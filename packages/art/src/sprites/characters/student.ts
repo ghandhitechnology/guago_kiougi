@@ -145,7 +145,7 @@ const shadowPoses: Readonly<Record<string, PoseGrid>> = {
   },
 };
 
-const shadow = part({
+export const shadow = part({
   palette: ink,
   pieces: { ground: { at: [6, 22], down: shadowPoses, up: shadowPoses, side: shadowPoses } },
 });
@@ -153,7 +153,7 @@ const shadow = part({
 // Body --------------------------------------------------------------------------------------
 
 /** Head only: hands are drawn in the sleeves so they sit above the uniform. */
-const skin = part({
+export const skin = part({
   palette: ink,
   pieces: {
     head: {
@@ -824,7 +824,7 @@ const raise = `
   ....111
 `;
 /** Upper arm pointing away from the camera, forearm hidden. */
-const away = `
+export const away = `
   11.
   131
   131
@@ -927,6 +927,17 @@ const armL: Piece = {
   down: {
     ...armShade,
     raise: { at: [16, 8], grid: mirror(raise) },
+    mouth: {
+      at: [13, 10],
+      grid: `
+        .O...
+        O&O..
+        .464.
+        .464.
+        ..111
+        ..11.
+      `,
+    },
     read: {
       at: [15, 14],
       grid: `
@@ -942,6 +953,7 @@ const armL: Piece = {
     ...armLit,
     raise: { at: [1, 8], grid: raise },
     read: { at: [6, 14], grid: mirror(away) },
+    mouth: { at: [6, 14], grid: mirror(away) },
   },
   side: armSideFar,
 };
@@ -1024,9 +1036,9 @@ const legs = {
   },
 } satisfies Record<string, Piece>;
 
-type Torso = Record<Dir, string>;
+export type Torso = Record<Dir, string>;
 
-function garment(sleeve: Legend, torso: Torso, withLegs: boolean): PartDef {
+export function garment(sleeve: Legend, torso: Torso, withLegs: boolean): PartDef {
   return withKo(
     part({
       palette: { ...ink, ...sleeve },
@@ -1220,7 +1232,7 @@ const goggles = withKo(
 
 // Book --------------------------------------------------------------------------------------
 
-const closed = `
+export const closed = `
   TTTT
   TUuT
   TUuT
@@ -1378,7 +1390,7 @@ const textbook = withKo(
 
 // Rig ---------------------------------------------------------------------------------------
 
-const walkArms = (d: Dir, lead: "R" | "L") => {
+export const walkArms = (d: Dir, lead: "R" | "L") => {
   if (d === "side") {
     return lead === "R"
       ? { legR: "fwd", legL: "back", armR: "back", armL: "fwd", hand: [-1, 0], tail: [-1, 0] }
@@ -1395,8 +1407,8 @@ const page = (d: Dir, book: string) =>
 
 const lean = (d: Dir): Vec => (d === "side" ? [1, 0] : d === "down" ? [0, 1] : [0, -1]);
 
-export default rig({
-  name: "student",
+/** The skeleton every 16×24 character shares: students and the cast. */
+export const frame = {
   size: [24, 26],
   origin: [12, 24],
   directions: ["down", "up", "side"],
@@ -1413,6 +1425,11 @@ export default rig({
   },
   layers: ["shadow", "body", "uniform", "jacket", "face", "hair", "accessory", "book"],
   unchecked: ["shadow"],
+} as const;
+
+export default rig({
+  name: "student",
+  ...frame,
   parts: {
     shadow: { blob: shadow },
     body: { base: withKo(skin) },
