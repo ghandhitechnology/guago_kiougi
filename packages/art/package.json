@@ -1,0 +1,21 @@
+{
+  "name": "@guago/art",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node src/build/main.ts",
+    "sheet": "node src/sheet/main.ts"
+  },
+  "dependencies": {
+    "galmuri": "^2.40.3",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pngjs": "^6.0.5"
+  }
+}

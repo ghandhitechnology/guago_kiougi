@@ -1,0 +1,22 @@
+{
+  "name": "@guago/client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @guago/art build && vite",
+    "build": "pnpm --filter @guago/art build && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "vite": "8.3.8"
+  },
+  "dependencies": {
+    "@colyseus/schema": "5.0.51",
+    "@colyseus/sdk": "0.18.10",
+    "@guago/art": "workspace:*",
+    "@guago/content": "workspace:*",
+    "@guago/shared": "workspace:*",
+    "phaser": "4.2.1"
+  }
+}
