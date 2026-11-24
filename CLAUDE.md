@@ -1,0 +1,34 @@
+# 과고키우기
+
+A browser pixel-art online RPG. `docs/PLAN.md` is the source of truth: read the sections your task names before writing code. Any deviation from it gets an entry in `docs/DECISIONS.md` with the reason.
+
+## Layout
+- `apps/client` Phaser 4 + Vite. `apps/server` Colyseus rooms, simulation, persistence, HTTP API. `apps/admin` web admin.
+- `packages/shared` formulas, simulation step, message types, constants. `packages/content` typed game data. `packages/art` sprite and tile sources, palette, build script, contact sheet. `packages/audio` tracker songs and effect parameter sets.
+- `tools/balance-sim`, `tools/loadtest`.
+- A package is created when it gets real content, never as an empty placeholder.
+
+## Commands
+- `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm test`
+
+## Engineering rules
+- Build order inside every feature: shared formulas and content data, then server behaviour, then client presentation.
+- The server decides everything. Clients send inputs only and play instant cosmetic feedback. Positions, damage, drops and currency from a client are never trusted.
+- A formula or a content definition exists once, in `shared` or `content`, and is imported by both sides.
+- Phaser 4.2, Colyseus 0.18 and `@colyseus/schema` 5 are recent. Read the installed package's types and the official docs before using an API. Do not write from memory of Phaser 3 or older Colyseus.
+- Tests go only where PLAN section 26 puts them: shared formulas, economic operations against a real Postgres, the deterministic replay, the load test and the balance sim. No blanket UI or smoke tests. Delete one-off tests before committing.
+- Budgets in PLAN section 19 are hard. If one cannot be met, stop and report instead of building on top of it.
+
+## No AI feel (hard rules for anything a player sees)
+- No placeholder text, lorem, TODO strings, emoji, or generic web UI (rounded cards, gradients, system fonts). Everything is pixel art drawn to the 해솔 64 palette, with the Galmuri pixel font.
+- No hint text, explanatory captions, disclaimers, debug labels or "Powered by" anywhere in the UI.
+- All Korean copy is written in character, one register per speaker, never mixing 반말 and 존댓말, and funny where the PLAN says so.
+- Every action has feedback at the values in PLAN section 6: hitstop, flash, knockback, shake, sound and particles.
+- Menus open with motion and sound. Nothing pops in.
+- Reference bar: Stardew Valley for movement, tiles and readability; Vampire Survivors and Brotato for hordes, hit feel and evolutions; MapleStory for town, social life and job advancement. These are quality bars, never sources: all names, art, music and levels here are original.
+
+## Git
+- Branches are `feat/<name>` or `fix/<name>` only. One PR per feature from its own worktree.
+- Commit messages are one full sentence saying what was added or fixed. No attribution trailers, no co-author lines, no tool credits in commits or PRs.
+- PR body: bullets for what was missing or broken and what was added, then a short summary of the diff. UI PRs carry real browser screenshots; animation or feel PRs carry a short screen recording. Never mocks.
+- Never merge a PR, deploy to a public host or spend money. Andy merges.

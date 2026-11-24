@@ -6,3 +6,7 @@ dist/
 
 # Local-only reference material
 docs/private/
+*.tsbuildinfo
+coverage/
+.vite/
+*.log
