@@ -35,7 +35,8 @@ A browser pixel-art online RPG. `docs/PLAN.md` is the source of truth: read the 
 - Reference bar: Stardew Valley for movement, tiles and readability; Vampire Survivors and Brotato for hordes, hit feel and evolutions; MapleStory for town, social life and job advancement. These are quality bars, never sources: all names, art, music and levels here are original.
 
 ## Git
-- Branches are `feat/<name>` or `fix/<name>` only. One PR per feature from its own worktree.
+- Each feature is built on its own `feat/<name>` or `fix/<name>` branch in its own worktree. The orchestrator reviews it and merges it into `main`. A pull request is optional.
 - Commit messages are one full sentence saying what was added or fixed. No attribution trailers, no co-author lines, no tool credits in commits or PRs.
-- PR body: bullets for what was missing or broken and what was added, then a short summary of the diff. UI PRs carry real browser screenshots; animation or feel PRs carry a short screen recording. Never mocks.
-- Never merge a PR, deploy to a public host or spend money. Andy merges.
+- Work a player can see is handed over with real browser screenshots; animation or feel work with a short screen recording. Never mocks.
+- If a PR is opened, its body has bullets for what was missing or broken and what was added, then a short summary of the diff.
+- Never deploy to a public host or spend money.
