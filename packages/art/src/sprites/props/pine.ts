@@ -153,20 +153,24 @@ const PADS: readonly (readonly Lobe[])[] = [
 const needles: readonly (readonly Mark[])[] = [
   [
     [1, 1, Pic.of("l.l\n.l.")],
-    [7, 3, Pic.of("d.d\n.d.")],
-    [11, 0, Pic.of(".l\nl.")],
-    [4, 6, Pic.of("dd")],
+    [6, 0, Pic.of(".l\nl.")],
+    [10, 2, Pic.of("d.d\n.d.")],
+    [3, 4, Pic.of("d.d\n.d.")],
+    [8, 5, Pic.of("l.l\n.l.")],
+    [13, 4, Pic.of("dd")],
+    [1, 8, Pic.of(".l\nl.")],
+    [6, 9, Pic.of("d.d\n.d.")],
+    [11, 9, Pic.of("l.\n.l")],
   ],
   [
-    [3, 2, Pic.of("ll")],
-    [9, 1, Pic.of("l.l\n.l.")],
-    [1, 5, Pic.of("d.d\n.d.")],
-    [12, 5, Pic.of(".d\nd.")],
-  ],
-  [
-    [6, 0, Pic.of("l.\n.l")],
-    [1, 3, Pic.of("d.d\n.d.")],
-    [10, 4, Pic.of("ll")],
+    [2, 0, Pic.of("d.d\n.d.")],
+    [8, 1, Pic.of("l.l\n.l.")],
+    [13, 1, Pic.of(".d\nd.")],
+    [0, 4, Pic.of("l.\n.l")],
+    [5, 5, Pic.of("d.d\n.d.")],
+    [11, 5, Pic.of("l.l\n.l.")],
+    [2, 9, Pic.of("l.l\n.l.")],
+    [9, 9, Pic.of("dd")],
   ],
 ];
 const tips: readonly (readonly Mark[])[] = [
@@ -176,6 +180,22 @@ const tips: readonly (readonly Mark[])[] = [
   ],
   [[5, 1, Pic.of("m.\n.m")]],
 ];
+
+/** Needle tips through the pad's outline: spikes on top and at the sides, a fringe below. */
+function needleEdge(pic: Pic, seed: number): Pic {
+  const out = pic.clone();
+  for (let y = 1; y < pic.h - 1; y++) {
+    for (let x = 1; x < pic.w - 1; x++) {
+      if (pic.at(x, y) !== "o") continue;
+      const roll = (x * 7 + y * 13 + seed * 5) % 5;
+      if (pic.at(x, y - 1) === "." && roll < 2) out.set(x, y - 1, "o").set(x, y, "d");
+      else if (pic.at(x, y + 1) === "." && roll === 0) out.set(x, y + 1, "o");
+      else if (pic.at(x - 1, y) === "." && pic.at(x, y - 1) !== "." && roll === 3)
+        out.set(x - 1, y, "o");
+    }
+  }
+  return out;
+}
 
 /** Pads drawn back to front, each shaded on its own so the tiers read as layers. */
 function crown(shift: readonly number[]): Pic {
@@ -192,9 +212,9 @@ function crown(shift: readonly number[]): Pic {
     );
     texture(shaded, needles, "m", (cx, cy) => cx + cy + i);
     texture(shaded, tips, "l", (cx, cy) => cx * 2 + cy + i);
-    pic.put(tidy(shaded, "m", "o"), 0, 0);
+    pic.put(needleEdge(tidy(shaded, "m", "o"), i), 0, 0);
   });
-  return tidy(tidy(pic, "m", "o"), "m", "o");
+  return tidy(tidy(seal(pic, "o"), "m", "o"), "m", "o");
 }
 
 const shadow = Pic.blank(W, H)

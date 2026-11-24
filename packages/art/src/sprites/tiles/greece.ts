@@ -1,13 +1,23 @@
 import { type Legend, overlay, terrain } from "../../format.ts";
-import { inside, type Mark, Pic, paint, type Shape, texture, tidy, tileOf } from "../../paint.ts";
+import {
+  inside,
+  type Mark,
+  Pic,
+  paint,
+  type Shape,
+  smooth,
+  texture,
+  tidy,
+  tileOf,
+} from "../../paint.ts";
 
 /**
  * Page 1 ground. The agora's marble paving sits a hand's height above the dust, slabs chipped
  * at the corners. The dust is the campus dirt drawn in the same colours, which the `greece`
  * theme bleaches pale, so paving, paths and dry grass all share one ground.
  *
- * The rift edge is an overlay drawn over both worlds: where the field's sand tears open onto
- * the era's ground, a lip of torn earth, then a seam of light.
+ * The rift edge is an overlay drawn over both worlds: the campus ground torn like a page,
+ * its paper lip curling over the era's ground below.
  */
 const palette: Legend = {
   ".": null,
@@ -27,15 +37,8 @@ const palette: Legend = {
   // shards
   r: "clay.light",
   R: "clay.mid",
-  // rift light
+  // the torn edge of the page
   W: "stone.bright",
-  q: "sea.pale",
-  Q: "sea.light",
-  s: "sea.mid",
-  p: "plum.light",
-  P: "plum.mid",
-  // the rift's halo on the ground outside it
-  h: "sea.pale",
   // moss
   G: "grass.mid",
   D: "grass.dark",
@@ -188,59 +191,84 @@ const marbleDust = terrain({
 // The rift's edge ------------------------------------------------------------------------------
 
 /**
- * The tear around an era's ground, which rises a step above the field it replaced: a torn
- * earth face below its south edge, a dark crack around the rest, and on the seam itself a band
- * of light from white through sea to plum. `pulse` shifts the bands, so cycling the two
- * overlays breathes.
+ * Where the world tears like a notebook page. Outside the hole, the campus ground ends in a
+ * ragged paper lip: where it is wide enough to curl, the underside in shade at the tear, then
+ * the page's white body, a crease where it leaves the ground, loose fibres beyond. Inside, the curl throws a thin shadow on the era's
+ * ground. The lip's width swells and narrows inside each tile but is the same at every tile
+ * edge, so any two tiles join. The overlay also carries its shape, so scenes cut the two
+ * grounds along the torn line, never along the cell grid.
  */
-function riftPicture(kind: "outer" | "inner", shape: Shape, pulse: number): string {
+function riftPicture(kind: "outer" | "inner", shape: Shape, v: number): string {
   const size = kind === "outer" ? 48 : 32;
   const isIn = inside(kind, shape);
-  // Inside pixels near the edge are the glowing seam; outside ones near it are the torn lip.
-  const glow = pulse ? ["W", "W", "q", "q", "Q", "s", "p"] : ["W", "q", "q", "Q", "Q", "s", "P"];
-  const pic = paint(size, size, isIn, { fill: "x", band: glow, lip: ["e", "E"], ring: "E" });
-  // A halo of light spilling onto the ground outside the seam, fading out in a checker.
+  const pic = Pic.blank(size, size);
+  const swell = (l: number) => Math.sin((Math.PI * (l + 0.5)) / 16);
+  const width = (x: number, y: number): number => {
+    const lx = x % 16;
+    const ly = y % 16;
+    if (lx < 2 || lx > 13 || ly < 2 || ly > 13) return 2.5;
+    return (
+      2.5 + 4.4 * swell(lx) * swell(ly) * (0.55 + 0.45 * Math.sin(lx * 1.3 + ly * 0.7 + v * 2.1))
+    );
+  };
+  const dist = (x: number, y: number, want: boolean): number => {
+    let best = 9;
+    for (let dy = -7; dy <= 7; dy++)
+      for (let dx = -7; dx <= 7; dx++)
+        if (isIn(x + dx, y + dy) === want) best = Math.min(best, Math.hypot(dx, dy));
+    return best;
+  };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      if (pic.at(x, y) !== "." || isIn(x, y)) continue;
-      let d = 9;
-      for (let dy = -5; dy <= 5; dy++)
-        for (let dx = -5; dx <= 5; dx++)
-          if (isIn(x + dx, y + dy)) d = Math.min(d, Math.hypot(dx, dy));
-      const reach = pulse ? 5.2 : 4.4;
-      if (d <= reach && (d <= 3.2 || (x + y) % 2 === 0)) pic.set(x, y, "h");
+      if (isIn(x, y)) {
+        pic.set(x, y, dist(x, y, false) <= 1.6 ? "S" : "x");
+        continue;
+      }
+      const d = dist(x, y, true);
+      const w = width(x, y);
+      const lx = x % 16;
+      const ly = y % 16;
+      const fibre =
+        lx > 1 &&
+        lx < 14 &&
+        ly > 1 &&
+        ly < 14 &&
+        ((lx * 5 + ly * 3 + v * 7) % 6 === 0 || (lx + ly * 7 + v) % 9 === 0);
+      if (d <= 1.01 && w > 3.4) pic.set(x, y, "K");
+      else if (d <= w - 1) pic.set(x, y, "W");
+      else if (d <= w || (fibre && d <= w + 1.5)) pic.set(x, y, "k");
     }
   }
-  return tidy(pic.swap("x", "."), "E", "WqQspPeh").toString();
+  return smooth(tidy(pic, "W", "x"), "x").toString();
 }
 
+/** Two tears: big bulges between the seam points and rounded steps, so no edge runs on the grid. */
 const RIFT_SHAPES: readonly Shape[] = [
   {
-    top: [0, 0, 1, 2, 1, 0, -1, -2, -1, 0, 1, 1, 0, 0, 0, 0],
-    bottom: [0, 0, -1, -2, -1, 0, 1, 2, 2, 1, 0, -1, 0, 0, 0, 0],
-    left: [0, 0, 1, 1, 0, -1, -2, -1, 0, 1, 2, 1, 0, 0, 0, 0],
-    right: [0, 0, -1, -1, 0, 1, 2, 1, 0, -1, -2, -1, 0, 0, 0, 0],
-    radius: 5,
-    holeRadius: 3,
+    top: [0, 0, 1, 3, 4, 3, 1, 0, -1, -2, -1, 1, 2, 1, 0, 0],
+    bottom: [0, 0, -1, -3, -3, -1, 1, 3, 4, 3, 1, 0, -1, -1, 0, 0],
+    left: [0, 0, 2, 3, 2, 0, -2, -3, -2, 0, 1, 2, 1, 0, 0, 0],
+    right: [0, 0, -1, -2, -1, 1, 3, 4, 3, 1, -1, -2, -1, 0, 0, 0],
+    radius: 8,
+    holeRadius: 7,
   },
   {
-    top: [0, 0, -1, -1, 0, 1, 2, 1, 0, -1, -2, -1, 0, 0, 0, 0],
-    bottom: [0, 0, 1, 1, 2, 1, 0, -1, -2, -1, 0, 1, 0, 0, 0, 0],
-    left: [0, 0, -1, -2, -1, 0, 1, 2, 1, 0, -1, -1, 0, 0, 0, 0],
-    right: [0, 0, 1, 2, 1, 0, -1, -1, 0, 1, 1, 0, 0, 0, 0, 0],
-    radius: 4,
-    holeRadius: 3,
+    top: [0, 0, -1, -2, -1, 1, 3, 4, 3, 1, 0, -1, -1, 0, 0, 0],
+    bottom: [0, 0, 2, 3, 2, 0, -1, -3, -3, -1, 1, 2, 1, 0, 0, 0],
+    left: [0, 0, -1, -3, -3, -1, 1, 3, 3, 1, -1, -1, 0, 0, 0, 0],
+    right: [0, 0, 1, 3, 3, 1, 0, -2, -3, -2, 0, 1, 1, 0, 0, 0],
+    radius: 8,
+    holeRadius: 6,
   },
 ];
 
-const rift = (name: string, pulse: number) =>
-  overlay({
-    name,
-    palette,
-    lone: "h",
-    themes: ["campus"],
-    outer: RIFT_SHAPES.map((s) => riftPicture("outer", s, pulse)),
-    inner: RIFT_SHAPES.map((s) => riftPicture("inner", s, pulse)),
-  });
+const rift = overlay({
+  name: "rift",
+  palette,
+  themes: ["rift-sun"],
+  inside: "xS",
+  outer: RIFT_SHAPES.map((sh, v) => riftPicture("outer", sh, v)),
+  inner: RIFT_SHAPES.map((sh, v) => riftPicture("inner", sh, v)),
+});
 
-export default [marbleDust, rift("rift", 0), rift("rift-pulse", 1)];
+export default [marbleDust, rift];

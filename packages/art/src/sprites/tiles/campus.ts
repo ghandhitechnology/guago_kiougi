@@ -44,8 +44,9 @@ const palette: Legend = {
   // 운동장 sand
   s: "stone.pale",
   // flowers
-  y: "gold.light",
-  Y: "gold.mid",
+  // Flowers keep clear of gold.light and gold.pale, which the night theme leaves glowing.
+  y: "gold.mid",
+  Y: "gold.dark",
   v: "plum.light",
   V: "plum.mid",
   // needles and cones
@@ -560,6 +561,15 @@ const scuff = P(`
   KK..
   .KKK
 `);
+/** Dents and grit that stay darker than the sand at night. */
+const dent = P(`
+  MM.
+  .MM
+`);
+const grit2 = P(`
+  .M
+  MM
+`);
 
 const lawnField = terrain({
   name: "lawn-field",
@@ -573,23 +583,27 @@ const lawnField = terrain({
     tileOf("s", [
       [2, 2, speck],
       [10, 5, shine],
-      [5, 10, warm],
+      [5, 10, dent],
       [12, 12, speck],
     ]),
     tileOf("s", [
       [8, 2, scuff],
-      [2, 9, speck],
+      [2, 9, grit2],
       [11, 11, shine],
     ]),
     tileOf("s", [
-      [3, 4, shine],
+      [3, 4, dent],
       [10, 8, speck],
       [4, 13, scuff],
     ]),
     tileOf("s", [
       [12, 2, warm],
-      [6, 7, speck],
+      [6, 7, grit2],
       [1, 13, shine],
+    ]),
+    tileOf("s", [
+      [7, 3, speck],
+      [2, 11, dent],
     ]),
   ],
   fill: LAWN_MARKS.slice(1).map(lawnTile),

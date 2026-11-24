@@ -240,6 +240,12 @@ export function terrain(def: Omit<TerrainDef, "kind">): TerrainDef {
 export interface OverlayDef extends Common, OverlayPictures {
   readonly kind: "overlay";
   readonly themes?: readonly string[];
+  /**
+   * Picture characters that belong to the region itself, drawn or clear. With it, each tile
+   * also carries its shape, and scenes cut the ground inside and outside along that shape
+   * instead of along the cell grid.
+   */
+  readonly inside?: string;
 }
 
 export function overlay(def: Omit<OverlayDef, "kind">): OverlayDef {

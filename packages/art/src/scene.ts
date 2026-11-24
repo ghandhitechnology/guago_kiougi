@@ -10,7 +10,7 @@
  * 5. `shadows`: ground shadows, plus every object's own; the ground under them drops one step.
  * 6. `objects`: props, monsters and characters, sorted by their feet.
  * 7. `overhead`: what characters walk behind: canopies, eaves, capitals.
- * 8. `lights`: a second render in another theme shows inside each light's dithered ellipse.
+ * 8. `lights`: stepped bands of other themes, brightest inside, with ragged edges.
  * 9. `atmosphere`: small animated sprites over everything: moths, drifting needles, motes.
  *
  * Night and lamp light are painted, not blended: a light is a palette theme, a shadow is one ramp
@@ -18,7 +18,14 @@
  * name atlas sprites only, so redrawn art shows up by itself. Browser-safe: the contact sheet
  * page and the static sheet both run this file.
  */
-import { dualMask, hash2, pickTone, scatterDecals, type TerrainGrid } from "./dualgrid.ts";
+import {
+  dualMask,
+  hash2,
+  pickTone,
+  scatterDecals,
+  type TerrainGrid,
+  valueNoise,
+} from "./dualgrid.ts";
 
 export const SCREEN = { w: 480, h: 270 } as const;
 const TILE = 16;
@@ -52,6 +59,11 @@ interface Placement extends FramePick {
   readonly flip?: boolean;
   /** Draws copies this many times, each one frame width further right. */
   readonly repeat?: number;
+  /**
+   * Moves from `at` to `to` over `period` seconds, then starts again, offset by `phase`
+   * seconds. For things being carried somewhere: pages pulled into a rift, scraps lifting off.
+   */
+  readonly drift?: { readonly to: Vec; readonly period: number; readonly phase?: number };
 }
 
 /** Environment art. Takes the pass theme unless `raw`. */
@@ -77,16 +89,27 @@ export interface Decal {
 }
 
 /**
- * Painted light: `theme` inside an ellipse, `ring` (a dimmer theme) in its outer band, each
- * edge softened by a one-pixel checker. `pulse` swells the radius over time.
+ * Painted light: stepped bands of themes, brightest first, falling off into the scene theme.
+ * Every band edge is broken by low-frequency noise, so no light ends on a clean curve. One shape
+ * per light:
+ *
+ * - `at` and `r`: an ellipse, its bands evenly spaced out to `r`.
+ * - `spill`: a trapezoid falling from a lit window or door, narrow at the top, wide below.
+ * - `region`: the ground around cells whose legend character is in `region`, each band reaching
+ *   the next distance in `reach` (pixels).
  */
 export interface Light {
-  readonly theme: string;
-  readonly ring?: string;
-  readonly at: Vec;
-  readonly r: Vec;
-  /** Fraction of the radius that is core when there is a ring. Defaults to 0.6. */
-  readonly core?: number;
+  readonly bands: readonly string[];
+  readonly at?: Vec;
+  readonly r?: Vec;
+  readonly spill?: {
+    readonly top: readonly [x0: number, x1: number, y: number];
+    readonly bottom: readonly [x0: number, x1: number, y: number];
+  };
+  readonly region?: string;
+  readonly reach?: readonly number[];
+  /** Pixels of edge noise. Defaults to 3. */
+  readonly ragged?: number;
   readonly pulse?: { readonly amount: number; readonly period: number };
 }
 
@@ -197,7 +220,7 @@ export interface SceneMeta {
       readonly frame: string;
     }[];
   }>;
-  readonly overlays: Table<{ readonly masks: Masks }>;
+  readonly overlays: Table<{ readonly masks: Masks; readonly shapes?: Table<string> | null }>;
 }
 
 // Drawing ------------------------------------------------------------------------------------
@@ -269,27 +292,92 @@ class Canvas implements Pixels {
   }
 }
 
+/** Ragged-edge noise in pixels, two octaves, centred on zero. */
+function ragged(x: number, y: number, amount: number, seed: number): number {
+  const n = 0.65 * valueNoise(x, y, 7, seed) + 0.35 * valueNoise(x, y, 2.5, seed + 9);
+  return (n - 0.5) * 2 * amount;
+}
+
 /**
- * How far inside a light a pixel is: 2 in the core, 1 in the ring, 0 outside. Edges get a
- * one-pixel checker so a light never ends on a hard ellipse.
+ * Band per pixel for one light: 0 is the brightest band, `bands.length` is unlit. `field` is
+ * the region's distance field when the light has a region.
  */
-function litLevel(light: Light, t: number, x: number, y: number): number {
+function bandAt(
+  light: Light,
+  t: number,
+  x: number,
+  y: number,
+  seed: number,
+  field: Float32Array | null,
+): number {
+  const n = light.bands.length;
   const swell = light.pulse
     ? 1 + light.pulse.amount * Math.sin((2 * Math.PI * t) / light.pulse.period)
     : 1;
-  const rx = light.r[0] * swell;
-  const ry = light.r[1] * swell;
-  const dx = (x + 0.5 - light.at[0]) / rx;
-  const dy = (y + 0.5 - light.at[1]) / ry;
-  const d = Math.sqrt(dx * dx + dy * dy);
-  /** Half a pixel of the ellipse's radius at this angle, as a fraction. */
-  const px = 1 / Math.max(1, Math.min(rx, ry));
-  const checker = (x + y) % 2 === 0;
-  const inside = (edge: number) => d < edge - px || (d < edge + px && checker);
-  const core = light.ring ? (light.core ?? 0.6) : 1;
-  if (inside(core)) return 2;
-  if (light.ring && inside(1)) return 1;
-  return 0;
+  const wobble = ragged(x, y, light.ragged ?? 3, seed);
+  if (field && light.reach) {
+    const d = (field[y * SCREEN.w + x] as number) + wobble;
+    const k = light.reach.findIndex((r) => d < r * swell);
+    return k < 0 ? n : k;
+  }
+  let f: number;
+  let scale: number;
+  if (light.spill) {
+    const { top, bottom } = light.spill;
+    if (y < top[2]) return n;
+    const v = (y - top[2]) / Math.max(1, bottom[2] - top[2]);
+    const x0 = top[0] + (bottom[0] - top[0]) * v;
+    const x1 = top[1] + (bottom[1] - top[1]) * v;
+    const half = Math.max(1, (x1 - x0) / 2);
+    f = Math.max(Math.abs(x + 0.5 - (x0 + x1) / 2) / half, v);
+    scale = Math.max(half, (bottom[2] - top[2]) / 2);
+  } else if (light.at && light.r) {
+    const dx = (x + 0.5 - light.at[0]) / (light.r[0] * swell);
+    const dy = (y + 0.5 - light.at[1]) / (light.r[1] * swell);
+    f = Math.sqrt(dx * dx + dy * dy);
+    scale = (light.r[0] + light.r[1]) / 2;
+  } else return n;
+  const k = Math.floor((f + wobble / scale) * n);
+  return k < 0 ? 0 : Math.min(n, k);
+}
+
+/** Pixel distance to the nearest cell whose legend character is in `chars`, about Euclidean. */
+function regionField(cells: readonly GroundCell[], chars: string): Float32Array {
+  const { w, h } = SCREEN;
+  const big = 1e6;
+  const d = new Float32Array(w * h).fill(big);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const c = cells[Math.floor(y / TILE) * SCENE_CELLS.w + Math.floor(x / TILE)];
+      if (c && chars.includes(c.char)) d[y * w + x] = 0;
+    }
+  }
+  // Two-pass chamfer, weights 1 and √2.
+  const at = (x: number, y: number) =>
+    x < 0 || y < 0 || x >= w || y >= h ? big : (d[y * w + x] as number);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const v = Math.min(
+        at(x, y),
+        at(x - 1, y) + 1,
+        at(x, y - 1) + 1,
+        at(x - 1, y - 1) + 1.41,
+        at(x + 1, y - 1) + 1.41,
+      );
+      d[y * w + x] = v;
+    }
+  for (let y = h - 1; y >= 0; y--)
+    for (let x = w - 1; x >= 0; x--) {
+      const v = Math.min(
+        at(x, y),
+        at(x + 1, y) + 1,
+        at(x, y + 1) + 1,
+        at(x + 1, y + 1) + 1.41,
+        at(x - 1, y + 1) + 1.41,
+      );
+      d[y * w + x] = v;
+    }
+  return d;
 }
 
 // Rendering ----------------------------------------------------------------------------------
@@ -342,21 +430,25 @@ export function renderScene(
   const out = renderPass(ctx, def.theme);
   const lights = def.lights ?? [];
   if (lights.length > 0) {
-    // Per pixel, the brightest light wins: any core over any ring.
+    // Per pixel the brightest light wins, measured as the fraction of its bands still ahead.
     const pick: (string | null)[] = new Array(out.w * out.h).fill(null);
-    const level = new Uint8Array(out.w * out.h);
-    for (const l of lights) {
+    const level = new Float32Array(out.w * out.h);
+    lights.forEach((l, li) => {
+      const field = l.region ? regionField(cells, l.region) : null;
+      const n = l.bands.length;
       for (let y = 0; y < out.h; y++) {
         for (let x = 0; x < out.w; x++) {
-          const v = litLevel(l, time, x, y);
+          const k = bandAt(l, time, x, y, def.seed + li * 17, field);
+          if (k >= n) continue;
+          const v = (n - k) / n;
           const i = y * out.w + x;
           if (v > (level[i] as number)) {
             level[i] = v;
-            pick[i] = v === 2 ? l.theme : (l.ring as string);
+            pick[i] = l.bands[k] as string;
           }
         }
       }
-    }
+    });
     const passes = new Map<string, Canvas>();
     for (const theme of new Set(pick)) {
       if (theme) passes.set(theme, renderPass({ ...ctx, warnings: [] }, theme));
@@ -463,10 +555,18 @@ function drawThing(
   }
   const found = key ? frameOf(ctx, atlas, key) : undefined;
   if (!found) return;
+  const [ax, ay] = placeAt(t, ctx.time);
   for (let k = 0; k < (t.repeat ?? 1); k++) {
-    const at: Vec = [t.at[0] + k * found.f.sourceSize.w, t.at[1]];
-    place(out, found, origin, at, map, t.flip ?? false);
+    place(out, found, origin, [ax + k * found.f.sourceSize.w, ay], map, t.flip ?? false);
   }
+}
+
+/** Where a placement is at time `t`, after its drift. */
+function placeAt(p: Placement, t: number): Vec {
+  if (!p.drift) return p.at;
+  const { to, period, phase = 0 } = p.drift;
+  const f = ((((t + phase) / period) % 1) + 1) % 1;
+  return [Math.round(p.at[0] + (to[0] - p.at[0]) * f), Math.round(p.at[1] + (to[1] - p.at[1]) * f)];
 }
 
 function renderPass(ctx: Ctx, passTheme: string): Canvas {
@@ -504,43 +604,107 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
   // 2. Terrain. A display tile whose corners fit one pair and one theme draws that pair's tile.
   // Otherwise each quarter draws its own cell's pair, leaving a straight seam at the cell edge
   // for an overlay or a wall to cover. Void quarters draw nothing.
+  const drawCell = (
+    target: Canvas,
+    i: number,
+    j: number,
+    corners: readonly GroundCell[],
+    px: number,
+    py: number,
+  ) => {
+    const draw = (set: (typeof pairs)[number], mask: number, theme: string, clip?: Rect) => {
+      const list = set.masks[mask] ?? [];
+      const index = list[hash2(i, j, def.seed) % Math.max(1, list.length)];
+      const atlas = tiles(theme);
+      if (index !== undefined && atlas)
+        target.blit(atlas, tileRect(index), px, py, NO_MAP, false, clip);
+    };
+    const ids = new Set(corners.map((c) => c.terrain));
+    const themes = new Set(corners.map(themeOf));
+    const fit = ids.has(null)
+      ? undefined
+      : pairs.find((p) => [...ids].every((t) => t === p.upper || t === p.lower));
+    if (fit && themes.size === 1) {
+      const mask = corners.reduce((m, c, k) => m | (c.terrain === fit.upper ? 1 << k : 0), 0);
+      draw(fit, mask, themeOf(corners[3] as GroundCell));
+      return;
+    }
+    corners.forEach((c, k) => {
+      if (c.terrain === null) return;
+      const own = pairs.find((p) => p.upper === c.terrain || p.lower === c.terrain);
+      if (!own) {
+        warnings.push(`no terrain pair has "${c.terrain}"`);
+        return;
+      }
+      const mask = corners.reduce((m, o, q) => {
+        const same =
+          (o.terrain === own.upper || o.terrain === own.lower) && themeOf(o) === themeOf(c);
+        return m | ((same ? o.terrain : c.terrain) === own.upper ? 1 << q : 0);
+      }, 0);
+      const [qx, qy] = QUADS[k] as Vec;
+      draw(own, mask, themeOf(c), { x: px + qx, y: py + qy, w: 8, h: 8 });
+    });
+  };
+  // Edges with a shape cut the ground along it: each side is drawn as if it filled the tile,
+  // and the shape picks between them per pixel.
+  const cuts = (def.edges ?? []).flatMap((edge) => {
+    const first = typeof edge.overlay === "string" ? edge.overlay : edge.overlay[0];
+    const o = first ? meta.overlays[first] : undefined;
+    if (!o?.shapes) return [];
+    const grid: TerrainGrid = {
+      w: W,
+      h: H,
+      cells: cells.map((c) => (edge.inside.includes(c.char) ? 1 : 0)),
+    };
+    return [{ edge, o, shapes: o.shapes, grid }];
+  });
+  const sideA = new Canvas(TILE, TILE);
+  const sideB = new Canvas(TILE, TILE);
   for (let j = 0; j <= H; j++) {
     for (let i = 0; i <= W; i++) {
       const corners = [cellAt(i - 1, j - 1), cellAt(i, j - 1), cellAt(i - 1, j), cellAt(i, j)];
       const px = i * TILE - TILE / 2;
       const py = j * TILE - TILE / 2;
-      const draw = (set: (typeof pairs)[number], mask: number, theme: string, clip?: Rect) => {
-        const list = set.masks[mask] ?? [];
-        const index = list[hash2(i, j, def.seed) % Math.max(1, list.length)];
-        const atlas = tiles(theme);
-        if (index !== undefined && atlas)
-          out.blit(atlas, tileRect(index), px, py, NO_MAP, false, clip);
-      };
-      const ids = new Set(corners.map((c) => c.terrain));
-      const themes = new Set(corners.map(themeOf));
-      const fit = ids.has(null)
+      const cut = corners.some((c) => c.terrain === null)
         ? undefined
-        : pairs.find((p) => [...ids].every((t) => t === p.upper || t === p.lower));
-      if (fit && themes.size === 1) {
-        const mask = corners.reduce((m, c, k) => m | (c.terrain === fit.upper ? 1 << k : 0), 0);
-        draw(fit, mask, themeOf(corners[3] as GroundCell));
+        : cuts.find((c) => {
+            const m = dualMask(c.grid, 1, i, j);
+            return m !== 0 && m !== 15;
+          });
+      const mask = cut ? dualMask(cut.grid, 1, i, j) : 0;
+      const list = cut ? (cut.o.masks[mask] ?? []) : [];
+      const index = list[hash2(i, j, def.seed + 11) % Math.max(1, list.length)];
+      const hex = index !== undefined && cut ? cut.shapes[String(index)] : undefined;
+      if (!cut || !hex) {
+        drawCell(out, i, j, corners, px, py);
         continue;
       }
-      corners.forEach((c, k) => {
-        if (c.terrain === null) return;
-        const own = pairs.find((p) => p.upper === c.terrain || p.lower === c.terrain);
-        if (!own) {
-          warnings.push(`no terrain pair has "${c.terrain}"`);
-          return;
+      const isIn = corners.map((c) => cut.edge.inside.includes(c.char));
+      /** Corners with the other side's corners swapped for a neighbour on this side. */
+      const side = (inside: boolean) =>
+        corners.map((c, k) => {
+          if (isIn[k] === inside) return c;
+          const q = [k ^ 1, k ^ 2, 3 - k].find((n) => isIn[n] === inside) as number;
+          return corners[q] as GroundCell;
+        });
+      sideA.data.fill(0);
+      sideB.data.fill(0);
+      drawCell(sideA, i, j, side(false), 0, 0);
+      drawCell(sideB, i, j, side(true), 0, 0);
+      for (let y = 0; y < TILE; y++) {
+        const ty = py + y;
+        if (ty < 0 || ty >= out.h) continue;
+        for (let x = 0; x < TILE; x++) {
+          const tx = px + x;
+          if (tx < 0 || tx >= out.w) continue;
+          const bit =
+            (Number.parseInt(hex[(y * TILE + x) >> 2] as string, 16) >> (3 - (x & 3))) & 1;
+          const src = bit ? sideB : sideA;
+          const si = (y * TILE + x) * 4;
+          if ((src.data[si + 3] as number) === 0) continue;
+          out.data.set(src.data.subarray(si, si + 4), (ty * out.w + tx) * 4);
         }
-        const mask = corners.reduce((m, o, q) => {
-          const same =
-            (o.terrain === own.upper || o.terrain === own.lower) && themeOf(o) === themeOf(c);
-          return m | ((same ? o.terrain : c.terrain) === own.upper ? 1 << q : 0);
-        }, 0);
-        const [qx, qy] = QUADS[k] as Vec;
-        draw(own, mask, themeOf(c), { x: px + qx, y: py + qy, w: 8, h: 8 });
-      });
+      }
     }
   }
 
