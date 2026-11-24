@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { growth } from "./growth";
+import { growth } from "./growth.ts";
 
 describe("growth", () => {
   it("is 1 at level 0", () => {

@@ -1,0 +1,269 @@
+/**
+ * 해솔 64: the master palette (PLAN §16 "Palette").
+ *
+ * Ramps run dark to light. Step names are positional: `deep` is always the darkest step and the
+ * outline colour, then `dark`, `mid`, `light`, `pale`, `bright` as far as the ramp goes.
+ * Shadows lean cool, highlights lean warm. Some ramps share an end colour on purpose so that
+ * materials blend where they meet.
+ */
+
+export const STEPS = ["deep", "dark", "mid", "light", "pale", "bright"] as const;
+export type Step = (typeof STEPS)[number];
+
+// Shared end colours.
+const NIGHT = "#1a1427"; // darkest colour in the game
+const SLATE = "#2a2741"; // ink.dark, navy.deep
+const DUSK = "#484662"; // ink.mid, stone.deep
+const WINE = "#3d1426"; // red.deep, clay.deep
+const UMBER = "#4f2d26"; // wood.dark, gold.deep
+const FOREST = "#173230"; // grass.deep, board.deep
+const PLUMSHADE = "#4a2758"; // plum.dark, rose.deep
+
+const RAMPS = {
+  ink: [NIGHT, SLATE, DUSK, "#706f8a"],
+  stone: [DUSK, "#6a6276", "#958b93", "#bdb2ab", "#e0d5c2", "#faf2e1"],
+  red: [WINE, "#751a30", "#b8293a", "#e3513f", "#ff9268"],
+  clay: [WINE, "#7a3329", "#b5582f", "#dc8a4a", "#f4c185"],
+  gold: [UMBER, "#8c5524", "#c98b25", "#efc244", "#fbe8a0"],
+  wood: ["#2f1b24", UMBER, "#7d5039", "#a8784e", "#d0a56f"],
+  skin: ["#4b2629", "#773f35", "#a25e46", "#ca8a64", "#e9b58d", "#f9dcbc"],
+  grass: [FOREST, "#23533a", "#3c7d3b", "#6aa845", "#acd26a", "#e0ee9c"],
+  olive: ["#34331f", "#5a5a30", "#858645", "#b3b16b"],
+  board: [FOREST, "#22463f", "#336555", "#518d76"],
+  navy: [SLATE, "#2b3a6d", "#3c5ca2", "#5e8bd0", "#99c0ea"],
+  sea: ["#143e5b", "#196e91", "#22a5c3", "#58d8d6", "#b6f6e5"],
+  plum: ["#2a1636", PLUMSHADE, "#763f86", "#a868ad", "#d9a3cc"],
+  rose: [PLUMSHADE, "#953a68", "#cf5f80", "#f297a0", "#ffcdbf"],
+} as const satisfies Record<string, readonly string[]>;
+
+export type RampName = keyof typeof RAMPS;
+
+type StepNames<
+  T extends readonly unknown[],
+  S extends readonly string[] = typeof STEPS,
+> = T extends readonly [unknown, ...infer Rest]
+  ? S extends readonly [infer H extends string, ...infer SRest extends string[]]
+    ? H | StepNames<Rest, SRest>
+    : never
+  : never;
+
+/** Every addressable palette name, like `red.deep` or `stone.bright`. */
+export type ColorName = {
+  [R in RampName]: `${R}.${StepNames<(typeof RAMPS)[R]>}`;
+}[RampName];
+
+export interface Ramp {
+  readonly name: RampName;
+  readonly steps: readonly Step[];
+  /** Palette indices of the steps, dark to light. */
+  readonly indices: readonly number[];
+}
+
+/** The 64 unique colours, in first-seen order. Index into this is a palette index. */
+export const COLORS: readonly string[] = [...new Set(Object.values(RAMPS).flat())];
+
+export const RAMP_LIST: readonly Ramp[] = Object.entries(RAMPS).map(([name, hexes]) => ({
+  name: name as RampName,
+  steps: STEPS.slice(0, hexes.length),
+  indices: hexes.map((h) => COLORS.indexOf(h)),
+}));
+
+const NAME_TO_INDEX = new Map<string, number>();
+for (const ramp of RAMP_LIST) {
+  ramp.steps.forEach((step, i) => {
+    NAME_TO_INDEX.set(`${ramp.name}.${step}`, ramp.indices[i] as number);
+  });
+}
+
+export function isColorName(name: string): name is ColorName {
+  return NAME_TO_INDEX.has(name);
+}
+
+/** Palette index of a colour name. Throws on an unknown name. */
+export function colorIndex(name: string): number {
+  const index = NAME_TO_INDEX.get(name);
+  if (index === undefined) throw new Error(`unknown palette name "${name}"`);
+  return index;
+}
+
+/** Indices that are the darkest step of at least one ramp: the legal outline colours. */
+export const DEEP_INDICES: ReadonlySet<number> = new Set(
+  RAMP_LIST.map((r) => r.indices[0] as number),
+);
+
+/** Ramps that contain a palette index. A shared end colour belongs to several. */
+export function rampsOf(index: number): readonly Ramp[] {
+  return RAMP_LIST.filter((r) => r.indices.includes(index));
+}
+
+export function rampByName(name: string): Ramp | undefined {
+  return RAMP_LIST.find((r) => r.name === name);
+}
+
+export function hexToRgb(hex: string): [number, number, number] {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+if (COLORS.length !== 64) {
+  throw new Error(`해솔 64 must have exactly 64 colours, has ${COLORS.length}`);
+}
+
+// Swap slots ----------------------------------------------------------------------------------
+
+type Four = readonly [ColorName, ColorName, ColorName, ColorName];
+
+/**
+ * Swap slots: one grid, many colours. A legend can paint `hair.mid` instead of a fixed colour.
+ * The compiler writes those pixels in reserved key colours, and a consumer swaps the keys for
+ * one of the slot's options at composite time. Every slot has the steps deep, dark, mid, light.
+ */
+const SLOT_OPTIONS = {
+  skin: {
+    fair: ["skin.dark", "skin.light", "skin.pale", "skin.bright"],
+    warm: ["skin.deep", "skin.mid", "skin.light", "skin.pale"],
+    deep: ["skin.deep", "skin.dark", "skin.mid", "skin.light"],
+  },
+  hair: {
+    black: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
+    brown: ["wood.deep", "wood.dark", "wood.mid", "wood.light"],
+    chestnut: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+    blond: ["gold.dark", "gold.mid", "gold.light", "gold.pale"],
+    red: ["red.deep", "red.dark", "red.mid", "red.light"],
+    silver: ["stone.deep", "stone.mid", "stone.light", "stone.pale"],
+    blue: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
+    pink: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    green: ["board.deep", "board.dark", "board.mid", "board.light"],
+    violet: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
+  },
+  jacket: {
+    navy: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
+    crimson: ["red.deep", "red.dark", "red.mid", "red.light"],
+    forest: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
+    violet: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
+    mustard: ["wood.dark", "gold.dark", "gold.mid", "gold.light"],
+    ash: ["ink.dark", "ink.mid", "ink.light", "stone.light"],
+  },
+} as const satisfies Record<string, Record<string, Four>>;
+
+export const SLOT_STEPS = ["deep", "dark", "mid", "light"] as const;
+export type SlotName = keyof typeof SLOT_OPTIONS;
+export type SlotColorName = `${SlotName}.${(typeof SLOT_STEPS)[number]}`;
+export type SlotOption<S extends SlotName> = keyof (typeof SLOT_OPTIONS)[S];
+
+export interface Slot {
+  readonly name: SlotName;
+  /** Index of the slot's first key. Step i has index `base + i`. */
+  readonly base: number;
+  /** Key colour per step, as written into atlas pixels. */
+  readonly keys: readonly string[];
+  readonly options: Readonly<Record<string, readonly ColorName[]>>;
+}
+
+export const SLOTS: readonly Slot[] = Object.entries(SLOT_OPTIONS).map(([name, options], s) => ({
+  name: name as SlotName,
+  base: COLORS.length + s * SLOT_STEPS.length,
+  keys: SLOT_STEPS.map((_, i) => `#ff00${(0x80 + s * 16 + i).toString(16)}`),
+  options,
+}));
+
+for (const slot of SLOTS) {
+  for (const key of slot.keys) {
+    if (COLORS.includes(key)) throw new Error(`slot key ${key} collides with the palette`);
+  }
+}
+
+/** Index of a palette or slot name. Throws on an unknown name. */
+export function paintIndex(name: string): number {
+  const [head, step] = name.split(".");
+  const slot = SLOTS.find((s) => s.name === head);
+  if (slot) {
+    const i = SLOT_STEPS.indexOf(step as (typeof SLOT_STEPS)[number]);
+    if (i < 0) throw new Error(`unknown slot step "${name}"`);
+    return slot.base + i;
+  }
+  return colorIndex(name);
+}
+
+/** The slot an index belongs to, or undefined for palette indices. */
+export function slotOf(index: number): Slot | undefined {
+  return SLOTS.find((s) => index >= s.base && index < s.base + SLOT_STEPS.length);
+}
+
+/** RGB for every index: the 64 colours, then every slot key. */
+export const INDEX_RGB: readonly (readonly [number, number, number])[] = [
+  ...COLORS,
+  ...SLOTS.flatMap((s) => s.keys),
+].map(hexToRgb);
+
+/** Index to RGB with each slot resolved to one of its options, for previews. */
+export function previewLut(
+  choice: Readonly<Partial<Record<SlotName, string>>>,
+): (readonly [number, number, number])[] {
+  const lut = [...INDEX_RGB];
+  for (const slot of SLOTS) {
+    const option = choice[slot.name] ?? Object.keys(slot.options)[0];
+    const names = option === undefined ? undefined : slot.options[option];
+    if (!names) throw new Error(`slot ${slot.name} has no option "${option}"`);
+    names.forEach((n, i) => {
+      lut[slot.base + i] = INDEX_RGB[colorIndex(n)] as readonly [number, number, number];
+    });
+  }
+  return lut;
+}
+
+// Themes --------------------------------------------------------------------------------------
+
+/**
+ * A remap of palette names. `'grass.*': 'olive.*'` maps every step of a ramp to the same step
+ * of another; `'grass.pale': 'stone.pale'` maps one colour. Later entries win.
+ */
+export type Remap = Readonly<Record<string, string>>;
+
+/** Resolves a remap to palette index pairs. Throws with the offending entry. */
+export function resolveRemap(remap: Remap): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const [from, to] of Object.entries(remap)) {
+    if (from.endsWith(".*") !== to.endsWith(".*")) {
+      throw new Error(`remap "${from}" → "${to}": both sides need ".*" or neither`);
+    }
+    if (!from.endsWith(".*")) {
+      out.set(colorIndex(from), colorIndex(to));
+      continue;
+    }
+    const a = rampByName(from.slice(0, -2));
+    const b = rampByName(to.slice(0, -2));
+    if (!a) throw new Error(`remap "${from}": unknown ramp`);
+    if (!b) throw new Error(`remap "${to}": unknown ramp`);
+    a.steps.forEach((step, i) => {
+      const j = b.steps.indexOf(step);
+      if (j < 0) throw new Error(`remap "${from}" → "${to}": ${b.name} has no step "${step}"`);
+      out.set(a.indices[i] as number, b.indices[j] as number);
+    });
+  }
+  return out;
+}
+
+export interface Theme {
+  readonly name: string;
+  readonly remap: Remap;
+}
+
+/** An era theme: a named remap applied to tile art when its atlas is baked. */
+export function theme(name: string, remap: Remap): Theme {
+  resolveRemap(remap);
+  return { name, remap };
+}
+
+/** Every theme baked by the compiler. Each Page adds one. */
+export const THEMES: readonly Theme[] = [theme("campus", {})];
+
+/** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */
+export function nameOf(index: number): string {
+  const slot = slotOf(index);
+  if (slot) return `${slot.name}.${SLOT_STEPS[index - slot.base]}`;
+  const names = RAMP_LIST.filter((r) => r.indices.includes(index)).map(
+    (r) => `${r.name}.${r.steps[r.indices.indexOf(index)]}`,
+  );
+  return names.length > 0 ? names.join(" / ") : `#${index}`;
+}

@@ -10,6 +10,13 @@ A browser pixel-art online RPG. `docs/PLAN.md` is the source of truth: read the 
 
 ## Commands
 - `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm test`
+- `pnpm dev` builds the art, then runs the game server on :2567 and the client on http://localhost:5173. `pnpm build` builds the art and the client into `apps/client/dist`. The server has no build step: Node runs its TypeScript directly (`pnpm --filter @guago/server start`)
+- `pnpm art:build` compiles and checks all art into `packages/art/dist`. `pnpm art:sheet` serves the contact sheet; `pnpm art:sheet --png <dir>` writes it as PNGs
+
+## Art
+- Palette, swap slots and themes live in `packages/art/src/palette.ts`; the source format (`sprite`, `variant`, `rig`, `part`, `terrain`) is documented in `packages/art/src/format.ts`. Sources go in `packages/art/src/sprites/`.
+- The build fails on any check problem (palette, orphan pixels, outlines, frame jumps) and names the file, frame and pixel. Fix the art, not the check.
+- `pnpm art:sheet` is the art review surface. Look at every change there at ×1 and ×4 before calling it done.
 
 ## Engineering rules
 - Build order inside every feature: shared formulas and content data, then server behaviour, then client presentation.

@@ -2,3 +2,7 @@ packages:
   - apps/*
   - packages/*
   - tools/*
+minimumReleaseAgeExclude:
+  - "@colyseus/schema@5.0.51"
+allowBuilds:
+  msgpackr-extract: false
