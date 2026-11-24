@@ -13,6 +13,8 @@ export interface SpriteMeta {
   readonly size: Vec;
   /** The feet, in pixels from the top left of the untrimmed frame. */
   readonly origin: Vec;
+  /** The `shadow` frame's name when the sprite brings a ground shadow, else null. */
+  readonly shadow: string | null;
   readonly frames: readonly string[];
   readonly anims: Readonly<Record<string, AnimMeta>>;
 }
@@ -49,12 +51,29 @@ export interface DecalMeta {
   readonly frame: string;
 }
 
+/** Soft patches over one side of a pair, for `pickTone`. Mask 0 is empty. */
+export interface ToneMeta {
+  readonly name: string;
+  readonly on: "upper" | "lower";
+  readonly band: readonly [number, number];
+  readonly masks: readonly (readonly number[])[];
+}
+
 export interface TilesetMeta {
   readonly upper: string;
   readonly lower: string;
+  /** Themes the pair is meant for, or null for all. */
+  readonly themes: readonly string[] | null;
   /** Tile indices per dual-grid mask, for `pickTiles`. */
   readonly masks: readonly (readonly number[])[];
+  readonly tones: readonly ToneMeta[];
   readonly decals: readonly DecalMeta[];
+}
+
+/** A dual-grid edge drawn over other ground. Mask 0 is empty. */
+export interface OverlayMeta {
+  readonly themes: readonly string[] | null;
+  readonly masks: readonly (readonly number[])[];
 }
 
 export interface SlotMeta {
@@ -72,6 +91,10 @@ export interface ArtMetadata {
   readonly slots: Readonly<Record<string, SlotMeta>>;
   readonly atlases: readonly string[];
   readonly themes: readonly string[];
+  /** Per theme, every colour it changes (`#rrggbb` to `#rrggbb`), for drawing sprites in a theme. */
+  readonly recolor: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /** Each colour one ramp step darker, for ground shadows. */
+  readonly shade: Readonly<Record<string, string>>;
   readonly sprites: Readonly<Record<string, SpriteMeta>>;
   readonly rigs: Readonly<Record<string, RigMeta>>;
   /** Tile atlases are named `tiles-{theme}` and laid out on this grid. */
@@ -82,4 +105,5 @@ export interface ArtMetadata {
     readonly columns: number;
   };
   readonly tilesets: Readonly<Record<string, TilesetMeta>>;
+  readonly overlays: Readonly<Record<string, OverlayMeta>>;
 }

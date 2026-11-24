@@ -10,6 +10,8 @@ export interface CompiledSprite {
   readonly size: Vec;
   readonly origin: Vec;
   readonly outline: boolean;
+  /** Whether `frames` holds a `shadow` frame from the def's shadow grid. */
+  readonly shadow: boolean;
   readonly frames: ReadonlyMap<string, Indexed>;
   readonly anim: Readonly<Record<string, Anim>>;
 }
@@ -81,6 +83,10 @@ export function compileSprite(def: SpriteDef, name: string, where: string): Comp
     const img = frames.get(key) as Indexed;
     out.set(key, map.size > 0 ? remap(img, map) : img);
   }
+  if (def.shadow !== undefined) {
+    if (out.has("shadow")) throw new ArtError(where, `"shadow" is both a frame and the shadow`);
+    out.set("shadow", parseGrid(def.shadow, def.palette, `${where} › shadow`, { w, h }));
+  }
   checkAnims(def.anim, new Set(out.keys()), where);
 
   return {
@@ -90,6 +96,7 @@ export function compileSprite(def: SpriteDef, name: string, where: string): Comp
     size: def.size,
     origin: def.origin ?? defaultOrigin(def.size),
     outline: def.outline ?? true,
+    shadow: def.shadow !== undefined,
     frames: out,
     anim: def.anim,
   };
