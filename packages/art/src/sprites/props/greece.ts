@@ -458,7 +458,7 @@ export default [
   one("amphora-tipped", [20, 9], finish(AMPHORA_TIPPED, "Q", "R", "j"), {
     shadow: oval(20, 9, 10, 8, 9.5, 1.5),
   }),
-  one("tortoise", [30, 21], finish(TORTOISE, "d", "k", "y"), {
+  one("tortoise-statue", [30, 21], finish(TORTOISE, "d", "k", "y"), {
     lone: "",
     shadow: oval(30, 21, 15.5, 20, 14.5, 1.8),
   }),

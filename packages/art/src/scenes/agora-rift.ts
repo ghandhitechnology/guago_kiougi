@@ -124,7 +124,7 @@ export default scene({
     ...sorted(columns),
     { prop: "drum", at: [240, 246], flip: true },
     { prop: "rocket", at: [20, 152] },
-    { prop: "tortoise", at: [336, 124], raw: true },
+    { prop: "tortoise-statue", at: [336, 124], raw: true },
     { prop: "olive", at: [398, 128], raw: true },
     { prop: "amphora", at: [282, 140], raw: true },
     { prop: "amphora-tipped", at: [296, 152], raw: true },

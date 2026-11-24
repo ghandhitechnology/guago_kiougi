@@ -33,10 +33,16 @@ export interface CompiledRig {
   readonly looks: readonly RigLook[];
 }
 
+interface ParsedPose {
+  readonly img: Indexed;
+  /** Set when the pose has its own position instead of the piece's. */
+  readonly at?: Vec;
+}
+
 interface ParsedPiece {
   readonly at: ReadonlyMap<Dir, Vec>;
   /** Direction to pose name to grid. A null direction draws nothing. */
-  readonly grids: ReadonlyMap<Dir, ReadonlyMap<string, Indexed> | null>;
+  readonly grids: ReadonlyMap<Dir, ReadonlyMap<string, ParsedPose> | null>;
 }
 
 /** Resolved position and pose of every bone for one direction and frame. */
@@ -80,7 +86,7 @@ function parsePart(def: PartDef, rig: RigDef, where: string): ReadonlyMap<string
   const out = new Map<string, ParsedPiece>();
   for (const [bone, piece] of Object.entries(def.pieces)) {
     if (!(bone in rig.bones)) throw new ArtError(where, `unknown bone "${bone}"`);
-    const grids = new Map<Dir, Map<string, Indexed> | null>();
+    const grids = new Map<Dir, Map<string, ParsedPose> | null>();
     const at = new Map<Dir, Vec>();
     for (const dir of rig.directions) {
       const a = piece.at;
@@ -101,18 +107,11 @@ function parsePart(def: PartDef, rig: RigDef, where: string): ReadonlyMap<string
       }
       const byPose = typeof src === "string" ? { rest: src } : src;
       if (!("rest" in byPose)) throw new ArtError(pw, 'a pose map needs a "rest" grid');
-      const poses = new Map<string, Indexed>();
-      let width: number | undefined;
-      for (const [pose, grid] of Object.entries(byPose)) {
-        const img = parseGrid(
-          grid,
-          def.palette,
-          `${pw} › ${pose}`,
-          width === undefined ? {} : { w: width },
-          def.lone,
-        );
-        width ??= img.w;
-        poses.set(pose, img);
+      const poses = new Map<string, ParsedPose>();
+      for (const [pose, src] of Object.entries(byPose)) {
+        const grid = typeof src === "string" ? src : src.grid;
+        const img = parseGrid(grid, def.palette, `${pw} › ${pose}`, {}, def.lone);
+        poses.set(pose, typeof src === "string" ? { img } : { img, at: src.at });
       }
       grids.set(dir, poses);
     }
@@ -136,9 +135,9 @@ export function drawPart(
     if (!piece || !byPose) continue;
     const s = skeleton.get(bone);
     if (!s) continue;
-    const grid = byPose.get(s.pose) ?? (byPose.get("rest") as Indexed);
-    const at = piece.at.get(dir) ?? [0, 0];
-    stamp(img, grid, at[0] + s.offset[0], at[1] + s.offset[1]);
+    const pose = byPose.get(s.pose) ?? (byPose.get("rest") as ParsedPose);
+    const at = pose.at ?? piece.at.get(dir) ?? [0, 0];
+    stamp(img, pose.img, at[0] + s.offset[0], at[1] + s.offset[1]);
   }
   return img;
 }
