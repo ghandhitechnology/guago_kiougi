@@ -74,6 +74,11 @@ export interface TilesetMeta {
 export interface OverlayMeta {
   readonly themes: readonly string[] | null;
   readonly masks: readonly (readonly number[])[];
+  /**
+   * Per tile index, its shape as 64 hex digits: 256 flags row major, high bit first, set inside
+   * the region. Null for overlays without a shape.
+   */
+  readonly shapes: Readonly<Record<string, string>> | null;
 }
 
 export interface SlotMeta {

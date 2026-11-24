@@ -2,309 +2,331 @@ import { type Legend, sprite } from "../../format.ts";
 import { Pic, smooth, tidy } from "../../paint.ts";
 
 /**
- * What lies past the 운동장 while the rift is open. On the campus side a plain afternoon: blue
- * sky, flat clouds, the dorm's roofline and a row of pines. On the rift side the era's sky
- * bleeds through: gold haze, a hill of olives, and a temple on top that has never been finished.
- * A seam of light runs up between the two skies.
+ * What lies past the 운동장 at 23:40, when the first rift opens. On the campus side the night:
+ * the dorm's lit windows behind a row of pines. In the middle the sky itself is torn like a
+ * page, and through the hole the era's afternoon pours in: gold haze, a low sun, olive hills
+ * with a temple on the brow, and a bright sea below them. The tear's lip is paper, lit by the
+ * day it lets through.
  */
 const palette: Legend = {
   ".": null,
-  // campus sky
-  n: "navy.pale",
-  N: "navy.light",
-  w: "stone.bright",
-  k: "stone.pale",
-  K: "stone.light",
-  M: "stone.mid",
-  d: "stone.deep",
-  // pines and roofs
+  // night
+  a: "ink.deep",
+  b: "ink.dark",
+  B: "navy.dark",
   f: "board.deep",
   F: "board.dark",
-  m: "board.mid",
-  r: "clay.mid",
-  R: "clay.dark",
   // greek sky
   Y: "gold.pale",
   y: "gold.light",
   t: "clay.pale",
   T: "clay.light",
+  w: "stone.bright",
+  // hills and temple
   o: "olive.mid",
   O: "olive.dark",
   l: "olive.light",
-  // rift light
-  W: "stone.bright",
-  q: "sea.pale",
-  Q: "sea.light",
+  k: "stone.pale",
+  K: "stone.light",
+  M: "stone.mid",
+  // sea
   s: "sea.mid",
-  p: "plum.light",
-  P: "plum.mid",
-  // motes and pages
-  "*": "stone.bright",
-  "+": "sea.pale",
-  ",": "plum.light",
+  S: "sea.dark",
+  q: "sea.light",
+  Q: "sea.pale",
+  // paper
+  P: "stone.bright",
+  p: "stone.pale",
+  e: "stone.light",
+  n: "navy.light",
+  r: "red.light",
+  // working cells
+  x: null,
+  // lit windows and specks are dots on purpose
+  "'": "gold.light",
+  "*": "gold.pale",
+  "+": "clay.pale",
 };
-const lone = "*+,";
+const lone = "'*+";
 
-// Campus side --------------------------------------------------------------------------------
+// The torn sky ------------------------------------------------------------------------------
 
-/** Flat afternoon clouds, lit along the top. */
-const CLOUDS = `
-  ..............................................................................
-  ..........wwwwww..........................................................
-  ......wwwwwwwwwwww..............................www.......................
-  ...wwwwwwwwwwwwwwwwww......................wwwwwwwwwww....................
-  .wwwwwwwwwwwwwwwwwwwwwww...............wwwwwwwwwwwwwwwwwww...............
-  kkkkkkkkkkkkkkkkkkkkkkkkkk...........kkkkkkkkkkkkkkkkkkkkkkkkkk...........
-  ..............................................................................
-`;
+const TEAR_W = 200;
+const TEAR_H = 96;
 
-/** The dorm's roof and a row of black pines along the field's far edge. */
-function campusEdge(): string {
-  const W = 240;
-  const H = 40;
-  const pic = Pic.blank(W, H);
-  // Roofline of 새벽관 far off: a long low block with a gable, in haze.
-  for (let x = 20; x < 150; x++) {
-    const top = x < 60 ? 14 : x < 70 ? 14 - (x - 60) : x < 80 ? 4 + (x - 70) : 14;
-    for (let y = top; y < H; y++)
-      pic.set(x, y, y === top ? "M" : y < top + 3 ? "K" : y % 6 === 0 && x % 8 < 5 ? "M" : "k");
-  }
-  // Pines in front: dark cones with a lit edge.
-  for (const [cx, base, hgt] of [
-    [8, 40, 26],
-    [26, 40, 20],
-    [46, 40, 30],
-    [70, 40, 22],
-    [96, 40, 28],
-    [122, 40, 19],
-    [148, 40, 31],
-    [172, 40, 24],
-    [196, 40, 29],
-    [222, 40, 21],
-  ] as const) {
-    for (let y = base - hgt; y < base; y++) {
-      const half = Math.max(
-        1,
-        Math.round(((y - (base - hgt)) / hgt) * 7 + Math.sin(y * 1.3) * 1.2),
-      );
-      for (let x = cx - half; x <= cx + half; x++) {
-        if (x < 0 || x >= W) continue;
-        pic.set(x, y, x === cx - half ? "m" : x > cx + half - 2 ? "f" : "F");
-      }
-    }
-  }
-  return smooth(pic).toString();
+/** A triangle wave: the zigzag of a tear. */
+const tri = (v: number, period: number, amp: number): number =>
+  amp * (Math.abs(((v / period) % 1) * 2 - 1) * 2 - 1);
+
+/** The hole's left and right edge per row: ripped from a point at the top, open at the bottom. */
+function holeSpan(y: number): [number, number] {
+  const k = Math.min(1, Math.max(0, (y - 2) / 66));
+  const half = 4 + 84 * k ** 1.25;
+  const lean = (1 - k) * 10;
+  const tearL = tri(y, 8, 5) + tri(y + 3, 3, 1.5);
+  const tearR = tri(y + 5, 10, 5) + tri(y, 4, 1.5);
+  return [100 + lean - half + tearL, 100 + lean + half + tearR];
 }
 
-// Rift side ----------------------------------------------------------------------------------
+function inHole(x: number, y: number): boolean {
+  const [l, r] = holeSpan(y);
+  const top = 2 + Math.abs(x - 112) * 0.9 + tri(x, 6, 2);
+  return y >= top && x >= l && x <= r;
+}
 
-/** The era's sky: banded gold haze with a low sun, a hill of olives, a temple on top. */
-function greekSky(): string {
-  const W = 240;
-  const H = 96;
-  const pic = Pic.blank(W, H);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const band =
-        y < 18
-          ? "T"
-          : y < 22
-            ? (x + y) % 2
-              ? "T"
-              : "t"
-            : y < 40
-              ? "t"
-              : y < 44
-                ? (x + y) % 2
-                  ? "t"
-                  : "Y"
-                : "Y";
-      pic.set(x, y, band);
-    }
+/** The era's view: banded gold sky, a low sun, hills of olives with a temple, the sea below. */
+function eraView(x: number, y: number): string {
+  if (y >= 66) {
+    // Sea, darker toward the far shore, glints in rows.
+    const glint = (x * 3 + y * 5) % 23 < 2 && y % 3 === 0;
+    if (y < 69) return "S";
+    return glint ? (y < 80 ? "Q" : "q") : "s";
   }
-  // Sun.
-  for (let y = 26; y < 46; y++)
-    for (let x = 150; x < 190; x++) {
-      const d = Math.hypot(x - 170, (y - 36) * 1.1);
-      if (d < 8) pic.set(x, y, "w");
-      else if (d < 11) pic.set(x, y, (x + y) % 2 ? "y" : "Y");
-    }
-  // The hill, olives on its flank, a temple on its brow.
-  for (let x = 0; x < W; x++) {
-    const top = Math.round(70 - 22 * Math.exp(-(((x - 110) / 70) ** 2)) + Math.sin(x * 0.11) * 1.5);
-    for (let y = top; y < H; y++) pic.set(x, y, y === top ? "l" : y < top + 2 ? "o" : "O");
-  }
-  for (let i = 0; i < 26; i++) {
-    const x = 12 + i * 9 + (i % 3) * 2;
-    const top = Math.round(70 - 22 * Math.exp(-(((x - 110) / 70) ** 2))) + 4 + (i % 4) * 3;
-    pic.put(".oo.\nolOo\n.OO.", x, top);
-  }
-  const tx = 92;
-  const ty = 40;
+  const hill =
+    52 - 16 * Math.exp(-(((x - 106) / 34) ** 2)) - 6 * Math.exp(-(((x - 170) / 26) ** 2));
+  if (y >= hill) return y < hill + 1.5 ? "l" : (x * 7 + y * 3) % 17 === 0 ? "O" : "o";
+  const sun = Math.hypot(x - 134, (y - 24) * 1.1);
+  if (sun < 6) return "w";
+  if (sun < 8.5) return (x + y) % 2 ? "Y" : "y";
+  if (y < 14) return "T";
+  if (y < 18) return (x + y) % 2 ? "T" : "t";
+  if (y < 32) return "t";
+  if (y < 36) return (x + y) % 2 ? "t" : "Y";
+  return "Y";
+}
+
+function skyTear(): string {
+  const pic = Pic.blank(TEAR_W, TEAR_H);
+  for (let y = 0; y < TEAR_H; y++)
+    for (let x = 0; x < TEAR_W; x++) if (inHole(x, y)) pic.set(x, y, eraView(x, y));
+  // The temple on the brow of the first hill.
   pic.put(
     `
-      ......kkkkkkkkkkkkkkkkkkkk......
-      ....kkkkkkkkkkkkkkkkkkkkkkkk....
-      ..wwwwwwwwwwwwwwwwwwwwwwwwwwww..
-      ..KKKKKKKKKKKKKKKKKKKKKKKKKKKK..
-      ...wK.wK.wK.wK.wK.wK.wK.wK.wK...
-      ...wK.wK.wK.wK.wK.wK.wK.wK.wK...
-      ...wK.wK.wK.wK.wK.wK.wK.wK.wK...
-      ...wK.wK.wK.wK.wK.wK.wK.wK.wK...
-      ...wK.wK.wK.wK.wK.wK.wK.wK.wK...
-      ..kkkkkkkkkkkkkkkkkkkkkkkkkkkk..
-      .KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK.
+      ....kkkkkkkkkkkk....
+      ..wwwwwwwwwwwwwwww..
+      ..KKKKKKKKKKKKKKKK..
+      ...wK.wK.wK.wK.wK...
+      ...wK.wK.wK.wK.wK...
+      ...wK.wK.wK.wK.wK...
+      ..kkkkkkkkkkkkkkkk..
+      .KKKKKKKKKKKKKKKKKK.
     `,
-    tx,
-    ty,
+    96,
+    31,
   );
-  return smooth(pic).toString();
-}
-
-/** The seam between the two skies: a ragged column of light. Two frames for its pulse. */
-function seam(pulse: number): string {
-  const W = 16;
-  const H = 96;
-  const pic = Pic.blank(W, H);
-  for (let y = 0; y < H; y++) {
-    const c = 8 + Math.round(Math.sin(y * 0.37 + 1) * 2 + Math.sin(y * 0.11) * 2);
-    const half = 2 + ((y * 7 + pulse * 3) % 5 === 0 ? 1 : 0) + pulse;
-    for (let x = c - half - 2; x <= c + half + 2; x++) {
-      const d = Math.abs(x - c);
-      const ch =
-        d <= half - 2 ? "W" : d <= half - 1 ? "q" : d <= half ? "Q" : d <= half + 1 ? "s" : "P";
-      pic.set(x, y, ch);
+  // The paper lip around the hole: lit torn edge, pale page, crease, fibres.
+  const lip = Pic.blank(TEAR_W, TEAR_H);
+  for (let y = 0; y < TEAR_H; y++) {
+    for (let x = 0; x < TEAR_W; x++) {
+      if (inHole(x, y)) continue;
+      let d = 9;
+      for (let dy = -6; dy <= 6; dy++)
+        for (let dx = -6; dx <= 6; dx++)
+          if (inHole(x + dx, y + dy)) d = Math.min(d, Math.hypot(dx, dy));
+      const w = 3 + 2.5 * (0.5 + 0.5 * Math.sin(y * 0.21 + x * 0.05));
+      const fibre = (x * 5 + y * 3) % 7 === 0;
+      if (d <= 1.01) lip.set(x, y, "e");
+      else if (d <= w - 1) lip.set(x, y, "P");
+      else if (d <= w || (fibre && d <= w + 1.5)) lip.set(x, y, "p");
     }
   }
-  return tidy(pic, "Q", "").toString();
+  pic.put(smooth(lip), 0, 0);
+  return smooth(pic, "'").toString();
 }
 
-/** Motes drawn into the rift: specks sliding inward, one step per frame. */
-function motes(frame: number): string {
-  const pic = Pic.blank(32, 24);
-  const paths: (readonly [number, number, number, number, string])[] = [
-    [0, 4, 1, 0.4, "*"],
-    [2, 18, 1, -0.5, "+"],
-    [6, 10, 1, 0.1, ","],
-    [1, 14, 1, -0.1, "*"],
-    [4, 2, 1, 0.6, "+"],
-  ];
-  for (const [x0, y0, vx, vy, ch] of paths) {
-    const t = (frame * 3 + x0 * 2) % 26;
-    pic.set(Math.round(x0 + vx * t), Math.round(y0 + vy * t), ch);
+// The campus side ---------------------------------------------------------------------------
+
+/** 새벽관 at night beyond the field: a long dark block with its corridors lit, pines in front. */
+function nightDorm(): string {
+  const W = 240;
+  const H = 36;
+  const pic = Pic.blank(W, H);
+  for (let x = 6; x < 200; x++) {
+    const top = x < 90 ? 8 : x < 100 ? 8 - (x - 90) * 0.6 : x < 110 ? 2 + (x - 100) * 0.6 : 8;
+    for (let y = Math.round(top); y < H; y++) pic.set(x, y, y === Math.round(top) ? "B" : "b");
+  }
+  // Corridor lights in rows, some rooms awake.
+  for (let row = 0; row < 3; row++) {
+    const y = 12 + row * 7;
+    for (let x = 10; x < 196; x += 6) {
+      const on = (x * 7 + row * 13) % 5 < (row === 1 ? 3 : 1);
+      if (on) pic.set(x, y, "'").set(x + 1, y, "'");
+    }
+  }
+  // Pines in front, cones with ragged sides.
+  for (const [cx, hgt] of [
+    [6, 24],
+    [28, 18],
+    [50, 28],
+    [76, 20],
+    [104, 26],
+    [128, 17],
+    [150, 29],
+    [176, 22],
+    [204, 27],
+    [228, 19],
+  ] as const) {
+    for (let y = H - hgt; y < H; y++) {
+      const half = Math.max(1, Math.round(((y - (H - hgt)) / hgt) * 7 + Math.sin(y * 1.7) * 1.3));
+      for (let x = cx - half; x <= cx + half; x++)
+        if (x >= 0 && x < W) pic.set(x, y, x === cx - half ? "F" : "f");
+    }
+  }
+  return tidy(pic, "f", "'").toString();
+}
+
+/** Marble balustrade along the far edge of the agora's terrace, where the ground drops to the sea. */
+const TERRACE = `
+  KKKKKKKKKKKKKKKK
+  wwwwwwwwwwwwwwww
+  kkkkkkkkkkkkkkkk
+  MMMMMMMMMMMMMMMM
+  .wK..wK..wK..wK.
+  .wK..wK..wK..wK.
+  .wK..wK..wK..wK.
+  .wK..wK..wK..wK.
+  kkkkkkkkkkkkkkkk
+  KKKKKKKKKKKKKKKK
+  MMMMMMMMMMMMMMMM
+`;
+
+// Things being pulled in ------------------------------------------------------------------------
+
+/**
+ * A page torn out of the 0조 notebook: ruled in blue, a red margin, the ragged edge where it
+ * left the spiral. Frames turn it over as it flies: face, foreshortened, edge on, back.
+ */
+function page(width: number, face: boolean): string {
+  const W = 26;
+  const H = 16;
+  const pic = Pic.blank(W, H);
+  const x0 = Math.round((W - width) / 2);
+  for (let y = 1; y < H - 1; y++) {
+    for (let x = x0; x < x0 + width; x++) {
+      const left = x === x0;
+      // The torn spiral edge: notches every third row.
+      if (left && y % 3 === 0) continue;
+      let ch = "P";
+      if (y === H - 2) ch = "e";
+      else if (x >= x0 + width - 1) ch = "p";
+      else if (face && width > 6 && x === x0 + 2) ch = "r";
+      else if (face && width > 6 && y % 2 === 0 && x > x0 + 2 && x < x0 + width - 2) ch = "n";
+      pic.set(x, y, ch);
+    }
   }
   return pic.toString();
 }
 
-/** A page torn out of the notebook, turning over as it drifts east toward the tear. */
-const PAGES = [
+const PAGES = [page(24, true), page(15, true), page(3, false), page(18, false)];
+
+/** A scrap of the field coming loose at the tear: sand on top, pale page underneath. */
+const SCRAPS = [
   `
-    ..........
-    .wwwww....
-    .wKKKwk...
-    .wwwwwwk..
-    .wKKKKwk..
-    .wwwwwwk..
-    ..kkkkkk..
-    ..........
+    ..kkk...
+    .kKKkk..
+    kKKKKkp.
+    .pppppp.
+    ..pPP...
   `,
   `
-    ..........
-    ...wwww...
-    ..wKKKwk..
-    ..wwwwwk..
-    ..wKKKwk..
-    ...kkkk...
-    ..........
-    ..........
+    ...kk...
+    ..kKKk..
+    .pkKKkp.
+    .ppPPpp.
+    ........
   `,
   `
-    ..........
-    ..........
-    ....ww....
-    ...wwwk...
-    ...wwwk...
-    ....kk....
-    ..........
-    ..........
+    ........
+    .pppp...
+    pPPPPp..
+    .kKKkk..
+    ..kkk...
   `,
   `
-    ..........
-    ..........
-    ..kkkkk...
-    ..kwwwwk..
-    ..kwKKwk..
-    ..kwwwww..
-    ...kkkk...
-    ..........
+    ...pp...
+    ..pPPp..
+    .kkKKkk.
+    ..kKKk..
+    ........
   `,
 ];
 
+/** Warm specks of the era's light, rising toward the tear. */
+function embers(frame: number): string {
+  const pic = Pic.blank(24, 32);
+  for (const [x0, y0, ch] of [
+    [3, 30, "*"],
+    [12, 26, "+"],
+    [20, 31, "*"],
+    [8, 20, "+"],
+    [16, 14, "*"],
+  ] as const) {
+    const t = (frame * 2 + x0) % 30;
+    const x = Math.round(x0 + Math.sin((t + x0) * 0.5) * 2);
+    const y = y0 - t;
+    if (y >= 0) pic.set(Math.max(0, Math.min(23, x)), y, ch);
+  }
+  return pic.toString();
+}
+
+const four = (grids: readonly string[], prefix: string) =>
+  Object.fromEntries(grids.map((g, i) => [`${prefix}${i}`, g]));
+
 export default [
   sprite({
-    name: "agora-clouds",
-    size: [78, 7],
+    name: "sky-tear",
+    size: [TEAR_W, TEAR_H],
     origin: [0, 0],
     palette,
     outline: false,
-    frames: {
-      still: CLOUDS.trim()
-        .split("\n")
-        .map((r) => r.trim().padEnd(78, "."))
-        .join("\n"),
-    },
+    frames: { still: skyTear() },
     anim: { idle: { frames: ["still"], fps: 1 } },
   }),
   sprite({
-    name: "agora-edge",
-    size: [240, 40],
-    origin: [0, 39],
-    palette,
-    outline: false,
-    frames: { still: campusEdge() },
-    anim: { idle: { frames: ["still"], fps: 1 } },
-  }),
-  sprite({
-    name: "greek-sky",
-    size: [240, 96],
-    origin: [0, 0],
-    palette,
-    outline: false,
-    frames: { still: greekSky() },
-    anim: { idle: { frames: ["still"], fps: 1 } },
-  }),
-  sprite({
-    name: "rift-seam",
-    size: [16, 96],
-    origin: [8, 0],
-    palette,
-    outline: false,
-    frames: { pulse0: seam(0), pulse1: seam(1) },
-    anim: { pulse: { frames: ["pulse0", "pulse1"], fps: 3 } },
-  }),
-  sprite({
-    name: "motes",
-    size: [32, 24],
-    origin: [0, 0],
+    name: "night-dorm",
+    size: [240, 36],
+    origin: [0, 35],
     palette,
     lone,
     outline: false,
-    frames: Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`drift${i}`, motes(i)])),
-    anim: {
-      drift: { frames: Array.from({ length: 9 }, (_, i) => `drift${i}`), fps: 8, jump: 1 },
-    },
+    frames: { still: nightDorm() },
+    anim: { idle: { frames: ["still"], fps: 1 } },
   }),
   sprite({
-    name: "page",
-    size: [10, 8],
+    name: "terrace",
+    size: [16, 11],
+    origin: [0, 10],
     palette,
     outline: false,
-    frames: {
-      turn0: PAGES[0] as string,
-      turn1: PAGES[1] as string,
-      turn2: PAGES[2] as string,
-      turn3: PAGES[3] as string,
-    },
+    frames: { run: TERRACE },
+    anim: { idle: { frames: ["run"], fps: 1 } },
+  }),
+  sprite({
+    name: "page-big",
+    size: [26, 16],
+    palette,
+    outline: false,
+    frames: four(PAGES, "turn"),
     anim: { turn: { frames: ["turn0", "turn1", "turn2", "turn3"], fps: 5, jump: 1 } },
+  }),
+  sprite({
+    name: "scrap",
+    size: [8, 5],
+    palette,
+    outline: false,
+    frames: four(SCRAPS, "tumble"),
+    anim: { tumble: { frames: ["tumble0", "tumble1", "tumble2", "tumble3"], fps: 6, jump: 1 } },
+  }),
+  sprite({
+    name: "embers",
+    size: [24, 32],
+    origin: [0, 31],
+    palette,
+    lone,
+    outline: false,
+    frames: Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`rise${i}`, embers(i)])),
+    anim: {
+      rise: { frames: Array.from({ length: 15 }, (_, i) => `rise${i}`), fps: 8, jump: 1 },
+    },
   }),
 ];

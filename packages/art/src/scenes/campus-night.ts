@@ -22,11 +22,13 @@ const UW = "up-window";
 const UD = "up-window-dark";
 const UC = "up-curtain";
 
-/** Light spilling from a lit ground-floor window onto the walkway. */
+const LAMP = ["campus-lamp", "campus-lamp-mid", "campus-dusk"];
+
+/** Light falling from a lit ground-floor window onto the walkway, widening as it falls. */
 const spill = (col: number): Light => ({
-  theme: "campus-dusk",
-  at: [col * 16 + 8, 149],
-  r: [9, 6],
+  bands: ["campus-dusk"],
+  spill: { top: [col * 16 + 2, col * 16 + 14, 144], bottom: [col * 16 - 3, col * 16 + 19, 160] },
+  ragged: 2,
 });
 
 export default scene({
@@ -74,10 +76,14 @@ export default scene({
   ],
   objects: [
     // 가설관: three floors of the south face, running off the top of the screen.
-    ...floor(47, ["up-end-l", UD, UW, UW, UD, UC, UW, UD, UW, UW, UW, UD, UW, UD, "up-end-r"], [9]),
+    ...floor(
+      47,
+      ["up-end-l", UD, UW, UW, UD, "up-wall", "up-wall", UD, UW, UC, UW, UD, UW, UD, "up-end-r"],
+      [8],
+    ),
     ...floor(
       95,
-      ["up-end-l", UW, UC, UD, UD, UW, UW, UD, UW, UW, UD, UD, UW, UW, "up-end-r"],
+      ["up-end-l", UW, UC, UD, UD, UW, UW, UD, UW, "up-studying", UD, UD, UW, UW, "up-end-r"],
       [12],
     ),
     ...floor(143, [
@@ -97,13 +103,20 @@ export default scene({
       "wall",
       "end-r",
     ]),
+    // The east face in shadow and a drainpipe at the corner.
+    { prop: "facade-side", frame: "up", at: [240, 47] },
+    { prop: "facade-side", frame: "up", at: [240, 95] },
+    { prop: "facade-side", frame: "ground", at: [240, 143] },
+    { prop: "drainpipe", frame: "run", at: [231, 47] },
+    { prop: "drainpipe", frame: "run", at: [231, 95] },
+    { prop: "drainpipe", frame: "foot", at: [231, 143] },
     { prop: "steps", at: [96, 153] },
     { prop: "planter", at: [40, 157] },
     { prop: "shrub", at: [26, 152] },
     { prop: "shrub", at: [52, 153], flip: true },
     // The sea wall and its fence, with the city behind.
-    { prop: "seawall", frame: "run", at: [240, 109], repeat: 15 },
-    { prop: "fence", frame: "run", at: [240, 98], repeat: 15 },
+    { prop: "seawall", frame: "run", at: [250, 109], repeat: 15 },
+    { prop: "fence", frame: "run", at: [250, 98], repeat: 15 },
     { prop: "fence", frame: "post", at: [288, 98] },
     { prop: "fence", frame: "post", at: [352, 98] },
     { prop: "fence", frame: "post", at: [416, 98] },
@@ -142,18 +155,19 @@ export default scene({
     },
   ],
   overhead: [
+    // Fixed to the wall above everyone's heads: the clock and the name plate.
+    { prop: "clock", at: [96, 36] },
+    { prop: "sign", at: [96, 91] },
     { prop: "pine-crown", anim: "sway", play: true, at: [428, 175] },
     { prop: "canopy", at: [96, 116] },
   ],
   lights: [
-    { theme: "campus-lamp", ring: "campus-dusk", at: [332, 174], r: [68, 33], core: 0.48 },
-    {
-      theme: "campus-dusk",
-      at: [220, 160],
-      r: [26, 13],
-      pulse: { amount: 0.08, period: 2.5 },
-    },
-    { theme: "campus-lamp", ring: "campus-dusk", at: [96, 151], r: [26, 11], core: 0.5 },
+    { bands: LAMP, at: [332, 172], r: [74, 36], ragged: 5 },
+    // The vending machine's panel lights the pavement cold and white, not like the lamp.
+    { bands: ["campus"], at: [218, 162], r: [24, 11], pulse: { amount: 0.08, period: 2.5 } },
+    { bands: LAMP, spill: { top: [80, 112, 144], bottom: [64, 128, 172] }, ragged: 3 },
+    spill(1),
+    spill(2),
     spill(8),
     spill(10),
   ],

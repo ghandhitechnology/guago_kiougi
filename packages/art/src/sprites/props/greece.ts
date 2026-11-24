@@ -378,36 +378,6 @@ const ROCKET = `
   dd..........dd
 `;
 
-/** Chalk lines of the field, worn thin in places. Placed by hand, under everything. */
-const CHALK = {
-  h: `
-    wwwwwkwwwwwwkkww
-    wwwwkkwwwwwwwkww
-  `,
-  v: `
-    ww
-    ww
-    ww
-    kk
-    ww
-    ww
-    ww
-    ww
-    ww
-    ww
-    kk
-    ww
-    ww
-    ww
-    ww
-    ww
-  `,
-  spot: `
-    ww
-    ww
-  `,
-};
-
 /** Where a column broke through: the field's crust split and heaved around its foot. */
 const HEAVE = `
   .......E..........E......
@@ -497,9 +467,6 @@ export default [
     shadow: oval(72, 62, 38, 60, 34, 2.4),
   }),
   one("rocket", [14, 22], finish(ROCKET, "d", "g"), { shadow: oval(14, 22, 7, 21, 6.5, 1.4) }),
-  one("chalk-h", [16, 2], CHALK.h, { origin: [0, 0], outline: false }),
-  one("chalk-v", [2, 16], CHALK.v, { origin: [0, 0], outline: false }),
-  one("chalk-spot", [2, 2], CHALK.spot, { origin: [0, 0], outline: false }),
   sprite({
     name: "heave",
     size: [25, 10],

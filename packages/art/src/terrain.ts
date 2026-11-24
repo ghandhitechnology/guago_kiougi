@@ -145,6 +145,8 @@ export interface CompiledOverlay {
   readonly themes: readonly string[] | null;
   /** Every distinct tile, 16×16, clear where nothing is drawn. */
   readonly tiles: readonly Indexed[];
+  /** Per tile, 256 flags (row major) for the pixels inside the region; null without `inside`. */
+  readonly shapes: readonly (Uint8Array | null)[];
   /** Tile indices per mask 0 to 15. Mask 0 draws nothing and is empty. */
   readonly masks: readonly (readonly number[])[];
 }
@@ -171,9 +173,38 @@ function cutOverlay(
 
 export function compileOverlay(def: OverlayDef, name: string, where: string): CompiledOverlay {
   checkLegend(def.palette, where);
+  const lone = def.lone ?? "";
+  const grid = (src: string, label: string, w: number, h: number): Indexed =>
+    parseGrid(src, def.palette, `${where} › ${label}`, { w, h }, lone);
+  const look = cut(def, grid);
+  // The shape: the same pictures read as inside (any colour) or not.
+  const inside = def.inside;
+  const shapeLegend: Legend = Object.fromEntries(
+    Object.keys(def.palette).map((ch) => [ch, inside?.includes(ch) ? "ink.deep" : null]),
+  );
+  const form = inside
+    ? cut(def, (src, label, w, h) => parseGrid(src, shapeLegend, `${where} › ${label}`, { w, h }))
+    : null;
   const tiles: Indexed[] = [];
-  const masks = cutOverlay(def, def.palette, def.lone ?? "", where, tiles);
-  return { kind: "overlay", name, themes: def.themes ?? null, tiles, masks };
+  const shapes: (Uint8Array | null)[] = [];
+  const add = (img: Indexed, shape: Indexed | undefined): number => {
+    const flags = shape ? shape.px.map((v) => (v === 255 ? 0 : 1)) : null;
+    const found = tiles.findIndex(
+      (t, i) =>
+        same(t, img) && (flags ? (shapes[i] as Uint8Array).every((v, k) => v === flags[k]) : true),
+    );
+    if (found >= 0) return found;
+    tiles.push(img);
+    shapes.push(flags);
+    return tiles.length - 1;
+  };
+  const masks: number[][] = [[]];
+  for (let m = 1; m < 16; m++) {
+    const imgs = m === 15 ? look.fills : look.layers.map((l) => l[m] as Indexed);
+    const forms = form ? (m === 15 ? form.fills : form.layers.map((l) => l[m] as Indexed)) : [];
+    masks.push([...new Set(imgs.map((img, k) => add(img, forms[k])))]);
+  }
+  return { kind: "overlay", name, themes: def.themes ?? null, tiles, shapes, masks };
 }
 
 export function compileTerrain(def: TerrainDef, name: string, where: string): CompiledTerrain {

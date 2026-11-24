@@ -89,6 +89,30 @@ const curtained: Glass = (r) => {
   return `cC${base.slice(2, 9)}Ccc`;
 };
 
+/** Someone still studying at 23:38: a head and shoulders bent over a desk against the light. */
+const studying: Glass = (r) => {
+  const base = lit(false)(r);
+  const figure = [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "..OO",
+    ".OOOO",
+    ".OOOO",
+    "..OOO",
+    "OOOOO",
+    "OOOOOO",
+  ][r];
+  if (!figure) return base;
+  return [...base].map((ch, x) => (figure[x] === "O" ? "O" : ch)).join("");
+};
+
 const FLOOR_GLASS_ROWS = 20;
 
 /** One floor piece: slab band, wall above, window (or none), wall below, plinth on the ground floor. */
@@ -167,11 +191,108 @@ const frames: Record<string, string> = {
   "up-window-dim": floor(lit(true), false),
   "up-window-dark": floor(dark, false),
   "up-curtain": floor(curtained, false),
+  "up-studying": floor(studying, false),
   "up-end-l": corner(floor(null, false), "l"),
   "up-end-r": corner(floor(null, false), "r"),
 };
 
+/**
+ * The building's east face, seen at a slant past its corner: the same floors in shadow, a
+ * narrow stair window per floor, closed by its outline on the far edge.
+ */
+function sideFloor(ground: boolean): string {
+  const rows: string[] = [];
+  for (let y = 0; y < FLOOR; y++) {
+    let row: string;
+    if (y === 0) row = "kKKKKKKKMd";
+    else if (y < 3) row = "kMMMMMMMMd";
+    else if (y === 3) row = "KSSSSSSSSd";
+    else if (ground && y >= FLOOR - 4)
+      row = y === FLOOR - 1 ? "dddddddddd" : "MjjjjjjjjD".replace("D", "d");
+    else if (y >= 12 && y < 30) row = y === 12 ? "KSdddddSSd" : "KSdvvvdSSd";
+    else row = "KSSSSSSSSd";
+    rows.push(row);
+  }
+  return rows.join("\n");
+}
+
+/** A rainwater pipe down the facade: brackets every floor, a shoe and a splash block at the foot. */
+const PIPE_RUN = Array.from({ length: FLOOR }, (_, y) =>
+  y % 24 === 10 ? "jMMMj" : y % 24 === 11 ? "jSSSj" : ".jMj.",
+).join("\n");
+const PIPE_FOOT = Array.from({ length: FLOOR }, (_, y) =>
+  y < FLOOR - 6
+    ? y % 24 === 10
+      ? "jMMMj"
+      : y % 24 === 11
+        ? "jSSSj"
+        : ".jMj."
+    : ["..jMj", "..jMM", "...jj", "jjjjj", "jKKKj", "jjjjj"][y - (FLOOR - 6)],
+).join("\n");
+
+/** The school clock over the entrance, stopped at no particular time: it reads 11:38. */
+const CLOCK = `
+  ....dddddd....
+  ..ddwwwwwwdd..
+  .dwwwwMwwwwKd.
+  .dwwwwwwwwwKd.
+  dwwjwwwwwwwwKd
+  dwwwjjwwwwwwKd
+  dMwwwjjwwwwMKd
+  dwwwwjjwwwwwKd
+  dwwwjjwwwwwwKd
+  .dwjjwwwwwwKd.
+  .dwjwwwMwwwKd.
+  ..ddKKKKKKdd..
+  ....dddddd....
+  ..............
+`;
+
+/** A plate over the doors with the building's name, too small and too far to read. */
+const SIGN = `
+  dddddddddddddddddddddddddddddddddddd
+  dSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSd
+  dSKKSwSKwKSSKKwSSwKKSSKwKSwSKKSSKKSd
+  dSKwSKSKKwSSwKKSSKKwSSKKSSKwKSSwKKSd
+  dSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSd
+  dddddddddddddddddddddddddddddddddddd
+`;
+
 export default [
+  sprite({
+    name: "facade-side",
+    size: [10, FLOOR],
+    origin: [0, FLOOR - 1],
+    palette,
+    outline: false,
+    frames: { ground: sideFloor(true), up: sideFloor(false) },
+    anim: { idle: { frames: ["ground"], fps: 1 } },
+  }),
+  sprite({
+    name: "drainpipe",
+    size: [5, FLOOR],
+    origin: [2, FLOOR - 1],
+    palette,
+    outline: false,
+    frames: { run: PIPE_RUN, foot: PIPE_FOOT },
+    anim: { idle: { frames: ["run"], fps: 1 } },
+  }),
+  sprite({
+    name: "clock",
+    size: [14, 14],
+    palette,
+    lone: "M",
+    frames: { still: CLOCK },
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
+  sprite({
+    name: "sign",
+    size: [36, 6],
+    palette,
+    lone: "wK",
+    frames: { still: SIGN },
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
   sprite({
     name: "facade",
     size: [W, FLOOR],

@@ -317,10 +317,29 @@ export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): A
     overlays: Object.fromEntries(
       sets
         .filter((o): o is CompiledOverlay => o.kind === "overlay")
-        .map((o) => [
-          o.name,
-          { themes: o.themes, masks: shift(o.masks, layout.first.get(o.name) as number) },
-        ]),
+        .map((o) => {
+          const first = layout.first.get(o.name) as number;
+          const shapes = o.shapes.some((sh) => sh)
+            ? Object.fromEntries(
+                o.shapes.map((sh, i) => [
+                  String(first + i),
+                  sh
+                    ? Array.from(
+                        { length: 64 },
+                        (_, q) =>
+                          (sh[q * 4] as number) * 8 +
+                          (sh[q * 4 + 1] as number) * 4 +
+                          (sh[q * 4 + 2] as number) * 2 +
+                          (sh[q * 4 + 3] as number),
+                      )
+                        .map((v) => v.toString(16))
+                        .join("")
+                    : "",
+                ]),
+              )
+            : null;
+          return [o.name, { themes: o.themes, masks: shift(o.masks, first), shapes }];
+        }),
     ),
   };
 }
