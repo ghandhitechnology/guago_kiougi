@@ -96,8 +96,14 @@ export function variant(
 
 export type Dir = "down" | "up" | "side";
 
+/**
+ * A grid placed at the piece's `at`, or one with its own `at` for a pose that sits elsewhere
+ * (an arm raised for a strike, a body lying down).
+ */
+export type PoseGrid = string | { readonly at: Vec; readonly grid: string };
+
 /** A grid, or pose name to grid. A pose map must have `rest`, used for poses it does not draw. */
-export type PieceGrids = string | Readonly<Record<string, string>>;
+export type PieceGrids = string | Readonly<Record<string, PoseGrid>>;
 
 /**
  * A part's drawing on one bone. Every direction the rig uses needs an entry; null means nothing

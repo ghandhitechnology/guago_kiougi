@@ -1,7 +1,25 @@
-import { type Legend, part, rig } from "../../format.ts";
+import {
+  type Dir,
+  type Legend,
+  type PartDef,
+  type Piece,
+  type PieceGrids,
+  type PoseGrid,
+  part,
+  rig,
+  type Vec,
+} from "../../format.ts";
+import { gridRows } from "../../grid.ts";
+
+/**
+ * The student: a first-year two weeks into dorm life, textbook always in hand.
+ *
+ * The body sits in the centre 16×24 of a 24×26 frame so the strike, the knocked-out pose and
+ * tall hair can reach past it. Side faces right. Light comes from the top left in every direction.
+ */
 
 /** One legend for every student part. Skin, hair and jacket are swap slots. */
-const ink: Legend = {
+export const ink: Legend = {
   ".": null,
   O: "skin.deep",
   k: "skin.dark",
@@ -19,502 +37,1368 @@ const ink: Legend = {
   n: "navy.dark",
   v: "navy.mid",
   V: "navy.light",
-  w: "stone.bright",
+  G: "stone.deep",
+  g: "stone.mid",
   q: "stone.light",
-  R: "red.dark",
-  r: "red.mid",
-  b: "wood.deep",
-  B: "wood.dark",
+  p: "stone.pale",
+  w: "stone.bright",
   e: "ink.deep",
   z: "ink.dark",
+  i: "ink.mid",
+  I: "ink.light",
+  R: "red.deep",
+  r: "red.dark",
+  m: "red.mid",
+  M: "red.light",
   T: "clay.deep",
-  t: "clay.mid",
-  u: "clay.light",
-  p: "stone.pale",
+  t: "clay.dark",
+  u: "clay.mid",
+  U: "clay.light",
+  y: "clay.pale",
+  D: "gold.deep",
+  a: "gold.mid",
+  W: "wood.deep",
+  b: "sea.dark",
+  l: "sea.light",
   L: "sea.pale",
-  g: "ink.mid",
+  // Lone marks: eye glints, blush, mouths, hands, smears.
+  "^": "stone.bright",
+  "'": "rose.light",
+  "-": "skin.deep",
+  ",": "skin.dark",
+  "*": "ink.deep",
+  "%": "skin.mid",
+  "&": "skin.dark",
+  "~": "stone.pale",
+  "!": "red.dark",
+};
+
+export const lone = "^'-,*%&~!";
+
+// Knocked out ---------------------------------------------------------------------------------
+
+/** Swaps rows and columns: a side-view grid becomes the same body lying face down. */
+export function transpose(grid: string): string {
+  const rows = gridRows(grid).map((r) => [...r]);
+  const w = Math.max(...rows.map((r) => r.length));
+  const out: string[] = [];
+  for (let x = 0; x < w; x++) out.push(rows.map((r) => r[x] ?? ".").join(""));
+  return out.join("\n");
+}
+
+/** The lying body is the side frame transposed, then lowered onto the ground. */
+const KO_DROP: Vec = [-1, 7];
+
+function sideAt(piece: Piece): Vec {
+  const a = piece.at;
+  if (a === undefined) return [0, 0];
+  if (Array.isArray(a)) return a as Vec;
+  return (a as Partial<Record<Dir, Vec>>).side ?? [0, 0];
+}
+
+/**
+ * Adds a `ko` pose to every piece of a part: its side grid (or its side `ko` grid) transposed.
+ * Every hairstyle, garment and face falls over the same way with no extra drawing, and light
+ * stays at the top left. The knocked-out frame is the same lying body from every direction.
+ */
+export function withKo(def: PartDef): PartDef {
+  const pieces: Record<string, Piece> = {};
+  for (const [bone, piece] of Object.entries(def.pieces)) {
+    const side = piece.side;
+    if (side === undefined || side === null) {
+      pieces[bone] = piece;
+      continue;
+    }
+    const map: Readonly<Record<string, PoseGrid>> =
+      typeof side === "string" ? { rest: side } : side;
+    const src = (map.ko ?? map.rest) as PoseGrid;
+    const at = typeof src === "string" ? sideAt(piece) : src.at;
+    const grid = typeof src === "string" ? src : src.grid;
+    const ko: PoseGrid = { at: [at[1] + KO_DROP[0], at[0] + KO_DROP[1]], grid: transpose(grid) };
+    const add = (g: PieceGrids | null | undefined): PieceGrids => {
+      if (g === undefined || g === null) return { rest: ".", ko };
+      return typeof g === "string" ? { rest: g, ko } : { ...g, ko };
+    };
+    pieces[bone] = { ...piece, down: add(piece.down), up: add(piece.up), side: add(piece.side) };
+  }
+  return { ...def, pieces };
+}
+
+// Shadow --------------------------------------------------------------------------------------
+
+const blob = `
+  ...zzzzzz...
+  .zzzzzzzzzz.
+  zzzzzzzzzzzz
+  .zzzzzzzzzz.
+`;
+
+const shadowPoses: Readonly<Record<string, PoseGrid>> = {
+  rest: blob,
+  ko: {
+    at: [1, 22],
+    grid: `
+      ..zzzzzzzzzzzzzzzzzz..
+      zzzzzzzzzzzzzzzzzzzzzz
+      .zzzzzzzzzzzzzzzzzzzz.
+    `,
+  },
 };
 
 const shadow = part({
   palette: ink,
+  pieces: { ground: { at: [6, 22], down: shadowPoses, up: shadowPoses, side: shadowPoses } },
+});
+
+// Body --------------------------------------------------------------------------------------
+
+/** Head only: hands are drawn in the sleeves so they sit above the uniform. */
+const skin = part({
+  palette: ink,
   pieces: {
-    ground: {
-      at: [3, 21],
+    head: {
+      at: { down: [5, 3], up: [5, 3], side: [3, 3] },
       down: `
-        .zzzzzzzz.
-        zzzzzzzzzz
-        .zzzzzzzz.
+        ....OOOOOO....
+        ..OOssssssOO..
+        .OssssssssssO.
+        OssssssssssssO
+        OssssssssssssO
+        OssssssssssssO
+        OssssssssssssO
+        .OssssssssssO.
+        ..OOssssssOO..
+        ....OOOOOO....
       `,
       up: `
-        .zzzzzzzz.
-        zzzzzzzzzz
-        .zzzzzzzz.
+        ....OOOOOO....
+        ..OOssssssOO..
+        .OssssssssssO.
+        OssssssssssssO
+        OssssssssssssO
+        OssssssssssssO
+        OssssssssssssO
+        OssssssssssssO
+        ..OOssssskOO..
+        ....OssssO....
+        ....OssssO....
       `,
       side: `
-        .zzzzzzzz.
-        zzzzzzzzzz
-        .zzzzzzzz.
+        ....OOOOOOO....
+        ..OOsssssssOO..
+        .OsssssssssssO.
+        OsssssssssssssO
+        OsssssssssssssO
+        OsssssssssssssO
+        OsssssOsssssssO
+        OsssssOOssssssO
+        ......OssssssO.
+        ......OOOssOO..
+        .......OOOO....
       `,
     },
   },
 });
 
-const body = part({
-  palette: ink,
-  pieces: {
-    head: {
-      at: [3, 3],
-      down: `
-        ..OOOOOO..
-        .OsSSSSsO.
-        OsSSSSSSsO
-        OsSSSSSSsO
-        OsSSSSSSsO
-        OsSSSSSSkO
-        OSSSSSSSSO
-        .OSSSSSSO.
-        ..OOOOOO..
-      `,
-      up: `
-        ..OOOOOO..
-        .OsssssskO
-        OsssssssO.
-        OsssssskO.
-        OsssssskO.
-        OsssssskO.
-        OksssskkO.
-        .OkkkkkO..
-        ..OOOOOO..
-      `,
-      side: `
-        ..OOOOOO..
-        .OsSSSSSO.
-        OsSSSSSSSO
-        OsSSSSSSSO
-        OsSSSSSSSO
-        OsSSSSSSSO
-        OsSSSSSSSO
-        .OSSSSSSO.
-        ..OOOOOO..
-      `,
-    },
+// Faces -------------------------------------------------------------------------------------
+// Down grids sit on the face at [5, 6]; side grids at [3, 6]. Rows: eyes, eyes, cheeks, chin.
+
+const hurt = {
+  down: `
+    ...*......*...
+    ....*....*....
+    ......--......
+  `,
+  side: `
+    .............*.
+    ............*..
+    ...............
+    ............-..
+  `,
+};
+
+const yawn = {
+  down: `
+    ..............
+    ...**....**...
+    ...'..!!..'...
+    ......!!......
+  `,
+  side: `
+    ...............
+    ...........**..
+    ...........'!..
+    ............!..
+  `,
+};
+
+/** Profile for the knocked-out pose, drawn upright; it is transposed with the head. */
+const koSide = `
+  ...............
+  ...........**..
+  ...............
+  ............!..
+`;
+
+function face(own: {
+  down: Record<"rest" | "shout" | "read", string>;
+  side: Record<"rest" | "shout" | "read", string>;
+}): PartDef {
+  return withKo(
+    part({
+      palette: ink,
+      lone,
+      pieces: {
+        head: {
+          at: { down: [5, 8], up: [5, 8], side: [3, 8] },
+          down: { ...own.down, hurt: hurt.down, yawn: yawn.down },
+          up: null,
+          side: { ...own.side, hurt: hurt.side, yawn: yawn.side, ko: koSide },
+        },
+      },
+    }),
+  );
+}
+
+/** 밝음: eager, round eyes with a glint, always a little flushed. */
+const bright = face({
+  down: {
+    rest: `
+      ...^e....^e...
+      ...ee....ee...
+      ...'..--..'...
+    `,
+    shout: `
+      ...^e....^e...
+      ...ee....ee...
+      ...'..!!..'...
+      ......!!......
+    `,
+    read: `
+      ..............
+      ...ee....ee...
+      ...'..--..'...
+    `,
+  },
+  side: {
+    rest: `
+      ............^e.
+      ...........ee..
+      ...........'...
+      ............-..
+    `,
+    shout: `
+      ............^e.
+      ...........ee..
+      ...........'!..
+      ............!..
+    `,
+    read: `
+      ...............
+      ...........ee..
+      ...........'...
+      ............-..
+    `,
   },
 });
 
-const face = part({
-  palette: ink,
-  lone: "e",
-  pieces: {
-    head: {
-      at: [4, 8],
-      down: {
-        rest: `
-          .e....e.
-          .e....e.
-          ...OO...
+/** 졸림: heavy lids, a sideways look, rings under the eyes. Has not slept since March. */
+const sleepy = face({
+  down: {
+    rest: `
+      ...**....**...
+      ...*,....*,...
+      ...,,.-..,,...
+    `,
+    shout: `
+      ...**....**...
+      ...ee....ee...
+      ...,,.!!.,,...
+    `,
+    read: `
+      ..............
+      ...**....**...
+      ...,,..-.,,...
+    `,
+  },
+  side: {
+    rest: `
+      ............**.
+      ...........*...
+      ...........,,..
+      ............-..
+    `,
+    shout: `
+      ............**.
+      ...........ee..
+      ...........,!..
+      ............!..
+    `,
+    read: `
+      ...............
+      ...........**..
+      ...........,,..
+      ............-..
+    `,
+  },
+});
+
+/** 승부: eyes angled down to the nose, a one-sided grin. Treats every quiz as a duel. */
+const sharp = face({
+  down: {
+    rest: `
+      ...e,....,e...
+      ...ee....ee...
+      .......--.....
+    `,
+    shout: `
+      ...e,....,e...
+      ...ee....ee...
+      .....!^^!.....
+      ......!!......
+    `,
+    read: `
+      ..............
+      ...ee....ee...
+      .......--.....
+    `,
+  },
+  side: {
+    rest: `
+      ...........e...
+      ...........ee..
+      ...............
+      ...........--..
+    `,
+    shout: `
+      ...........e...
+      ...........ee..
+      ............^!.
+      ............!..
+    `,
+    read: `
+      ...............
+      ...........ee..
+      ...............
+      ...........--..
+    `,
+  },
+});
+
+// Hair --------------------------------------------------------------------------------------
+// Down and up heads span x 5..18; the side head spans x 3..17 with the face at the right.
+
+function hair(pieces: Record<string, Piece>): PartDef {
+  return withKo(part({ palette: ink, pieces }));
+}
+
+const none = { down: null, up: null, side: null } as const;
+
+/** Neat and short, one tuft that will not lie down. */
+const crop = hair({
+  head: {
+    at: { down: [5, 2], up: [5, 2], side: [3, 2] },
+    down: `
+      ........XX....
+      ....XXXXXXX...
+      ..XXHHHHhhXX..
+      .XHHhhhhhhhxX.
+      XHHhhhhhhhhhxX
+      XxhxxhhhhxxhxX
+      Xx..........xX
+    `,
+    up: `
+      ........XX....
+      ....XXXXXXX...
+      ..XXHHHHhhXX..
+      .XHHHHhhhhhxX.
+      XHHhhhhhhhhhxX
+      XHhhhhhhhhhxxX
+      XhhhhhhhhhxxxX
+      .XhhhhhhhhxxX.
+      .XhxhhxhhxhxX.
+      ..XxhhxhhxxX..
+      ...XX....XX...
+    `,
+    side: `
+      ........XX.....
+      ....XXXXXXX....
+      ..XXHHHHhhhXX..
+      .XHHhhhhhhhhhX.
+      XHHhhhhhhhhhhxX
+      XHhhhhhhhxhhxxX
+      Xhhhhhhhx......
+      Xhhhhh.x.......
+      Xxhhhh.........
+      .Xxhhxx........
+      ..XXXX.........
+    `,
+  },
+  tail: none,
+});
+
+/** Slept on it wrong. Spikes everywhere and one strand that points at the sky. */
+const spiky = hair({
+  head: {
+    at: { down: [4, 1], up: [4, 1], side: [2, 1] },
+    down: `
+      .........XX.....
+      ..X...XXXhhX.X..
+      .XHX.XHHhhXXXhX.
+      .XHHXHHhhhhhhhX.
+      XHHHhhhhhhhhhhxX
+      XHhhhhhhhhhhhxxX
+      XhhxhhhxxhhhxhxX
+      Xhx....xx....xhX
+      .Xx..........xX.
+    `,
+    up: `
+      .........XX.....
+      ..X...XXXhhX.X..
+      .XHX.XHHhhXXXhX.
+      .XHHXHHhhhhhhhX.
+      XHHHhhhhhhhhhhxX
+      XHhhhhhhhhhhhxxX
+      XhhhhhhhhhhhxxxX
+      XhhhhhhhhhhxxxxX
+      .XhhhhhhhhxxxxX.
+      .XhhhhhhhhhhxxX.
+      ..XXhhXXXXhxXX..
+      ....XX....XX....
+    `,
+    side: `
+      ..........XX.....
+      ...X...XXXhhX.X..
+      ..XHXXXHHhhXXXhX.
+      .XHHHXHhhhhhhhhX.
+      XHHhhhhhhhhhhhhhX
+      XHhhhhhhhhhhhhxxX
+      XhhhhhhhhxhxxXXXX
+      Xhhhhhhhx........
+      XhhhhhX..........
+      XhhhhxX..........
+      .XhhxX...........
+      ..XXX............
+    `,
+  },
+  tail: none,
+});
+
+/** Chin-length bob with a blunt fringe, cut in the dorm bathroom. */
+const bob = hair({
+  head: {
+    at: { down: [4, 2], up: [4, 2], side: [2, 2] },
+    down: `
+      ....XXXXXXXX....
+      ..XXHHHHhhhhXX..
+      .XHHHhhhhhhhhhX.
+      XHHhhhhhhhhhhhxX
+      XHhhhhhhhhhhhxxX
+      XhhhhhhhhhhhhxxX
+      Xhx..........xxX
+      Xhx..........xxX
+      Xhx..........xxX
+      XhhX........XxxX
+      .XXX........XXX.
+    `,
+    up: `
+      ....XXXXXXXX....
+      ..XXHHHHhhhhXX..
+      .XHHHhhhhhhhhhX.
+      XHHhhhhhhhhhhhxX
+      XhhhhhhhhhhhhxxX
+      XhhhhhhhhhhhhxxX
+      XhhhhhhhhhhhxxxX
+      XhhhhhhhhhhhxxxX
+      XhhhxhhxhhhxxxxX
+      XhhhxhhxhhxxxxxX
+      .XXXXXXXXXXXXXX.
+    `,
+    side: `
+      ....XXXXXXXX.....
+      ..XXHHHHHhhhXX...
+      .XHHhhhhhhhhhhX..
+      XHHhhhhhhhhhhhhX.
+      XhhhhhhhhhhhhhhxX
+      XhhhhhhhhhhhhhxxX
+      Xhhhhhhhhhx......
+      Xhhhhhhhhx.......
+      Xhhhhhhhhx.......
+      XhhhhhhhxX.......
+      .XXXXXXXXX.......
+    `,
+  },
+  tail: none,
+});
+
+/** Straight and long, centre parting, falls over the shoulders and down the back. */
+const long = hair({
+  head: {
+    at: { down: [4, 2], up: [4, 2], side: [2, 2] },
+    down: `
+      ....XXXXXXXX....
+      ..XXHHHxhHHhXX..
+      .XHHhhhxXhhhhhX.
+      XHHhhhhXhhhhhhxX
+      XHhhhhxXxhhhhhxX
+      XhhhhhxhhxhhhxxX
+      Xhhx........xhxX
+      Xhx..........xxX
+      Xhx..........xxX
+      Xhx..........xxX
+      XhX..........XxX
+      XhX..........XxX
+      XhX..........XxX
+      XhX..........XxX
+      .XX..........XX.
+    `,
+    up: `
+      ....XXXXXXXX....
+      ..XXHHHHhhhhXX..
+      .XHHHhhhhhhhhhX.
+      XHHHhhhhhhhhhhxX
+      XHHhhhhhhhhhhhxX
+      XhHhhhhhhhhhhxxX
+      XhHhhhhhhhhhhxxX
+      XhhhhhhhhhhhxxxX
+      XhhhhhhhhhhhxxxX
+      XhhhhhhhhhhxxxxX
+      XhhhhhhhhhhxxxxX
+      XhhhxhhhhxhxxxxX
+      XhhhxhhhhxhxxxxX
+      .XhhhhhhhhhxxxX.
+      ..XXXXXXXXXXXX..
+    `,
+    side: `
+      ....XXXXXXXX.....
+      ..XXHHHHHhhhXX...
+      .XHHhhhhhhhhhhX..
+      XHHhhhhhhhhhhhhX.
+      XHhhhhhhhhhhhhhxX
+      XhhhhhhhhhhhhhxxX
+      Xhhhhhhhhhx......
+      Xhhhhhhhhx.......
+      Xhhhhhhhhx.......
+      Xhhhhhhhx........
+    `,
+  },
+  tail: {
+    at: { down: [4, 11], up: [4, 11], side: [2, 11] },
+    down: null,
+    up: null,
+    side: `
+      Xhhhhhhx.
+      XhhhhhxX.
+      XhhhhhxX.
+      XhhhhxX..
+      XhhhxX...
+      .XhxX....
+      ..XX.....
+    `,
+  },
+});
+
+/** High ponytail and side-swept bangs. The tail swings a beat behind every step. */
+const ponytail = hair({
+  head: {
+    at: { down: [5, 2], up: [5, 2], side: [3, 2] },
+    down: `
+      ....XXXXXX....
+      ..XXHHHHhhXX..
+      .XHHhhhhhhhxX.
+      XHHhhhhhhhhhxX
+      XHhhhhhhhhhxxX
+      XhhhhhxxhxxhxX
+      Xhx.......xxxX
+      Xx..........xX
+    `,
+    up: `
+      ....XXXXXX....
+      ..XXHHHHhhXX..
+      .XHHhhhhhhhxX.
+      XHHhhhXXhhhhxX
+      XHhhhXmmXhhxxX
+      XhhhhXrrXhhxxX
+      XhhhhhXXhhhxxX
+      .XhhhhxhhhxxX.
+      .XhhhhxhhxxxX.
+      ..XXhhxhhxXX..
+      ....XhhhhX....
+    `,
+    side: `
+      ....XXXXXX.....
+      ..XXHHHHhhXX...
+      .XHHhhhhhhhhX..
+      XHHhhhhhhhhhhX.
+      XHhhhhhhhhhxhxX
+      XhhhhhhhhhxxhxX
+      Xhhhhhhhx..xxX.
+      Xhhhhh.x.......
+      Xxhhhh.........
+      .XxhhX.........
+      ..XXXX.........
+    `,
+  },
+  tail: {
+    at: { down: [17, 5], up: [9, 12], side: [1, 4] },
+    down: `
+      XX..
+      XhX.
+      XhxX
+      XXxX
+      XXxX
+      .XxX
+      .XX.
+    `,
+    up: `
+      XhhhxX
+      XhhhxX
+      .XhhxX
+      .XhhX.
+      ..XX..
+    `,
+    side: `
+      .XX.
+      XhhX
+      XhxX
+      XhxX
+      XhxX
+      XhxX
+      .XxX
+      .XX.
+    `,
+  },
+});
+
+/** Tight curls with a lot of volume. Will not fit under the 기숙사 shower cap. */
+const curly = hair({
+  head: {
+    at: { down: [3, 1], up: [3, 1], side: [1, 1] },
+    down: `
+      .....XX.XX.XX.....
+      ...XXHHXHHXhhXX...
+      ..XHHHHhHHhhhhhX..
+      .XHHHhhHHhhhhxhhX.
+      XHHhhhhhhhhhxxhhxX
+      XhhhhhhhhhhhhhhxxX
+      XhhxxhhxxhhxxhhxxX
+      Xhhx..........xxxX
+      XhhX..........XxxX
+      XhhX..........XxxX
+      .XXX..........XXX.
+    `,
+    up: `
+      .....XX.XX.XX.....
+      ...XXHHXHHXhhXX...
+      ..XHHHHhHHhhhhhX..
+      .XHHHhhHHhhhhxhhX.
+      XHHhhhhhhhhhxxhhxX
+      XhhhhhHHhhhhhhhxxX
+      XhhhhhhhhhhhxxhxxX
+      XhhhhhhhhhhhhhxxxX
+      XhhhxxhhhhxxhhxxxX
+      .XhhhhhhhhhhhxxxX.
+      ..XXXXXXXXXXXXXX..
+      ......X....X......
+    `,
+    side: `
+      .....XX.XX.XX.....
+      ...XXHHXHHXhhXX...
+      ..XHHHHhHHhhhhhX..
+      .XHHHhhHHhhhhxhhX.
+      XHHhhhhhhhhhxxhhxX
+      XhhhhhhhhhhhhxxhxX
+      XhhhhhhhhhhhxxxxxX
+      XhhhhHHhhhx.......
+      XhhhhhhhhX........
+      XhhhhhhhhX........
+      .XhhhhhhX.........
+      ..XXXXXX..........
+    `,
+  },
+  tail: none,
+});
+
+// Garments ----------------------------------------------------------------------------------
+// Sleeves are drawn once with digits and painted by each garment's legend: 1 2 3 upper arm
+// (outline, lit, shaded), 4 5 6 forearm. Hands are skin in every garment.
+
+/** Flips a grid left to right and swaps lit marks for shaded ones: the arm on the other side. */
+export function mirror(grid: string): string {
+  const swap: Record<string, string> = { "2": "3", "5": "6", "%": "&" };
+  return gridRows(grid)
+    .map((r) =>
+      [...r]
+        .reverse()
+        .map((c) => swap[c] ?? c)
+        .join(""),
+    )
+    .join("\n");
+}
+
+const armLit = {
+  rest: `
+    .11
+    121
+    121
+    454
+    454
+    O%O
+    .O.
+  `,
+  fwd: `
+    .11
+    121
+    121
+    454
+    454
+    454
+    O%O
+    .O.
+  `,
+  back: `
+    .11
+    121
+    121
+    O%O
+    .O.
+  `,
+};
+const armShade = {
+  rest: mirror(armLit.rest),
+  fwd: mirror(armLit.fwd),
+  back: mirror(armLit.back),
+};
+
+const armSide = {
+  rest: `
+    .11..
+    .121.
+    .121.
+    .454.
+    .454.
+    .O%O.
+    ..O..
+  `,
+  fwd: `
+    .11..
+    .121.
+    .121.
+    ..454
+    ..454
+    ..O%O
+    ...O.
+  `,
+  back: `
+    .11..
+    .121.
+    .121.
+    454..
+    454..
+    O%O..
+    .O...
+  `,
+};
+const shaded = (g: string) => g.replaceAll("2", "3").replaceAll("5", "6").replaceAll("%", "&");
+const armSideFar = {
+  rest: `
+    .11..
+    .131.
+    .131.
+    .464.
+    .464.
+    .O&O.
+  `,
+  fwd: shaded(armSide.fwd),
+  back: { at: [7, 14] as Vec, grid: shaded(armSide.back) },
+};
+
+/** The book arm raised beside the head: the wind-up, and both arms in a stretch. */
+const raise = `
+  .O.....
+  O%O....
+  454....
+  .454...
+  ..121..
+  ...121.
+  ....111
+`;
+/** Upper arm pointing away from the camera, forearm hidden. */
+const away = `
+  11.
+  131
+  131
+  .1.
+`;
+
+const armR: Piece = {
+  at: { down: [6, 14], up: [15, 14], side: [9, 14] },
+  down: {
+    ...armLit,
+    raise: { at: [1, 8], grid: raise },
+    strike: {
+      at: [6, 14],
+      grid: `
+        .11.
+        121.
+        .121
+        .454
+        .454
+        .O%O
+        ..O.
+      `,
+    },
+    follow: {
+      at: [6, 14],
+      grid: `
+        .11...
+        .121..
+        .121..
+        ..454.
+        ...454
+        ...O%O
+        ....O.
+      `,
+    },
+    read: {
+      at: [6, 14],
+      grid: `
+        .11.
+        121.
+        121.
+        O%O.
+        .O..
+      `,
+    },
+  },
+  up: {
+    ...armShade,
+    raise: { at: [16, 8], grid: mirror(raise) },
+    strike: { at: [15, 14], grid: away },
+    follow: { at: [15, 14], grid: away },
+    read: { at: [15, 14], grid: away },
+  },
+  side: {
+    ...armSide,
+    raise: {
+      at: [6, 14],
+      grid: `
+        .OO441..
+        O%%55221
+        O%%55221
+        .OO4411.
+      `,
+    },
+    strike: {
+      at: [10, 13],
+      grid: `
+        111444O.
+        122555%O
+        .11444O.
+      `,
+    },
+    follow: {
+      at: [10, 14],
+      grid: `
+        11...
+        121..
+        121..
+        .454.
+        .454.
+        .O%O.
+        ..O..
+      `,
+    },
+    read: {
+      at: [10, 14],
+      grid: `
+        .11...
+        .121..
+        ..1454
+        ...O%O
+        ....O.
+      `,
+    },
+  },
+};
+
+const armL: Piece = {
+  at: { down: [15, 14], up: [6, 14], side: [8, 14] },
+  down: {
+    ...armShade,
+    raise: { at: [16, 8], grid: mirror(raise) },
+    read: {
+      at: [15, 14],
+      grid: `
+        .11.
+        .131
+        .131
+        .O&O
+        ..O.
+      `,
+    },
+  },
+  up: {
+    ...armLit,
+    raise: { at: [1, 8], grid: raise },
+    read: { at: [6, 14], grid: mirror(away) },
+  },
+  side: armSideFar,
+};
+
+const legLit = {
+  rest: `
+    .eIe
+    .eIe
+    .eIe
+    .eIe
+    GwwG
+    GGGG
+  `,
+  lift: `
+    .eIe
+    .eIe
+    .eIe
+    GwwG
+    GGGG
+  `,
+};
+const legShade = {
+  rest: `
+    eie.
+    eie.
+    eie.
+    eie.
+    GwwG
+    GGGG
+  `,
+  lift: `
+    eie.
+    eie.
+    eie.
+    GwwG
+    GGGG
+  `,
+};
+const legSide = {
+  rest: `
+    ..eiie..
+    ..eiie..
+    ..eiie..
+    ..eiie..
+    ..GwwwG.
+    ..GGGGG.
+  `,
+  fwd: `
+    ..eiie..
+    ..eiie..
+    ...eiie.
+    ...eiie.
+    ...GwwwG
+    ...GGGGG
+  `,
+  back: `
+    ..eiie..
+    ..eiie..
+    .eiie...
+    .eiie...
+    GwwwG...
+    GGGGG...
+  `,
+};
+const far = (g: string) => g.replaceAll("I", "z").replaceAll("i", "z");
+const legSideFar = { rest: far(legSide.rest), fwd: far(legSide.fwd), back: far(legSide.back) };
+
+const legs = {
+  legR: {
+    at: { down: [8, 19], up: [12, 19], side: [8, 19] },
+    down: legLit,
+    up: legShade,
+    side: legSide,
+  },
+  legL: {
+    at: { down: [12, 19], up: [8, 19], side: [8, 19] },
+    down: legShade,
+    up: legLit,
+    side: legSideFar,
+  },
+} satisfies Record<string, Piece>;
+
+type Torso = Record<Dir, string>;
+
+function garment(sleeve: Legend, torso: Torso, withLegs: boolean): PartDef {
+  return withKo(
+    part({
+      palette: { ...ink, ...sleeve },
+      lone,
+      pieces: {
+        armL,
+        ...(withLegs ? legs : {}),
+        torso: { at: { down: [8, 13], up: [8, 13], side: [9, 13] }, ...torso },
+        armR,
+      },
+    }),
+  );
+}
+
+/** 동복: navy blazer, white collar, red tie, gold buttons. */
+const blazer = garment(
+  {
+    "1": "navy.deep",
+    "2": "navy.light",
+    "3": "navy.dark",
+    "4": "navy.deep",
+    "5": "navy.mid",
+    "6": "navy.dark",
+  },
+  {
+    down: `
+      NNwmmwNN
+      NVwmrwvN
+      NVVmrvnN
+      NVVmrvnN
+      NvvvvvnN
+      NvvvvvnN
+      NNNNNNNN
+    `,
+    up: `
+      NNNNNNNN
+      NVvvvvnN
+      NVvvvvnN
+      NVvvvvnN
+      NvvvnvnN
+      NvvvnvnN
+      NNNNNNNN
+    `,
+    side: `
+      NNNwmN
+      NVvwmN
+      NVvvvN
+      NVvvvN
+      NvvvvN
+      NvvvvN
+      NNNNNN
+    `,
+  },
+  true,
+);
+
+/** 하복: short-sleeved white shirt, the same tie, a belt. */
+const shirt = garment(
+  {
+    "1": "stone.deep",
+    "2": "stone.bright",
+    "3": "stone.light",
+    "4": "skin.deep",
+    "5": "skin.mid",
+    "6": "skin.dark",
+  },
+  {
+    down: `
+      GGwmmwGG
+      GwwmrwqG
+      GpwmrwqG
+      GppmrqqG
+      GwppppqG
+      GwppppqG
+      GGGGGGGG
+    `,
+    up: `
+      GGGGGGGG
+      GwppppqG
+      GwppppqG
+      GwppppqG
+      GwpppqqG
+      GwpppqqG
+      GGGGGGGG
+    `,
+    side: `
+      GGGwmG
+      GwpwmG
+      GwpppG
+      GwpppG
+      GpppqG
+      GpppqG
+      GGGGGG
+    `,
+  },
+  true,
+);
+
+/** 과잠: the club jacket. Worn open, cream sleeves, a cream panel on the back for the emblem. */
+const varsity = garment(
+  {
+    "1": "jacket.deep",
+    "2": "stone.bright",
+    "3": "stone.light",
+    "4": "jacket.deep",
+    "5": "stone.pale",
+    "6": "stone.light",
+  },
+  {
+    down: `
+      JCj..jcJ
+      JCj..jcJ
+      JCj..jcJ
+      Jwj..jcJ
+      Jwj..jcJ
+      JJJ..JJJ
+      JJJ..JJJ
+    `,
+    up: `
+      JjjjjjjJ
+      JCccccjJ
+      JCwwwwjJ
+      JCwppwjJ
+      JCwwwwjJ
+      JjjjjjjJ
+      JJJJJJJJ
+    `,
+    side: `
+      JjjjJ.
+      JjjjJ.
+      JcccJ.
+      JcccJ.
+      JjjjJ.
+      JjjjJ.
+      JJJJJ.
+    `,
+  },
+  false,
+);
+
+// Accessories -------------------------------------------------------------------------------
+
+/** Round gold frames. */
+const glasses = withKo(
+  part({
+    palette: ink,
+    pieces: {
+      head: {
+        at: { down: [5, 7], up: [5, 7], side: [3, 7] },
+        down: `
+          ...DD....DD...
+          .DD..DDDD..DD.
+          ..D..D..D..D..
+          ..DDD....DDD..
         `,
-        hurt: `
-          ........
-          ee....ee
-          ...OO...
-        `,
-        ko: `
-          ........
-          .ee..ee.
-          ...OO...
+        up: null,
+        side: `
+          ...........DDD.
+          .......DDDD...D
+          ..............D
         `,
       },
-      up: null,
-      side: {
-        rest: `
-          ......e.
-          ......e.
-          .......O
+    },
+  }),
+);
+
+/** Lab goggles pushed up on the forehead, never once pulled down. */
+const goggles = withKo(
+  part({
+    palette: ink,
+    pieces: {
+      head: {
+        at: { down: [5, 4], up: [5, 5], side: [3, 4] },
+        down: `
+          eGGGGGGGGGGGGe
+          eGLLllGGLLllGe
+          eGGGGGGGGGGGGe
         `,
-        hurt: `
-          ........
-          .....ee.
-          .......O
+        up: `
+          eeeeeeeeeeeeee
         `,
-        ko: `
-          ........
-          .....ee.
-          .......O
+        side: `
+          ...........GGGG
+          eeeeeeeeeeeGLLG
+          ...........GGGG
         `,
       },
     },
-  },
-});
+  }),
+);
 
-const short = part({
-  palette: ink,
-  pieces: {
-    head: {
-      at: [2, 1],
-      down: `
-        ...XXXXXX...
-        ..XHHhhhhX..
-        .XHHhhhhhhX.
-        XHHhhhhhhhxX
-        XHhhhhhhhhxX
-        XhhhhhXhhhxX
-        XxxxxxXxxxxX
-        XxX......XxX
-        .X........X.
-      `,
-      up: `
-        ...XXXXXX...
-        ..XHHhhhhX..
-        .XHHhhhhhhX.
-        XHhhhhhhhhxX
-        XhhhhhhhhhxX
-        XhhhhhhhhxxX
-        XhhhhhhhhxxX
-        XhhhhhhhxxxX
-        XxhhhhhxxxxX
-        .XxxxxxxxxX.
-        ..XXXXXXXX..
-      `,
-      side: `
-        ...XXXXX....
-        ..XHHhhhX...
-        .XHHhhhhhX..
-        XHhhhhhhhhX.
-        XhhhhhhhhhxX
-        XhhhhhhxxxxX
-        XhhhxXXXX...
-        XhhxX.......
-        XxxX........
-        .XX.........
-      `,
-    },
-  },
-});
+// Book --------------------------------------------------------------------------------------
 
-const bob = part({
-  palette: ink,
-  pieces: {
-    head: {
-      at: [1, 1],
-      down: `
-        ....XXXXXX....
-        ...XHHhhhhX...
-        ..XHHhhhhhhX..
-        .XHHhhhhhhhxX.
-        .XHhhhhhhhhxX.
-        .XhhhhhXhhhxX.
-        XhxxxxxXxxxxxX
-        XhxX......XxxX
-        XhxX......XxxX
-        XhxX......XxxX
-        .XXX......XXX.
-      `,
-      up: `
-        ....XXXXXX....
-        ...XHHhhhhX...
-        ..XHHhhhhhhX..
-        .XHHhhhhhhhxX.
-        .XHhhhhhhhhxX.
-        XHhhhhhhhhhxxX
-        XhhhhhhhhhhxxX
-        XhhhhhhhhhxxxX
-        XhhhhhhhhhxxxX
-        XhhhhhhhhxxxxX
-        .XXXXXXXXXXXX.
-      `,
-      side: `
-        ...XXXXXX.....
-        ..XHHhhhhX....
-        .XHHhhhhhhX...
-        XHHhhhhhhhhX..
-        XHhhhhhhhhhxX.
-        XhhhhhhhhxxxX.
-        XhhhhhxXXXX...
-        XhhhhxX.......
-        XhhhhxX.......
-        XhhhxxX.......
-        XxxxxX........
-        .XXXX.........
-      `,
-    },
-  },
-});
+const closed = `
+  TTTT
+  TUuT
+  TUuT
+  TyyT
+  TTTT
+`;
 
-const blazer = part({
-  palette: ink,
-  pieces: {
-    armL: {
-      at: [2, 12],
-      down: `
-        .NN
-        NVN
-        NVN
-        NvN
-        NvN
-        OsO
-        OsO
-        .O.
-      `,
-      up: `
-        .NN
-        NVN
-        NVN
-        NvN
-        NvN
-        OsO
-        OsO
-        .O.
-      `,
-      side: null,
+/** The textbook. Raised, swung, read, and dropped with its owner. */
+const textbook = withKo(
+  part({
+    palette: ink,
+    lone,
+    pieces: {
+      hand: {
+        at: { down: [2, 17], up: [18, 17], side: [11, 15] },
+        down: {
+          rest: closed,
+          raise: {
+            at: [0, 2],
+            grid: `
+              .TTTT
+              TUuuT
+              TUuuT
+              TuuuT
+              TyyyT
+              TTTT.
+            `,
+          },
+          strike: {
+            at: [7, 18],
+            grid: `
+              TTTTTT
+              TUuuuT
+              TUuuuT
+              TyyyyT
+              TTTTTT
+            `,
+          },
+          follow: {
+            at: [12, 19],
+            grid: `
+              TTTT
+              TUuT
+              TUuT
+              TTTT
+            `,
+          },
+          read0: {
+            at: [9, 13],
+            grid: `
+              TTTTTT
+              TwwwwT
+              TUuTuT
+              TUuTuT
+              TUuTuT
+              TTTTTT
+            `,
+          },
+          read1: {
+            at: [9, 11],
+            grid: `
+              ...T..
+              ..TwT.
+              TTTwTT
+              TwwwwT
+              TUuTuT
+              TUuTuT
+              TUuTuT
+              TTTTTT
+            `,
+          },
+          read2: {
+            at: [9, 13],
+            grid: `
+              TTTTTT
+              TTwwwT
+              TUuTuT
+              TUuTuT
+              TUuTuT
+              TTTTTT
+            `,
+          },
+        },
+        up: {
+          rest: `
+            TTT
+            TtT
+            TtT
+            TtT
+            TTT
+          `,
+          raise: {
+            at: [18, 3],
+            grid: `
+              .TTT.
+              TtttT
+              TtttT
+              TtttT
+              TTTTT
+            `,
+          },
+          strike: {
+            at: [15, 0],
+            grid: `
+              ~.TTTTTT
+              .~TttttT
+              ..TTTTTT
+            `,
+          },
+          follow: ".",
+          read0: ".",
+          read1: ".",
+          read2: ".",
+        },
+        side: {
+          rest: closed,
+          ko: { at: [15, 15], grid: closed },
+          raise: {
+            at: [2, 12],
+            grid: `
+              TTTT
+              TUuT
+              TUuT
+              TuuT
+              TyyT
+              TTTT
+            `,
+          },
+          strike: {
+            at: [19, 10],
+            grid: `
+              TTTTT
+              TUuuT
+              TUuuT
+              TuuuT
+              TuuuT
+              TyyyT
+              TTTTT
+            `,
+          },
+          follow: {
+            at: [13, 19],
+            grid: `
+              .TTTTT
+              TUuuuT
+              TUyyyT
+              TTTTT.
+            `,
+          },
+        },
+      },
     },
-    armR: {
-      at: { down: [11, 12], up: [11, 12], side: [5, 12] },
-      down: `
-        NN.
-        NnN
-        NnN
-        NnN
-        NnN
-        OkO
-        OkO
-        .O.
-      `,
-      up: `
-        NN.
-        NnN
-        NnN
-        NnN
-        NnN
-        OkO
-        OkO
-        .O.
-      `,
-      side: `
-        .NN.
-        NVvN
-        NVvN
-        NnnN
-        OssO
-        OOOO
-      `,
-    },
-    torso: {
-      at: { down: [4, 12], up: [4, 12], side: [5, 12] },
-      down: `
-        NVwwwwnN
-        NVwrrwnN
-        NVvrRvnN
-        NVvrRvnN
-        NvvvvvnN
-        NvvvvnnN
-        NNNNNNNN
-      `,
-      up: `
-        NNNNNNNN
-        NVvvvvnN
-        NVvvvvnN
-        NVvvvvnN
-        NvvvvvnN
-        NvvvvnnN
-        NNNNNNNN
-      `,
-      side: `
-        .NNNwN
-        NVvvwN
-        NVvvrN
-        NVvvrN
-        NvvvvN
-        NvvvvN
-        NNNNNN
-      `,
-    },
-    legL: {
-      at: { down: [4, 18], up: [4, 18], side: [4, 18] },
-      down: `
-        NvvN
-        NvvN
-        NvvN
-        NBBN
-        NNNN
-      `,
-      up: `
-        NvvN
-        NvvN
-        NvvN
-        NBBN
-        NNNN
-      `,
-      side: `
-        NNNN
-        NnnN
-        NnnN
-        NNNN
-        NNNN
-      `,
-    },
-    legR: {
-      at: { down: [8, 18], up: [8, 18], side: [7, 18] },
-      down: `
-        NnnN
-        NnnN
-        NnnN
-        NBBN
-        NNNN
-      `,
-      up: `
-        NnnN
-        NnnN
-        NnnN
-        NBBN
-        NNNN
-      `,
-      side: `
-        NNNN.
-        NvvN.
-        NvvN.
-        NBBBN
-        NNNNN
-      `,
-    },
-  },
-});
+  }),
+);
 
-const varsity = part({
-  palette: ink,
-  pieces: {
-    armL: {
-      at: [2, 12],
-      down: `
-        .JJ
-        JCJ
-        JCJ
-        JpJ
-        JpJ
-        OsO
-        OsO
-        .O.
-      `,
-      up: `
-        .JJ
-        JCJ
-        JCJ
-        JpJ
-        JpJ
-        OsO
-        OsO
-        .O.
-      `,
-      side: null,
-    },
-    armR: {
-      at: { down: [11, 12], up: [11, 12], side: [5, 12] },
-      down: `
-        JJ.
-        JjJ
-        JjJ
-        JpJ
-        JpJ
-        OkO
-        OkO
-        .O.
-      `,
-      up: `
-        JJ.
-        JjJ
-        JjJ
-        JpJ
-        JpJ
-        OkO
-        OkO
-        .O.
-      `,
-      side: `
-        .JJ.
-        JCcJ
-        JCcJ
-        JppJ
-        OssO
-        OOOO
-      `,
-    },
-    torso: {
-      at: { down: [4, 12], up: [4, 12], side: [5, 12] },
-      down: `
-        JCwwwwjJ
-        JCwrrwjJ
-        JCprRcjJ
-        JCprRcjJ
-        JcccccjJ
-        JppppppJ
-        JJJJJJJJ
-      `,
-      up: `
-        JJJJJJJJ
-        JCccccjJ
-        JCcppcjJ
-        JCcppcjJ
-        JcccccjJ
-        JppppppJ
-        JJJJJJJJ
-      `,
-      side: `
-        .JJJwJ
-        JCccwJ
-        JCccrJ
-        JCccrJ
-        JppppJ
-        JppppJ
-        JJJJJJ
-      `,
-    },
-  },
-});
+// Rig ---------------------------------------------------------------------------------------
 
-const glasses = part({
-  palette: ink,
-  lone: "L",
-  pieces: {
-    head: {
-      at: [4, 8],
-      down: `
-        gLggggLg
-        g.g..g.g
-      `,
-      up: null,
-      side: `
-        ....ggLg
-        .....g.g
-      `,
-    },
-  },
-});
+const walkArms = (d: Dir, lead: "R" | "L") => {
+  if (d === "side") {
+    return lead === "R"
+      ? { legR: "fwd", legL: "back", armR: "back", armL: "fwd", hand: [-1, 0], tail: [-1, 0] }
+      : { legL: "fwd", legR: "back", armR: "fwd", armL: "back", hand: [1, 0], tail: [-1, 0] };
+  }
+  return lead === "R"
+    ? { legL: "lift", armL: "fwd", armR: "back", hand: [0, -2] }
+    : { legR: "lift", armR: "fwd", armL: "back", hand: [0, 1] };
+};
 
-const textbook = part({
-  palette: ink,
-  pieces: {
-    hand: {
-      at: { down: [11, 17], up: [11, 17], side: [8, 16] },
-      down: `
-        TTTT
-        TuuT
-        TttT
-        TwwT
-        TTTT
-      `,
-      up: null,
-      side: `
-        TTTT
-        TuuT
-        TTTT
-      `,
-    },
-  },
-});
+/** Only the front view shows the book held up and a page turning; elsewhere the head dips. */
+const page = (d: Dir, book: string) =>
+  d === "down" ? { armR: "read", armL: "read", hand: book, head: "read" } : { head: "read" };
+
+const lean = (d: Dir): Vec => (d === "side" ? [1, 0] : d === "down" ? [0, 1] : [0, -1]);
 
 export default rig({
   name: "student",
-  size: [16, 24],
-  origin: [8, 22],
+  size: [24, 26],
+  origin: [12, 24],
   directions: ["down", "up", "side"],
   bones: {
     ground: null,
@@ -523,50 +1407,67 @@ export default rig({
     legR: null,
     torso: null,
     armR: "torso",
+    tail: "head",
     head: "torso",
-    hand: "armR",
+    hand: null,
   },
   layers: ["shadow", "body", "uniform", "jacket", "face", "hair", "accessory", "book"],
   unchecked: ["shadow"],
   parts: {
     shadow: { blob: shadow },
-    body: { base: body },
-    uniform: { blazer },
+    body: { base: withKo(skin) },
+    uniform: { blazer, shirt },
     jacket: { varsity },
-    face: { calm: face },
-    hair: { short, bob },
-    accessory: { glasses },
+    face: { bright, sleepy, sharp },
+    hair: { crop, spiky, bob, long, ponytail, curly },
+    accessory: { glasses, goggles },
     book: { textbook },
   },
   frames: {
     idle0: {},
-    idle1: { torso: [0, 1] },
-    walk0: (d) =>
+    idle1: { torso: [0, 1], hand: [0, 1] },
+    walk0: (d) => walkArms(d, "R") as never,
+    walk1: { torso: [0, -1], tail: [0, 1], hand: [0, -1] },
+    walk2: (d) => walkArms(d, "L") as never,
+    walk3: { torso: [0, -1], tail: [0, 1], hand: [0, -1] },
+    attack0: { armR: "raise", hand: "raise" },
+    attack1: (d) => ({ armR: "strike", hand: "strike", head: "shout", torso: lean(d) }),
+    attack2: { armR: "follow", hand: "follow", head: "shout" },
+    attack3: (d) => ({ armR: "fwd", hand: d === "side" ? [1, 0] : [0, 1] }),
+
+    hit: (d) =>
       d === "side"
-        ? { legL: [-1, 0], legR: [1, -1] }
-        : { legL: [0, -1], armL: [0, -1], armR: [0, 1] },
-    walk1: { torso: [0, -1] },
-    walk2: (d) =>
-      d === "side"
-        ? { legL: [1, -1], legR: [-1, 0] }
-        : { legR: [0, -1], armL: [0, 1], armR: [0, -1] },
-    walk3: { torso: [0, -1] },
-    attack0: (d) => ({ armR: d === "side" ? [1, -1] : [1, -3] }),
-    attack1: (d) => ({ torso: [0, 1], armR: d === "side" ? [3, 0] : [0, 1] }),
-    attack2: (d) => ({ torso: [0, 1], armR: d === "side" ? [2, 0] : [0, 0] }),
-    attack3: (d) => ({ armR: d === "side" ? [0, 0] : [0, -1] }),
-    hit: (d) => ({
-      torso: [0, -1],
-      armL: [-1, -1],
-      armR: d === "side" ? [2, 0] : [1, -1],
-      head: "hurt",
-    }),
-    ko: (d) => ({
-      torso: [0, 3],
-      armL: [-1, 0],
-      armR: d === "side" ? [0, 0] : [1, -1],
+        ? { torso: [-1, 0], hand: [-1, 0], head: "hurt" }
+        : { torso: [0, -1], hand: [0, -1], head: "hurt" },
+    ko: {
+      ground: "ko",
+      armL: "ko",
+      legL: "ko",
+      legR: "ko",
+      torso: "ko",
+      armR: "ko",
+      tail: "ko",
       head: "ko",
-    }),
+      hand: "ko",
+    },
+    yawn0: (d) =>
+      d === "side"
+        ? { head: "yawn" }
+        : { armR: "raise", armL: "raise", hand: "raise", head: "yawn" },
+    yawn1: (d) =>
+      d === "side"
+        ? { torso: [0, -1], head: "yawn", tail: [0, 1], hand: [0, -1] }
+        : {
+            torso: [0, -1],
+            armR: "raise",
+            armL: "raise",
+            hand: ["raise", 0, -1],
+            head: "yawn",
+          },
+
+    page0: (d) => page(d, "read0"),
+    page1: (d) => page(d, "read1"),
+    page2: (d) => page(d, "read2"),
   },
   anim: {
     idle: { frames: ["idle0", "idle1"], fps: 2 },
@@ -574,6 +1475,8 @@ export default rig({
     attack: { frames: ["attack0", "attack1", "attack2", "attack3"], fps: 12, loop: false },
     hit: { frames: ["hit"], fps: 1, loop: false },
     ko: { frames: ["ko"], fps: 1, loop: false },
+    yawn: { frames: ["yawn0", "yawn1", "yawn1", "yawn1", "yawn0"], fps: 5, loop: false },
+    page: { frames: ["page0", "page0", "page1", "page2", "page0"], fps: 5, loop: false },
   },
   looks: {
     blazer: {
@@ -581,24 +1484,71 @@ export default rig({
         shadow: "blob",
         body: "base",
         uniform: "blazer",
-        face: "calm",
-        hair: "short",
+        face: "bright",
+        hair: "crop",
         book: "textbook",
       },
       slots: { skin: "fair", hair: "black" },
     },
-    varsity: {
+    summer: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "shirt",
+        face: "bright",
+        hair: "ponytail",
+        book: "textbook",
+      },
+      slots: { skin: "warm", hair: "brown" },
+    },
+    club: {
       parts: {
         shadow: "blob",
         body: "base",
         uniform: "blazer",
         jacket: "varsity",
-        face: "calm",
+        face: "sharp",
         hair: "bob",
+        accessory: "goggles",
+        book: "textbook",
+      },
+      slots: { skin: "fair", hair: "chestnut", jacket: "crimson" },
+    },
+    reader: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "blazer",
+        face: "sleepy",
+        hair: "long",
         accessory: "glasses",
         book: "textbook",
       },
-      slots: { skin: "warm", hair: "pink", jacket: "crimson" },
+      slots: { skin: "fair", hair: "black" },
+    },
+    bedhead: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "shirt",
+        jacket: "varsity",
+        face: "sleepy",
+        hair: "spiky",
+        book: "textbook",
+      },
+      slots: { skin: "deep", hair: "blond", jacket: "navy" },
+    },
+    curls: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "shirt",
+        face: "sharp",
+        hair: "curly",
+        accessory: "glasses",
+        book: "textbook",
+      },
+      slots: { skin: "warm", hair: "red", jacket: "forest" },
     },
   },
 });
