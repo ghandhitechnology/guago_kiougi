@@ -6,12 +6,17 @@ import type { Art } from "../format.ts";
 import { ArtError } from "../grid.ts";
 import { type CompiledRig, compileRig } from "../rig.ts";
 import { type CompiledSprite, compileSprite } from "../sprite.ts";
-import { type CompiledTerrain, compileTerrain } from "../terrain.ts";
+import {
+  type CompiledOverlay,
+  type CompiledTerrain,
+  compileOverlay,
+  compileTerrain,
+} from "../terrain.ts";
 
 export const ART_ROOT = new URL("../..", import.meta.url).pathname;
 export const SOURCES = join(ART_ROOT, "src/sprites");
 
-export type Compiled = CompiledSprite | CompiledRig | CompiledTerrain;
+export type Compiled = CompiledSprite | CompiledRig | CompiledTerrain | CompiledOverlay;
 
 export interface CompileResult {
   readonly art: readonly Compiled[];
@@ -29,6 +34,7 @@ export function sourceFiles(dir = SOURCES): string[] {
 function compileOne(art: Art, name: string, where: string): Compiled {
   if (art.kind === "sprite") return compileSprite(art, name, where);
   if (art.kind === "rig") return compileRig(art, name, where);
+  if (art.kind === "overlay") return compileOverlay(art, name, where);
   return compileTerrain(art, name, where);
 }
 
@@ -82,7 +88,9 @@ export function checkArt(art: Compiled, where: string): string[] {
   if (art.kind === "sprite") {
     for (const [frame, img] of art.frames) {
       const fw = `${where} › ${frame}`;
-      out.push(...checkPalette(img, fw), ...checkOrphans(img, fw));
+      out.push(...checkPalette(img, fw));
+      if (frame === "shadow" && art.shadow) continue;
+      out.push(...checkOrphans(img, fw));
       if (art.outline) out.push(...checkOutline(img, fw));
     }
     for (const [name, anim] of Object.entries(art.anim)) {
@@ -111,9 +119,23 @@ export function checkArt(art: Compiled, where: string): string[] {
         }
       }
     }
-  } else {
+  } else if (art.kind === "overlay") {
     art.tiles.forEach((img, i) => {
       const fw = `${where} › tile ${i} (mask ${art.masks.findIndex((m) => m.includes(i))})`;
+      out.push(...checkPalette(img, fw), ...checkOrphans(img, fw, true));
+    });
+  } else {
+    const label = (i: number): string => {
+      const m = art.masks.findIndex((list) => list.includes(i));
+      if (m >= 0) return `mask ${m}`;
+      for (const t of art.tones) {
+        const tm = t.masks.findIndex((list) => list.includes(i));
+        if (tm >= 0) return `tone ${t.name} mask ${tm}`;
+      }
+      return "unused";
+    };
+    art.tiles.forEach((img, i) => {
+      const fw = `${where} › tile ${i} (${label(i)})`;
       out.push(...checkPalette(img, fw), ...checkOrphans(img, fw, true));
     });
     for (const d of art.decals) {
