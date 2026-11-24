@@ -15,6 +15,30 @@ export interface SpriteMeta {
   readonly origin: Vec;
   readonly frames: readonly string[];
   readonly anims: Readonly<Record<string, AnimMeta>>;
+  /** Nine-slice insets for `add.nineslice`. Sliced frames are packed untrimmed. */
+  readonly slice?: {
+    readonly left: number;
+    readonly right: number;
+    readonly top: number;
+    readonly bottom: number;
+  };
+}
+
+/** A bitmap font for `load.bitmapFont(key, image, data)`. */
+export interface FontMeta {
+  /** Paths inside the build directory. */
+  readonly image: string;
+  readonly data: string;
+  /** The size the font data declares. BitmapText draws 1:1 at it, which is its default. */
+  readonly size: number;
+  readonly lineHeight: number;
+  /** Baseline, in pixels from the top of a line. */
+  readonly base: number;
+  /** Where a Hangul syllable's ink sits in a line: rows from the top, and its height. */
+  readonly ink: { readonly top: number; readonly height: number };
+  readonly chars: number;
+  /** One white colour, meant for `setTint` with a palette colour. Otherwise drawn as is. */
+  readonly tint: boolean;
 }
 
 export interface LookMeta {
@@ -82,4 +106,6 @@ export interface ArtMetadata {
     readonly columns: number;
   };
   readonly tilesets: Readonly<Record<string, TilesetMeta>>;
+  /** Font key to font. Galmuri's OFL licence ships beside them as `fonts/OFL-Galmuri.txt`. */
+  readonly fonts: Readonly<Record<string, FontMeta>>;
 }

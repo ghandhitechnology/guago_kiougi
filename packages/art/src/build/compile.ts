@@ -1,8 +1,16 @@
 import { readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import { checkJumps, checkOrphans, checkOutline, checkPalette, opaqueCount } from "../checks.ts";
+import {
+  checkJumps,
+  checkOrphans,
+  checkOutline,
+  checkPalette,
+  checkSlice,
+  opaqueCount,
+} from "../checks.ts";
 import type { Art } from "../format.ts";
+import { type CompiledGlyphs, compileGlyphs } from "../glyphs.ts";
 import { ArtError } from "../grid.ts";
 import { type CompiledRig, compileRig } from "../rig.ts";
 import { type CompiledSprite, compileSprite } from "../sprite.ts";
@@ -11,7 +19,7 @@ import { type CompiledTerrain, compileTerrain } from "../terrain.ts";
 export const ART_ROOT = new URL("../..", import.meta.url).pathname;
 export const SOURCES = join(ART_ROOT, "src/sprites");
 
-export type Compiled = CompiledSprite | CompiledRig | CompiledTerrain;
+export type Compiled = CompiledSprite | CompiledRig | CompiledTerrain | CompiledGlyphs;
 
 export interface CompileResult {
   readonly art: readonly Compiled[];
@@ -29,6 +37,7 @@ export function sourceFiles(dir = SOURCES): string[] {
 function compileOne(art: Art, name: string, where: string): Compiled {
   if (art.kind === "sprite") return compileSprite(art, name, where);
   if (art.kind === "rig") return compileRig(art, name, where);
+  if (art.kind === "glyphs") return compileGlyphs(art, name, where);
   return compileTerrain(art, name, where);
 }
 
@@ -84,6 +93,7 @@ export function checkArt(art: Compiled, where: string): string[] {
       const fw = `${where} › ${frame}`;
       out.push(...checkPalette(img, fw), ...checkOrphans(img, fw));
       if (art.outline) out.push(...checkOutline(img, fw));
+      if (art.slice) out.push(...checkSlice(img, art.slice, fw));
     }
     for (const [name, anim] of Object.entries(art.anim)) {
       out.push(...checkJumps(name, anim, (f) => opaqueCount(art.frames.get(f) as never), where));
@@ -110,6 +120,11 @@ export function checkArt(art: Compiled, where: string): string[] {
           );
         }
       }
+    }
+  } else if (art.kind === "glyphs") {
+    for (const g of art.glyphs) {
+      const fw = `${where} › "${g.chars.join("")}"`;
+      out.push(...checkPalette(g.img, fw), ...checkOrphans(g.img, fw), ...checkOutline(g.img, fw));
     }
   } else {
     art.tiles.forEach((img, i) => {

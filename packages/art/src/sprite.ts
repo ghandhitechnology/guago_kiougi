@@ -1,4 +1,4 @@
-import type { Anim, SpriteDef, Vec } from "./format.ts";
+import type { Anim, Slice, SpriteDef, Vec } from "./format.ts";
 import { ArtError, checkLegend, parseGrid } from "./grid.ts";
 import { resolveRemap } from "./palette.ts";
 import { type Indexed, indexed, remap, stamp } from "./raster.ts";
@@ -12,6 +12,7 @@ export interface CompiledSprite {
   readonly outline: boolean;
   readonly frames: ReadonlyMap<string, Indexed>;
   readonly anim: Readonly<Record<string, Anim>>;
+  readonly slice?: Slice;
 }
 
 export function defaultOrigin([w, h]: Vec): Vec {
@@ -92,5 +93,6 @@ export function compileSprite(def: SpriteDef, name: string, where: string): Comp
     outline: def.outline ?? true,
     frames: out,
     anim: def.anim,
+    ...(def.slice ? { slice: def.slice } : {}),
   };
 }
