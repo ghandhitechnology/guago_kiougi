@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Anim } from "../format.ts";
+import type { ArtMetadata } from "../meta.ts";
 import { pack } from "../pack.ts";
 import {
   COLORS,
@@ -178,7 +179,7 @@ export function rigFrameKey(rig: string, layer: string, part: string, key: strin
 }
 
 /** Everything a consumer needs besides the atlases. */
-export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): unknown {
+export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): ArtMetadata {
   const terrains = art.filter((a): a is CompiledTerrain => a.kind === "terrain");
   const layout = tileLayout(terrains);
   const anims = (owner: string, anim: Readonly<Record<string, Anim>>) =>
@@ -198,7 +199,7 @@ export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): u
       ramps: Object.fromEntries(
         RAMP_LIST.map((r) => [
           r.name,
-          Object.fromEntries(r.steps.map((s, i) => [s, COLORS[r.indices[i] as number]])),
+          Object.fromEntries(r.steps.map((s, i) => [s, COLORS[r.indices[i] as number] as string])),
         ]),
       ),
     },
@@ -206,12 +207,15 @@ export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): u
       SLOTS.map((s) => [
         s.name,
         {
-          keys: Object.fromEntries(SLOT_STEPS.map((step, i) => [step, s.keys[i]])),
+          keys: Object.fromEntries(SLOT_STEPS.map((step, i) => [step, s.keys[i] as string])),
           options: Object.fromEntries(
             Object.entries(s.options).map(([o, names]) => [
               o,
               Object.fromEntries(
-                SLOT_STEPS.map((step, i) => [step, COLORS[colorIndex(names[i] as string)]]),
+                SLOT_STEPS.map((step, i) => [
+                  step,
+                  COLORS[colorIndex(names[i] as string)] as string,
+                ]),
               ),
             ]),
           ),
@@ -244,7 +248,7 @@ export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): u
             size: r.size,
             origin: r.origin,
             directions: r.directions,
-            flipForLeft: "side",
+            flipForLeft: "side" as const,
             layers: r.layers,
             parts: Object.fromEntries(
               r.layers.map((l) => [l, r.parts.filter((p) => p.layer === l).map((p) => p.name)]),

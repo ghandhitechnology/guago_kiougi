@@ -10,6 +10,7 @@ A browser pixel-art online RPG. `docs/PLAN.md` is the source of truth: read the 
 
 ## Commands
 - `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm test`
+- `pnpm dev` builds the art, then runs the game server on :2567 and the client on http://localhost:5173. `pnpm build` builds the art and the client into `apps/client/dist`. The server has no build step: Node runs its TypeScript directly (`pnpm --filter @guago/server start`)
 - `pnpm art:build` compiles and checks all art into `packages/art/dist`. `pnpm art:sheet` serves the contact sheet; `pnpm art:sheet --png <dir>` writes it as PNGs
 
 ## Art
