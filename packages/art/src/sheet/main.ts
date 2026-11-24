@@ -12,6 +12,7 @@ import { writeOutput } from "../build/emit.ts";
 import { COLORS, colorIndex } from "../palette.ts";
 import { galmuriDir } from "./font.ts";
 import { loadFonts, paletteSheet, rigSheet, spriteSheet, terrainSheet } from "./static.ts";
+import { uiSheets } from "./ui-static.ts";
 
 const { values } = parseArgs({
   options: { png: { type: "string" }, port: { type: "string", default: "4310" } },
@@ -26,7 +27,7 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-writeOutput(DIST, art);
+const built = writeOutput(DIST, art);
 
 if (values.png) {
   const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.png);
@@ -37,6 +38,7 @@ if (values.png) {
     sprites: spriteSheet(fonts, art),
     rigs: rigSheet(fonts, art),
     terrain: terrainSheet(fonts, art),
+    ...uiSheets(art, built.fonts),
   };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);
