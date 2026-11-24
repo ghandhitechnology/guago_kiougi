@@ -63,7 +63,7 @@ describe("rig assembly", () => {
           pieces: {
             head: {
               at: { down: [2, 0], up: [2, 0], side: [3, 0] },
-              down: { rest: box("o"), hurt: "oo" },
+              down: { rest: box("o"), hurt: "oo", lifted: { at: [0, 4], grid: "oo" } },
               up: box("o"),
               side: null,
             },
@@ -71,7 +71,7 @@ describe("rig assembly", () => {
         }),
       },
     },
-    frames: { idle0: {}, bob: { torso: [0, 1] }, hurt: { head: "hurt" } },
+    frames: { idle0: {}, bob: { torso: [0, 1] }, hurt: { head: "hurt" }, lift: { head: "lifted" } },
     anim: { idle: { frames: ["idle0", "bob"], fps: 2 } },
     looks: { a: { parts: { body: "base", hair: "tuft" } } },
   });
@@ -89,6 +89,11 @@ describe("rig assembly", () => {
   it("swaps pose grids and falls back to rest", () => {
     expect(at("down/hurt", 2, 1)).toBe(CLEAR);
     expect(at("up/hurt", 2, 1)).toBe(colorIndex("red.deep"));
+  });
+
+  it("places a pose with its own position there", () => {
+    expect(at("down/lift", 0, 4)).toBe(colorIndex("red.deep"));
+    expect(at("down/lift", 2, 0)).toBe(CLEAR);
   });
 
   it("draws nothing for a null direction", () => {
