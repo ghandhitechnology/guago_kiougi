@@ -338,19 +338,9 @@ export default sprite({
       ["back", 0, -1],
     ],
     side0: ["sideTail", "trunk", "legs0", "profile"],
-    side1: [
-      ["sideTailUp", 0, -1],
-      ["trunk", 0, -1],
-      "legs1",
-      ["profile", 0, -1],
-    ],
+    side1: [["sideTailUp", 0, -1], ["trunk", 0, -1], "legs1", ["profile", 0, -1]],
     side2: ["sideTail", "trunk", "legs2", "profile"],
-    side3: [
-      ["sideTailUp", 0, -1],
-      ["trunk", 0, -1],
-      "legs3",
-      ["profile", 0, -1],
-    ],
+    side3: [["sideTailUp", 0, -1], ["trunk", 0, -1], "legs3", ["profile", 0, -1]],
   },
   anim: {
     idle: {
