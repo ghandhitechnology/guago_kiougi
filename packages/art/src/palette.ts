@@ -14,27 +14,55 @@ export type Step = (typeof STEPS)[number];
 const NIGHT = "#1a1427"; // darkest colour in the game
 const SLATE = "#2a2741"; // ink.dark, navy.deep
 const DUSK = "#484662"; // ink.mid, stone.deep
+const ASH = "#6a6276"; // stone.dark, ink.light
 const WINE = "#3d1426"; // red.deep, clay.deep
-const UMBER = "#4f2d26"; // wood.dark, gold.deep
+const BRICK = "#7a3329"; // clay.dark, flesh.dark
+const UMBER = "#4f2d26"; // wood.dark, gold.deep, flesh.deep
 const FOREST = "#173230"; // grass.deep, board.deep
+const PINE = "#336555"; // board.mid, grass.dark
 const PLUMSHADE = "#4a2758"; // plum.dark, rose.deep
 
+/**
+ * Core ramps. `flesh` is the fixed skin ramp: the `skin` swap slot keeps the name `skin`, so a
+ * legend asks for a fixed skin colour as `flesh.pale` and for the slot as `skin.mid`.
+ *
+ * Revision 2 merged four near-identical pairs to free room for the steps in `EXTRAS`; the old
+ * names are aliases of the survivor: `ink.light` #706f8a → `stone.dark` #6a6276,
+ * `skin.deep` #4b2629 → `wood.dark` #4f2d26, `skin.dark` #773f35 → `clay.dark` #7a3329,
+ * `grass.dark` #23533a → `board.mid` #336555.
+ */
 const RAMPS = {
-  ink: [NIGHT, SLATE, DUSK, "#706f8a"],
-  stone: [DUSK, "#6a6276", "#958b93", "#bdb2ab", "#e0d5c2", "#faf2e1"],
+  ink: [NIGHT, SLATE, DUSK, ASH],
+  stone: [DUSK, ASH, "#958b93", "#bdb2ab", "#e0d5c2", "#faf2e1"],
   red: [WINE, "#751a30", "#b8293a", "#e3513f", "#ff9268"],
-  clay: [WINE, "#7a3329", "#b5582f", "#dc8a4a", "#f4c185"],
+  clay: [WINE, BRICK, "#b5582f", "#dc8a4a", "#f4c185"],
   gold: [UMBER, "#8c5524", "#c98b25", "#efc244", "#fbe8a0"],
   wood: ["#2f1b24", UMBER, "#7d5039", "#a8784e", "#d0a56f"],
-  skin: ["#4b2629", "#773f35", "#a25e46", "#ca8a64", "#e9b58d", "#f9dcbc"],
-  grass: [FOREST, "#23533a", "#3c7d3b", "#6aa845", "#acd26a", "#e0ee9c"],
+  flesh: [UMBER, BRICK, "#a25e46", "#ca8a64", "#e9b58d", "#f9dcbc"],
+  grass: [FOREST, PINE, "#3c7d3b", "#6aa845", "#acd26a", "#e0ee9c"],
   olive: ["#34331f", "#5a5a30", "#858645", "#b3b16b"],
-  board: [FOREST, "#22463f", "#336555", "#518d76"],
+  board: [FOREST, "#22463f", PINE, "#518d76"],
   navy: [SLATE, "#2b3a6d", "#3c5ca2", "#5e8bd0", "#99c0ea"],
   sea: ["#143e5b", "#196e91", "#22a5c3", "#58d8d6", "#b6f6e5"],
   plum: ["#2a1636", PLUMSHADE, "#763f86", "#a868ad", "#d9a3cc"],
   rose: [PLUMSHADE, "#953a68", "#cf5f80", "#f297a0", "#ffcdbf"],
 } as const satisfies Record<string, readonly string[]>;
+
+/**
+ * Extra named steps that sit between two core steps of a ramp, each with the core step it
+ * shades down to. They are full palette colours but stay out of the step order that shadows,
+ * outlines and `ramp.*` remaps follow, so adding one never shifts another colour.
+ */
+const EXTRAS = {
+  /** A lawn green between `grass.mid` and `grass.light`, for soft tonal patches. */
+  "grass.soft": ["#53923f", "grass.mid"],
+  /** Stone under a warm lamp: a lit grey, not a brown. */
+  "stone.lamp": ["#d5c3a0", "stone.light"],
+  /** Marble's warm shadow, between `stone.mid` and `stone.light`. */
+  "stone.vein": ["#a89a8c", "stone.mid"],
+  /** Sunlit dust between `clay.light` and `clay.pale`. */
+  "clay.dust": ["#e8a768", "clay.light"],
+} as const;
 
 export type RampName = keyof typeof RAMPS;
 
@@ -47,25 +75,38 @@ type StepNames<
     : never
   : never;
 
-/** Every addressable palette name, like `red.deep` or `stone.bright`. */
-export type ColorName = {
-  [R in RampName]: `${R}.${StepNames<(typeof RAMPS)[R]>}`;
-}[RampName];
+export type ExtraName = keyof typeof EXTRAS;
+
+/** Every addressable palette name, like `red.deep`, `stone.bright` or `grass.soft`. */
+export type ColorName =
+  | {
+      [R in RampName]: `${R}.${StepNames<(typeof RAMPS)[R]>}`;
+    }[RampName]
+  | ExtraName;
 
 export interface Ramp {
   readonly name: RampName;
   readonly steps: readonly Step[];
   /** Palette indices of the steps, dark to light. */
   readonly indices: readonly number[];
+  /** Extra named steps of this ramp, name to palette index. */
+  readonly extras: ReadonlyMap<string, number>;
 }
 
 /** The 64 unique colours, in first-seen order. Index into this is a palette index. */
-export const COLORS: readonly string[] = [...new Set(Object.values(RAMPS).flat())];
+export const COLORS: readonly string[] = [
+  ...new Set([...Object.values(RAMPS).flat(), ...Object.values(EXTRAS).map(([hex]) => hex)]),
+];
 
 export const RAMP_LIST: readonly Ramp[] = Object.entries(RAMPS).map(([name, hexes]) => ({
   name: name as RampName,
   steps: STEPS.slice(0, hexes.length),
   indices: hexes.map((h) => COLORS.indexOf(h)),
+  extras: new Map(
+    Object.entries(EXTRAS)
+      .filter(([extra]) => extra.startsWith(`${name}.`))
+      .map(([extra, [hex]]) => [extra.slice(name.length + 1), COLORS.indexOf(hex)]),
+  ),
 }));
 
 const NAME_TO_INDEX = new Map<string, number>();
@@ -73,6 +114,25 @@ for (const ramp of RAMP_LIST) {
   ramp.steps.forEach((step, i) => {
     NAME_TO_INDEX.set(`${ramp.name}.${step}`, ramp.indices[i] as number);
   });
+  for (const [extra, index] of ramp.extras) NAME_TO_INDEX.set(`${ramp.name}.${extra}`, index);
+}
+// In code, `skin.<step>` still names the fixed skin colours; in a legend it is the swap slot.
+for (const step of STEPS) {
+  const index = NAME_TO_INDEX.get(`flesh.${step}`);
+  if (index !== undefined) NAME_TO_INDEX.set(`skin.${step}`, index);
+}
+
+/** Every ramp name and step in display order (extras slot in above the step they shade to). */
+export function rampEntries(ramp: Ramp): [name: string, index: number][] {
+  const out: [string, number][] = [];
+  ramp.steps.forEach((step, i) => {
+    out.push([step, ramp.indices[i] as number]);
+    for (const [extra, [, below]] of Object.entries(EXTRAS)) {
+      if (below === `${ramp.name}.${step}`)
+        out.push([extra.split(".")[1] as string, NAME_TO_INDEX.get(extra) as number]);
+    }
+  });
+  return out;
 }
 
 export function isColorName(name: string): name is ColorName {
@@ -98,14 +158,18 @@ export const DEEP_INDICES: ReadonlySet<number> = new Set(
  */
 export const SHADE: ReadonlyMap<number, number> = new Map(
   COLORS.map((_, i) => {
+    const extra = Object.values(EXTRAS).find(([hex]) => COLORS.indexOf(hex) === i);
+    if (extra) return [i, NAME_TO_INDEX.get(extra[1]) as number];
     const ramp = RAMP_LIST.find((r) => r.indices.indexOf(i) > 0);
     return [i, ramp ? (ramp.indices[ramp.indices.indexOf(i) - 1] as number) : i];
   }),
 );
 
-/** Ramps that contain a palette index. A shared end colour belongs to several. */
+/** Ramps that contain a palette index, as a step or an extra. A shared end colour belongs to several. */
 export function rampsOf(index: number): readonly Ramp[] {
-  return RAMP_LIST.filter((r) => r.indices.includes(index));
+  return RAMP_LIST.filter(
+    (r) => r.indices.includes(index) || [...r.extras.values()].includes(index),
+  );
 }
 
 export function rampByName(name: string): Ramp | undefined {
@@ -132,9 +196,9 @@ type Four = readonly [ColorName, ColorName, ColorName, ColorName];
  */
 const SLOT_OPTIONS = {
   skin: {
-    fair: ["skin.dark", "skin.light", "skin.pale", "skin.bright"],
-    warm: ["skin.deep", "skin.mid", "skin.light", "skin.pale"],
-    deep: ["skin.deep", "skin.dark", "skin.mid", "skin.light"],
+    fair: ["flesh.dark", "flesh.light", "flesh.pale", "flesh.bright"],
+    warm: ["flesh.deep", "flesh.mid", "flesh.light", "flesh.pale"],
+    deep: ["flesh.deep", "flesh.dark", "flesh.mid", "flesh.light"],
   },
   hair: {
     black: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
@@ -191,7 +255,10 @@ export function paintIndex(name: string): number {
   const slot = SLOTS.find((s) => s.name === head);
   if (slot) {
     const i = SLOT_STEPS.indexOf(step as (typeof SLOT_STEPS)[number]);
-    if (i < 0) throw new Error(`unknown slot step "${name}"`);
+    if (i < 0) {
+      const fixed = head === "skin" ? ` (fixed skin colours are "flesh.${step}")` : "";
+      throw new Error(`unknown slot step "${name}"${fixed}`);
+    }
     return slot.base + i;
   }
   return colorIndex(name);
@@ -228,7 +295,9 @@ export function previewLut(
 
 /**
  * A remap of palette names. `'grass.*': 'olive.*'` maps every step of a ramp to the same step
- * of another; `'grass.pale': 'stone.pale'` maps one colour. Later entries win.
+ * of another; `'grass.pale': 'stone.pale'` maps one colour. Later entries win. Names merged in
+ * revision 2 share one index, so a theme maps the survivor once (`stone.dark`, `board.mid`) and
+ * the alias (`ink.light`, `grass.dark`) follows it.
  */
 export type Remap = Readonly<Record<string, string>>;
 
@@ -252,6 +321,14 @@ export function resolveRemap(remap: Remap): Map<number, number> {
       if (j < 0) throw new Error(`remap "${from}" → "${to}": ${b.name} has no step "${step}"`);
       out.set(a.indices[i] as number, b.indices[j] as number);
     });
+    // Extras go to the same extra in the target, or to the target's step they shade to.
+    for (const [extra, index] of a.extras) {
+      const same = b.extras.get(extra);
+      const below = EXTRAS[`${a.name}.${extra}` as ExtraName][1].split(".")[1] as Step;
+      const j = b.steps.indexOf(below);
+      if (same !== undefined) out.set(index, same);
+      else if (j >= 0) out.set(index, b.indices[j] as number);
+    }
   }
   return out;
 }
@@ -273,7 +350,6 @@ export function theme(name: string, remap: Remap): Theme {
  * them and keep glowing.
  */
 const CAMPUS_NIGHT = theme("campus-night", {
-  "ink.light": "ink.mid",
   "ink.mid": "ink.dark",
   "ink.dark": "ink.deep",
   "stone.bright": "stone.dark",
@@ -285,7 +361,6 @@ const CAMPUS_NIGHT = theme("campus-night", {
   "grass.pale": "board.mid",
   "grass.light": "board.dark",
   "grass.mid": "board.deep",
-  "grass.dark": "board.deep",
   "board.light": "board.mid",
   "board.mid": "board.dark",
   "board.dark": "board.deep",
@@ -347,7 +422,6 @@ const CAMPUS_LAMP_MID = theme("campus-lamp-mid", {
   "grass.pale": "grass.light",
   "grass.light": "grass.mid",
   "grass.mid": "grass.dark",
-  "grass.dark": "grass.deep",
   "wood.pale": "wood.light",
   "wood.light": "wood.mid",
   "wood.mid": "wood.dark",
@@ -362,7 +436,6 @@ const CAMPUS_LAMP_MID = theme("campus-lamp-mid", {
 });
 
 const CAMPUS_DUSK = theme("campus-dusk", {
-  "ink.light": "ink.mid",
   "ink.mid": "ink.dark",
   "stone.bright": "wood.pale",
   "stone.pale": "wood.light",
@@ -373,7 +446,6 @@ const CAMPUS_DUSK = theme("campus-dusk", {
   "grass.pale": "grass.mid",
   "grass.light": "grass.dark",
   "grass.mid": "grass.deep",
-  "grass.dark": "grass.deep",
   "board.light": "board.mid",
   "board.mid": "board.dark",
   "board.dark": "board.deep",
@@ -444,7 +516,6 @@ const RIFT_EMBER = theme("rift-ember", {
   "wood.pale": "wood.mid",
   "wood.light": "wood.dark",
   "wood.mid": "wood.deep",
-  "ink.light": "ink.mid",
   "ink.mid": "ink.dark",
 });
 
@@ -481,8 +552,10 @@ export const THEMES: readonly Theme[] = [
 export function nameOf(index: number): string {
   const slot = slotOf(index);
   if (slot) return `${slot.name}.${SLOT_STEPS[index - slot.base]}`;
-  const names = RAMP_LIST.filter((r) => r.indices.includes(index)).map(
-    (r) => `${r.name}.${r.steps[r.indices.indexOf(index)]}`,
+  const names = RAMP_LIST.flatMap((r) =>
+    rampEntries(r)
+      .filter(([, i]) => i === index)
+      .map(([step]) => `${r.name}.${step}`),
   );
   return names.length > 0 ? names.join(" / ") : `#${index}`;
 }

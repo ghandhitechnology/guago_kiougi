@@ -64,7 +64,8 @@ export function outlineColors(img: Indexed): Map<number, string> {
   const allowed = new Map<number, string>();
   for (const ramp of RAMP_LIST) {
     const deep = ramp.indices[0] as number;
-    if (ramp.indices.some((i) => used.has(i)) && !allowed.has(deep)) {
+    const members = [...ramp.indices, ...ramp.extras.values()];
+    if (members.some((i) => used.has(i)) && !allowed.has(deep)) {
       allowed.set(deep, `${ramp.name}.deep`);
     }
   }

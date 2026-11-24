@@ -94,7 +94,7 @@ figure { margin: 0; display: flex; flex-direction: column; align-items: flex-sta
 figcaption { color: var(--dim); }
 .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-bottom: 8px; }
 .pair { display: flex; gap: 4px; }
-.ramps { display: grid; grid-template-columns: 72px repeat(6, 32px); gap: 4px; align-items: center; margin-bottom: 16px; }
+.ramp { display: block; width: 64px; align-self: center; }
 .swatch { display: block; width: 32px; height: 32px; border: 1px solid var(--edge); }
 .swatch.none { background: transparent; border-color: transparent; }
 .strip { display: flex; border: 1px solid var(--edge); }
