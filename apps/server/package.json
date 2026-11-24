@@ -1,0 +1,20 @@
+{
+  "name": "@guago/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  },
+  "dependencies": {
+    "@colyseus/core": "0.18.29",
+    "@colyseus/schema": "5.0.51",
+    "@colyseus/ws-transport": "0.18.5",
+    "@guago/content": "workspace:*",
+    "@guago/shared": "workspace:*"
+  }
+}
