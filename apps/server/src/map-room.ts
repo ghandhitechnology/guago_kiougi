@@ -24,7 +24,6 @@ import {
   type SimWorld,
   skipTicks,
   step,
-  TICK_MS,
   TILE_SIZE,
 } from "@guago/shared";
 import { InterestGrid, type Viewer } from "./interest.ts";
