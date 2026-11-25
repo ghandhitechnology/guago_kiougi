@@ -61,6 +61,8 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     adminHost,
     adminPort,
     /** The origin the admin page is loaded from; state-changing requests must come from it. */
+    /** Behind `tailscale serve` on this machine: key admin limits on the user it names. */
+    adminTrustProxy: env.ADMIN_TRUST_PROXY === "1",
     adminOrigin:
       env.ADMIN_ORIGIN ||
       `http://${adminHost.includes(":") ? `[${adminHost}]` : adminHost}:${adminPort}`,

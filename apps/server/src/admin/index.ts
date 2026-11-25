@@ -68,7 +68,13 @@ export async function createModerationStack(o: StackOptions) {
     reads,
     routes,
     /** Opens the admin port. `staticDir` serves the built admin page when it exists. */
-    listen(s: { host: string; port: number; origin: string; staticDir?: string }): Promise<Server> {
+    listen(s: {
+      host: string;
+      port: number;
+      origin: string;
+      staticDir?: string;
+      trustProxy?: boolean;
+    }): Promise<Server> {
       return serveAdmin(
         { ...s, secret: o.secret, staticDir: s.staticDir ?? ADMIN_DIST },
         auth,

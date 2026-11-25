@@ -577,3 +577,37 @@ describe("an IP ban", () => {
     expect(await count()).toBe(1);
   });
 });
+
+describe("admin limits behind a proxy", () => {
+  const attempt = (url: string, password: string, user: string) =>
+    fetch(`${url}/admin/api/login`, {
+      method: "POST",
+      headers: { origin: admin, "content-type": "application/json", "tailscale-user-login": user },
+      body: JSON.stringify({ loginId: "proxied", password }),
+    }).then((r) => r.status);
+
+  it("key on the person the trusted proxy names, and ignore the header otherwise", async () => {
+    await stack.auth.create("proxied", "proxied admin password", "moderator");
+    const port = await freePort();
+    // A second listener that trusts a proxy on this machine, as behind `tailscale serve`.
+    const host = `127.0.0.1:${port}`;
+    const trusted = await stack.listen({
+      host: "127.0.0.1",
+      port,
+      origin: admin,
+      trustProxy: true,
+    });
+    const url = `http://${host}`;
+    try {
+      for (let i = 0; i < 6; i++) await attempt(url, "wrong", "mallory@example.com");
+      expect(await attempt(url, "wrong", "mallory@example.com")).toBe(429);
+      expect(await attempt(url, "proxied admin password", "alice@example.com")).toBe(200);
+
+      // Without trust, the header is the client's own word: one address, one counter.
+      for (let i = 0; i < 6; i++) await attempt(admin, "wrong", `m${i}@example.com`);
+      expect(await attempt(admin, "proxied admin password", "alice@example.com")).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => trusted.close(() => resolve()));
+    }
+  });
+});

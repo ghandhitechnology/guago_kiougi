@@ -120,7 +120,12 @@ setInterval(
 setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
 await serveMetrics(config.metricsPort, "127.0.0.1", live.adminRoute);
 // Its own port on a loopback or Tailscale address (config.ts), never through the game port.
-await admin.listen({ host: config.adminHost, port: config.adminPort, origin: config.adminOrigin });
+await admin.listen({
+  host: config.adminHost,
+  port: config.adminPort,
+  origin: config.adminOrigin,
+  trustProxy: config.adminTrustProxy,
+});
 console.log(
   `game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}, admin on ${config.adminHost}:${config.adminPort}`,
 );
