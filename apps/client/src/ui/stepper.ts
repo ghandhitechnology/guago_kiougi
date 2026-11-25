@@ -46,7 +46,8 @@ export class Stepper extends Widget {
     this.plus = s.add.nineslice(SIDE + MID, 0, "ui", "btn/idle", SIDE, H, l, r, t, b).setOrigin(0);
     const [il, ir, it, ib] = sliceOf("inset");
     const well = s.add.nineslice(SIDE, 0, "ui", "inset/idle", MID, H, il, ir, it, ib).setOrigin(0);
-    const minusMark = new Label(s, 5, 3, "−", { font: "galmuri11-bold", color: "ink.dark" });
+    // galmuri11-bold has no U+2212 minus; the en dash is its minus.
+    const minusMark = new Label(s, 5, 3, "–", { font: "galmuri11-bold", color: "ink.dark" });
     const plusMark = new Label(s, SIDE + MID + 4, 3, "+", {
       font: "galmuri11-bold",
       color: "ink.dark",
