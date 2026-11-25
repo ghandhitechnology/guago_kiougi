@@ -12,6 +12,7 @@
 import type {
   Actor,
   Doll,
+  Edge,
   Emitter,
   FramePick,
   Light,
@@ -520,6 +521,120 @@ export function renderScene(
   return { w: out.w, h: out.h, data: out.data, warnings: [...new Set(warnings)] };
 }
 
+export interface GroundImage extends SceneImage {
+  /** One byte per pixel, 255 where the ground lies in a shadow. */
+  readonly shadow: Uint8Array;
+}
+
+/**
+ * The part of a scene that never moves, for the game to draw as one image: terrain, tones,
+ * decals, details, edges and shadows, in the scene's theme, transparent over the void. The sky,
+ * the backdrop, painted lights, objects and everything above them are left out, and so are
+ * details that play an animation.
+ */
+export function renderGround(
+  def: SceneDef,
+  meta: SceneMeta,
+  atlases: ReadonlyMap<string, SceneAtlas>,
+  view?: Rect,
+): GroundImage {
+  const warnings: string[] = [];
+  const { sky: _sky, ...rest } = def;
+  const still: SceneDef = {
+    ...rest,
+    backdrop: [],
+    details: (def.details ?? []).filter((d) => !("prop" in d && d.play)),
+  };
+  const size = sceneSize(still).px;
+  const win = view ?? { x: 0, y: 0, w: size[0], h: size[1] };
+  const ctx: Ctx = {
+    def: still,
+    meta,
+    atlases,
+    cells: prepare(def).cells,
+    size,
+    time: 0,
+    warnings,
+  };
+  let shadow = new Uint8Array(win.w * win.h);
+  const out = renderPass(ctx, still.theme, win, "shaded", (mask) => {
+    shadow = new Uint8Array(mask.w * mask.h);
+    for (let i = 0; i < shadow.length; i++) shadow[i] = mask.data[i * 4 + 3] as number;
+  });
+  return { w: out.w, h: out.h, data: out.data, shadow, warnings: [...new Set(warnings)] };
+}
+
+/**
+ * One byte per pixel of the whole scene, 255 inside an edge's region: the cells whose legend
+ * character is in `edge.inside`, cut along the overlay's shape where it has one, so the mask
+ * follows the same torn line the ground is drawn with.
+ */
+export function edgeInside(def: SceneDef, meta: SceneMeta, edge: Edge): Uint8Array {
+  const { cells } = prepare(def);
+  const [W, H] = cells.size;
+  const [pw, ph] = sceneSize(def).px;
+  const out = new Uint8Array(pw * ph);
+  const first = typeof edge.overlay === "string" ? edge.overlay : edge.overlay[0];
+  const o = first ? meta.overlays[first] : undefined;
+  const cell = (x: number, y: number) =>
+    cells.list[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))] as GroundCell;
+  const grid: TerrainGrid = {
+    w: W,
+    h: H,
+    cells: cells.list.map((c) => (edge.inside.includes(c.char) ? 1 : 0)),
+  };
+  for (let j = 0; j <= H; j++) {
+    for (let i = 0; i <= W; i++) {
+      const mask = dualMask(grid, 1, i, j);
+      if (mask === 0) continue;
+      const corners = [cell(i - 1, j - 1), cell(i, j - 1), cell(i - 1, j), cell(i, j)];
+      const list = o?.masks[mask] ?? [];
+      const index = list[hash2(i, j, def.seed + 11) % Math.max(1, list.length)];
+      const hex =
+        mask !== 15 && !corners.some((c) => c.terrain === null) && index !== undefined
+          ? o?.shapes?.[String(index)]
+          : undefined;
+      for (let y = 0; y < TILE; y++) {
+        const py = j * TILE - TILE / 2 + y;
+        if (py < 0 || py >= ph) continue;
+        for (let x = 0; x < TILE; x++) {
+          const px = i * TILE - TILE / 2 + x;
+          if (px < 0 || px >= pw) continue;
+          const inside = hex
+            ? (Number.parseInt(hex[(y * TILE + x) >> 2] as string, 16) >> (3 - (x & 3))) & 1
+            : (mask >> ((y < 8 ? 0 : 2) + (x < 8 ? 0 : 1))) & 1;
+          if (inside) out[py * pw + px] = 255;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Where particle `k` of an emitter is at `time`, and how far into its life. */
+export function emitterParticle(
+  e: Emitter,
+  seed: number,
+  k: number,
+  time: number,
+): { x: number; y: number; age: number; hash: number } {
+  const offset = ((k + (hash2(k, 7, seed) % 1000) / 1000) / e.count) * e.life;
+  const t = time + offset;
+  const birth = Math.floor(t / e.life);
+  const age = t - birth * e.life;
+  const h = hash2(k, birth, seed + 5);
+  const bx = e.area.x + ((h % 1000) / 1000) * e.area.w;
+  const by = e.area.y + (((h >>> 10) % 1000) / 1000) * e.area.h;
+  let x = bx + e.velocity[0] * age;
+  let y = by + e.velocity[1] * age;
+  if (e.toward) {
+    const f = (age / e.life) ** 2;
+    x += (e.toward[0] - x) * f;
+    y += (e.toward[1] - y) * f;
+  }
+  return { x, y, age, hash: h };
+}
+
 interface Ctx {
   readonly def: SceneDef;
   readonly meta: SceneMeta;
@@ -650,20 +765,7 @@ function drawEmitter(ctx: Ctx, out: Canvas, e: Emitter): void {
   const anims = Object.keys(sp.anims);
   const animName = e.anim ?? anims[0];
   for (let k = 0; k < e.count; k++) {
-    const offset = ((k + (hash2(k, 7, ctx.def.seed) % 1000) / 1000) / e.count) * e.life;
-    const t = ctx.time + offset;
-    const birth = Math.floor(t / e.life);
-    const age = t - birth * e.life;
-    const h = hash2(k, birth, ctx.def.seed + 5);
-    const bx = e.area.x + ((h % 1000) / 1000) * e.area.w;
-    const by = e.area.y + (((h >>> 10) % 1000) / 1000) * e.area.h;
-    let x = bx + e.velocity[0] * age;
-    let y = by + e.velocity[1] * age;
-    if (e.toward) {
-      const f = (age / e.life) ** 2;
-      x += (e.toward[0] - x) * f;
-      y += (e.toward[1] - y) * f;
-    }
+    const { x, y, age, hash: h } = emitterParticle(e, ctx.def.seed, k, ctx.time);
     const key = pickFrame(
       ctx,
       e.sprite,
@@ -707,7 +809,20 @@ function fillPoly(target: Canvas, shape: ShadowShape): void {
   }
 }
 
-function renderPass(ctx: Ctx, passTheme: string, view: Rect, groundOnly = false): Canvas {
+/**
+ * How far a pass draws: the ground alone (terrain, tones, decals, details, edges), the ground
+ * with its shadows, or everything.
+ */
+type Stage = "ground" | "shaded" | "all";
+
+function renderPass(
+  ctx: Ctx,
+  passTheme: string,
+  view: Rect,
+  stage: Stage = "all",
+  shadowMask?: (mask: Canvas) => void,
+): Canvas {
+  const groundOnly = stage === "ground";
   const { def, meta, warnings } = ctx;
   const out = new Canvas(view.w, view.h, view.x, view.y);
   const [W, H] = ctx.cells.size;
@@ -967,7 +1082,7 @@ function renderPass(ctx: Ctx, passTheme: string, view: Rect, groundOnly = false)
     });
   }
   const shade = toMap(meta.shade);
-  const shaded = def.shade ? renderPass({ ...ctx, warnings: [] }, def.shade, view, true) : null;
+  const shaded = def.shade ? renderPass({ ...ctx, warnings: [] }, def.shade, view, "ground") : null;
   for (let i = 0; i < mask.data.length; i += 4) {
     if (mask.data[i + 3] === 0) continue;
     if (shaded && (shaded.data[i + 3] as number) > 0) {
@@ -983,6 +1098,8 @@ function renderPass(ctx: Ctx, passTheme: string, view: Rect, groundOnly = false)
     out.data[i + 1] = (to >> 8) & 255;
     out.data[i + 2] = to & 255;
   }
+  shadowMask?.(mask);
+  if (stage === "shaded") return out;
 
   // 6 and 7. Objects by their feet, then everything overhead.
   sorted.sort((a, b) => a.y - b.y || a.x - b.x);
