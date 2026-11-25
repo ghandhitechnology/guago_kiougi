@@ -398,7 +398,7 @@ export class CodeScreen extends Screen {
       sound: "confirm",
       onPress: () => this.onDone?.(),
     });
-    this.done.setX(page.x + page.w - 8 - this.done.bounds().w);
+    this.done.setX(page.x + page.w - 8 - this.done.size().w);
     this.panel.add([copy, this.done]);
   }
 

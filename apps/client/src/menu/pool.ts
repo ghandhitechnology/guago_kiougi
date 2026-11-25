@@ -167,7 +167,7 @@ export class PoolCard {
       sound: "confirm",
       onPress: () => void this.claim(take, said, flyers),
     });
-    take.setX(page.x + page.w - 8 - take.bounds().w);
+    take.setX(page.x + page.w - 8 - take.size().w);
     panel.add(take);
     scope.onBack = () => this.close();
     pushScope(scope);

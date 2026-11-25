@@ -159,12 +159,12 @@ class CodexPage {
         onPress: () => this.setSection(section),
       });
       const mark = s.add
-        .rectangle(x - 1, 16, button.bounds().w + 2, 1, paint("red.mid"))
+        .rectangle(x - 1, 16, button.size().w + 2, 1, paint("red.mid"))
         .setOrigin(0)
         .setVisible(false);
       this.root.add([button, mark]);
       this.tabs.push({ section, button, mark });
-      x += button.bounds().w + 12;
+      x += button.size().w + 12;
     }
     this.detail = s.add.container(LIST_W + 20, 22);
     this.setRow = s.add.container(8, size.h - 36);

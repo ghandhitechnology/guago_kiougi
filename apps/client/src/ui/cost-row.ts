@@ -54,7 +54,7 @@ export class CostRow {
         if (this.met && !this.pending && !this.blocked) opts.onPress();
       },
     });
-    this.button.setX(w - this.button.bounds().w);
+    this.button.setX(w - this.button.size().w);
     this.root.add([this.costs, this.button]);
   }
 

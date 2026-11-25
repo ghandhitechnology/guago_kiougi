@@ -71,7 +71,7 @@ export class ItemGrid {
     });
     this.pageLabel = new Label(scene, 0, h + 6, "", { font: "galmuri9", color: "stone.dark" });
     this.root.add([this.prev, this.next, this.pageLabel.obj]);
-    this.next.setX(w - this.next.bounds().w);
+    this.next.setX(w - this.next.size().w);
     this.layoutPager(w);
   }
 

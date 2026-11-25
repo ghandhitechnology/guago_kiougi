@@ -263,7 +263,7 @@ export class DialogueBox {
       });
       return b;
     });
-    const w = Math.max(...buttons.map((b) => b.bounds().w)) + 12;
+    const w = Math.max(...buttons.map((b) => b.size().w)) + 12;
     const h = buttons.length * 22 + 8;
     const [l, r, t, b] = sliceOf("dialog");
     const x = boxAt().x + BOX.w - w;

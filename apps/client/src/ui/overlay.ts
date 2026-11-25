@@ -175,7 +175,7 @@ export class Modal {
         onPress: a.onPress,
         sound: a.kind === "ink" ? "confirm" : "select",
       });
-      bx -= b.bounds().w;
+      bx -= b.size().w;
       b.setX(bx);
       bx -= 6;
       this.panel.add(b);

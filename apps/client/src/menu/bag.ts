@@ -136,12 +136,12 @@ export class BagView {
         onPress: () => this.setKind(kind),
       });
       const mark = s.add
-        .rectangle(kx - 1, 15, button.bounds().w + 2, 1, paint("red.mid"))
+        .rectangle(kx - 1, 15, button.size().w + 2, 1, paint("red.mid"))
         .setOrigin(0)
         .setVisible(false);
       this.root.add([button, mark]);
       this.kindTabs.push({ kind, button, mark });
-      kx += button.bounds().w + 12;
+      kx += button.size().w + 12;
     }
     this.grid = new ItemGrid(ctx, LEFT_W + 6, 20, {
       cols: COLS,
@@ -346,12 +346,12 @@ export class BagView {
         h: 17,
         onPress: a.run,
       });
-      if (bx > 0 && bx + b.bounds().w > w) {
+      if (bx > 0 && bx + b.size().w > w) {
         bx = 0;
         by += 20;
         b.setPosition(bx, by);
       }
-      bx += b.bounds().w + 4;
+      bx += b.size().w + 4;
       b.setEnabled(!this.pending);
       this.inspector.add(b);
     });

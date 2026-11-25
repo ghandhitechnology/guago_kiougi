@@ -135,12 +135,12 @@ class BoardPage {
         onPress: () => this.setKind(kind),
       });
       const mark = s.add
-        .rectangle(kx - 1, 15, b.bounds().w + 2, 1, paint("red.mid"))
+        .rectangle(kx - 1, 15, b.size().w + 2, 1, paint("red.mid"))
         .setOrigin(0)
         .setVisible(false);
       this.root.add([b, mark]);
       this.kindTabs.push({ kind, mark });
-      kx += b.bounds().w + 12;
+      kx += b.size().w + 12;
     }
     this.clock = s.add.container(size.w - 70, 2);
     this.notes = s.add.container(0, 22);
@@ -329,7 +329,7 @@ class BoardPage {
       ...(sound ? { sound } : {}),
       onPress: run,
     });
-    b.setX(NOTE.w - 6 - b.bounds().w);
+    b.setX(NOTE.w - 6 - b.size().w);
     c.add(b);
     return b;
   }
