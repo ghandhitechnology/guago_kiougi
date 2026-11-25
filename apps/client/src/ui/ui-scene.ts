@@ -1,9 +1,10 @@
 import * as Phaser from "phaser";
 import { backend } from "../backend/index.ts";
 import { ChatPanel } from "../chat/panel.ts";
-import { Joystick, touchScreen } from "../controls/joystick.ts";
+import { aimStick, type Joystick, moveStick, touchScreen } from "../controls/joystick.ts";
 import { RotateCard } from "../controls/rotate.ts";
 import { FRONT_SCENE, UI_SCENE, WORLD_SCENE } from "../entry.ts";
+import { fight, watchFight } from "../hud/fight.ts";
 import { Hud } from "../hud/hud.ts";
 import { hud } from "../hud/store.ts";
 import { Notebook } from "../menu/notebook.ts";
@@ -25,7 +26,7 @@ export class UiScene extends Phaser.Scene {
     | {
         hud: Hud;
         chat: ChatPanel | undefined;
-        joystick: Joystick | undefined;
+        sticks: Joystick[];
         notebook: Notebook;
         stop: () => void;
       }
@@ -73,10 +74,21 @@ export class UiScene extends Phaser.Scene {
           notebook.open();
         },
         openChat: () => chat?.open(),
+        cycleMode: () => fight()?.cycleMode(),
+        dodge: () => fight()?.dodge(),
+        cast: (slot) => fight()?.cast(slot),
+        mentor: () => fight()?.mentor(),
       },
       touch,
     );
-    const joystick = touch ? new Joystick(this) : undefined;
+    // The left thumb walks; the right one aims, only while there is a fight to aim in.
+    const sticks: Joystick[] = [];
+    let unfight = () => {};
+    if (touch) {
+      const aim = aimStick(this, (dir) => fight()?.aim(dir));
+      sticks.push(moveStick(this), aim);
+      unfight = watchFight((live) => aim.setEnabled(live));
+    }
     setIdleKeys((e) => {
       if (e.key === "Enter" && chat) {
         chat.open();
@@ -98,15 +110,22 @@ export class UiScene extends Phaser.Scene {
       if (name !== lastPlace) this.banner.show(name);
       lastPlace = name;
     });
+    let stopFeed = () => {};
     this.world = {
       hud: hudView,
       chat,
-      joystick,
+      sticks,
       notebook,
-      stop: unplace,
+      stop: () => {
+        unplace();
+        unfight();
+        stopFeed();
+      },
     };
     if (import.meta.env.DEV && new URLSearchParams(location.search).has("hudfeed")) {
-      void import("../hud/dev-feed.ts").then((m) => m.startDevFeed(this));
+      void import("../hud/dev-feed.ts").then((m) => {
+        if (this.world?.hud === hudView) stopFeed = m.startDevFeed(this);
+      });
     }
   }
 
@@ -118,7 +137,7 @@ export class UiScene extends Phaser.Scene {
     w.stop();
     w.notebook.close();
     w.chat?.destroy();
-    w.joystick?.destroy();
+    for (const s of w.sticks) s.destroy();
     w.hud.destroy();
   }
 

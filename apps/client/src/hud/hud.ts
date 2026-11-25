@@ -28,6 +28,7 @@ export interface HudActions {
   dodge?(): void;
   /** A book slot pressed, by index. */
   cast?(slot: number): void;
+  mentor?(): void;
 }
 
 function plate(scene: Phaser.Scene, x: number, y: number, w: number, h: number) {
@@ -126,6 +127,9 @@ export class Hud {
     lock: Phaser.GameObjects.Image;
   }[] = [];
   private readonly dodge: Piece;
+  private readonly mentor: Piece;
+  private readonly mentorIcon: Phaser.GameObjects.Image;
+  private mentorReady = false;
   private readonly interact: Piece;
   private readonly chat: Piece;
   private lagTimer: Phaser.Time.TimerEvent | undefined;
@@ -245,6 +249,23 @@ export class Hud {
       () => this.actions.dodge?.(),
     );
     this.buildBooks();
+    // 멘토 찬스: the big gold button above the fan; it lights and pops when the call comes back.
+    this.mentor = new Piece(scene, 440 - 17, 230 - 64 - 12 - 8 - 34, { dx: 60, dy: 0 });
+    this.mentorIcon = scene.add.image(10, 10, "ui", "touch-icon/mentor").setOrigin(0);
+    this.mentor.root.add([
+      scene.add.image(0, 0, "ui", "touch-main/mentor").setOrigin(0),
+      this.mentorIcon,
+    ]);
+    this.tappable(
+      this.mentor.root,
+      0,
+      0,
+      () => ({ w: 34, h: 34 }),
+      () => {
+        if (this.mentorReady) this.actions.mentor?.();
+        else sound("error");
+      },
+    );
     this.interact = new Piece(scene, 0, 0, { dx: 60, dy: 0 });
     this.interact.root.add([
       scene.add.image(0, 0, "ui", "touch-btn/idle").setOrigin(0),
@@ -282,6 +303,7 @@ export class Hud {
       this.pool,
       this.books,
       this.dodge,
+      this.mentor,
       this.interact,
       this.chat,
     ]) {
@@ -316,6 +338,7 @@ export class Hud {
       this.pool,
       this.books,
       this.dodge,
+      this.mentor,
       this.interact,
       this.chat,
     ]) {
@@ -428,6 +451,7 @@ export class Hud {
     }
     if (changed.has("books")) this.applyBooks(data.books);
     if (changed.has("dodge")) this.dodge.show(this.touch && data.dodge !== undefined);
+    if (changed.has("mentor")) this.applyMentor(data.mentor);
     if (changed.has("interact") || changed.has("books")) this.applyInteract(data);
     if (changed.has("hp") || changed.has("exp") || changed.has("mode")) this.layoutLeft();
   }
@@ -500,6 +524,26 @@ export class Hud {
       s.book.setCrop(0, 16 - shown, 16, shown);
     });
     this.books.show(books !== undefined);
+  }
+
+  private applyMentor(m: HudData["mentor"] | undefined): void {
+    if (m) {
+      const ready = m.cooldown <= 0;
+      this.mentorIcon.setAlpha(ready ? 1 : 0.35);
+      if (ready && !this.mentorReady && this.mentor.live) {
+        this.scene.tweens.add({
+          targets: this.mentorIcon,
+          scale: { from: 1.6, to: 1 },
+          x: { from: 10 - 4, to: 10 },
+          y: { from: 10 - 4, to: 10 },
+          duration: 220,
+          ease: "Back.Out",
+        });
+        sound("stamp");
+      }
+      this.mentorReady = ready;
+    }
+    this.mentor.show(this.touch && m !== undefined);
   }
 
   private applyInteract(data: Partial<HudData>): void {

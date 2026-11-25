@@ -24,6 +24,8 @@ export interface HudData {
   readonly books: readonly (BookSlot | null)[];
   /** Whether the dodge is live, and its cooldown. */
   readonly dodge: { readonly cooldown: number };
+  /** 멘토 찬스 once a freed mentor can be called, and its cooldown (0 ready, 1 just used). */
+  readonly mentor: { readonly cooldown: number };
   /** 벌점 on the ledger. */
   readonly demerits: number;
   /** The offline 자습 pool, filled `now` of `max`. */
