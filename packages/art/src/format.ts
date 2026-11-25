@@ -143,6 +143,23 @@ export interface PartDef {
   readonly lone?: string;
   /** Pieces keyed by bone. */
   readonly pieces: Readonly<Record<string, Piece>>;
+  /**
+   * Draws the part just below this layer instead of in its own layer's place: headphones round
+   * the neck sit in the accessory layer but `under: 'hair'`, so long hair falls over them.
+   */
+  readonly under?: string;
+  /** Named points that follow a bone, like the panel on a 과잠's back where the emblem goes. */
+  readonly anchors?: Readonly<Record<string, AnchorDef>>;
+}
+
+/**
+ * A point on a bone, per direction; a direction left out has none. `poses` moves it for a pose
+ * of that bone that draws the piece elsewhere, or hides it with null.
+ */
+export interface AnchorDef {
+  readonly bone: string;
+  readonly at: Readonly<Partial<Record<Dir, Vec>>>;
+  readonly poses?: Readonly<Partial<Record<Dir, Readonly<Record<string, Vec | null>>>>>;
 }
 
 /** One option for a layer, like a hairstyle. */
@@ -182,6 +199,18 @@ export interface RigDef {
   readonly anim: Readonly<Record<string, Anim>>;
   /** Looks composited for the build checks and the contact sheet. */
   readonly looks: Readonly<Record<string, Look>>;
+  /**
+   * What the build checks beyond the looks. `parts` (the default) wears every part option alone
+   * on the first look; `pairs` also wears every two options of different layers together, for
+   * a rig whose layers a player combines freely.
+   */
+  readonly probe?: "parts" | "pairs";
+  /**
+   * Hides the strays layers leave on each other: a pixel that loses every same-colour neighbour
+   * to a later layer takes that layer's colour (see `stackLayers`). For a rig whose parts are
+   * combined at run time, where no one can clean each combination by hand.
+   */
+  readonly clean?: boolean;
 }
 
 export function rig(def: Omit<RigDef, "kind">): RigDef {

@@ -20,7 +20,7 @@ import {
 } from "../palette.ts";
 import { crop, type Indexed, type Lut, Rgba, remap } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
-import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
+import { renderScene, SCREEN, type SceneAtlas, type SceneMeta, sceneSize } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import type { CompiledSprite } from "../sprite.ts";
 import type { CompiledOverlay, CompiledTerrain } from "../terrain.ts";
@@ -156,13 +156,14 @@ function frameStrip(
   lut: Lut,
   y: number,
   backdrops: readonly (readonly number[] | null)[],
+  zoom?: number,
 ): number {
   const fw = Math.max(...frames.map(([, i]) => i.w));
   const fh = Math.max(...frames.map(([, i]) => i.h));
   // Large art (an era boss's 160 px parts) shows at ×2 on the checkerboard and one ground only:
   // at ×4 on every theme's ground each frame takes a row of its own, thirty times over.
   const big = fw > 96 || fh > 96;
-  const z = big ? 2 : 4;
+  const z = zoom ?? (big ? 2 : 4);
   const grounds = big ? backdrops.slice(0, 2) : backdrops;
   const gap = 8;
   let x = 20;
@@ -227,7 +228,7 @@ export function spriteSheet(f: Fonts, art: readonly Compiled[]): Rgba {
 }
 
 export function rigSheet(f: Fonts, art: readonly Compiled[]): Rgba {
-  const s = new Sheet(1200);
+  const s = new Sheet(1200, 30000);
   let y = 20;
   for (const r of art) {
     if (r.kind !== "rig") continue;
@@ -249,7 +250,8 @@ function drawRig(s: Sheet, f: Fonts, r: CompiledRig, y0: number): number {
       const frames = r.frameNames.map(
         (fr) => [fr, look.frames.get(`${dir}/${fr}`) as Indexed] as const,
       );
-      y = frameStrip(s, f, frames, lut, y, [null]);
+      // A rig with dozens of frames (the student's poses and emotes) at ×2, so it fits.
+      y = frameStrip(s, f, frames, lut, y, [null], frames.length > 30 ? 2 : undefined);
     }
     y += 12;
   }
@@ -324,7 +326,8 @@ export function sceneSheet(f: Fonts, meta: SceneMeta, atlases: readonly Atlas[])
     atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
   );
   // Each scene takes its ×1 and ×3 rows and a title; the canvas fits however many there are.
-  const s = new Sheet(SCREEN.w * 3 + 40, SCENES.length * (SCREEN.h * 4 + 90) + 40);
+  const tall = SCENES.reduce((h, def) => h + sceneSize(def).px[1] * 4 + 60, 40);
+  const s = new Sheet(SCREEN.w * 3 + 40, tall);
   let y = 20;
   for (const def of SCENES) {
     const img = renderScene(def, meta, pixels, 0);
