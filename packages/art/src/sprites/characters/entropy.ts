@@ -347,12 +347,7 @@ export default sprite({
       ["face", 0, -1],
     ],
     up0: [["upTail", 1, -1], "rump", "hindA", "back"],
-    up1: [
-      "upTail",
-      ["rump", 0, -1],
-      ["pawsC", 0, -1],
-      ["back", 0, -1],
-    ],
+    up1: ["upTail", ["rump", 0, -1], ["pawsC", 0, -1], ["back", 0, -1]],
     up2: [["upTail", 1, -1], "rump", "hindB", "back"],
     up3: [
       ["upTail", 2, 0],
