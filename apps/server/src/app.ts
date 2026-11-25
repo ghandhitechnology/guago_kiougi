@@ -9,7 +9,8 @@ import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
-import { MapRoom } from "./map-room.ts";
+import { inventoryLoadouts } from "./fight/loadout.ts";
+import { MapRoom, provideFightServices } from "./map-room.ts";
 import { allRooms } from "./metrics.ts";
 import { provideSeatServices } from "./seats.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
@@ -51,6 +52,8 @@ export function createGameServer(
     ...(grants ? { onLeave: (id: string) => grants.flush(id) } : {}),
   });
   provideWorldServices({ ...chat, ...(economy.ops ? { ops: economy.ops } : {}) });
+  const ops = economy.ops;
+  if (ops) provideFightServices({ loadouts: inventoryLoadouts((id) => ops.snapshot(id)) });
   const api = createApiHandler(auth, settings, looks, economy.routes);
 
   // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays

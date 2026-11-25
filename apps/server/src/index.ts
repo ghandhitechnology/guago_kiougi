@@ -7,6 +7,7 @@ import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
 import { studentLooks } from "./looks.ts";
+import { fightLoadoutChanged } from "./map-room.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { worldRoom } from "./world-room.ts";
@@ -18,6 +19,7 @@ const db = createDb(config.databaseUrl);
 const economy = createEconomy(db, {
   onLevel: (id, level) => worldRoom()?.setLevel(id, level),
   onChange: (id, change) => worldRoom()?.notify(id, change),
+  onApplied: (id, _name, change) => fightLoadoutChanged(id, change),
 });
 const auth = createAuthService({
   db,

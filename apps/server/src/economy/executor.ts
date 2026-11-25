@@ -97,6 +97,11 @@ export interface ExecutorOptions {
   };
   /** Called after a commit that changed the character's level. */
   onLevel?(characterId: string, level: number): void;
+  /**
+   * Called after every commit that applied an operation, with its change notice: a fight in
+   * progress rebuilds the character's books from it (an equip, 필기, a level from a grant).
+   */
+  onApplied?(characterId: string, name: string, change: ChangeNotice): void;
 }
 
 const cryptoRoll = () => (getRandomValues(new Uint32Array(1))[0] as number) / 2 ** 32;
@@ -638,6 +643,13 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash));
         if (out.level !== undefined) notifyLevel(characterId, out.level);
+        if (out.result.ok && options.onApplied) {
+          try {
+            options.onApplied(characterId, name, out.result.change);
+          } catch (error) {
+            console.error(`applied listener failed: ${describeError(error)}`);
+          }
+        }
         return out.result;
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);

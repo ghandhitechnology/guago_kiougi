@@ -101,7 +101,16 @@ export class RoomMetrics {
   viewChanges = 0;
   private readonly sim = new Ring();
   private readonly net = new Ring();
-  private readonly count = { kills: 0, spawns: 0, hits: 0, casts: 0, events: 0, downs: 0, revives: 0, wakes: 0 };
+  private readonly count = {
+    kills: 0,
+    spawns: 0,
+    hits: 0,
+    casts: 0,
+    events: 0,
+    downs: 0,
+    revives: 0,
+    wakes: 0,
+  };
   private countAt = { ...this.count, fx: 0, t: performance.now() };
   private lastFight: RoomSnapshot["fight"] | undefined;
   private fightNet: FightNet | undefined;

@@ -12,6 +12,7 @@ import {
 import {
   AIM_MESSAGE,
   aimMessage,
+  type ChangeNotice,
   type Character,
   createFight,
   dressPlayer,
@@ -46,8 +47,8 @@ import {
   TICK_MS,
   TILE_SIZE,
 } from "@guago/shared";
-import { type GrantSink, MemoryGrants } from "./fight/grants.ts";
-import { type Loadouts, starterLoadouts } from "./fight/loadout.ts";
+import { grants } from "./economy/grants.ts";
+import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
@@ -66,9 +67,6 @@ const MAX_CATCH_UP = 3;
  * keeps every tick within a few milliseconds of its time.
  */
 const POLL_MS = 5;
-/** EXP is handed to the grant sink this often, and the sink flushed every few of those. */
-const EXP_EVERY_MS = 2_000;
-const GRANT_FLUSH_MS = 10_000;
 /** Aim, mode and revive requests a client may send per second, after a small burst. */
 const RATES = { aim: [20, 10], mode: [2, 2], revive: [4, 4] } as const;
 
@@ -105,17 +103,37 @@ interface Pawn {
   readonly player: Player;
   readonly character: Character;
   readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
+  /** What it fights with; replaced when an operation changes it. */
+  loadout: Loadout;
+  /** EXP below one, carried to the next grant: grants take whole numbers. */
+  expCarry: number;
 }
 
 const wire = (px: number) => Math.round(px * POS_SCALE);
 
-let grants: GrantSink = new MemoryGrants();
 let loadouts: Loadouts = starterLoadouts;
 
-/** Called once at server start to wire the real grant executor and inventory. */
-export function provideFightServices(s: { grants?: GrantSink; loadouts?: Loadouts }): void {
-  if (s.grants) grants = s.grants;
+/** Called once at server start to read loadouts from the inventory. */
+export function provideFightServices(s: { loadouts?: Loadouts }): void {
   if (s.loadouts) loadouts = s.loadouts;
+}
+
+/** Characters fighting in this process, by id, for loadout changes. */
+const fighting = new Map<string, { room: MapRoom; pawn: Pawn }>();
+
+/**
+ * An operation landed for a character (the executor's `onApplied`): when it touched what the
+ * character fights with (an equip, 필기, a forge, a level or stats), its kit is rebuilt.
+ */
+export function fightLoadoutChanged(characterId: string, change: ChangeNotice): void {
+  const at = fighting.get(characterId);
+  if (!at) return;
+  const touched =
+    (change.items?.some((i) => i.slot !== null) ?? false) ||
+    (change.removed?.length ?? 0) > 0 ||
+    change.progression !== undefined;
+  if (!touched) return;
+  void at.room.reload(at.pawn);
 }
 
 /** The map a room runs: `GUAGO_MAP` names it (the lawn by default). */
@@ -212,8 +230,17 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
-    this.clock.setInterval(() => this.handOverExp(), EXP_EVERY_MS);
-    this.clock.setInterval(() => void grants.flush(), GRANT_FLUSH_MS);
+  }
+
+  /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
+  async reload(pawn: Pawn): Promise<void> {
+    const loadout = await loadouts.read(pawn.character);
+    if (this.pawns.get(pawn.player.id) !== pawn) return;
+    pawn.loadout = loadout;
+    const p = pawn.player;
+    // The inventory's level is the record; the fight may run ahead of grants not yet landed.
+    if (loadout.level > p.level) p.level = loadout.level;
+    this.world.setKit(p, this.world.rules.kit(buildOf(pawn.character, loadout, p.level)));
   }
 
   /**
@@ -232,7 +259,14 @@ export class MapRoom extends Room<{ state: MapState }> {
         const n = typeof b === "number" ? Math.min(20, Math.max(1, b)) : 1;
         for (let i = 0; i < n; i++) {
           const ang = (i / n) * Math.PI * 2;
-          spawnMonster(this.world, kind, p.level, false, p.x + Math.cos(ang) * 90, p.y + Math.sin(ang) * 60);
+          spawnMonster(
+            this.world,
+            kind,
+            p.level,
+            false,
+            p.x + Math.cos(ang) * 90,
+            p.y + Math.sin(ang) * 60,
+          );
         }
       } else if (cmd === "clear") {
         for (const m of this.world.monsters) if (m.alive) m.gone = true;
@@ -273,11 +307,19 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (slot === undefined || !state)
       throw new Error("no free body; maxClients should have refused the join");
     const rules = this.world.rules;
-    const level = Math.max(character.level, grants.progress(character.id)?.level ?? 0, 1);
-    const build = (lv: number) => rules.kit(loadouts.buildFor(character, lv));
-    const player = this.world.addPlayer(id, Number(slot), start.x, start.y, build(level), level);
-    player.exp = grants.progress(character.id)?.exp ?? 0;
-    player.rebuild = build;
+    const loadout = await loadouts.read(character);
+    const level = Math.max(1, loadout.level);
+    const kitAt = (lv: number) => rules.kit(buildOf(character, pawn.loadout, lv));
+    const player = this.world.addPlayer(
+      id,
+      Number(slot),
+      start.x,
+      start.y,
+      rules.kit(buildOf(character, loadout, level)),
+      level,
+    );
+    player.exp = loadout.exp;
+    player.rebuild = kitAt;
     state.sid = id;
     state.seq = 0;
     dressPlayer(state, character);
@@ -298,6 +340,8 @@ export class MapRoom extends Room<{ state: MapState }> {
       queue: new InputQueue(),
       player,
       character,
+      loadout,
+      expCarry: 0,
       buckets: {
         aim: new Bucket(RATES.aim[0], RATES.aim[1]),
         mode: new Bucket(RATES.mode[0], RATES.mode[1]),
@@ -306,6 +350,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     };
     this.pawns.set(id, pawn);
     this.bySlot.set(Number(slot), pawn);
+    fighting.set(character.id, { room: this, pawn });
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
@@ -346,11 +391,8 @@ export class MapRoom extends Room<{ state: MapState }> {
     const id = client.sessionId;
     const pawn = this.pawns.get(id);
     if (pawn) {
-      const p = pawn.player;
-      if (p.expEarned > 0) grants.exp(pawn.character.id, p.expEarned);
-      p.expEarned = 0;
-      grants.setProgress(pawn.character.id, p.level, p.exp);
-      void grants.flush(pawn.character.id);
+      this.handOverExp(pawn);
+      if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
       this.grid.watch(pawn.viewer, undefined);
       this.grid.remove(pawn.state);
       pawn.state.sid = "";
@@ -379,14 +421,16 @@ export class MapRoom extends Room<{ state: MapState }> {
     };
   }
 
-  /** EXP earned since the last hand-over goes to the grant sink. */
-  private handOverExp(): void {
-    for (const pawn of this.pawns.values()) {
-      const p = pawn.player;
-      if (p.expEarned <= 0) continue;
-      grants.exp(pawn.character.id, p.expEarned);
-      p.expEarned = 0;
-      grants.setProgress(pawn.character.id, p.level, p.exp);
+  /** EXP earned since the last hand-over joins the character's pending grant, in whole points. */
+  private handOverExp(pawn: Pawn): void {
+    const p = pawn.player;
+    if (p.expEarned <= 0) return;
+    const total = pawn.expCarry + p.expEarned;
+    const whole = Math.floor(total);
+    p.expEarned = 0;
+    pawn.expCarry = total - whole;
+    if (whole >= 1 && Number.isSafeInteger(whole)) {
+      grants()?.add(pawn.character.id, { exp: whole, drops: [] });
     }
   }
 
@@ -406,10 +450,13 @@ export class MapRoom extends Room<{ state: MapState }> {
       for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take() as FightInput[]);
       const s0 = performance.now();
       stepFight(this.world, inputs);
+      // What combat earned goes to each character's pending grant; nothing touches the database.
+      const sink = grants();
       for (const g of this.world.grants) {
         const pawn = this.pawns.get(g.player.id);
-        if (pawn) grants.drop(pawn.character.id, g.drop.payload as Drop);
+        if (pawn) sink?.add(pawn.character.id, { exp: 0, drops: [g.drop.payload as Drop] });
       }
+      for (const pawn of this.pawns.values()) this.handOverExp(pawn);
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {
