@@ -190,6 +190,15 @@ beforeEach(async () => {
 describe("walking through a door", () => {
   it("is in one room before and after, never two, and saved on the far side in between", async () => {
     const { jar, id } = await player("walker");
+    // The walker holds the WorldRoom beside the map room, as a browser does; a friend online
+    // sees their presence move with them.
+    const own = await sdk(base, jar).joinOrCreate(WORLD_ROOM);
+    const friend = await player("friend");
+    const world = await sdk(base, friend.jar).joinOrCreate(WORLD_ROOM);
+    const moves: string[] = [];
+    world.onMessage(WORLD_MESSAGES.presence, (m: PresenceMessage) => {
+      if (m.t === "map" && m.id === id) moves.push(`${m.map}#${m.ch}`);
+    });
     const { room, seating } = await joinMap(base, jar);
     room.onMessage("*", () => {});
     expect(seating.map).toBe("campus-yard");
@@ -225,7 +234,12 @@ describe("walking through a door", () => {
     });
     expect(next.state.map).toBe("gaseolgwan-stairs");
     expect(places.get(id)).toMatchObject({ mapId: "gaseolgwan-stairs", channel: 1 });
+    // From the yard straight to the stairs: never on no map in between.
+    await waitFor(() => moves.length >= 2);
+    expect(moves).toEqual(["campus-yard#1", "gaseolgwan-stairs#1"]);
     await next.leave();
+    await world.leave();
+    await own.leave();
   });
 
   it("lands on the far side when the connection drops in the middle of it", async () => {

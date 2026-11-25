@@ -47,8 +47,12 @@ import { playWorld } from "./world-sound.ts";
 const PLAYER_RIG = "student";
 /** The camera frames the body, not the feet. */
 const CHEST_PX = 10;
-/** A door the prediction walked into that the server never answers is given up after this. */
-const DOOR_PATIENCE_MS = 1500;
+/**
+ * A door the prediction walked into is given up when the server's body has caught up with the
+ * drawn one and stood this long without being sent through, or after `DOOR_GIVE_UP_MS` at most.
+ */
+const DOOR_PATIENCE_MS = 400;
+const DOOR_GIVE_UP_MS = 5000;
 /** Pressing against a shut door this long rattles it. */
 const PUSH_MS = 90;
 const RATTLE_COOLDOWN_MS = 1200;
@@ -56,6 +60,8 @@ const RATTLE_COOLDOWN_MS = 1200;
 const HEAR_PX = 220;
 /** A door this close starts loading the map behind it. */
 const NEAR_DOOR_PX = 56;
+/** Development only: `?cold` turns that off, to time a door whose map loads behind the curtain. */
+const PREFETCH = !(import.meta.env.DEV && new URLSearchParams(location.search).has("cold"));
 const KO = narrative.NARRATIVE.ko;
 
 /** One map change as the player saw it: from the step into the door to the fade lifting. */
@@ -67,7 +73,7 @@ interface Transition {
   readonly how: "step" | "server";
   /** Whether the map behind the door was already loaded. */
   readonly warm: boolean;
-  /** Milliseconds to each stage: transfer, seat, map, dark, body. */
+  /** Milliseconds to each stage: transfer, seat, map, dark, body, view (the map view built). */
   readonly marks: Record<string, number>;
 }
 
@@ -124,6 +130,8 @@ export class WorldScene extends Phaser.Scene {
   /** The predicted body stepped into a built door at this time and waits for the server. */
   private doorAt: number | undefined;
   private selfInside = -1;
+  /** Where the server last put the player's own body, in pixels. */
+  private serverSelf: { x: number; y: number } | undefined;
   private pushFor = 0;
   /** The move the keys gave the last simulation tick. */
   private lastMove: [number, number] = [0, 0];
@@ -250,6 +258,7 @@ export class WorldScene extends Phaser.Scene {
     const before = this.here?.map.id;
     this.clearMap();
     const view = MapView.create(this, map.id);
+    this.mark("view");
     const untier = onQualityTier((t) => view.setTier(t));
     enteredMap(this, map.id);
     const npcs = new Map<string, NpcActor>();
@@ -406,14 +415,23 @@ export class WorldScene extends Phaser.Scene {
     playWorld("door.open", { volume: 0.6 });
     void this.curtain.close();
     const at = this.doorAt;
-    this.time.delayedCall(DOOR_PATIENCE_MS, () => {
+    const drawn = this.selfActor?.body;
+    const check = () => {
       if (this.doorAt !== at) return;
+      // The drawn body may lead the server's after a stall: wait while the server's catches up.
+      const s = this.serverSelf;
+      const behind = s && drawn ? Math.hypot(s.x - drawn.x, s.y - drawn.y) > 2 : false;
+      if (behind && performance.now() - at < DOOR_GIVE_UP_MS) {
+        this.time.delayedCall(DOOR_PATIENCE_MS, check);
+        return;
+      }
       // The server did not agree: the door stays here.
       this.doorAt = undefined;
       this.transitionStart = undefined;
       this.holding = false;
       void this.curtain.open();
-    });
+    };
+    this.time.delayedCall(DOOR_PATIENCE_MS, check);
   }
 
   // Patches and messages ------------------------------------------------------------------
@@ -436,6 +454,7 @@ export class WorldScene extends Phaser.Scene {
       if (!p.sid) continue;
       if (p.sid === this.selfId) {
         this.self?.onServer(p);
+        this.serverSelf = { x: p.x / POS_SCALE, y: p.y / POS_SCALE };
         continue;
       }
       seated.add(p.sid);
@@ -605,7 +624,7 @@ export class WorldScene extends Phaser.Scene {
     dt: number,
   ) {
     // Loading starts a few steps before the door, so the far side is in by the time of the fade.
-    for (const p of map.portals) {
+    for (const p of PREFETCH ? map.portals : []) {
       if (!p.built || mapReady(this, p.to)) continue;
       if (distanceToArea(p.rect, x, y) < NEAR_DOOR_PX) void ensureMap(this, p.to).catch(() => {});
     }
