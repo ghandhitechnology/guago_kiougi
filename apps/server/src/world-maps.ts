@@ -12,6 +12,7 @@ import {
   overlapsSolid,
   PLAYER_RADIUS,
   shutDoors,
+  TILE_SIZE,
 } from "@guago/shared";
 
 const MAPS: ReadonlyMap<string, BuiltMap> = new Map(buildAllMaps().map((r) => [r.map.id, r.map]));
@@ -59,26 +60,41 @@ export function startPlace(): Place {
   return mainOf(MAPS.get(START_MAP) as BuiltMap);
 }
 
+/** Pixels a blocked spot may be moved to find room for the feet. */
+const NUDGE_PX = 12;
+
+/** The spot, or the nearest one within a few pixels where the feet fit. */
+function clearSpot(map: BuiltMap, x: number, y: number): { x: number; y: number } | undefined {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) return undefined;
+  if (x >= map.w * TILE_SIZE || y >= map.h * TILE_SIZE) return undefined;
+  const walls = roomCollision(map);
+  for (let r = 0; r <= NUDGE_PX; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        if (!overlapsSolid(walls, x + dx, y + dy, PLAYER_RADIUS)) return { x: x + dx, y: y + dy };
+      }
+    }
+  }
+  return undefined;
+}
+
 /**
- * A saved place made valid: the spot itself when its map is built and the feet fit there,
- * else that map's main spawn, else the start.
+ * A saved place made valid: the spot itself when its map is built and the feet fit there (or
+ * fit a few pixels off), else that map's main spawn, else the start.
  */
 export function validPlace(mapId: string, x: number, y: number): Place {
   const map = MAPS.get(mapId);
   if (!map) return startPlace();
-  const fits =
-    Number.isFinite(x) &&
-    Number.isFinite(y) &&
-    x > 0 &&
-    y > 0 &&
-    !overlapsSolid(roomCollision(map), x, y, PLAYER_RADIUS);
-  return fits ? { map, x, y, facing: facingOf("down") } : mainOf(map);
+  const spot = clearSpot(map, x, y);
+  return spot ? { map, ...spot, facing: facingOf("down") } : mainOf(map);
 }
 
-/** A spawn of `map` by name, else its main spawn. */
+/** A spawn of `map` by name, nudged clear of walls, else its main spawn. */
 export function spawnPlace(map: BuiltMap, name: string): Place {
   const s = map.spawns[name];
-  return s ? { map, x: s.x, y: s.y, facing: facingOf(s.facing) } : mainOf(map);
+  const spot = s && clearSpot(map, s.x, s.y);
+  return s && spot ? { map, ...spot, facing: facingOf(s.facing) } : mainOf(map);
 }
 
 // The cast -----------------------------------------------------------------------------------

@@ -4,7 +4,7 @@
  * the server says, with a nameplate under their feet. A speaker with no art yet is skipped.
  */
 import type { ArtMetadata } from "@guago/art";
-import { narrative } from "@guago/content";
+import { CAST_ART, narrative } from "@guago/content";
 import { Facing } from "@guago/shared";
 import type * as Phaser from "phaser";
 import { ENTITY_DEPTH, SHADOW_ALPHA, SHADOW_DEPTH } from "./actors.ts";
@@ -13,19 +13,8 @@ import { OVERHEAD_DEPTH } from "./map-draw.ts";
 import { Label } from "./ui/text.ts";
 import { sliceOf } from "./ui/theme.ts";
 
-/** Art names that differ from the speaker id and the narrative's `actor`. */
-const ART_NAMES: Readonly<Record<string, string>> = { cook: "head-cook" };
-
-/** Rig animations every rig shares; anything else a rig has is its own signature move. */
-const COMMON = new Set(["idle", "walk", "attack", "hit", "ko", "yawn", "page"]);
-
 export type NpcArt =
-  | {
-      readonly kind: "rig";
-      readonly rig: string;
-      readonly look: string;
-      readonly signature?: string;
-    }
+  | { readonly kind: "rig"; readonly rig: string; readonly look: string; readonly signature?: string }
   | { readonly kind: "sprite"; readonly sprite: string; readonly signature?: string };
 
 const SPEAKERS = new Map(narrative.NARRATIVE.speakers.map((s) => [s.id, s]));
@@ -37,22 +26,24 @@ export function speakerName(speaker: string): string {
   return (key && KO[key]) || "";
 }
 
-/** What `speaker` is drawn with, or undefined while the art build has nothing for them. */
+/**
+ * What `speaker` is drawn with (`CAST_ART`), or undefined while the art build has nothing for
+ * them yet, so a cast member whose sprites are still being drawn is simply not there.
+ */
 export function npcArt(meta: ArtMetadata, speaker: string): NpcArt | undefined {
-  const name = ART_NAMES[speaker] ?? SPEAKERS.get(speaker)?.actor ?? speaker;
-  const rig = meta.rigs[name];
-  if (rig) {
-    const look = Object.keys(rig.looks)[0];
-    if (!look) return undefined;
-    const signature = Object.keys(rig.anims).find((a) => !COMMON.has(a));
-    return { kind: "rig", rig: name, look, ...(signature ? { signature } : {}) };
+  const cast = CAST_ART[speaker];
+  if (!cast) return undefined;
+  if (cast.kind === "rig") {
+    const rig = meta.rigs[cast.art];
+    const look = rig && Object.keys(rig.looks)[0];
+    if (!rig || !look) return undefined;
+    const signature = rig.anims[cast.signature] ? cast.signature : undefined;
+    return { kind: "rig", rig: cast.art, look, ...(signature ? { signature } : {}) };
   }
-  const sprite = meta.sprites[name];
-  if (sprite?.anims.idle) {
-    const signature = Object.keys(sprite.anims).find((a) => a !== "idle" && !a.startsWith("walk"));
-    return { kind: "sprite", sprite: name, ...(signature ? { signature } : {}) };
-  }
-  return undefined;
+  const sprite = meta.sprites[cast.art];
+  if (!sprite?.anims.idle) return undefined;
+  const signature = sprite.anims[cast.signature] ? cast.signature : undefined;
+  return { kind: "sprite", sprite: cast.art, ...(signature ? { signature } : {}) };
 }
 
 const DIRS: Record<number, string> = {
