@@ -13,6 +13,10 @@ const HORIZON = 148;
 const WALL = 182;
 const GROUND = 196;
 const NIGHT = "campus-night";
+/** Lamp light, brightest band first, as the campus-night scene paints it. */
+export const LAMP_BANDS = ["campus-lamp", "campus-dusk", "campus-glow"] as const;
+/** The lamp's foot on screen and the reach of its light. */
+const LAMP = { x: 346, y: 226, r: [84, 34] as const };
 
 interface Layer {
   readonly obj: Phaser.GameObjects.Components.Transform;
@@ -123,7 +127,7 @@ export class NightBackdrop {
     this.building(night);
 
     // The lamp and its bench, the cat on the wall, the pine and its needles.
-    const lamp = scene.add.image(346, 226, night, "lamp/still");
+    const lamp = scene.add.image(LAMP.x, LAMP.y, night, "lamp/still");
     this.layer(lamp, lamp.x, lamp.y, 1);
     const moths = scene.add.sprite(346, 184, "core", "moths/fly0").play(spriteAnim("moths", "fly"));
     this.layer(moths, moths.x, moths.y, 1);
@@ -291,15 +295,16 @@ export class NightBackdrop {
     }
   }
 
-  /** The promenade along the wall and the lawn below it, with a path down the middle. */
+  /**
+   * The promenade along the wall and the lawn below it, with a path down the middle, lit by
+   * the lamp the way the art's scenes paint light: stepped bands of brighter palette themes
+   * with ragged edges, not a blend.
+   */
   private groundTexture(scene: Phaser.Scene, meta: ArtMetadata): string {
     const key = "title-ground";
     if (scene.textures.exists(key)) return key;
     const tileset = meta.tilesets["lawn-walk"];
     if (!tileset) throw new Error("art has no lawn-walk terrain");
-    const atlasKey = `tiles-${NIGHT}`;
-    const atlas = scene.textures.get(atlasKey);
-    const img = atlas.getSourceImage() as CanvasImageSource;
     const cols = 33;
     const rows = 6;
     // 1 is grass, 0 the paved walk: a promenade two cells deep, a path down to the bottom.
@@ -312,46 +317,83 @@ export class NightBackdrop {
     }
     const grid = { w: cols, h: rows, cells };
     const picked = pickTiles(grid, 1, tileset.masks, 1123);
+    const decals = scatterDecals(grid, 1, tileset.decals, 1123);
     const { tile, margin, spacing, columns } = meta.tileGrid;
-    const canvas = document.createElement("canvas");
-    canvas.width = cols * tile;
-    canvas.height = rows * tile;
-    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-    ctx.imageSmoothingEnabled = false;
-    for (let j = 0; j <= rows; j++) {
-      for (let i = 0; i <= cols; i++) {
-        const idx = picked[j * (cols + 1) + i] as number;
-        const sx = margin + (idx % columns) * (tile + spacing);
-        const sy = margin + Math.floor(idx / columns) * (tile + spacing);
+    const w = cols * tile;
+    const h = rows * tile;
+
+    const paintTheme = (theme: string): ImageData | undefined => {
+      if (!scene.textures.exists(`tiles-${theme}`)) return undefined;
+      const atlas = scene.textures.get(`tiles-${theme}`);
+      const img = atlas.getSourceImage() as CanvasImageSource;
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
+      ctx.imageSmoothingEnabled = false;
+      for (let j = 0; j <= rows; j++) {
+        for (let i = 0; i <= cols; i++) {
+          const idx = picked[j * (cols + 1) + i] as number;
+          const sx = margin + (idx % columns) * (tile + spacing);
+          const sy = margin + Math.floor(idx / columns) * (tile + spacing);
+          ctx.drawImage(
+            img,
+            sx,
+            sy,
+            tile,
+            tile,
+            i * tile - tile / 2,
+            j * tile - tile / 2,
+            tile,
+            tile,
+          );
+        }
+      }
+      for (const d of decals) {
+        const decal = tileset.decals[d.decal];
+        if (!decal || !atlas.has(decal.frame)) continue;
+        const f = atlas.get(decal.frame);
         ctx.drawImage(
           img,
-          sx,
-          sy,
-          tile,
-          tile,
-          i * tile - tile / 2,
-          j * tile - tile / 2,
-          tile,
-          tile,
+          f.cutX,
+          f.cutY,
+          f.cutWidth,
+          f.cutHeight,
+          d.x + f.x,
+          d.y + f.y,
+          f.cutWidth,
+          f.cutHeight,
         );
       }
+      return ctx.getImageData(0, 0, w, h);
+    };
+
+    const base = paintTheme(NIGHT);
+    if (!base) throw new Error(`tiles-${NIGHT} is not loaded`);
+    // Brightest band first; each band covers a third of the pool's radius.
+    const bands = LAMP_BANDS.map(paintTheme);
+    const [lx, ly] = [LAMP.x + 16, LAMP.y - (GROUND - 4)];
+    const [rx, ry] = LAMP.r;
+    const out = base.data;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const d = Math.hypot((x - lx) / rx, (y - ly) / ry);
+        // A ragged edge: the band boundary wanders by a few pixels.
+        const ragged = d + ((hash2(x >> 1, y >> 1, 5) % 1000) / 1000 - 0.5) * 0.09;
+        const k = Math.floor(ragged * bands.length);
+        const band = k >= 0 && k < bands.length ? bands[k] : undefined;
+        if (!band) continue;
+        const i = (y * w + x) * 4;
+        out[i] = band.data[i] as number;
+        out[i + 1] = band.data[i + 1] as number;
+        out[i + 2] = band.data[i + 2] as number;
+        out[i + 3] = band.data[i + 3] as number;
+      }
     }
-    for (const d of scatterDecals(grid, 1, tileset.decals, 1123)) {
-      const decal = tileset.decals[d.decal];
-      if (!decal || !atlas.has(decal.frame)) continue;
-      const f = atlas.get(decal.frame);
-      ctx.drawImage(
-        img,
-        f.cutX,
-        f.cutY,
-        f.cutWidth,
-        f.cutHeight,
-        d.x + f.x,
-        d.y + f.y,
-        f.cutWidth,
-        f.cutHeight,
-      );
-    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    (canvas.getContext("2d") as CanvasRenderingContext2D).putImageData(base, 0, 0);
     scene.textures.addCanvas(key, canvas);
     return key;
   }

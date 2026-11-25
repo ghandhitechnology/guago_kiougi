@@ -5,7 +5,15 @@ import { FRONT_SCENE, UI_SCENE, WORLD_SCENE, type WorldEntry } from "./entry.ts"
 import { setUiArt } from "./ui/theme.ts";
 
 /** Atlases the front end draws from; the world loads its tiles itself. */
-const FRONT_ATLASES = ["core", "ui", "portraits", "tiles-campus-night"];
+const FRONT_ATLASES = [
+  "core",
+  "ui",
+  "portraits",
+  "tiles-campus-night",
+  "tiles-campus-lamp",
+  "tiles-campus-dusk",
+  "tiles-campus-glow",
+];
 
 /**
  * Loads what the first screens need, then asks the server whether this browser already has a

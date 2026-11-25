@@ -184,8 +184,16 @@ export class FrontScene extends Phaser.Scene implements Flow {
       }
     });
     if (next === this.current) return;
-    this.current?.close();
+    const was = this.current;
     this.current = next;
-    next.open();
+    if (!was) {
+      next.open();
+      return;
+    }
+    // The old sheet is picked up first, so two pages never blur into each other.
+    was.close();
+    this.time.delayedCall(90, () => {
+      if (this.current === next) next.open();
+    });
   }
 }

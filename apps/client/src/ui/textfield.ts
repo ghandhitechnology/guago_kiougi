@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { fieldBlurred, fieldFocused } from "./keyboard-room.ts";
 import { Highlighter } from "./marks.ts";
 import { shake } from "./motion.ts";
 import { sound } from "./sound.ts";
@@ -158,8 +159,10 @@ export class TextField extends Widget {
       if (this.ctx.scope.current !== this) this.ctx.scope.focus(this, "pointer");
       this.blink = 0;
       this.draw();
+      fieldFocused(el);
     });
     el.addEventListener("blur", () => {
+      fieldBlurred(el);
       this.composing = undefined;
       this.draw();
     });
