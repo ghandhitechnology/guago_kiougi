@@ -158,6 +158,11 @@ function frameStrip(
 ): number {
   const fw = Math.max(...frames.map(([, i]) => i.w));
   const fh = Math.max(...frames.map(([, i]) => i.h));
+  // Large art (an era boss's 160 px parts) shows at ×2 on the checkerboard and one ground only:
+  // at ×4 on every theme's ground each frame takes a row of its own, thirty times over.
+  const big = fw > 96 || fh > 96;
+  const z = big ? 2 : 4;
+  const grounds = big ? backdrops.slice(0, 2) : backdrops;
   const gap = 8;
   let x = 20;
   // ×1 on a checkerboard.
@@ -167,22 +172,22 @@ function frameStrip(
     x += fw + gap;
   }
   y += fh + 10;
-  for (const bg of backdrops) {
+  for (const bg of grounds) {
     x = 20;
     let maxX = x;
     for (const [name, img] of frames) {
-      if (x + fw * 4 > s.c.w - 20) {
+      if (x + fw * z > s.c.w - 20) {
         x = 20;
-        y += fh * 4 + 26;
+        y += fh * z + 26;
       }
-      if (bg) s.c.rect(x, y, fw * 4, fh * 4, bg);
-      else checker(s.c, x, y, fw * 4, fh * 4, 8);
-      s.c.draw(img, x, y, lut, 4);
-      if (bg === backdrops[0]) drawText(s.c, f.label, name, x, y + fh * 4 + 4, UI.dim);
-      x += fw * 4 + gap;
+      if (bg) s.c.rect(x, y, fw * z, fh * z, bg);
+      else checker(s.c, x, y, fw * z, fh * z, 8);
+      s.c.draw(img, x, y, lut, z);
+      if (bg === grounds[0]) drawText(s.c, f.label, name, x, y + fh * z + 4, UI.dim);
+      x += fw * z + gap;
       maxX = Math.max(maxX, x);
     }
-    y += fh * 4 + (bg === backdrops[0] ? 24 : gap);
+    y += fh * z + (bg === grounds[0] ? 24 : gap);
   }
   s.mark(y);
   return y;
