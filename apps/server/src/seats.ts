@@ -250,6 +250,11 @@ export class RoomSeats {
     return seat !== undefined && !seat.evicted && !seat.moving;
   }
 
+  /** Whether a dropped socket of this session may still come back. */
+  holding(sessionId: string): boolean {
+    return this.seats.get(sessionId)?.reconnection !== undefined;
+  }
+
   hold(client: Client, reconnection: Reconnection): void {
     reconnection.catch(() => {});
     const seat = this.seats.get(client.sessionId);

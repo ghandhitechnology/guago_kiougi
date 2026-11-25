@@ -1,4 +1,11 @@
-import { type AuthContext, type Client, type Delayed, Room, ServerError } from "@colyseus/core";
+import {
+  type AuthContext,
+  type Client,
+  ClientState,
+  type Delayed,
+  Room,
+  ServerError,
+} from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import { type BuiltMap, type Interactable, type Patrol, patrolPose, sees } from "@guago/content";
 import {
@@ -50,6 +57,7 @@ import {
 import { channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubTags } from "./club-tags.ts";
 import { InterestGrid, type Viewer } from "./interest.ts";
+import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
@@ -113,6 +121,16 @@ const HOME_EVERY_MS = 2000;
 /** Guards look every other tick; a player they caught is not seen again for this long. */
 const PATROL_EVERY_TICKS = 2;
 const CAUGHT_GRACE_TICKS = 80;
+/** Development and tests: how often each room checks that bodies and clients pair up. */
+const BODY_CHECK_MS = 2000;
+
+/** Every map room of this process, for the development checks across rooms. */
+const ROOMS = new Set<MapRoom>();
+
+/** Runs every room's body check now (tests call it at the moments that matter). */
+export function checkMapRooms(): void {
+  for (const room of ROOMS) room.checkBodies();
+}
 
 /** A player's body in this room: what is synced, what its client sees, what it asked to do. */
 interface Pawn {
@@ -195,6 +213,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   private graceMs = 30_000;
   private ticks!: TickClock;
   private unlistenClubs: (() => void) | undefined;
+  /** Sessions whose body walked out through a door; their socket stays open a little while. */
+  private readonly moved = new Set<string>();
 
   /**
    * Map rooms are never matchmade by a client: every seat is reserved by the server for a
@@ -262,6 +282,10 @@ export class MapRoom extends Room<{ state: MapState }> {
         if (pawn.character.id === characterId) wearClub(pawn.state, tag);
       }
     });
+    if (invariants.on) {
+      ROOMS.add(this);
+      this.clock.setInterval(() => this.checkBodies(), BODY_CHECK_MS);
+    }
     // Made for a seat that may never be taken.
     this.emptied();
   }
@@ -341,6 +365,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   /** Puts a joined character's body into the world and the client's view around it. */
   private seat(client: Client, character: Character, options: SeatOptions): void {
     const id = client.sessionId;
+    if (invariants.on) oneBody(character.id, this);
     const start =
       character.mapId === this.def.id
         ? validPlace(this.def.id, character.x, character.y)
@@ -414,18 +439,31 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override onDrop(client: Client): void {
     // The character stays where it stood; queued inputs from before the drop are stale.
-    this.pawns.get(client.sessionId)?.queue.clear();
-    if (!this.seats.mayReconnect(client)) return;
+    const pawn = this.pawns.get(client.sessionId);
+    pawn?.queue.clear();
+    if (!this.seats.mayReconnect(client)) {
+      if (pawn) pawn.leaving = true;
+      return;
+    }
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
 
-  override onReconnect(client: Client): void {
+  override async onReconnect(client: Client): Promise<void> {
     this.seats.reconnected(client);
     this.countBytes(client);
+    // Moved by the server while the socket was down (sent home, let back, walked out): there is
+    // no body here to come back to. The client enters again and lands where it belongs.
+    const pawn = this.pawns.get(client.sessionId);
+    if (!pawn || pawn.leaving || !(await this.belongsHere(pawn.character))) {
+      if (client.state !== ClientState.LEAVING) client.leave(CLOSE_MAP_CHANGED);
+    }
   }
 
   override async onLeave(client: Client): Promise<void> {
     places.leave(client.sessionId);
+    this.moved.delete(client.sessionId);
+    const pawn = this.pawns.get(client.sessionId);
+    if (pawn) pawn.leaving = true;
     if (this.clients.length === 0) this.emptied();
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
@@ -434,6 +472,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override onDispose(): void {
+    ROOMS.delete(this);
     channels.forget(this.roomId);
     this.unlistenClubs?.();
     this.metrics.dispose();
@@ -618,6 +657,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     pawn.leaving = true;
     pawn.queue.clear();
     this.removeBody(id);
+    this.moved.add(id);
     const arrive = spawnPlace(target, spawn);
     let auth: Awaited<ReturnType<RoomSeats["moveOut"]>>;
     try {
@@ -629,6 +669,8 @@ export class MapRoom extends Room<{ state: MapState }> {
       }
       return;
     }
+    // Dropped meanwhile: the far side is written, and entering again lands there.
+    if (!this.clients.includes(client)) return;
     let seating: Awaited<ReturnType<typeof channels.seat>> | undefined;
     try {
       seating = await channels.seat(target.id, auth, { facing: arrive.facing });
@@ -685,8 +727,37 @@ export class MapRoom extends Room<{ state: MapState }> {
     const back: Pawn = { ...pawn, slot, state, leaving: false, queue: new InputQueue() };
     pawn.client.view?.add(state, OWNER_TAG);
     this.pawns.set(id, back);
+    this.moved.delete(id);
     const cell = this.grid.place(state, x, y);
     this.grid.watch(back.viewer, cell ?? this.grid.cellOfEntity(state));
+  }
+
+  /**
+   * Development and tests: every joined client has a body here, unless it just walked out through
+   * a door, and every body has its client or a reconnection held for it.
+   */
+  checkBodies(): void {
+    const where = `${this.def.id}#${this.state.channel}`;
+    for (const client of this.clients) {
+      const id = client.sessionId;
+      if (client.state !== ClientState.JOINED || this.pawns.has(id) || this.moved.has(id)) continue;
+      invariants.report(`client ${id} in ${where} has no body`);
+    }
+    for (const [id, pawn] of this.pawns) {
+      if (pawn.leaving || this.seats.holding(id)) continue;
+      if (!this.clients.some((c) => c.sessionId === id)) {
+        invariants.report(`body ${id} in ${where} has no client`);
+      }
+    }
+  }
+
+  /** Bodies of a character standing in this room, for the check across rooms. */
+  bodiesOf(characterId: string): number {
+    let n = 0;
+    for (const pawn of this.pawns.values()) {
+      if (pawn.character.id === characterId && !pawn.leaving) n++;
+    }
+    return n;
   }
 
   // The cast -----------------------------------------------------------------------------------
@@ -848,5 +919,16 @@ export class MapRoom extends Room<{ state: MapState }> {
       y: back.y,
     } satisfies Caught);
     void live()?.events.patrolCaught(pawn.character.id);
+  }
+}
+
+/** Development and tests: a character about to be seated has no body anywhere else. */
+function oneBody(characterId: string, here: MapRoom): void {
+  for (const room of ROOMS) {
+    if (room.bodiesOf(characterId) > 0) {
+      invariants.report(
+        `character ${characterId} has a body in ${room.mapId}#${room.channel} while seated in ${here.mapId}#${here.channel}`,
+      );
+    }
   }
 }
