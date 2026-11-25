@@ -9,6 +9,7 @@ import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
+import type { Live } from "./live/index.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
 import type { Social } from "./social/index.ts";
@@ -30,21 +31,32 @@ export function createGameServer(
     ops?: OpHandler;
     routes?: readonly ApiRoute[];
     grants?: GrantBuffer;
+    live?: Live;
     trading?: Trading;
   } = {},
 ) {
-  const { grants } = economy;
+  const { grants, live } = economy;
   provideGrants(grants);
   // A character's pending combat credit lands before their seat is freed, so the next login
-  // reads it.
+  // reads it; then the living world ends the session (the 자습 pool starts at logout).
   provideSeatServices({
     auth,
     ...settings,
-    ...(grants ? { onLeave: (id: string) => grants.flush(id) } : {}),
+    onLeave: async (id, slot, sessionId, replaced) => {
+      await grants?.flush(id);
+      await live?.left(id, slot, sessionId, replaced);
+    },
+    ...(live ? { onJoin: live.joined } : {}),
   });
   provideWorldServices({
     ...chat,
     ...(economy.ops ? { ops: economy.ops } : {}),
+    ...(live ? { handlers: live.handlers } : {}),
+  });
+  provideWorldServices({
+    ...chat,
+    ...(economy.ops ? { ops: economy.ops } : {}),
+    ...(live ? { handlers: live.handlers } : {}),
     ...(economy.trading ? { trading: economy.trading } : {}),
   });
   const api = createApiHandler(auth, settings, looks, economy.routes);
@@ -66,6 +78,7 @@ export function createGameServer(
     },
     express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
       app.disable("x-powered-by");
+      if (live) app.use(live.adminRoute);
       app.use(api);
     },
     greet: false,

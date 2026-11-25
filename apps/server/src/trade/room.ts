@@ -53,6 +53,8 @@ const BOARD_TYPES: BoardMessageName[] = ["listing.browse", "listing.mine", "list
 export interface TradingOptions {
   db: Db;
   executor: Pick<Executor, "executeAll">;
+  /** The server clock (live/clock.ts): listing times, cooldowns and price history follow it. */
+  clock?: () => Date;
 }
 
 type Answer = { type: string; body: unknown };
@@ -65,7 +67,7 @@ const refused = (type: string, n: number, code: Refusal["code"], retryMs?: numbe
   body: { type, n, code, ...(retryMs ? { retryMs } : {}) } satisfies Refusal,
 });
 
-export function createTrading({ db, executor }: TradingOptions) {
+export function createTrading({ db, executor, clock = () => new Date() }: TradingOptions) {
   let trades: Trades | undefined;
   const stops: (() => void)[] = [];
   const reads = new Buckets();
@@ -77,13 +79,13 @@ export function createTrading({ db, executor }: TradingOptions) {
       let data: BoardData[BoardMessageName];
       switch (m.type) {
         case "listing.browse":
-          data = await browseListings(db, m.req, me);
+          data = await browseListings(db, m.req, me, clock());
           break;
         case "listing.mine":
-          data = { listings: await myListings(db, me) };
+          data = { listings: await myListings(db, me, clock()) };
           break;
         case "listing.history":
-          data = { history: await priceHistory(db, m.req) };
+          data = { history: await priceHistory(db, m.req, clock()) };
           break;
       }
       return done(m.type, m.n, data);
@@ -98,6 +100,7 @@ export function createTrading({ db, executor }: TradingOptions) {
       const t = createTrades({
         db,
         executor,
+        clock,
         // A block either way drops a trade request without a word to either side.
         isBlocked: host.blocked,
         link: {

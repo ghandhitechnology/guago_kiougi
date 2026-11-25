@@ -56,6 +56,8 @@ import {
   type Wearer,
   type Worn,
 } from "@guago/shared";
+import { type LiveRequests, liveOps } from "../live/ops.ts";
+import type { LiveLoaded, LiveRows, LiveWrite } from "../live/rows.ts";
 import type { ExpireRequest, TradeCommitRequest } from "../trade/ops.ts";
 import type { Queryable } from "./executor.ts";
 import {
@@ -94,7 +96,7 @@ export interface GrantRequest {
   drops: Drop[];
 }
 
-export type Requests = OpRequests & InternalRequests;
+export type Requests = OpRequests & InternalRequests & LiveRequests;
 export type AnyOp = keyof Requests;
 /** Operations over listings or several characters; the rest touch one character's own rows. */
 export type PartyOp =
@@ -129,6 +131,8 @@ export interface Rows {
   listed?: readonly string[];
   /** Count the character's live listings. */
   listingCount?: boolean;
+  /** Living-world rows (live/rows.ts). */
+  live?: LiveRows;
 }
 
 export interface Loaded {
@@ -144,6 +148,7 @@ export interface Loaded {
   readonly exact: Readonly<Partial<Record<Currency, bigint>>>;
   /** Live listings, when the operation asked for `listingCount`. */
   readonly listingCount: number;
+  readonly live: LiveLoaded;
 }
 
 export type CharacterChange = Partial<
@@ -182,6 +187,8 @@ export interface Applied {
   quests?: readonly QuestRow[];
   codex?: readonly string[];
   outcome?: OpOutcome;
+  /** Living-world writes (live/rows.ts). */
+  live?: LiveWrite;
 }
 
 export type Step = { ok: true; value: Applied } | { ok: false; error: OpError };
@@ -193,7 +200,7 @@ export interface OpDef<R> {
   /** Currencies touched, once the rows are loaded (a book's 낱장 depend on which book). */
   currencies(
     req: R,
-    loaded: Omit<Loaded, "purse" | "exact" | "worn" | "listingCount">,
+    loaded: Omit<Loaded, "purse" | "exact" | "worn" | "listingCount" | "live">,
     ctx: Ctx,
   ): readonly string[];
   apply(loaded: Loaded, req: R, env: Env): Step;
@@ -265,7 +272,7 @@ export interface PartyOpDef<R> {
   currencies(
     req: R,
     party: string,
-    loaded: Omit<Loaded, "purse" | "exact" | "worn" | "listingCount">,
+    loaded: Omit<Loaded, "purse" | "exact" | "worn" | "listingCount" | "live">,
     locked: Locked,
     ctx: Ctx,
   ): readonly string[];
@@ -302,7 +309,7 @@ const tierOf = (c: CharacterRow): Tier => TIERS[c.tier] ?? (TIERS[0] as Tier);
 const wearer = (c: CharacterRow): Wearer => ({ tier: tierOf(c), major: c.major, minor: c.minor });
 
 /** EXP to the character, and 10% of it to each equipped book (PLAN §8), capped at the owner. */
-function gainExp(l: Loaded, exp: number): { character: CharacterChange; put: ItemRow[] } {
+export function gainExp(l: Loaded, exp: number): { character: CharacterChange; put: ItemRow[] } {
   if (exp <= 0) return { character: {}, put: [] };
   const next = addExp(l.character.level, l.character.exp, exp);
   const put = l.worn
@@ -325,6 +332,8 @@ const wornAmong = (rows: readonly ItemRow[]): Worn[] =>
 const isBook = (def: string) => BOOKS.some((b) => b.id === def);
 
 export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
+  // The living world's operations (PLAN §9, §11, §15), in live/ops.ts.
+  ...liveOps({ gainExp }),
   kit: {
     client: false,
     rows: () => ({}),

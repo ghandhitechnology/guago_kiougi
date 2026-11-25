@@ -1,5 +1,6 @@
 /**
- * The 매점 게시판's reads and its clock (PLAN §13): browsing live listings by category or item,
+ * The 매점 게시판's reads and its clock (PLAN §13). Every time here is the server clock's
+ * (live/clock.ts), the one the executor stamps listings with: browsing live listings by category or item,
  * sorted by price and paged by a cursor so every page is one index range; a player's own
  * listings; 14 days of price history; and the sweeper that returns expired listings to their
  * sellers.
@@ -51,6 +52,7 @@ export async function browseListings(
   db: Db,
   req: BoardRequests["listing.browse"],
   viewer?: string,
+  now: Date = new Date(),
 ): Promise<{ listings: ListingView[]; next: string | null }> {
   const size = TRADE.board.pageSize;
   const desc = req.sort === "-price";
@@ -64,7 +66,7 @@ export async function browseListings(
   const { rows } = await db.execute(sql`
     select ${VIEW_COLUMNS}
     from listings l join characters c on c.id = l.seller_id
-    where l.state = 'live' and l.expires_at > now()
+    where l.state = 'live' and l.expires_at > ${now.toISOString()}::timestamptz
       and (${req.category ?? null}::text is null or l.category = ${req.category ?? null})
       and (${req.def ?? null}::text is null or l.def_id = ${req.def ?? null})
       and (${req.grade ?? null}::smallint is null or l.grade = ${req.grade ?? null})
@@ -82,12 +84,17 @@ export async function browseListings(
 }
 
 /** The seller's live listings and those closed in the last two weeks, newest first. */
-export async function myListings(db: Db, sellerId: string): Promise<ListingView[]> {
+export async function myListings(
+  db: Db,
+  sellerId: string,
+  now: Date = new Date(),
+): Promise<ListingView[]> {
   const { rows } = await db.execute(sql`
     select ${VIEW_COLUMNS}
     from listings l join characters c on c.id = l.seller_id
     where l.seller_id = ${sellerId}
-      and (l.state = 'live' or l.closed_at > now() - make_interval(days => ${CLOSED_KEPT_DAYS}))
+      and (l.state = 'live'
+        or l.closed_at > ${now.toISOString()}::timestamptz - make_interval(days => ${CLOSED_KEPT_DAYS}))
     order by l.created_at desc
     limit 100`);
   return rows.map((r) => view(r, true));
@@ -97,6 +104,7 @@ export async function myListings(db: Db, sellerId: string): Promise<ListingView[
 export async function priceHistory(
   db: Db,
   req: BoardRequests["listing.history"],
+  now: Date = new Date(),
 ): Promise<PriceDay[]> {
   const { rows } = await db.execute(sql`
     select (at at time zone 'Asia/Seoul')::date::text as day, sum(qty)::bigint as volume,
@@ -105,7 +113,7 @@ export async function priceHistory(
     from trade_log
     where kind = 'board' and def_id = ${req.def}
       and (${req.grade ?? null}::smallint is null or grade = ${req.grade ?? null})
-      and at > now() - make_interval(days => ${TRADE.board.historyDays})
+      and at > ${now.toISOString()}::timestamptz - make_interval(days => ${TRADE.board.historyDays})
     group by 1 order by 1`);
   return rows.map((r) => ({
     day: r.day as string,
@@ -120,11 +128,13 @@ export async function priceHistory(
 export async function sweepListings(
   db: Db,
   executor: Pick<Executor, "execute">,
+  clock: () => Date = () => new Date(),
   notify?: (characterId: string, change: ChangeNotice) => void,
 ): Promise<number> {
+  const now = clock();
   const { rows } = await db.execute(sql`
     select id, seller_id from listings
-    where state = 'live' and expires_at <= now()
+    where state = 'live' and expires_at <= ${now.toISOString()}::timestamptz
     order by expires_at limit ${SWEEP_BATCH}`);
   let returned = 0;
   for (const r of rows) {
@@ -144,14 +154,16 @@ export async function sweepListings(
   }
   await db.execute(sql`
     delete from listings
-    where state <> 'live' and closed_at < now() - make_interval(days => ${CLOSED_KEPT_DAYS})`);
+    where state <> 'live'
+      and closed_at < ${now.toISOString()}::timestamptz - make_interval(days => ${CLOSED_KEPT_DAYS})`);
   return returned;
 }
 
-/** Sweeps now and every 30 seconds. Returns the stop. */
+/** Sweeps now and every 30 seconds of real time (the clock decides what is due). Returns the stop. */
 export function startListingSweeper(
   db: Db,
   executor: Pick<Executor, "execute">,
+  clock: () => Date,
   notify?: (characterId: string, change: ChangeNotice) => void,
 ): () => void {
   let timer: NodeJS.Timeout | undefined;
@@ -159,7 +171,7 @@ export function startListingSweeper(
   const run = async () => {
     try {
       // A full batch means more are waiting: go again at once.
-      while ((await sweepListings(db, executor, notify)) >= SWEEP_BATCH && !stopped) {}
+      while ((await sweepListings(db, executor, clock, notify)) >= SWEEP_BATCH && !stopped) {}
     } catch (error) {
       console.error(`listing sweep failed: ${describeError(error)}`);
     }

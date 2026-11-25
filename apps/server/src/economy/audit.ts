@@ -121,6 +121,31 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
     left join items i on i.id = l.item_id and i.listing_id = l.id and i.owner_id = l.seller_id
     where l.state = 'live' and l.item_id is not null and i.id is null`,
 
+  // Across the whole game, what exists (wallets, bags, items and what listings hold) is exactly
+  // what the ledger says entered minus what it says left: transfers between players, whatever
+  // their kind, create and destroy nothing.
+  game_conserved: sql`
+    with held as (
+      select 'pinecone' as unit, coalesce(sum(pinecones), 0) as n from wallets
+      union all select 'merit', coalesce(sum(merit_points), 0) from wallets
+      union all select 'token', coalesce(sum(tokens), 0) from wallets
+      union all select def_id, sum(qty) from materials group by def_id
+      union all select def_id, sum(qty) from listings
+        where state = 'live' and item_id is null group by def_id
+      union all select 'item:' || def_id, count(*) from items group by def_id
+    ), h as (
+      select unit, sum(n) as n from held group by unit
+    ), f as (
+      select currency as unit, sum(amount) as n from economy_ledger
+      where source_or_sink not like 'trade.%' and source_or_sink not like 'escrow.%'
+      group by currency
+    )
+    select null::uuid as character_id,
+      coalesce(h.unit, f.unit) || ': held ' || coalesce(h.n, 0)::text
+        || ', entered less left ' || coalesce(f.n, 0)::text as detail
+    from h full join f on f.unit = h.unit
+    where coalesce(h.n, 0) <> coalesce(f.n, 0)`,
+
   // Bound items never change hands (PLAN §13).
   bound_never_traded: sql`
     select distinct l.character_id, l.item_id::text || ': bound, but traded' as detail
@@ -145,6 +170,20 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
     where i.slot is not null and i.slot >= case i.kind
       when 'book' then (${sql.param(TIERS.map((t) => t.books))}::int[])[c.tier + 1]
       else (${sql.param(TIERS.map((t) => t.tools))}::int[])[c.tier + 1] end`,
+
+  // 벌점 held and lifetime 상점 are the sums of the conduct ledger (PLAN §11).
+  conduct_equals_ledger: sql`
+    with l as (
+      select character_id,
+        coalesce(sum(amount) filter (where kind = 'demerit'), 0) as demerits,
+        coalesce(sum(amount) filter (where kind = 'merit'), 0) as merits
+      from conduct_ledger group by 1
+    )
+    select c.id as character_id,
+      '벌점 ' || c.demerits::text || ' vs ' || coalesce(l.demerits, 0)::text
+        || ', 상점 ' || c.merits::text || ' vs ' || coalesce(l.merits, 0)::text as detail
+    from characters c left join l on l.character_id = c.id
+    where c.demerits <> coalesce(l.demerits, 0) or c.merits <> coalesce(l.merits, 0)`,
 
   // Every ledger entry belongs to a recorded operation (within the retention window).
   ledger_has_operation: sql`

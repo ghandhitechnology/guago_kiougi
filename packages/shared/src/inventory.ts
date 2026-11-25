@@ -24,6 +24,8 @@ export const OPS = [
   "shop.buy",
   "claimPool",
   "quest.claim",
+  // The living world (PLAN §11).
+  "drowsy.drink",
   "listing.create",
   "listing.buy",
   "listing.cancel",
@@ -47,6 +49,8 @@ export interface OpRequests {
   "shop.buy": { item: string; qty: number };
   claimPool: Record<string, never>;
   "quest.claim": { quest: string };
+  /** Drinks one 에너지 드링크 from the bag: 졸음 clears. */
+  "drowsy.drink": Record<string, never>;
   /**
    * 매점 게시판: one item (`item`) or part of one stack (`stack`, `qty`), at `unitPrice` 솔방울
    * each. It leaves the bag into the listing; 2% of the whole asking price is paid up front.
@@ -103,6 +107,8 @@ export const OP_ERRORS = [
   "equip_duplicate",
   "equip_minor_slots",
   "equip_not_worn",
+  // The living world (live/ops.ts)
+  "drink_none",
   // Trading (trade.ts)
   ...TRADE_ERRORS,
 ] as const;
@@ -350,6 +356,7 @@ const CHECKS: { [K in OpName]: Check<OpRequests[K]> } = {
     only(r, ["quest"]) && typeof r.quest === "string" && /^[a-z0-9:-]{1,64}$/.test(r.quest)
       ? { quest: r.quest }
       : null,
+  "drowsy.drink": (r) => (only(r, []) ? {} : null),
   "listing.create": (r) => {
     if (!only(r, ["item", "stack", "qty", "unitPrice"])) return null;
     const price = r.unitPrice;

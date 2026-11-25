@@ -102,6 +102,24 @@ export const characters = pgTable(
     poolSheetBook: text("pool_sheet_book"),
     /** 숙면 ends here (PLAN §11). */
     restedUntil: at("rested_until"),
+    // The living world (PLAN §9, §11): set by the live operations only.
+    /** When the player came back online; the pool stops filling here until it is claimed. */
+    poolStoppedAt: at("pool_stopped_at"),
+    /** The best income rate last measured, in the last field hunted, for the next pool. */
+    huntRates: jsonb("hunt_rates"),
+    /** 명령퇴사: home until, then −30% EXP until `penalty_until`. */
+    homeUntil: at("home_until"),
+    penaltyUntil: at("penalty_until"),
+    drowsy: boolean("drowsy").notNull().default(false),
+    mealId: text("meal_id"),
+    mealUntil: at("meal_until"),
+    /** Award ids (PLAN §11 joke awards). */
+    titles: jsonb("titles").notNull().default([]),
+    patrolCatches: integer("patrol_catches").notNull().default(0),
+    expulsions: integer("expulsions").notNull().default(0),
+    /** Full daily boards in a row, ending on board day `board_streak_day` (개근상). */
+    boardStreak: integer("board_streak").notNull().default(0),
+    boardStreakDay: integer("board_streak_day"),
     /** Bumped by every applied item or currency operation; change notices carry it. */
     rev: bigint("rev", { mode: "number" }).notNull().default(0),
     createdAt: at("created_at").notNull().defaultNow(),
@@ -728,5 +746,161 @@ export const reports = pgTable(
       sql`${t.category} in ('abuse', 'sexual', 'spam', 'cheat', 'trade', 'name', 'other')`,
     ),
     check("reports_state_check", sql`${t.state} in ('open', 'resolved', 'dismissed')`),
+  ],
+);
+
+// The living world (PLAN §10, §11, §15, §20) -------------------------------------------------
+
+/**
+ * Server-wide state, one row (PLAN §20 `server_state`): the live Page, when its rift opened, the
+ * last milestone announced, and the server clock's anchor (`clock_*`): game time is
+ * `clock_game_ms + (wall ms − clock_real_ms) × clock_rate`.
+ */
+export const serverState = pgTable(
+  "server_state",
+  {
+    id: smallint("id").primaryKey().default(1),
+    currentPage: integer("current_page").notNull(),
+    /** Game time the live Page's rift opened. */
+    pageOpenedAt: at("page_opened_at").notNull(),
+    /** The last milestone whose announcement went out. */
+    milestone: text("milestone").notNull(),
+    clockRealMs: doublePrecision("clock_real_ms").notNull(),
+    clockGameMs: doublePrecision("clock_game_ms").notNull(),
+    clockRate: doublePrecision("clock_rate").notNull().default(1),
+    /** Board day and week the server last turned over (announcements, 층장). */
+    lastDay: integer("last_day").notNull(),
+    lastWeek: integer("last_week").notNull(),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check("server_state_one_row", sql`${t.id} = 1`),
+    check("server_state_rate_check", sql`${t.clockRate} > 0`),
+  ],
+);
+
+/** The 0조 연구노트 (PLAN §10, §20 `notebook`): one row per Page once its rift has opened. */
+export const notebook = pgTable("notebook", {
+  page: integer("page").primaryKey(),
+  openedAt: at("opened_at").notNull(),
+  sealedAt: at("sealed_at"),
+});
+
+/** Each boss freed on a Page: when, who landed the final hit, who topped the boards. */
+export const notebookBosses = pgTable(
+  "notebook_bosses",
+  {
+    page: integer("page")
+      .notNull()
+      .references(() => notebook.page, { onDelete: "cascade" }),
+    bossId: text("boss_id").notNull(),
+    freedAt: at("freed_at").notNull(),
+    finalHitBy: uuid("final_hit_by").references(() => characters.id, { onDelete: "set null" }),
+    /** Kept as written that day: the notebook keeps the name even if the character goes. */
+    finalHitName: text("final_hit_name"),
+    /** `[{ board, id, name }]`. */
+    boardLeaders: jsonb("board_leaders").notNull().default([]),
+  },
+  (t) => [primaryKey({ columns: [t.page, t.bossId] })],
+);
+
+/** 벌점 and 상점 with their reasons (PLAN §11): `demerits` and `merits` are their sums. */
+export const conductLedger = pgTable(
+  "conduct_ledger",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    operationId: text("operation_id").notNull(),
+    kind: text("kind").notNull(),
+    amount: integer("amount").notNull(),
+    reason: text("reason").notNull(),
+    at: at("at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("conduct_ledger_character_idx").on(t.characterId, t.kind),
+    check("conduct_ledger_kind_check", sql`${t.kind} in ('demerit', 'merit')`),
+    check("conduct_ledger_amount_check", sql`${t.amount} <> 0`),
+  ],
+);
+
+/** Per board week counts: `merit` picks the 층장, `meal` the 다 먹었상. */
+export const weeklyTally = pgTable(
+  "weekly_tally",
+  {
+    week: integer("week").notNull(),
+    kind: text("kind").notNull(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    n: integer("n").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.week, t.kind, t.characterId] }),
+    index("weekly_tally_rank_idx").on(t.week, t.kind, t.n),
+    check("weekly_tally_kind_check", sql`${t.kind} in ('merit', 'meal')`),
+  ],
+);
+
+/** The week's five 층장 (PLAN §11), chosen from the week before. */
+export const floorLeaders = pgTable(
+  "floor_leaders",
+  {
+    week: integer("week").notNull(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    rank: smallint("rank").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.week, t.characterId] })],
+);
+
+/** Lifetime kills by monster, for the 오개념 entries (PLAN §15). Written by batched progress. */
+export const killCounts = pgTable(
+  "kill_counts",
+  {
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    monsterId: text("monster_id").notNull(),
+    kills: bigint("kills", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.characterId, t.monsterId] }),
+    check("kill_counts_check", sql`${t.kills} >= 0`),
+  ],
+);
+
+/**
+ * 도움 notices (PLAN §15): posted by a player below the frontier, taken by one helper whose
+ * `help:<id>` quest row carries the progress.
+ */
+export const helpNotices = pgTable(
+  "help_notices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    posterId: uuid("poster_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    posterLevel: integer("poster_level").notNull(),
+    template: text("template").notNull(),
+    slots: jsonb("slots").notNull(),
+    count: integer("count").notNull(),
+    /** `help-finish`: the poster's quest row the helper helps finish. */
+    questId: text("quest_id"),
+    state: text("state").notNull().default("open"),
+    helperId: uuid("helper_id").references(() => characters.id, { onDelete: "set null" }),
+    postedAt: at("posted_at").notNull(),
+    expiresAt: at("expires_at").notNull(),
+  },
+  (t) => [
+    index("help_notices_open_idx").on(t.state, t.expiresAt),
+    uniqueIndex("help_notices_poster_key")
+      .on(t.posterId)
+      .where(sql`${t.state} in ('open', 'taken')`),
+    uniqueIndex("help_notices_helper_key").on(t.helperId).where(sql`${t.state} = 'taken'`),
+    check("help_notices_state_check", sql`${t.state} in ('open', 'taken', 'done', 'cancelled')`),
+    check("help_notices_count_check", sql`${t.count} >= 1`),
   ],
 );

@@ -35,6 +35,7 @@ import {
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
+import type { WorldHandler } from "./live/index.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
@@ -83,6 +84,8 @@ interface Services {
   ops: OpHandler | undefined;
   /** Friends, blocks, parties, clubs, the 대자보, reports and emotes; off without it (tests). */
   social: Social | undefined;
+  /** More request handlers (the living world, live/index.ts). */
+  handlers?: readonly WorldHandler[];
   /** Direct trades and the 매점 게시판's reads (trade/room.ts). */
   trading?: Trading | undefined;
 }
@@ -96,6 +99,7 @@ export function provideWorldServices(s: {
   log?: ChatSink;
   ops?: OpHandler;
   social?: Social;
+  handlers?: readonly WorldHandler[];
   trading?: Trading;
 }): void {
   services = {
@@ -103,6 +107,7 @@ export function provideWorldServices(s: {
     log: s.log,
     ops: s.ops,
     social: s.social,
+    ...(s.handlers ? { handlers: s.handlers } : {}),
     trading: s.trading,
   };
 }
@@ -156,6 +161,12 @@ export class WorldRoom extends Room {
       for (const op of OPS) {
         this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
       }
+    }
+    for (const h of use().handlers ?? []) {
+      this.handle(h.type, h.schema, (client, message) => {
+        const me = this.members.get(client.sessionId);
+        if (me) void h.run(me.characterId, message);
+      });
     }
     const social = use().social;
     if (social) {
@@ -302,6 +313,11 @@ export class WorldRoom extends Room {
       masked: false,
       at: new Date(sent.at),
     });
+  }
+
+  /** Any message to one character, if online (the living world's pushes and refusals). */
+  sendTo(characterId: string, type: string, body: unknown): void {
+    this.byCharacter.get(characterId)?.client.send(type, body);
   }
 
   /** A change the player did not ask for (a combat grant), sent to them if they are online. */

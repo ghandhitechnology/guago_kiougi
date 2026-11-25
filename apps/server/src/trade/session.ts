@@ -101,7 +101,10 @@ export interface TradeOptions {
   executor: Pick<Executor, "executeAll">;
   link: TradeLink;
   isBlocked?: IsBlocked;
+  /** Real time, for the window's own timers: a request's 30 seconds, a window's 5 minutes. */
   now?: () => number;
+  /** The server clock (live/clock.ts), for the rules: an item's re-trade cooldown. */
+  clock?: () => Date;
 }
 
 export function createTrades({
@@ -110,6 +113,7 @@ export function createTrades({
   link,
   isBlocked = nobodyBlocked,
   now = Date.now,
+  clock = () => new Date(now()),
 }: TradeOptions) {
   const windows = new Map<string, Window>();
   const byCharacter = new Map<string, Window>();
@@ -164,7 +168,7 @@ export function createTrades({
    * it all again under the locks. Returns the side, or why it cannot be offered.
    */
   async function read(owner: string, offer: TradeOffer): Promise<Side | OpError> {
-    const at = new Date(now());
+    const at = clock();
     let rows: ItemRow[] = [];
     if (offer.items.length > 0) {
       const found = await db.execute(sql`

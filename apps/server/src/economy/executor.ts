@@ -25,10 +25,20 @@
  * two slots or share one, and the operation id is a primary key.
  */
 import { createHash, getRandomValues, randomUUID } from "node:crypto";
-import type { ChangeNotice, LedgerEntry, OpError, OpOutcome, OpResult, Purse } from "@guago/shared";
+import {
+  type ChangeNotice,
+  koreanDay,
+  type LedgerEntry,
+  type OpError,
+  type OpOutcome,
+  type OpResult,
+  type Purse,
+  type QuestView,
+} from "@guago/shared";
 import { sql } from "drizzle-orm";
-import { CURRENT_COHORT } from "../auth/service.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
+import { livePage } from "../live/current.ts";
+import { loadLive, writeLive } from "../live/rows.ts";
 import { PARTY_OPS } from "../trade/ops.ts";
 import {
   type AnyOp,
@@ -125,6 +135,8 @@ export interface ExecutorOptions {
    * were offline or elsewhere): their notice, for their client.
    */
   onChange?(characterId: string, change: ChangeNotice): void;
+  /** Called after every operation that applied, once it committed (the living world listens). */
+  onApplied?(characterId: string, name: AnyOp, result: ExecResult): void;
 }
 
 const cryptoRoll = () => (getRandomValues(new Uint32Array(1))[0] as number) / 2 ** 32;
@@ -352,7 +364,12 @@ async function lookup(q: Queryable, records: readonly { characterId: string; opI
  * character lock like every other row of theirs; any other is only read, and cannot be written
  * (a closed listing never changes again; someone else's live one is not this operation's).
  */
-async function lockListings(q: Queryable, ids: readonly string[], parties: readonly string[]) {
+async function lockListings(
+  q: Queryable,
+  ids: readonly string[],
+  parties: readonly string[],
+  now: () => Date,
+) {
   const locked = new Map<string, ListingRow>();
   const seen = new Map<string, ListingRow>();
   if (ids.length === 0) return { locked, seen };
@@ -361,12 +378,12 @@ async function lockListings(q: Queryable, ids: readonly string[], parties: reado
     where id = any(${sql.param([...ids])}::uuid[]) and seller_id = any(${sql.param([...parties])}::uuid[])
     order by id
     for update`);
-  for (const r of mine.rows) locked.set(r.id as string, listingFromDb(r));
+  for (const r of mine.rows) locked.set(r.id as string, listingFromDb(r, now()));
   const rest = ids.filter((id) => !locked.has(id));
   if (rest.length > 0) {
     const { rows } = await q.execute(sql`
       select ${sql.raw(LISTING_COLUMNS)} from listings where id = any(${sql.param(rest)}::uuid[])`);
-    for (const r of rows) seen.set(r.id as string, listingFromDb(r));
+    for (const r of rows) seen.set(r.id as string, listingFromDb(r, now()));
   }
   return { locked, seen };
 }
@@ -453,6 +470,8 @@ interface Written {
   wallet?: Record<string, string>;
   materials?: Record<string, number>;
   codex: string[];
+  /** Notices the operation posted. */
+  posted: QuestView[];
 }
 
 async function write(
@@ -462,6 +481,7 @@ async function write(
   p: Plan,
   opId: string,
   coalesce: boolean,
+  day: string,
 ): Promise<Written> {
   const c = loaded.character.id;
   const out: Partial<Written> = { codex: [] };
@@ -592,6 +612,7 @@ async function write(
     out.codex = rows.map((r) => r.entry_id as string);
   }
 
+  out.posted = (await writeLive(q, c, opId, applied.live)).quests;
   const ch = { ...loaded.character, ...applied.character };
   const { rows } = await q.execute(sql`
     update characters set
@@ -613,8 +634,8 @@ async function write(
   if (single.length > 0) {
     const l = single;
     await q.execute(sql`
-      insert into economy_ledger (character_id, operation_id, currency, source_or_sink, amount, item_id)
-      select ${c}, ${opId}, u.currency, u.key, u.amount, u.item
+      insert into economy_ledger (day, character_id, operation_id, currency, source_or_sink, amount, item_id)
+      select ${day}::date, ${c}, ${opId}, u.currency, u.key, u.amount, u.item
       from unnest(
         ${sql.param(l.map((e) => e.currency))}::text[],
         ${sql.param(l.map((e) => e.key))}::text[],
@@ -626,8 +647,8 @@ async function write(
     const l = pooled;
     await q.execute(sql`
       insert into economy_ledger
-        (character_id, operation_id, currency, source_or_sink, amount, coalesced)
-      select ${c}, ${opId}, u.currency, u.key, u.amount, true
+        (day, character_id, operation_id, currency, source_or_sink, amount, coalesced)
+      select ${day}::date, ${c}, ${opId}, u.currency, u.key, u.amount, true
       from unnest(
         ${sql.param(l.map((e) => e.currency))}::text[],
         ${sql.param(l.map((e) => e.key))}::text[],
@@ -668,23 +689,23 @@ async function writeListings(
     } else if (made.has(l.id) && parties.has(l.sellerId)) {
       await q.execute(sql`
         insert into listings (id, seller_id, state, category, def_id, grade, item_id, item, qty,
-          listed_qty, unit_price, fee, expires_at)
+          listed_qty, unit_price, fee, created_at, expires_at)
         values (${l.id}, ${l.sellerId}, ${l.state}, ${l.category}, ${l.def}, ${l.grade},
           ${l.itemId}, ${l.item ? JSON.stringify(l.item) : null}::jsonb, ${l.qty}, ${l.listedQty},
           ${l.unitPrice.toString()}::numeric, ${l.fee.toString()}::numeric,
-          ${l.expiresAt.toISOString()}::timestamptz)`);
+          ${l.createdAt.toISOString()}::timestamptz, ${l.expiresAt.toISOString()}::timestamptz)`);
     } else {
       throw new ContractError(`listing ${l.id} was neither locked nor made here`);
     }
   }
 }
 
-async function writeLog(q: Queryable, log: TradeLogRow, opId: string): Promise<void> {
+async function writeLog(q: Queryable, log: TradeLogRow, opId: string, at: Date): Promise<void> {
   const b = log.board;
   await q.execute(sql`
-    insert into trade_log (kind, op_id, from_id, to_id, item_ids, defs, tax, payload,
+    insert into trade_log (kind, op_id, at, from_id, to_id, item_ids, defs, tax, payload,
       listing_id, def_id, grade, qty, unit_price)
-    values (${log.kind}, ${opId}, ${log.fromId}, ${log.toId},
+    values (${log.kind}, ${opId}, ${at.toISOString()}::timestamptz, ${log.fromId}, ${log.toId},
       ${sql.param(log.itemIds)}::uuid[], ${sql.param(log.defs)}::text[],
       ${log.tax.toString()}::numeric, ${JSON.stringify(log.payload)}::jsonb,
       ${b?.listingId ?? null}, ${b?.def ?? null}, ${b?.grade ?? null}, ${b?.qty ?? null},
@@ -704,8 +725,8 @@ async function record(
 
 // The executor --------------------------------------------------------------------------------
 
-/** The live Page until server state owns it (PLAN §10): the cohort new characters join. */
-export const livePage = (): number => CURRENT_COHORT;
+/** The live Page (PLAN §10): the Page clock's, once the server provided it (live/current.ts). */
+export { livePage };
 
 /**
  * Errors worth retrying unchanged: the connection or the database server failed, not the
@@ -803,7 +824,12 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         return id;
       },
     };
-    const named = await lockListings(q, [...(def.listings?.(request) ?? [])].sort(), parties);
+    const named = await lockListings(
+      q,
+      [...(def.listings?.(request) ?? [])].sort(),
+      parties,
+      () => ctx.now,
+    );
     const listings = new Map([...named.seen, ...named.locked]);
     const locked: Locked = { initiator, characters, listings };
     const loaded = new Map<string, Loaded>();
@@ -819,6 +845,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       const { purse, exact } = await loadPurse(q, id, [...touched].sort());
       const worn = want.worn ? [...items.values()].filter((r) => r.slot !== null) : [];
       const listingCount = want.listingCount ? await countListings(q, id) : 0;
+      const live = await loadLive(q, id, want.live);
       touchedBy.set(id, touched);
       loaded.set(id, {
         character,
@@ -828,6 +855,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         purse: purse as Purse,
         exact: exact as Loaded["exact"],
         listingCount,
+        live,
       });
     }
     const facts = (await def.facts?.(q, request, locked)) ?? {};
@@ -878,6 +906,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
           p,
           (records[i] as { opId: string }).opId,
           op.name === "grant",
+          koreanDay(ctx.now.getTime()),
         );
         // A listed item leaves the bag as far as the client knows, as it does for the snapshot.
         const listed = p.updates.filter((r) => r.listing !== null).map((r) => r.id);
@@ -897,12 +926,14 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
               ? { progression: progressionView(written.character, ctx.now, ctx.page) }
               : {}),
             ...(written.codex.length > 0 ? { codex: written.codex } : {}),
-            ...(applied.quests ? { quests: applied.quests.map(questView) } : {}),
+            ...(applied.quests || written.posted.length > 0
+              ? { quests: [...(applied.quests ?? []).map(questView), ...written.posted] }
+              : {}),
           },
         });
         if (written.character.level !== l.character.level) levels.set(id, written.character.level);
       }
-      if (answer.log) await writeLog(q, answer.log, op.opId);
+      if (answer.log) await writeLog(q, answer.log, op.opId, ctx.now);
     }
     for (const r of records) {
       await record(q, { ...op, ...r }, hash, results.get(r.characterId) as ExecResult);
@@ -962,9 +993,13 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash, others));
         for (const [id, level] of out.levels) notifyLevel(id, level);
+        const applied = out.results.get(characterId);
+        if (applied?.ok) notifyApplied(characterId, name, applied);
         if (out.fresh && !DEFS[name].quiet) {
           for (const [id, result] of out.results) {
-            if (id !== characterId && result.ok) notifyChange(id, result.change);
+            if (id === characterId || !result.ok) continue;
+            notifyApplied(id, name, result);
+            notifyChange(id, result.change);
           }
         }
         return out.results;
@@ -993,6 +1028,14 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         }
         throw error;
       }
+    }
+  }
+
+  function notifyApplied(characterId: string, name: AnyOp, result: ExecResult): void {
+    try {
+      options.onApplied?.(characterId, name, result);
+    } catch (error) {
+      console.error(`operation listener failed: ${describeError(error)}`);
     }
   }
 

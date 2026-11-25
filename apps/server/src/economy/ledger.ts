@@ -14,6 +14,7 @@
  * Compaction keeps every sum: a wallet still equals its ledger and each day still totals the
  * same, so the audit holds before, during and after a run.
  */
+import { koreanDay } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import { type Db, describeError } from "../db/index.ts";
 
@@ -21,13 +22,19 @@ export const LEDGER_RAW_DAYS = 90;
 const MAINTAIN_EVERY_MS = 60 * 60 * 1000;
 const RETRY_MS = 5 * 60 * 1000;
 
-const KST_TODAY = sql`(now() at time zone 'Asia/Seoul')::date`;
+/**
+ * Days are Korean calendar days by the server clock (live/clock.ts), the clock every operation
+ * books its `day` by, so a test server running fast rolls up and compacts its own days.
+ */
+type Clock = () => number;
+const today = (now: Clock) => sql`${koreanDay(now())}::date`;
 
 /**
  * Rolls up every closed day not yet in the table, and the last two rolled again (a transaction
  * that began before midnight may land just after). Returns the days written.
  */
-export async function rollUpDays(db: Db): Promise<number> {
+export async function rollUpDays(db: Db, now: Clock = Date.now): Promise<number> {
+  const KST_TODAY = today(now);
   const { rows } = await db.execute(sql`
     select coalesce(
       (select max(day) - 1 from economy_daily_totals),
@@ -51,7 +58,12 @@ export async function rollUpDays(db: Db): Promise<number> {
 }
 
 /** Compacts per-operation rows of days past retention, one day per transaction. */
-export async function compactLedger(db: Db, rawDays = LEDGER_RAW_DAYS): Promise<number> {
+export async function compactLedger(
+  db: Db,
+  now: Clock = Date.now,
+  rawDays = LEDGER_RAW_DAYS,
+): Promise<number> {
+  const KST_TODAY = today(now);
   let compacted = 0;
   for (;;) {
     const { rows } = await db.execute(sql`
@@ -79,14 +91,14 @@ export async function compactLedger(db: Db, rawDays = LEDGER_RAW_DAYS): Promise<
 }
 
 /** Rolls up and compacts now and every hour, sooner again after a failure. Returns the stop. */
-export function startLedgerMaintenance(db: Db): () => void {
+export function startLedgerMaintenance(db: Db, now: Clock = Date.now): () => void {
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
   const run = async () => {
     let next = MAINTAIN_EVERY_MS;
     try {
-      await rollUpDays(db);
-      await compactLedger(db);
+      await rollUpDays(db, now);
+      await compactLedger(db, now);
     } catch (error) {
       console.error(`ledger maintenance failed: ${describeError(error)}`);
       next = RETRY_MS;
