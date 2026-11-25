@@ -390,7 +390,8 @@ export class Effects {
   }
 
   private free(a: Active): void {
-    for (const p of a.pieces) this.pieces.give(p);
+    // Lines and caps take pieces at fixed indices, so the list can have holes.
+    for (const p of a.pieces) if (p) this.pieces.give(p);
     a.pieces.length = 0;
     if (this.byFx.get(a.fx) === a) this.byFx.delete(a.fx);
     if (!a.own && !a.enemy) this.others--;
@@ -588,7 +589,7 @@ export class Effects {
     if ((this.frame + a.fx) % every !== 0) return;
     if (!a.mine && (this.ctx.restraint.otherSparks <= 0 || !this.ctx.lights.spare)) return;
     for (const p of a.pieces) {
-      if (!p.inUse || !p.s.visible) continue;
+      if (!p?.inUse || !p.s.visible) continue;
       this.ctx.lights.glow(p.s.x, p.s.y, art.color, a.mine ? 24 : 16, a.mine ? 0.4 : 0.2, 120);
       return;
     }
@@ -633,7 +634,7 @@ export class Effects {
   /** Draws an effect at age `t` ticks; true when it is over. */
   private draw(a: Active, t: number, clock: number): boolean {
     if (t < 0) {
-      for (const p of a.pieces) p.s.setVisible(false);
+      for (const p of a.pieces) p?.s.setVisible(false);
       return false;
     }
     switch (a.kind) {
