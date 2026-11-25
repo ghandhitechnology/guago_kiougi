@@ -34,14 +34,16 @@ import { startNetsim } from "./netsim.ts";
  * client (mean and the worst client), events, knock-outs and the server's memory.
  *
  *   pnpm loadtest --bots 80 --seconds 300 --url ws://localhost:2608
+ *   … --map p1-colonnade  open the room on this map (the server needs ALLOW_MAP_OPTION=1);
+ *                         without it the room runs the server's GUAGO_MAP
  *   … --auto 0.5          share of bots in full auto
  *   … --latency 150 --jitter 30 --loss 0.01   every bot through a simulated mobile link
  *   … --out report.txt    also write the report to a file
  *
  * Bots sign in through the HTTP API as bot0001, bot0002 … (`--accounts` changes the prefix),
  * make their characters on first use and keep their sessions in .local/ for the next run. The
- * server needs a database, a signup limit above the bot count (SIGNUPS_PER_IP_PER_DAY) and the
- * map to run (GUAGO_MAP).
+ * server needs a database and a signup limit above the bot count (SIGNUPS_PER_IP_PER_DAY). Its
+ * numbers come from the loopback metrics port, the game port + 100 unless `--metrics` says.
  */
 
 const { values } = parseArgs({
@@ -55,6 +57,8 @@ const { values } = parseArgs({
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
     accounts: { type: "string", default: "bot" },
+    map: { type: "string" },
+    metrics: { type: "string" },
     out: { type: "string" },
   },
 });
@@ -64,7 +68,8 @@ const SECONDS = Number(values.seconds);
 const WARMUP = Number(values.warmup);
 const AUTO = Number(values.auto);
 const target = new URL(values.url);
-const metricsUrl = `http://${target.host}/metrics`;
+const metricsUrl = values.metrics ?? `http://127.0.0.1:${Number(target.port) + 100}/metrics`;
+const joinOptions = values.map ? { map: values.map } : {};
 
 let url = values.url;
 if (values.latency !== undefined) {
@@ -258,7 +263,7 @@ for (let i = 0; i < BOTS; i++) {
   for (let attempt = 1; ; attempt++) {
     try {
       const client = new Client(url, { headers: { cookie } });
-      const room = await client.joinOrCreate(MAP_ROOM, {}, MapState);
+      const room = await client.joinOrCreate(MAP_ROOM, joinOptions, MapState);
       bots.push(new Bot(room, i < Math.round(BOTS * AUTO)));
       break;
     } catch (err) {
@@ -363,13 +368,82 @@ const lines = [
   `${BOTS} bots (${autoCount} full auto, ${BOTS - autoCount} semi-auto), ${fixed(elapsed, 0)} s measured after ${WARMUP} s warm-up, ${link}, map ${rooms[0]?.map ?? "?"}`,
   `${rooms.at(-1)?.players ?? 0} players; monsters alive p50 ${median((r) => r.monsters)} (min ${Math.min(...rooms.map((r) => r.monsters))}, max ${worstOf((r) => r.monsters)})`,
   "",
-  `server tick ms        p50 ${fixed(median((r) => r.tickMs.p50), 2)}  p95 ${fixed(median((r) => r.tickMs.p95), 2)} (worst 10 s window ${fixed(worstOf((r) => r.tickMs.p95), 2)})  p99 ${fixed(median((r) => r.tickMs.p99), 2)}  max ${fixed(worstOf((r) => r.tickMs.max), 2)}   budget p95 < 10`,
-  `  of it on the CPU    p50 ${fixed(median((r) => r.tickCpuMs.p50), 2)}  p95 ${fixed(median((r) => r.tickCpuMs.p95), 2)} (worst ${fixed(worstOf((r) => r.tickCpuMs.p95), 2)})  p99 ${fixed(median((r) => r.tickCpuMs.p99), 2)}`,
-  `  fight step          p50 ${fixed(fmed((f) => f.simMs.p50), 2)}  p95 ${fixed(fmed((f) => f.simMs.p95), 2)}  p99 ${fixed(fmed((f) => f.simMs.p99), 2)}  max ${fixed(fworst((f) => f.simMs.max), 2)}`,
-  `  snapshots           p50 ${fixed(fmed((f) => f.netMs.p50), 2)}  p95 ${fixed(fmed((f) => f.netMs.p95), 2)}  p99 ${fixed(fmed((f) => f.netMs.p99), 2)}  max ${fixed(fworst((f) => f.netMs.max), 2)}   (encode, assemble and send to every client)`,
-  `  schema patch        p95 ${fixed(median((r) => r.patchMs.p95), 2)}`,
-  `downstream B/s/client server ${fixed(median((r) => r.bytesPerClient.mean), 0)} mean, ${fixed(worstOf((r) => r.bytesPerClient.max), 0)} worst client   bots ${fixed(mean(perBot), 0)} mean, ${fixed(Math.max(0, ...perBot), 0)} worst   budget < 8000`,
-  `  snapshot by part    ${parts.map((k) => `${k} ${fixed(fmed((f) => f.bytesByPart[k] ?? 0), 0)}`).join("  ")}`,
+  `server tick ms        p50 ${fixed(
+    median((r) => r.tickMs.p50),
+    2,
+  )}  p95 ${fixed(
+    median((r) => r.tickMs.p95),
+    2,
+  )} (worst 10 s window ${fixed(
+    worstOf((r) => r.tickMs.p95),
+    2,
+  )})  p99 ${fixed(
+    median((r) => r.tickMs.p99),
+    2,
+  )}  max ${fixed(
+    worstOf((r) => r.tickMs.max),
+    2,
+  )}   budget p95 < 10`,
+  `  of it on the CPU    p50 ${fixed(
+    median((r) => r.tickCpuMs.p50),
+    2,
+  )}  p95 ${fixed(
+    median((r) => r.tickCpuMs.p95),
+    2,
+  )} (worst ${fixed(
+    worstOf((r) => r.tickCpuMs.p95),
+    2,
+  )})  p99 ${fixed(
+    median((r) => r.tickCpuMs.p99),
+    2,
+  )}`,
+  `  fight step          p50 ${fixed(
+    fmed((f) => f.simMs.p50),
+    2,
+  )}  p95 ${fixed(
+    fmed((f) => f.simMs.p95),
+    2,
+  )}  p99 ${fixed(
+    fmed((f) => f.simMs.p99),
+    2,
+  )}  max ${fixed(
+    fworst((f) => f.simMs.max),
+    2,
+  )}`,
+  `  snapshots           p50 ${fixed(
+    fmed((f) => f.netMs.p50),
+    2,
+  )}  p95 ${fixed(
+    fmed((f) => f.netMs.p95),
+    2,
+  )}  p99 ${fixed(
+    fmed((f) => f.netMs.p99),
+    2,
+  )}  max ${fixed(
+    fworst((f) => f.netMs.max),
+    2,
+  )}   (encode, assemble and send to every client)`,
+  `  schema patch        p95 ${fixed(
+    median((r) => r.patchMs.p95),
+    2,
+  )}`,
+  `downstream B/s/client server ${fixed(
+    median((r) => r.bytesPerClient.mean),
+    0,
+  )} mean, ${fixed(
+    worstOf((r) => r.bytesPerClient.max),
+    0,
+  )} worst client in any 5 s window   budget < 8000`,
+  `  measured by the bots p50 ${fixed(quantile(perBot, 0.5), 0)}  p95 ${fixed(quantile(perBot, 0.95), 0)}  mean ${fixed(mean(perBot), 0)}  worst ${fixed(Math.max(0, ...perBot), 0)} over the whole run`,
+  `  snapshot by part    ${parts
+    .map(
+      (k) =>
+        `${k} ${fixed(
+          fmed((f) => f.bytesByPart[k] ?? 0),
+          0,
+        )}`,
+    )
+    .join("  ")}`,
   `per second            kills ${fixed(fmed((f) => f.killsPerSecond))}  spawns ${fixed(fmed((f) => f.spawnsPerSecond))} (max ${fixed(fworst((f) => f.spawnsPerSecond))})  casts ${fixed(fmed((f) => f.castsPerSecond))}  hits ${fixed(fmed((f) => f.hitsPerSecond))}  events ${fixed(fmed((f) => f.eventsPerSecond))}  effect records ${fixed(fmed((f) => f.fxPerSecond))}`,
   `knocked out           ${(last?.downs ?? 0) - (firstFight?.downs ?? 0)} times, revived ${(last?.revives ?? 0) - (firstFight?.revives ?? 0)}, woke at the spawn ${(last?.wakes ?? 0) - (firstFight?.wakes ?? 0)}`,
   `server memory         rss ${mb(memStart?.rss)} → ${mb(memEnd?.rss)} MB, heap ${mb(memStart?.heapUsed)} → ${mb(memEnd?.heapUsed)} MB`,

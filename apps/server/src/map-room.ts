@@ -44,7 +44,6 @@ import {
   spawnMonster,
   startRevive,
   stepFight,
-  TICK_MS,
   TILE_SIZE,
 } from "@guago/shared";
 import { grants } from "./economy/grants.ts";
@@ -52,14 +51,19 @@ import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/l
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
+import { mapOptionAllowed } from "./room-maps.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { TickClock } from "./tick-clock.ts";
 
-/** Messages a second past which a client is dropped; inputs are 20 a second. */
-const MAX_MESSAGES_PER_SECOND = 120;
+/**
+ * Messages a second past which a client is dropped. Inputs come 20 a second, but a link that
+ * stalls delivers all it held at once, and the server drops a link silent for more than about
+ * nine seconds anyway: 400 lets every stall the connection survives through, and the input queue
+ * already bounds what a burst can buy.
+ */
+const MAX_MESSAGES_PER_SECOND = 400;
 /** How often each room logs its numbers. */
 const LOG_EVERY_MS = 30_000;
-/** Ticks the loop will run back to back to catch up after a stall before it lets time go. */
-const MAX_CATCH_UP = 3;
 /**
  * The loop wakes this often and steps whenever a tick is due. A 50 ms interval timer drifts late
  * by a millisecond or so each time and then has to double-step, so patches would leave up to a
@@ -136,8 +140,14 @@ export function fightLoadoutChanged(characterId: string, change: ChangeNotice): 
   void at.room.reload(at.pawn);
 }
 
-/** The map a room runs: `GUAGO_MAP` names it (the lawn by default). */
-function mapToRun(): string {
+/**
+ * The map a room runs: `GUAGO_MAP` names it (the lawn by default); a load test or a developer may
+ * name another in the create options where `ALLOW_MAP_OPTION=1`.
+ */
+function mapToRun(options?: { map?: unknown }): string {
+  if (mapOptionAllowed() && typeof options?.map === "string" && mapById(options.map)) {
+    return options.map;
+  }
   return process.env.GUAGO_MAP || LAWN.id;
 }
 
@@ -163,16 +173,15 @@ export class MapRoom extends Room<{ state: MapState }> {
   /** Free body slots, longest free first, so a body is never handed on within one patch. */
   private readonly free: string[] = [];
   private seats!: RoomSeats;
-  private acc = 0;
-  private lastLoop = 0;
+  private ticks!: TickClock;
 
   /** Only a browser with a live session and a character gets a seat. */
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
     return authenticateJoin(ctx);
   }
 
-  override onCreate(): void {
-    this.mapId = mapToRun();
+  override onCreate(options?: { map?: unknown }): void {
+    this.mapId = mapToRun(options);
     const def = mapById(this.mapId);
     if (!def) throw new Error(`no map ${this.mapId}`);
     this.map = fightMapOf(def);
@@ -197,7 +206,7 @@ export class MapRoom extends Room<{ state: MapState }> {
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: FightInput) => {
       const pawn = this.pawns.get(client.sessionId);
-      if (pawn && !pawn.queue.push(input)) this.metrics.inputsDropped++;
+      if (pawn) this.metrics.inputsDropped += pawn.queue.push(input);
     });
     this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
       const pawn = this.pawns.get(client.sessionId);
@@ -222,7 +231,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
     // Patches and snapshots go out right after each step, so each is exactly one tick of the world.
-    this.lastLoop = performance.now();
+    this.ticks = new TickClock(performance.now());
     this.setTimestep(() => this.loop(), POLL_MS);
     this.patchRate = 0;
     this.clock.setInterval(() => {
@@ -300,14 +309,44 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override async onJoin(client: Client): Promise<void> {
     const character = await this.seats.join(client);
+    try {
+      await this.seat(client, character);
+    } catch (error) {
+      // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
+      this.unseat(client);
+      await this.seats.leave(client);
+      throw error;
+    }
+  }
+
+  /** Puts a joined character's body into the fight and the client's views around it. */
+  private async seat(client: Client, character: Character): Promise<void> {
     const id = client.sessionId;
     const start = this.startOf(character.mapId, character.x, character.y);
+    const loadout = await loadouts.read(character);
     const slot = this.free.shift();
     const state = slot === undefined ? undefined : this.state.players.get(slot);
     if (slot === undefined || !state)
       throw new Error("no free body; maxClients should have refused the join");
+    try {
+      this.seatIn(client, character, loadout, slot, state, start);
+    } catch (error) {
+      this.free.unshift(slot);
+      this.world.removePlayer(id);
+      throw error;
+    }
+  }
+
+  private seatIn(
+    client: Client,
+    character: Character,
+    loadout: Loadout,
+    slot: string,
+    state: InstanceType<typeof PlayerState>,
+    start: { x: number; y: number },
+  ): void {
+    const id = client.sessionId;
     const rules = this.world.rules;
-    const loadout = await loadouts.read(character);
     const level = Math.max(1, loadout.level);
     const kitAt = (lv: number) => rules.kit(buildOf(character, pawn.loadout, lv));
     const player = this.world.addPlayer(
@@ -388,7 +427,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     places.leave(client.sessionId);
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
+    this.unseat(client);
+  }
+
+  /** Takes a body out of the fight and every view, hands over its EXP, and frees its slot. */
+  private unseat(client: Client): void {
     const id = client.sessionId;
+    places.leave(id);
     const pawn = this.pawns.get(id);
     if (pawn) {
       this.handOverExp(pawn);
@@ -436,16 +481,16 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   private loop(): void {
     const now = performance.now();
-    this.acc = Math.min(this.acc + now - this.lastLoop, TICK_MS * MAX_CATCH_UP);
-    this.lastLoop = now;
-    if (this.acc < TICK_MS) return;
+    const { run, skip } = this.ticks.advance(now);
+    if (run === 0) return;
     const start = now;
     const cpu = process.threadCpuUsage();
+    // Ticks lost to a stall keep their numbers, so the stamps on every message keep wall time.
+    if (skip > 0) this.world.tick += skip;
     let ticks = 0;
     let simMs = 0;
     let netMs = 0;
-    while (this.acc >= TICK_MS) {
-      this.acc -= TICK_MS;
+    for (let i = 0; i < run; i++) {
       const inputs = new Map<string, FightInput[]>();
       for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take() as FightInput[]);
       const s0 = performance.now();
@@ -470,7 +515,6 @@ export class MapRoom extends Room<{ state: MapState }> {
       this.metrics.countTick(this.world, this.net);
       ticks++;
     }
-    if (ticks === 0) return;
     this.sync();
     const patchStart = performance.now();
     this.broadcastPatch();
