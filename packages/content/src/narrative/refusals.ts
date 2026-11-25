@@ -12,7 +12,13 @@
  * Ids: `refusal.live.<code>`, `refusal.world.<code>`, `refusal.op.<code>`. A refusal's own
  * fields fill the slots: `until` as {time} for `muted`, `need` as {level} for `level`.
  */
-import type { LiveRefusalCode, OpError, RefusalCode, TradeErrorCode } from "@guago/shared";
+import type {
+  DuelErrorCode,
+  LiveRefusalCode,
+  OpError,
+  RefusalCode,
+  TradeErrorCode,
+} from "@guago/shared";
 import { Writer } from "./author.ts";
 import type { CopyPart, Slot, SystemMessage } from "./schema.ts";
 
@@ -63,7 +69,8 @@ const TRADE: Readonly<Record<TradeErrorCode, Line>> = {
   listing_daily: ["store", "오늘 게시판 일은 여기까지예요. 내일 다시 와 주세요."],
 };
 
-const WORLD: Readonly<Record<RefusalCode, Line>> = {
+/** The 콜로세움's codes (`DUEL_ERRORS`) wait for their lines from the narrative writer. */
+const WORLD: Readonly<Record<Exclude<RefusalCode, DuelErrorCode>, Line>> = {
   ...TRADE,
   // Chat.
   empty: ["narrator", "아무 말도 쓰지 않았다."],
