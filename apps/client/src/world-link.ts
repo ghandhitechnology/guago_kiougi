@@ -39,6 +39,10 @@ import {
   cleanText,
   closeEnd,
   type Done,
+  DUEL_MESSAGES,
+  type DuelEvent,
+  type DuelRequests,
+  type DuelType,
   type FriendEntry,
   type FriendRequest,
   type HelpTemplate,
@@ -109,11 +113,13 @@ export type PresenceChange =
 
 /**
  * Every request in the social shape (`n`, then one `done` or `refused`): the social systems',
- * direct trade's and the 매점 게시판's reads, each with what its `done` carries.
+ * direct trade's, the 매점 게시판's reads and the 콜로세움's, each with what its `done` carries.
  */
 export type Requests = { [K in SocialType]: SocialRequests[K] } & {
   [K in TradeMessageName]: { req: TradeRequests[K]; done: { session: string } };
-} & { [K in BoardMessageName]: { req: BoardRequests[K]; done: BoardData[K] } };
+} & { [K in BoardMessageName]: { req: BoardRequests[K]; done: BoardData[K] } } & {
+  [K in DuelType]: DuelRequests[K];
+};
 export type RequestType = keyof Requests;
 
 /** A request's answer: its data, or why it was not carried out. */
@@ -160,6 +166,8 @@ export type WorldEvent =
   | { type: "social"; event: SocialEvent }
   /** A direct trade window as it changes: an invite, the offers, confirmations, the end. */
   | { type: "trade"; update: TradeUpdate }
+  /** The 콜로세움: challenges, the queue, the ready check, the match, its result, the record. */
+  | { type: "duel"; event: DuelEvent }
   /** The living world: a view read back, a notice done, a 도감 unlock, an award, a 도움 change. */
   | { type: "live"; push: LivePush };
 
@@ -475,6 +483,7 @@ export function connectWorld(
     joined.onMessage(WORLD_MESSAGES.trade, (update: TradeUpdate) =>
       emit({ type: "trade", update }),
     );
+    joined.onMessage(DUEL_MESSAGES.push, (event: DuelEvent) => emit({ type: "duel", event }));
     joined.onMessage(LIVE_MESSAGES.push, (push: LivePush) => {
       if ("n" in push && push.n !== undefined) settleRead(push.n, { ok: true, value: push });
       // A 도움 notice's new state answers the oldest 도움 request still waiting.

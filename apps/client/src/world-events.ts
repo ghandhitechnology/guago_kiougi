@@ -1,4 +1,4 @@
-import type { DoorRefusal } from "@guago/shared";
+import type { DoorRefusal, FloorView } from "@guago/shared";
 
 /**
  * What the world tells the UI. The world scene emits; the HUD, panels and dialogue box (the UI
@@ -20,7 +20,20 @@ export type WorldUiEvent =
   /** The 급식 counter answered: served, already fed this meal, or sent home. */
   | { readonly t: "ate"; readonly id: string; readonly result: "ok" | "meal_full" | "sent_home" }
   /** A patrol's guard saw the player, who is back at the entrance with 벌점. */
-  | { readonly t: "caught"; readonly patrol: string };
+  | { readonly t: "caught"; readonly patrol: string }
+  /**
+   * The 콜로세움 floor in this room, as the server last told it, with the fight it is read
+   * against; no `view` on arriving in a room, which has no floor until it says so.
+   */
+  | { readonly t: "duel"; readonly view?: FloorView; readonly feed?: FightFeed };
+
+/** The fight a floor's clock and health shares are read from, as this client sees it now. */
+export interface FightFeed {
+  /** The newest fight tick the snapshot carried. */
+  tick(): number;
+  /** A body's health as a share of its kit, by session id; undefined when not in view. */
+  health(sid: string): number | undefined;
+}
 
 const listeners = new Set<(e: WorldUiEvent) => void>();
 

@@ -22,6 +22,16 @@ export interface Slip {
   readonly ttl?: number;
   readonly accept?: () => void;
   readonly decline?: () => void;
+  /** One answer instead of the two: 취소, for an offer of the player's own still waiting. */
+  readonly cancel?: () => void;
+  /** Answers in words of their own instead, side by side; an `ink` one moves things on. */
+  readonly choices?: readonly {
+    readonly label: string;
+    readonly run: () => void;
+    readonly ink?: boolean;
+  }[];
+  /** A clock counting up from this time (ms since the epoch) in place of `sub`: a wait. */
+  readonly since?: number;
   /** A slip that reports something done shows the red seal instead of answers. */
   readonly sealed?: boolean;
 }
@@ -35,6 +45,7 @@ interface Shown {
   readonly fuseW: number;
   readonly until: number;
   readonly start: number;
+  readonly clock: Label | undefined;
 }
 
 const W = 132;
@@ -69,18 +80,30 @@ export class Slips {
     this.layout();
   }
 
+  /** Puts a slip up; one with the key of a slip already up takes its place without moving. */
   push(slip: Slip): void {
-    this.drop(slip.key, true);
+    const before = this.shown.findIndex((s) => s.slip.key === slip.key);
+    const old = this.shown[before];
+    const was = old ? { x: old.root.x, y: old.root.y } : undefined;
+    if (old) {
+      this.shown.splice(before, 1);
+      old.root.destroy();
+    }
     const scene = this.scene;
     const ctx = { scene, scope: this.scope };
-    const answers = slip.accept !== undefined || slip.decline !== undefined;
+    const answers =
+      slip.accept !== undefined ||
+      slip.decline !== undefined ||
+      slip.cancel !== undefined ||
+      (slip.choices?.length ?? 0) > 0;
     const h = answers ? 50 : 30;
     const title = new Label(scene, 24, 5, slip.title, {
       font: "galmuri11-bold",
       color: "ink.dark",
     });
-    const sub = slip.sub
-      ? new Label(scene, 24, 18, slip.sub, { font: "galmuri9", color: "stone.dark" })
+    const subText = slip.since !== undefined ? waited(slip.since) : slip.sub;
+    const sub = subText
+      ? new Label(scene, 24, 18, subText, { font: "galmuri9", color: "stone.dark" })
       : undefined;
     // As wide as its words need, at least the width the answers sit in.
     const w = Math.max(W, 24 + Math.max(title.width, sub?.width ?? 0) + (slip.sealed ? 30 : 8));
@@ -97,12 +120,39 @@ export class Slips {
     if (sub) parts.push(sub.obj);
     if (slip.sealed) parts.push(scene.add.image(w - 25, 4, "ui", "seal/on").setOrigin(0));
     const root = scene.add.container(0, 0, parts).setDepth(700);
-    if (answers) {
+    const answer = (fn: (() => void) | undefined) => () => {
+      this.drop(slip.key);
+      fn?.();
+    };
+    if (slip.choices?.length) {
+      const n = slip.choices.length;
+      const bw = Math.floor((W - 10 - (n - 1) * 4) / n);
+      slip.choices.forEach((c, i) => {
+        root.add(
+          new Button(ctx, 5 + i * (bw + 4), h - 22, {
+            label: c.label,
+            ...(c.ink ? { kind: "ink" as const } : {}),
+            w: bw,
+            h: 17,
+            font: "galmuri9",
+            sound: c.ink ? "confirm" : "select",
+            onPress: answer(c.run),
+          }),
+        );
+      });
+    } else if (slip.cancel) {
+      root.add(
+        new Button(ctx, 5, h - 22, {
+          label: t("social.cancel"),
+          w: W - 10,
+          h: 17,
+          font: "galmuri9",
+          sound: "close",
+          onPress: answer(slip.cancel),
+        }),
+      );
+    } else if (answers) {
       const bw = Math.floor((W - 14) / 2);
-      const answer = (fn: (() => void) | undefined) => () => {
-        this.drop(slip.key);
-        fn?.();
-      };
       root.add(
         new Button(ctx, 5, h - 22, {
           label: t("social.accept"),
@@ -132,14 +182,17 @@ export class Slips {
     }
     const now = Date.now();
     const until = slip.expiresAt ?? now + (slip.ttl ?? 9000);
-    this.shown.unshift({ slip, root, w, h, fuse, fuseW, until, start: now });
+    const clock = slip.since !== undefined ? sub : undefined;
+    const shown = { slip, root, w, h, fuse, fuseW, until, start: old?.start ?? now, clock };
+    if (old) this.shown.splice(before, 0, shown);
+    else this.shown.unshift(shown);
     const sw = this.scene.scale.width;
-    root.setPosition(sw + 4, this.top);
+    root.setPosition(was?.x ?? sw + 4, was?.y ?? this.top);
     if (this.hidden) root.setAlpha(0);
-    else sound("toast");
+    else if (!was) sound("toast");
     while (this.shown.length > MAX) {
-      const old = this.shown.at(-1);
-      if (old) this.drop(old.slip.key);
+      const last = this.shown.at(-1);
+      if (last) this.drop(last.slip.key);
     }
     this.layout();
   }
@@ -185,7 +238,17 @@ export class Slips {
         const k = Phaser.Math.Clamp((s.until - now) / Math.max(1, s.until - s.start), 0, 1);
         s.fuse.width = Math.round(s.fuseW * k);
       }
+      if (s.clock && s.slip.since !== undefined) {
+        const text = waited(s.slip.since, now);
+        if (s.clock.obj.text !== text) s.clock.set(text);
+      }
       if (now >= s.until) this.drop(s.slip.key);
     }
   }
+}
+
+/** `m:ss` since `since`. */
+function waited(since: number, now = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

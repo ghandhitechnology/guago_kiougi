@@ -11,6 +11,7 @@ import { ask } from "./act.ts";
 import { Board } from "./board.ts";
 import { type CardTarget, PlayerCard } from "./card.ts";
 import { clubTab } from "./club.ts";
+import { Duels, duelTab } from "./duel/index.ts";
 import { friendsTab } from "./friends.ts";
 import { marketTab } from "./market.ts";
 import { watchModeration } from "./moderation.ts";
@@ -43,6 +44,7 @@ let current:
       card: PlayerCard;
       whisper: (name: string) => void;
       openBoard: () => void;
+      duels: Duels;
     }
   | undefined;
 
@@ -58,10 +60,13 @@ export function startSocialUi(
   const whisper = (name: string) => opts.chat?.open(name);
   const slips = new Slips(scene);
   const trades = watchTrades(scene, link, slips);
+  const duels = new Duels(scene, link, slips);
   const card = new PlayerCard(scene, link, {
     whisper,
     report: (target) => openReport(scene, link, target),
     trade: (target) => void trades.ask(target),
+    duel: (target) => duels.challenge(target),
+    records: duels.records,
   });
   let board: Board | undefined;
   const openBoard = () => {
@@ -75,7 +80,7 @@ export function startSocialUi(
       frames.setVisible(true);
     });
   };
-  current = { link, card, whisper, openBoard };
+  current = { link, card, whisper, openBoard, duels };
   registerSocialTabs();
 
   let fighting = false;
@@ -105,9 +110,11 @@ export function startSocialUi(
     setHudVisible(on) {
       frames.setVisible(on);
       slips.setVisible(on);
+      duels.setVisible(on);
       if (!on) card.close();
     },
     back() {
+      if (duels.back()) return true;
       if (wheel.isOpen) {
         wheel.toggle();
         return true;
@@ -135,6 +142,7 @@ export function startSocialUi(
       card.destroy();
       frames.destroy();
       trades.destroy();
+      duels.destroy();
       slips.destroy();
       wheel.destroy();
       board?.close();
@@ -155,6 +163,7 @@ function registerSocialTabs(): void {
   );
   registerMenuTab(clubTab(() => current?.link, { card }));
   registerMenuTab(marketTab(() => current?.link));
+  registerMenuTab(duelTab(() => current?.duels));
   registerMenuTab({
     id: "board",
     label: t("board.title"),

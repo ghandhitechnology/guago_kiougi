@@ -8,6 +8,8 @@ import { t, tMaybe } from "../i18n/index.ts";
 import { Button } from "../ui/button.ts";
 import { FocusScope } from "../ui/focus.ts";
 import { fade } from "../ui/motion.ts";
+import { holdToasts, type ToastSpot } from "../ui/overlay.ts";
+import { screen } from "../ui/screen.ts";
 import { sound } from "../ui/sound.ts";
 import { Label } from "../ui/text.ts";
 import { sliceOf, uiArt } from "../ui/theme.ts";
@@ -15,6 +17,8 @@ import { clubDress, clubOf, worldPeople } from "../world/people.ts";
 import { worldView } from "../world/view.ts";
 import type { WorldLink } from "../world-link.ts";
 import { ask } from "./act.ts";
+import { recordText } from "./duel/index.ts";
+import type { DuelRecords } from "./duel/records.ts";
 import { emblemTexture } from "./emblem.ts";
 
 /** Who a card is about: whatever the caller knows, at least the name. */
@@ -35,6 +39,10 @@ export interface CardActions {
   whisper(name: string): void;
   report(target: { id: string; name: string; line?: number }): void;
   trade?(target: { id: string; name: string }): void;
+  /** A 1v1 challenge, from the 결투 key. */
+  duel?(target: { id: string; name: string }): void;
+  /** Duels played and won, shown on the card once read. */
+  readonly records?: DuelRecords;
 }
 
 const W = 150;
@@ -62,8 +70,11 @@ export class PlayerCard {
   private target: CardTarget | undefined;
   /** How far apart the two stood when the card opened, once both were seen. */
   private openDist: number | undefined;
+  private h = 0;
+  private unhold: (() => void) | undefined;
   private readonly unfight: () => void;
   private readonly unsocial: () => void;
+  private readonly unrecord: () => void;
 
   constructor(scene: Phaser.Scene, link: WorldLink, actions: CardActions) {
     this.scene = scene;
@@ -78,6 +89,11 @@ export class PlayerCard {
         this.draw(this.target, false);
       }
     });
+    // A record read or written redraws the card it belongs on.
+    this.unrecord =
+      actions.records?.on((id) => {
+        if (this.target && this.resolve(this.target).id === id) this.draw(this.target, false);
+      }) ?? (() => {});
     scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
   }
 
@@ -89,6 +105,15 @@ export class PlayerCard {
     if (target.name === hud.get().player?.name) return;
     this.openDist = undefined;
     this.draw(target, true);
+    this.unhold ??= holdToasts(() => this.toastSpot());
+  }
+
+  /** Toasts drop in at the top of the screen, or under the card when it stands up there. */
+  private toastSpot(): ToastSpot {
+    const top = 4 + screen.safe.top;
+    const root = this.root;
+    if (!root || root.y > top + 24) return { x: screen.w / 2, w: 313, top };
+    return { x: root.x + W / 2, w: 300, top: root.y + this.h + 3 };
   }
 
   close(): void {
@@ -96,6 +121,8 @@ export class PlayerCard {
     if (!root) return;
     this.root = undefined;
     this.target = undefined;
+    this.unhold?.();
+    this.unhold = undefined;
     this.catcher?.destroy();
     this.catcher = undefined;
     const doll = this.doll;
@@ -111,6 +138,7 @@ export class PlayerCard {
     this.close();
     this.unfight();
     this.unsocial();
+    this.unrecord();
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
   }
 
@@ -151,8 +179,12 @@ export class PlayerCard {
     const buttons = this.buttons(who);
     const rows = Math.ceil(buttons.length / 2);
     const look = who.body?.look;
-    const info = look ? 44 : who.club ? 34 : 24;
+    // The duel record sits under major and club; its row is kept while it is being read.
+    const recorded = who.id !== undefined && this.actions.records !== undefined;
+    const recordY = BAND + 24 + (who.club ? 13 : 0);
+    const info = Math.max(look ? 44 : who.club ? 34 : 24, recorded ? recordY + 12 - BAND : 0);
     const h = BAND + info + rows * 21 + 5;
+    this.h = h;
     const [l, r, tt, b] = sliceOf("idcard");
     const card = scene.add.nineslice(0, 0, "ui", "idcard/idle", W, h, l, r, tt, b).setOrigin(0);
     card.setInteractive();
@@ -221,6 +253,17 @@ export class PlayerCard {
         color: "ink.dark",
       });
       root.add(club.obj);
+    }
+
+    // The duel record under the crossed rulers: `3전 2승`, as written, never ahead of it.
+    const record = who.id ? this.actions.records?.get(who.id) : undefined;
+    if (record) {
+      root.add(scene.add.image(left, recordY, "ui", "duel-icon/mark").setOrigin(0));
+      const played = new Label(scene, left + 12, recordY + 1, recordText(record), {
+        font: "galmuri9",
+        color: "ink.dark",
+      });
+      root.add(played.obj);
     }
 
     // What the two of them can do.
@@ -365,9 +408,9 @@ export class PlayerCard {
     ) {
       out.push({ label: t("social.trade"), run: () => trade({ id, name }), closes: true });
     }
-    // 결투 waits for the arena's challenge messages: the key is there, and does nothing yet.
-    if (id && !blocked && who.online) {
-      out.push({ label: t("social.duel"), run: () => {}, closes: false, off: true });
+    const duel = this.actions.duel;
+    if (duel && id && !blocked && who.online) {
+      out.push({ label: t("social.duel"), run: () => duel({ id, name }), closes: true });
     }
     if (id) {
       out.push(

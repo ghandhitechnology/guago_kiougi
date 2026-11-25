@@ -1,7 +1,7 @@
-import type { SocialRequests, SocialType } from "@guago/shared";
+import type { SocialType } from "@guago/shared";
 import { toast } from "../ui/overlay.ts";
 import { sound } from "../ui/sound.ts";
-import type { RequestResult, WorldLink } from "../world-link.ts";
+import type { RequestResult, Requests, RequestType, WorldLink } from "../world-link.ts";
 import { line, refusal } from "./words.ts";
 
 /** When each request type was last sent, so news can tell a leave from a kick. */
@@ -18,10 +18,10 @@ export function askedLately(type: SocialType, ms = 8000): boolean {
  * toasts `said`. Screens redraw from the `social` events the server sends after a change, never
  * from a guess made before the answer.
  */
-export async function ask<K extends SocialType>(
+export async function ask<K extends RequestType>(
   link: WorldLink,
   type: K,
-  req: SocialRequests[K]["req"],
+  req: Requests[K]["req"],
   said?: { id: string; params?: Readonly<Record<string, string | number>> },
 ): Promise<RequestResult<K>> {
   asked.set(type, Date.now());
@@ -29,7 +29,11 @@ export async function ask<K extends SocialType>(
   if (!r.ok) {
     sound("error");
     {
-      const said = refusal(r.code, r.need === undefined ? {} : { need: r.need });
+      // A wait the server names (a queue lock) is said as the clock time it ends.
+      const said = refusal(r.code, {
+        ...(r.need === undefined ? {} : { need: r.need }),
+        ...(r.retryMs === undefined ? {} : { until: Date.now() + r.retryMs }),
+      });
       if (said) toast(said);
     }
     return r;

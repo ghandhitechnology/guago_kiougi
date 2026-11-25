@@ -6,9 +6,11 @@ import {
   type Caught,
   castFlag,
   type DoorRattle,
+  DUEL_MESSAGES,
   distanceToArea,
   encodeInput,
   type Facing,
+  type FloorView,
   type Halt,
   INPUT_MESSAGE,
   InputFlag,
@@ -59,6 +61,7 @@ import { NpcActor, npcArt, speakerName } from "./npc.ts";
 import { Patrols } from "./patrols.ts";
 import { MapView, onQualityTier } from "./render/index.ts";
 import { SelfMover } from "./self.ts";
+import { fightFeed } from "./social/duel/feed.ts";
 import { enterSoundscape, preloadFor, soundscapeFor } from "./sound/audio.ts";
 import { StepSounds } from "./sound/steps.ts";
 import { worldUi } from "./ui/world-ui.ts";
@@ -286,6 +289,12 @@ export class WorldScene extends Phaser.Scene {
     });
     room.onMessage(MAP_MESSAGES.halt, (m: Halt) => {
       if (this.room === room) this.here?.patrols?.halt(m.patrol);
+    });
+    // The 콜로세움 floor, for its banner: none here until this room says so.
+    emitWorld({ t: "duel" });
+    const feed = fightFeed(room, () => (this.room === room ? this.reader : undefined));
+    room.onMessage(DUEL_MESSAGES.floor, (view: FloorView) => {
+      if (this.room === room) emitWorld({ t: "duel", view, feed });
     });
     room.onDrop(() => {
       if (this.room === room) this.live = false;
