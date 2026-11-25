@@ -129,7 +129,7 @@ const lights: LightSource[] = [
     at: [408, 168],
     radius: 60,
     color: "gold.light",
-    intensity: 0.6,
+    intensity: 0.3,
     paint: { bands: ["campus-lamp"], at: [408, 180], r: [54, 26], ragged: 3 },
   },
   ...[176, 296].map(
@@ -137,7 +137,7 @@ const lights: LightSource[] = [
       at: [x, 490],
       radius: 40,
       color: "gold.light",
-      intensity: 0.5,
+      intensity: 0.25,
       paint: { bands: ["campus-lamp"], at: [x, 492], r: [40, 18], ragged: 3 },
     }),
   ),
@@ -145,7 +145,7 @@ const lights: LightSource[] = [
     at: [690, 520],
     radius: 30,
     color: "gold.light",
-    intensity: 0.4,
+    intensity: 0.2,
     paint: { bands: ["campus-lamp"], at: [690, 526], r: [26, 12], ragged: 2 },
   },
 ];

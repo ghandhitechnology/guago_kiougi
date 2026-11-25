@@ -174,8 +174,6 @@ export class LightField {
     readonly color: Rgb;
   } | null = null;
   ambient: Rgb;
-  /** Lights count for less in daylight: a lit window barely shows on sunny pavement. */
-  scale = 1;
 
   private readonly id: string;
   private readonly masks: MapMasks;
@@ -413,7 +411,7 @@ export class LightField {
       if (spec.flicker) k += spec.flicker.amount * wobble(t, spec.flicker.period, l.seed);
       if (l.follows) k *= 0.08 + 0.92 * l.follows();
       if (l.owner && (!allowed.has(l) || !l.owner.visible)) k = 0;
-      l.level = Math.max(0, Math.min(2, spec.intensity * k * (l.window ? 1 : this.scale)));
+      l.level = Math.max(0, Math.min(2, spec.intensity * k));
       l.image.setTint(spec.color).setAlpha(l.level / 2);
       if (!l.shape) {
         const size = spec.radius * 2;

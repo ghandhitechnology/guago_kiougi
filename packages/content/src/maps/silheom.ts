@@ -238,7 +238,7 @@ const map: MapSource = {
       at: [144, 80],
       radius: 30,
       color: "plum.pale",
-      intensity: 0.35,
+      intensity: 0.2,
       paint: { bands: ["campus-lamp"], at: [144, 86], r: [26, 10], ragged: 2 },
     },
     // The laser on the interferometer.

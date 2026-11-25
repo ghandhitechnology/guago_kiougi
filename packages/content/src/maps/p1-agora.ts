@@ -214,16 +214,17 @@ const lights: LightSource[] = [
   // The wound: the school's night lying in the afternoon, a cool rim round it.
   {
     at: px(WOUND[0], WOUND[1]),
-    radius: 96,
-    color: "navy.light",
-    intensity: 0.4,
+    radius: 110,
+    color: "navy.pale",
+    intensity: 0.9,
+    flicker: { amount: 0.06, period: 3.2 },
   },
   // The altar's fire.
   {
     at: [ALTAR[0] * T + 16, ALTAR[1] * T + 4],
     radius: 40,
     color: "gold.light",
-    intensity: 0.4,
+    intensity: 0.6,
     flicker: { amount: 0.2, period: 0.7 },
   },
 ];
@@ -328,7 +329,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.pale",
-  ambient: { color: "gold.pale", intensity: 1 },
+  ambient: { color: "gold.pale", intensity: 0.95 },
   plan: PLAN,
   legend: {
     ...GREEK_LEGEND,

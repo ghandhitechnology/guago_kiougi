@@ -257,7 +257,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.dark",
-  ambient: { color: "rose.pale", intensity: 0.92 },
+  ambient: { color: "rose.pale", intensity: 0.86, sun: { dir: [-0.9, 0.08], color: "rose.light" } },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [{ prop: "dawn", at: [-60, 4], raw: true }],

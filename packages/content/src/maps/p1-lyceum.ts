@@ -269,7 +269,7 @@ const map: MapSource = {
   theme: "campus-golden",
   shade: "golden-shade",
   sky: "gold.pale",
-  ambient: { color: "gold.light", intensity: 1 },
+  ambient: { color: "gold.light", intensity: 0.9, sun: { dir: [0.55, 0.14], color: "gold.pale" } },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [

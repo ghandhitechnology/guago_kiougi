@@ -18,7 +18,17 @@
  */
 import type { ArtMetadata, SpriteMeta } from "@guago/art";
 import { emitterParticle } from "@guago/art";
-import type { Actor, BuiltMap, Doll, Emitter, FramePick, Placement, Prop } from "@guago/content";
+import type {
+  Actor,
+  BuiltMap,
+  Doll,
+  Emitter,
+  FramePick,
+  LightSource,
+  Patrol,
+  Placement,
+  Prop,
+} from "@guago/content";
 import * as Phaser from "phaser";
 import { composeLook, lookTexture } from "../art.ts";
 import { artMetadata, KEYS, litTheme, mapData, type ThemedAtlas, themedAtlas } from "./assets.ts";
@@ -42,8 +52,10 @@ import {
 } from "./sprite-light.ts";
 import { bayer4, makeTextures, TEX } from "./textures.ts";
 import { qualityTier, TIER_SETTINGS, type Tier, type TierSettings } from "./tiers.ts";
+import { Cone, type VisionCone } from "./vision.ts";
 
 export type { FlashSpec, LightSpec } from "./light-field.ts";
+export type { VisionCone } from "./vision.ts";
 
 export type LightingMode = "screen" | "object" | "off";
 
@@ -272,6 +284,8 @@ export class MapView {
   private floodAt: [number, number] = [0, 0];
   private barRamp: Ramp = { from: 0, to: 0, ms: 0, age: 0 };
   private time = 0;
+  private readonly cones = new Set<Cone>();
+  private coneCount = 0;
   /** A map with interior walls: no wind or rain falls across its screen. */
   private get indoors(): boolean {
     return (this.map.scene.edges ?? []).some((e) =>
@@ -314,7 +328,6 @@ export class MapView {
     const { intensity } = this.map.ambient;
     const ambient = [...amb].map((v) => intensity * (1 + (v / norm - 1) * (1 - intensity))) as Rgb;
     this.field = new LightField(scene, id, this.masks, this.camera, ambient, this.map.scene.seed);
-    this.field.scale = Math.max(0.25, Math.min(1, 1.6 * (1 - intensity)));
     this.shadeTint = [...rgbOf(this.map.time.phase === "night" ? 0x8c8aa8 : 0xb4accc)];
 
     // A layer made from a config takes NORMAL blending, which would override its children's;
@@ -376,7 +389,8 @@ export class MapView {
     // Lights: the rift's region first, then every map light, shaped and cut by walls.
     this.region = this.buildRegion();
     this.map.lights.forEach((source, i) => {
-      if (source.paint?.region) return;
+      // Light the contact sheet paints but the engine does not cast (radius or intensity 0).
+      if (source.paint?.region || source.radius <= 0 || source.intensity <= 0) return;
       const light = this.field.addStatic(source, paletteColor(this.meta, source.color), i);
       light.follows = this.sputter(source.at);
     });
@@ -572,6 +586,26 @@ export class MapView {
     this.barRamp = { from: this.bars[0].displayHeight, to: on ? size : 0, ms, age: 0 };
   }
 
+  /**
+   * A guard's vision cone as a torch beam in the light map, lit exactly where `sees` says the
+   * guard sees: drive it each frame with `setPose(patrolPose(patrol, t))`.
+   */
+  addVisionCone(patrol: Patrol, options: { color?: number; intensity?: number } = {}): VisionCone {
+    const key = `render:cone:${this.map.id}:${patrol.id}:${this.coneCount++}`;
+    const cone = new Cone(
+      this.scene,
+      this.map,
+      patrol,
+      key,
+      options.color ?? paletteColor(this.meta, "gold.light"),
+      options.intensity ?? 1.1,
+      () => this.cones.delete(cone),
+    );
+    this.cones.add(cone);
+    this.field.layer.add(cone.image);
+    return cone;
+  }
+
   /** Draws above the world, untouched by its light and drain: a boss's drain sprite, a title. */
   addOverlay(obj: Phaser.GameObjects.GameObject): void {
     this.overlay.add(obj);
@@ -729,6 +763,7 @@ export class MapView {
   destroy(): void {
     for (const off of this.offs.splice(0)) off();
     for (const obj of [...this.telegraphs.keys()]) this.removeTelegraph(obj);
+    for (const c of [...this.cones]) c.remove();
     for (const obj of [...this.entities.keys()]) this.removeEntity(obj);
     for (const ol of this.objectLights.values()) this.scene.lights.removeLight(ol);
     if (this.regionObjectLight) this.scene.lights.removeLight(this.regionObjectLight);
@@ -1179,7 +1214,7 @@ export class MapView {
   }
 
   private buildRegion(): RegionLight | null {
-    const source = this.map.lights.find((l) => l.paint?.region);
+    const source = this.map.lights.find((l) => l.paint?.region) ?? this.woundLight();
     if (!source) return null;
     const region = buildRegionLight(
       this.scene,
@@ -1199,7 +1234,7 @@ export class MapView {
     )
       .setOrigin(0)
       .setBlendMode(Phaser.BlendModes.ADD)
-      .setTint(paletteColor(this.meta, "gold.pale"));
+      .setTint(this.lipColor(source.color));
     this.groundGlow.add(this.regionGlow);
     const lip = region.lip;
     const n = lip.length / 2;
@@ -1219,13 +1254,57 @@ export class MapView {
       moveToY: cy,
       lifespan: { min: 2600, max: 5200 },
       alpha: { start: 0.95, end: 0.1 },
-      tint: [paletteColor(this.meta, "gold.pale"), paletteColor(this.meta, "clay.dust"), 0xffffff],
+      tint: [this.lipColor(source.color), paletteColor(this.meta, source.color), 0xffffff],
       blendMode: Phaser.BlendModes.ADD,
       frequency: 90,
       maxAliveParticles: 48,
     });
     this.glowLayer.add(this.regionMotes);
     return region;
+  }
+
+  /** The lip of a tear glows pale gold in warm light, in its own colour in cold. */
+  private lipColor(color: string): number {
+    const c = rgbOf(paletteColor(this.meta, color));
+    return c[2] > c[0] ? paletteColor(this.meta, color) : paletteColor(this.meta, "gold.pale");
+  }
+
+  /**
+   * A torn edge the map paints no region light for (the agora's wound): lit from the light
+   * standing nearest it, spilling that light's colour out over a third of its radius.
+   */
+  private woundLight(): LightSource | null {
+    const { w, h, inside } = this.masks;
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (let y = 0; y < h; y += 4) {
+      for (let x = 0; x < w; x += 4) {
+        if (!inside[y * w + x]) continue;
+        sx += x;
+        sy += y;
+        n++;
+      }
+    }
+    if (n === 0) return null;
+    const cx = sx / n;
+    const cy = sy / n;
+    const dist = (l: LightSource) => Math.hypot(l.at[0] - cx, l.at[1] - cy);
+    const near = this.map.lights
+      .filter((l) => l.radius > 0 && l.intensity > 0)
+      .sort((a, b) => dist(a) - dist(b))[0];
+    if (!near || dist(near) > 240) return null;
+    return {
+      ...near,
+      intensity: near.intensity * 0.6,
+      paint: {
+        bands: [],
+        region: "*",
+        reach: [near.radius * 0.35],
+        ragged: 5,
+        rays: { at: [cx, cy], count: 9, amount: 0.25 },
+      },
+    };
   }
 
   private defaultShadow(obj: Lit): { texture: string; frame: string } | null {

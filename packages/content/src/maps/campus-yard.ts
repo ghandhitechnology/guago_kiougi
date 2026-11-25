@@ -237,14 +237,14 @@ const lights: LightSource[] = [
     at: [880, 720],
     radius: 90,
     color: "gold.light",
-    intensity: 0.4,
+    intensity: 0.12,
     flicker: { amount: 0.04, period: 3 },
   },
   {
     at: [768, 712],
     radius: 40,
     color: "sea.pale",
-    intensity: 0.5,
+    intensity: 0.18,
     flicker: { amount: 0.08, period: 2.5 },
   },
 ];

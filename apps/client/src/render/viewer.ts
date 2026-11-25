@@ -14,10 +14,11 @@ import type { ArtMetadata } from "@guago/art";
 import { isSolidTile } from "@guago/shared";
 import * as Phaser from "phaser";
 import { composeLook, defaultLook, lookAnim, lookTexture } from "../art.ts";
-import { artMetadata, loadMap, mapData } from "./assets.ts";
+import { artMetadata, loadAtlases, loadMap, mapData } from "./assets.ts";
 import { paletteColor } from "./grade.ts";
 import { LAYER_NAMES, type LightHandle, type LightingMode, MapView } from "./map-view.ts";
 import { probeTier, setQualityTier, TIERS, type Tier } from "./tiers.ts";
+import { DEMO_ATLASES, type Demo, startDemo } from "./viewer-demos.ts";
 
 const MONSTERS = ["odap", "odap-pencil", "rational", "golem", "element-fire", "element-water"];
 const PLAYER_RIG = "student";
@@ -92,6 +93,8 @@ export class ViewerScene extends Phaser.Scene {
   preload(): void {
     this.id = this.params.get("view") || "campus-field";
     loadMap(this, this.id);
+    const demo = this.params.get("demo") as Demo | null;
+    if (demo && demo in DEMO_ATLASES) loadAtlases(this, DEMO_ATLASES[demo]);
   }
 
   create(): void {
@@ -137,6 +140,11 @@ export class ViewerScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown", (e: KeyboardEvent) => this.onKey(e.key));
     this.countDrawCalls();
     if (this.params.get("hud") !== "0") this.makeHud();
+    const demo = this.params.get("demo") as Demo | null;
+    if (demo && demo in DEMO_ATLASES) {
+      const centre = { x: cam.scrollX + cam.width / 2, y: cam.scrollY + cam.height / 2 };
+      this.demo = startDemo(demo, this, this.view, this.meta, centre);
+    }
     if (!tier) {
       void probeTier(this.game, (fn) => {
         this.events.on(Phaser.Scenes.Events.POST_UPDATE, fn);
@@ -304,7 +312,14 @@ export class ViewerScene extends Phaser.Scene {
 
   private gradeOn = true;
 
+  private demo: ((t: number, dt: number) => void) | null = null;
+  private demoTime = 0;
+
   override update(_time: number, delta: number): void {
+    if (this.demo) {
+      this.demoTime += delta / 1000;
+      this.demo(this.demoTime, delta);
+    }
     this.frameTimes.push(delta);
     if (this.frameTimes.length > 120) this.frameTimes.shift();
     const dt = delta / 1000;

@@ -246,7 +246,7 @@ const map: MapSource = {
   theme: "olive-morning",
   shade: "greece-shade",
   sky: "olive.mid",
-  ambient: { color: "stone.bright", intensity: 0.95 },
+  ambient: { color: "stone.bright", intensity: 0.92 },
   plan: PLAN,
   legend: GREEK_LEGEND,
   details,

@@ -163,10 +163,10 @@ const lights: LightSource[] = [
   // The fire: everything in the chamber that can be seen is seen by it.
   {
     at: px(FIRE[0], FIRE[1] - 1),
-    radius: 260,
+    radius: 280,
     color: "gold.light",
-    intensity: 1.1,
-    flicker: { amount: 0.12, period: 0.6 },
+    intensity: 1.5,
+    flicker: { amount: 0.16, period: 0.6 },
     paint: {
       bands: ["rift-sun", "rift-warm", "rift-ember"],
       at: [FIRE[0] * T + 8, FIRE[1] * T - 30],
@@ -205,10 +205,10 @@ const lights: LightSource[] = [
   ...TORCHES.map(
     ([x, y]): LightSource => ({
       at: [x * T + 8, y * T],
-      radius: 56,
+      radius: 64,
       color: "gold.light",
-      intensity: 0.6,
-      flicker: { amount: 0.2, period: 0.5 },
+      intensity: 1,
+      flicker: { amount: 0.22, period: 0.5 },
       paint: {
         bands: ["rift-warm", "rift-ember"],
         at: [x * T + 8, y * T + 4],
@@ -247,7 +247,7 @@ const map: MapSource = {
   time: { clock: "13:20", phase: "noon", weather: "clear" },
   theme: "field-night",
   sky: "ink.deep",
-  ambient: { color: "ink.dark", intensity: 0.35 },
+  ambient: { color: "ink.deep", intensity: 0.1, unlit: "greece" },
   plan: PLAN,
   legend: { ...GREEK_LEGEND, x: { terrain: null, solid: "#" } },
   details: [

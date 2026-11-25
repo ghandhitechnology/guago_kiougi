@@ -120,7 +120,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.pale",
-  ambient: { color: "gold.pale", intensity: 1.05 },
+  ambient: { color: "gold.pale", intensity: 0.96 },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [
