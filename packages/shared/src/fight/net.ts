@@ -107,7 +107,7 @@ export interface NetViewer {
   privCount: number;
   /** Players' effects this client was sent and has not seen end, by fx id. */
   readonly sentFx: Uint8Array;
-  /** The own body as last sent: x, y (1/POS_SCALE px), facing, seq, hp, shield. */
+  /** The own body as last sent: x, y (1/POS_SCALE px), facing, seq, hp, shield, roll left. */
   readonly self: Float64Array;
   /** Bytes of the last message, for metrics. */
   lastBytes: number;
@@ -132,7 +132,7 @@ export function newViewer(): NetViewer {
     priv: new ByteWriter(512),
     privCount: 0,
     sentFx: new Uint8Array(65536),
-    self: new Float64Array(6).fill(-1),
+    self: new Float64Array(7).fill(-1),
     lastBytes: 0,
     parts: new Float64Array(8),
   };
@@ -934,7 +934,14 @@ export class FightNet {
       const x = Math.round(p.x * POS_SCALE);
       const y = Math.round(p.y * POS_SCALE);
       let mask = 0;
-      if (v.fresh || me[0] !== x || me[1] !== y || me[2] !== p.facing || me[3] !== p.seq) {
+      if (
+        v.fresh ||
+        me[0] !== x ||
+        me[1] !== y ||
+        me[2] !== p.facing ||
+        me[3] !== p.seq ||
+        me[6] !== p.rollLeft
+      ) {
         const dx = x - (me[0] as number);
         const dy = y - (me[1] as number);
         const ds = p.seq - (me[3] as number);
@@ -955,17 +962,20 @@ export class FightNet {
         out.u16(y);
         out.u8(p.facing);
         out.u32(p.seq);
+        out.u8(p.rollLeft);
       } else if (mask & SelfField.Step) {
         out.i8(x - (me[0] as number));
         out.i8(y - (me[1] as number));
         out.u8(p.facing);
         out.u8(p.seq - (me[3] as number));
+        out.u8(p.rollLeft);
       }
       if (mask & (SelfField.Body | SelfField.Step)) {
         me[0] = x;
         me[1] = y;
         me[2] = p.facing;
         me[3] = p.seq;
+        me[6] = p.rollLeft;
       }
       if (mask & SelfField.Hp) {
         out.f32(hp);
@@ -1292,4 +1302,3 @@ export class FightNet {
   }
 }
 
-export { HitFlag };

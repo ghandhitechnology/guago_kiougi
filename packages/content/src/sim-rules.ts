@@ -709,4 +709,3 @@ export function monsterKindIndex(id: string): number {
   return i;
 }
 
-export { MOMENTUM };

@@ -2,10 +2,15 @@ import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
 import { LAWN, simRules } from "@guago/content";
 import {
+  AIM_MESSAGE,
+  castFlag,
   type Collidable,
   encodeInput,
   Facing,
   INPUT_MESSAGE,
+  InputFlag,
+  MAX_AIM,
+  MODE_MESSAGE,
   type MapState,
   NULL_SINK,
   PLAYER_SPEED,
@@ -35,6 +40,8 @@ import { drawGround } from "./ground.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { stayConnected } from "./net.ts";
+import { FightKeys } from "./fight-keys.ts";
+import { FightSketch } from "./fight-sketch.ts";
 import { drawProps } from "./props.ts";
 import { SelfMover } from "./self.ts";
 
@@ -63,6 +70,9 @@ export class WorldScene extends Phaser.Scene {
   /** The fight snapshot as this client holds it (`fight/wire.ts`). */
   private reader = new SnapshotReader();
   private selfSlot = -1;
+  private mode = 1;
+  private sketch: FightSketch | undefined;
+  private fightKeys: FightKeys | undefined;
   private self: SelfMover | undefined;
   private selfActor: PlayerActor | undefined;
   private selfId: string | undefined;
@@ -124,6 +134,31 @@ export class WorldScene extends Phaser.Scene {
     this.reader.rows = Math.ceil((this.walls.collision.h * TILE_SIZE) / cell);
     room.onStateChange((state) => this.onPatch(state));
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => this.onSnapshot(bytes));
+    if (import.meta.env.DEV) this.sketch = new FightSketch(this, this.walls, 9000);
+    this.fightKeys = new FightKeys(
+      {
+        dodge: () => this.self?.queue(InputFlag.Dodge),
+        cast: (slot) => {
+          if (this.mode === 3) this.self?.queue(castFlag(slot));
+        },
+        cycleMode: () => room.send(MODE_MESSAGE, [(this.mode + 1) % 4]),
+        aim: (at) => {
+          const me = this.selfActor?.body;
+          if (!at || !me) return room.send(AIM_MESSAGE, []);
+          const clamp = (v: number) => Math.max(-MAX_AIM, Math.min(MAX_AIM, Math.round(v)));
+          room.send(AIM_MESSAGE, [clamp(at.x - me.x), clamp(at.y - me.y)]);
+        },
+      },
+      (cx, cy) => {
+        const canvas = this.game.canvas.getBoundingClientRect();
+        if (cx < canvas.left || cy < canvas.top || cx > canvas.right || cy > canvas.bottom)
+          return null;
+        const cam = this.cameras.main;
+        const x = ((cx - canvas.left) / canvas.width) * cam.width + cam.scrollX;
+        const y = ((cy - canvas.top) / canvas.height) * cam.height + cam.scrollY;
+        return { x, y };
+      },
+    );
     room.onDrop(() => {
       this.live = false;
     });
@@ -133,8 +168,15 @@ export class WorldScene extends Phaser.Scene {
       this.clock.reset();
       this.reader.reset();
     });
-    if (import.meta.env.DEV) exposeDevStats(this);
+    if (import.meta.env.DEV) {
+      exposeDevStats(this);
+      // Development only: the server's dev commands (spawn beside me, clear), for recordings.
+      (window as unknown as { __guagoDev?: (c: unknown[]) => void }).__guagoDev = (c) =>
+        room.send("dev", c);
+    }
     return () => {
+      this.fightKeys?.dispose();
+      this.sketch?.clear();
       for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
       this.monsters.clear();
       this.players.clear();
@@ -150,7 +192,11 @@ export class WorldScene extends Phaser.Scene {
   /** Who this client is among the bodies; the bodies themselves come in the snapshot. */
   private onPatch(state: MapState): void {
     for (const [slot, p] of state.players) {
-      if (p.sid === this.selfId) this.selfSlot = Number(slot);
+      if (p.sid !== this.selfId) continue;
+      this.selfSlot = Number(slot);
+      this.mode = p.mode;
+      // In 완전 자동 and 스킬 수동 the server walks the body; knocked out, nothing moves it.
+      if (this.self) this.self.serverDriven = p.mode === 0 || p.mode === 2 || p.down > 0;
     }
   }
 
@@ -162,7 +208,10 @@ export class WorldScene extends Phaser.Scene {
     const reader = this.reader;
     reader.read(bytes, {
       ...NULL_SINK,
-      self: (me) => this.self?.onServer({ x: me.x, y: me.y, facing: me.facing, seq: me.seq }),
+      self: (me) =>
+        this.self?.onServer({ x: me.x, y: me.y, facing: me.facing, seq: me.seq, roll: me.roll }),
+      fx: (f) => this.sketch?.spawn(f, reader.tick),
+      fxEnd: (fx) => this.sketch?.end(fx),
     });
     const tick = reader.tick;
     this.clock.observe(tick, performance.now());
@@ -222,6 +271,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const t = this.clock.renderTime(time);
+    this.sketch?.draw(t);
     for (const { track, actor } of this.monsters.values()) {
       const at = track.at(t);
       actor.update(at.x, at.y, at.facing as Facing, dt);

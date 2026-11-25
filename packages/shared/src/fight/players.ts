@@ -187,4 +187,3 @@ export function startRevive(w: FightWorld, by: Player, target: Player): boolean 
   return true;
 }
 
-export const REGEN_STEP = REGEN_TICKS / TICK_RATE_HZ;

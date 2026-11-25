@@ -878,8 +878,3 @@ export class FightWorld {
     if (owner) owner.minions = Math.max(0, owner.minions - 1);
   }
 }
-
-/** Whether a weapon kind in a slot is worn. */
-export function weaponAt(p: Player, slot: number): Weapon | undefined {
-  return p.kit.weapons[slot];
-}

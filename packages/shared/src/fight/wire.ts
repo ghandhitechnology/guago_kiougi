@@ -81,8 +81,8 @@ export const Priv = {
 
 /**
  * Fields of a Self record: the body absolutely (u16 x, u16 y in 1/POS_SCALE px, u8 facing, u32
- * seq) or as a step from the last one (i8 dx, i8 dy in 1/POS_SCALE px, u8 facing, u8 inputs
- * applied since), health as f32, shield as f32.
+ * seq, u8 roll inputs left) or as a step from the last one (i8 dx, i8 dy in 1/POS_SCALE px, u8
+ * facing, u8 inputs applied since, u8 roll inputs left), health as f32, shield as f32.
  */
 export const SelfField = { Body: 1, Hp: 2, Shield: 4, Step: 8 } as const;
 
@@ -94,6 +94,8 @@ export interface WireSelf {
   facing: number;
   /** Last input applied. */
   seq: number;
+  /** Inputs left in a dodge roll it asked for, for replaying the rest of it. */
+  roll: number;
   hp: number;
   shield: number;
 }
@@ -843,7 +845,7 @@ export class SnapshotReader {
   }
 
   /** The client's own body, accumulated over Self records. */
-  readonly me: WireSelf = { x: 0, y: 0, facing: 0, seq: 0, hp: 0, shield: 0 };
+  readonly me: WireSelf = { x: 0, y: 0, facing: 0, seq: 0, roll: 0, hp: 0, shield: 0 };
   hasSelf = false;
 
   /** Transfers that found nothing to transfer: zero unless the two sides disagree. */
@@ -1013,11 +1015,13 @@ export class SnapshotReader {
             me.y = r.u16();
             me.facing = r.u8();
             me.seq = r.u32();
+            me.roll = r.u8();
           } else if (mask & SelfField.Step) {
             me.x += r.i8();
             me.y += r.i8();
             me.facing = r.u8();
             me.seq += r.u8();
+            me.roll = r.u8();
           }
           if (mask & SelfField.Hp) me.hp = r.f32();
           if (mask & SelfField.Shield) me.shield = r.f32();
@@ -1047,4 +1051,3 @@ export const NULL_SINK: SnapshotSink = {
   note() {},
 };
 
-export { CODE_EXTRA, CODE_FLASH, CODE_MOVE, CODE_SAME };
