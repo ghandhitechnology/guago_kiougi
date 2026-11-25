@@ -10,6 +10,13 @@ describe("server config", () => {
     expect(() => assertServable(readConfig({ ...deployed, SERVER_SECRET: "k" }))).not.toThrow();
   });
 
+  it("refuses the development map option anywhere but local development", () => {
+    const map = { ALLOW_MAP_OPTION: "1" };
+    expect(() => assertServable(readConfig({ ...map, NODE_ENV: "development" }))).not.toThrow();
+    const deployed = { ...map, CLIENT_ORIGIN: "https://game.example", SERVER_SECRET: "k" };
+    expect(() => assertServable(readConfig(deployed))).toThrow(/ALLOW_MAP_OPTION/);
+  });
+
   it("keeps cookies Secure for any https origin", () => {
     expect(readConfig({ NODE_ENV: "development" }).secureCookies).toBe(false);
     expect(readConfig({}).secureCookies).toBe(true);
