@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { type Drop, ledgerKey } from "@guago/content";
 import type { ChangeNotice } from "@guago/shared";
-import { background } from "../background.ts";
+import { guarded } from "../background.ts";
 import { describeError } from "../db/index.ts";
 import { type Executor, isTransient } from "./executor.ts";
 import { checkDrop, checkGrant, type GrantRequest } from "./ops.ts";
@@ -123,7 +123,10 @@ export class GrantBuffer {
 
   /** Flushes every `ms`; returns the stop. */
   start(ms = GRANT_FLUSH_MS): () => void {
-    const timer = setInterval(() => background("grant flush", this.flush()), ms);
+    const timer = setInterval(
+      guarded("grant flush", () => this.flush()),
+      ms,
+    );
     timer.unref();
     return () => clearInterval(timer);
   }

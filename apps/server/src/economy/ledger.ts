@@ -15,8 +15,10 @@
  * Compaction keeps every sum: a wallet still equals its ledger and each day still totals the
  * same, so the audit holds before, during and after a run.
  */
+
 import { koreanDay } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { guarded } from "../background.ts";
 import { type Db, describeError } from "../db/index.ts";
 import { pruneTradeLog } from "../trade/log.ts";
 
@@ -120,7 +122,7 @@ export function startLedgerMaintenance(db: Db, now: Clock = Date.now): () => voi
       next = RETRY_MS;
     }
     if (!stopped) {
-      timer = setTimeout(run, next);
+      timer = setTimeout(guarded("ledger maintenance", run), next);
       timer.unref();
     }
   };

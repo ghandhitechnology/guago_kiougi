@@ -95,7 +95,7 @@ import {
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
-import { background } from "./background.ts";
+import { background, guarded } from "./background.ts";
 import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
@@ -448,42 +448,72 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
     // Patches and snapshots go out right after each step, so each is exactly one tick of the world.
     this.ticks = new TickClock(performance.now());
-    this.setTimestep(() => this.loop(), POLL_MS);
+    this.setTimestep(
+      guarded("map tick", () => this.loop()),
+      POLL_MS,
+    );
     this.patchRate = 0;
-    this.clock.setInterval(() => {
-      if (this.clients.length > 0)
-        console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
-    }, LOG_EVERY_MS);
-    this.clock.setInterval(() => background("place save", this.seats.saveAll()), SAVE_INTERVAL_MS);
-    this.clock.setInterval(() => this.refreshDoors(), DOORS_EVERY_MS);
-    if (def.id === HOME_MAP) this.clock.setInterval(() => this.letGoHome(), HOME_EVERY_MS);
+    this.clock.setInterval(
+      guarded("map metrics log", () => {
+        if (this.clients.length > 0)
+          console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
+      }),
+      LOG_EVERY_MS,
+    );
+    this.clock.setInterval(
+      guarded("place save", () => this.seats.saveAll()),
+      SAVE_INTERVAL_MS,
+    );
+    this.clock.setInterval(
+      guarded("map doors", () => this.refreshDoors()),
+      DOORS_EVERY_MS,
+    );
+    if (def.id === HOME_MAP) {
+      this.clock.setInterval(
+        guarded("home check", () => this.letGoHome()),
+        HOME_EVERY_MS,
+      );
+    }
     // A club joined, left or restyled shows under the name at once.
-    this.unlistenClubs = clubTags.listen((characterId, tag) => {
-      for (const pawn of this.pawns.values()) {
-        if (pawn.character.id === characterId) wearClub(pawn.state, tag);
-      }
-    });
+    this.unlistenClubs = clubTags.listen(
+      guarded("map club tag", (characterId: string, tag: Parameters<typeof wearClub>[1]) => {
+        for (const pawn of this.pawns.values()) {
+          if (pawn.character.id === characterId) wearClub(pawn.state, tag);
+        }
+      }),
+    );
     // Party members on this map share kills within 20 tiles (PLAN §6); the step reads the party.
-    this.unlistenParties = parties.listen((characterId, partyId) => {
-      const pawn = fighting.get(characterId)?.pawn;
-      // A fighter's party is its side until the match is over (duel/floor.ts).
-      if (pawn && this.pawns.get(pawn.player.id) === pawn && pawn.player.team === 0)
-        pawn.player.party = partyOf(partyId);
-    });
+    this.unlistenParties = parties.listen(
+      guarded("map party", (characterId: string, partyId: Parameters<typeof partyOf>[0]) => {
+        const pawn = fighting.get(characterId)?.pawn;
+        // A fighter's party is its side until the match is over (duel/floor.ts).
+        if (pawn && this.pawns.get(pawn.player.id) === pawn && pawn.player.team === 0)
+          pawn.player.party = partyOf(partyId);
+      }),
+    );
     // Party frames: health and mode, which the party module passes on only when they change.
-    this.clock.setInterval(() => {
-      for (const pawn of this.pawns.values()) {
-        const p = pawn.player;
-        const mode = CONTROL_MODES[p.mode] ?? "semi";
-        parties.report(pawn.character.id, { hp: p.hp, maxHp: p.kit.maxHp, mode });
-      }
-    }, VITALS_EVERY_MS);
+    this.clock.setInterval(
+      guarded("map vitals", () => {
+        for (const pawn of this.pawns.values()) {
+          const p = pawn.player;
+          const mode = CONTROL_MODES[p.mode] ?? "semi";
+          parties.report(pawn.character.id, { hp: p.hp, maxHp: p.kit.maxHp, mode });
+        }
+      }),
+      VITALS_EVERY_MS,
+    );
     // The living world is read every couple of seconds from memory, never on the tick.
     this.readLive();
-    this.clock.setInterval(() => this.readLive(), LIVE_EVERY_MS);
+    this.clock.setInterval(
+      guarded("map live read", () => this.readLive()),
+      LIVE_EVERY_MS,
+    );
     if (invariants.on) {
       ROOMS.add(this);
-      this.clock.setInterval(() => this.checkBodies(), BODY_CHECK_MS);
+      this.clock.setInterval(
+        guarded("map body check", () => this.checkBodies()),
+        BODY_CHECK_MS,
+      );
     }
     // Made for a seat that may never be taken.
     this.emptied();
@@ -717,7 +747,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private emptied(): void {
     this.retireTimer?.clear();
     this.retireTimer = this.clock.setTimeout(
-      () => background("channel retire", this.retire()),
+      guarded("channel retire", () => this.retire()),
       this.graceMs,
     );
   }
@@ -1272,9 +1302,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       return;
     }
     client.send(MAP_MESSAGES.transfer, { ...seating, via } satisfies Transfer);
-    this.clock.setTimeout(() => {
-      if (this.clients.includes(client)) client.leave(CLOSE_MAP_CHANGED);
-    }, MOVED_SOCKET_MS);
+    this.clock.setTimeout(
+      guarded("moved socket close", () => {
+        if (this.clients.includes(client)) client.leave(CLOSE_MAP_CHANGED);
+      }),
+      MOVED_SOCKET_MS,
+    );
   }
 
   /**

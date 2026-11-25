@@ -3,7 +3,7 @@ import { WORLD_ROOM } from "@guago/shared";
 import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
-import { background } from "./background.ts";
+import { background, guarded } from "./background.ts";
 import { channels } from "./channels.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
@@ -21,6 +21,7 @@ import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
 import { fightLoadoutChanged, provideFightServices } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
+import { installProcessGuard } from "./process-guard.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
@@ -118,6 +119,16 @@ const server = createGameServer(
 provideFightServices({ modes: dbModes(db) });
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
+// Signals and exceptions nobody caught: keep serving through a one-off fault, saving what can be
+// saved; shut down the graceful way only when the same fault keeps coming back.
+installProcessGuard({
+  shutdown: (error) => server.gracefullyShutdown(true, error),
+  flush: async () => {
+    await economy.grants.flush();
+    await live.progress.flush();
+    await chatLog.flush();
+  },
+});
 onShutdown("grants", () => economy.grants.flush());
 onShutdown("quest progress", () => live.stop());
 onShutdown("chat log", () => chatLog.flush());
@@ -137,14 +148,17 @@ startListingSweeper(
   (id, change) => worldRoom()?.notify(id, change),
 );
 setInterval(
-  () => {
-    auth.sweep().catch(() => {});
-    economy.prune(live.progress.inflightIds()).catch(() => {});
+  guarded("ten-minute sweeps", () => {
+    background("session sweep", auth.sweep());
+    background("operation prune", economy.prune(live.progress.inflightIds()));
     background("social sweep", social.sweep());
-  },
+  }),
   10 * 60 * 1000,
 ).unref();
-setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
+setInterval(
+  guarded("moderation sweep", () => admin.sweep()),
+  60 * 1000,
+).unref();
 await serveMetrics(config.metricsPort, "127.0.0.1", live.adminRoute);
 // Its own port on a loopback or Tailscale address (config.ts), never through the game port.
 await admin.listen({

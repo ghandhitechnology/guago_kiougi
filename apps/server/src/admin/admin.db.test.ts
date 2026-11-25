@@ -17,7 +17,6 @@ import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
 import { createEconomy } from "../economy/index.ts";
 import { provideLive } from "../live/current.ts";
-import type { Live } from "../live/index.ts";
 import { studentLooks } from "../looks.ts";
 import { evictAccount } from "../seats.ts";
 import { executorFees } from "../social/fees.ts";
@@ -25,6 +24,7 @@ import { createSocial } from "../social/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { enter, joinMap, sdk as mapSdk } from "../test/enter.ts";
 import { call, cookieHeader, type Jar, remember, waitFor, within } from "../test/http.ts";
+import { testLive, withLiveEvents } from "../test/live.ts";
 import { createModerationStack, type ModerationStack } from "./index.ts";
 
 const SETTINGS = {
@@ -120,6 +120,8 @@ let owner: Awaited<ReturnType<typeof adminSession>>;
 
 beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
+  // The real living world for the whole file: map rooms ask it things from their own timers.
+  provideLive(await testLive(db));
   const economy = createEconomy(db);
   const social = createSocial(db, {
     fees: executorFees(db, economy.executor),
@@ -151,6 +153,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  provideLive(undefined);
   await new Promise<void>((resolve) => adminServer.close(() => resolve()));
   await server.gracefullyShutdown(false);
   await db.pool.end();
@@ -367,26 +370,23 @@ describe("the audit log", () => {
 
     // A strike lands once with one row and one 벌점 call; a second strike of the line adds neither.
     const struck: string[] = [];
-    provideLive({
-      events: {
-        chatStrike: async (id: string) => {
-          struck.push(id);
-          return true;
-        },
-      },
-    } as unknown as Live);
-    await db.execute(sql`
+    const chatStrike = async (id: string) => {
+      struck.push(id);
+      return true;
+    };
+    await withLiveEvents({ chatStrike }, async () => {
+      await db.execute(sql`
       insert into chat_log (channel, sender_id, target, body, masked, at)
       values ('world', ${p.characterId}, null, '시발 진짜', true, now())`);
-    const { rows } = await db.execute(
-      sql`select id, at from chat_log where sender_id = ${p.characterId}`,
-    );
-    const line = { id: Number(rows[0]?.id), at: new Date(rows[0]?.at as string).toISOString() };
-    expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).status).toBe(200);
-    expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).body.error).toBe(
-      "already_struck",
-    );
-    provideLive(undefined);
+      const { rows } = await db.execute(
+        sql`select id, at from chat_log where sender_id = ${p.characterId}`,
+      );
+      const line = { id: Number(rows[0]?.id), at: new Date(rows[0]?.at as string).toISOString() };
+      expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).status).toBe(200);
+      expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).body.error).toBe(
+        "already_struck",
+      );
+    });
     expect(struck).toEqual([p.characterId]);
     expect(await count("strike", `character:${p.characterId}`)).toBe(1);
   });
@@ -440,15 +440,11 @@ describe("the audit log", () => {
     const p = await player("struck2");
     let answer = false;
     const calls: string[] = [];
-    provideLive({
-      events: {
-        chatStrike: async (_id: string, strikeId: string) => {
-          calls.push(strikeId);
-          return answer;
-        },
-      },
-    } as unknown as Live);
-    try {
+    const chatStrike = async (_id: string, strikeId: string) => {
+      calls.push(strikeId);
+      return answer;
+    };
+    await withLiveEvents({ chatStrike }, async () => {
       await db.execute(sql`
         insert into chat_log (channel, sender_id, target, body, masked, at)
         values ('world', ${p.characterId}, null, '병신', true, now())`);
@@ -470,9 +466,7 @@ describe("the audit log", () => {
       await stack.sweep();
       expect(calls.length).toBe(2);
       expect(new Set(calls).size).toBe(1);
-    } finally {
-      provideLive(undefined);
-    }
+    });
   });
 });
 
