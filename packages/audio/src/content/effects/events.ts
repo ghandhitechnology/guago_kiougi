@@ -260,6 +260,41 @@ export const EVENT_EFFECTS = {
       whoosh(2000, 1, 0.15, { gain: -10 }),
     ],
   },
+  /** A crafting material: small bits clinking together. */
+  "sfx.pickup.material": {
+    category: "combat",
+    vary: 0.03,
+    priority: 1,
+    max: 3,
+    level: -5,
+    layers: [
+      tick(2600, 0.02, { band: { freq: 2600, q: 4 } }),
+      ping(1760, 0.06, { role: "body", wave: "tri" }),
+      tick(3100, 0.015, { delay: 0.03, gain: -4 }),
+    ],
+  },
+  /** A tool: a metal clank and a rising fifth. */
+  "sfx.pickup.tool": {
+    category: "combat",
+    vary: 0.01,
+    priority: 2,
+    max: 2,
+    level: -2,
+    layers: [
+      ping(700, 0.1, { role: "body", wave: "tri" }),
+      {
+        role: "material",
+        wave: "metal",
+        freq: 1400,
+        band: { freq: 2800, q: 3 },
+        attack: 0.0005,
+        hold: 0.003,
+        decay: 0.07,
+        gain: -6,
+      },
+      ping(1174.66, 0.3, { delay: 0.05, jumps: [{ at: 0.07, semitones: 7 }] }),
+    ],
+  },
   "combat.drop.cone": {
     category: "combat",
     priority: 0,

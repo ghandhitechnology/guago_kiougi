@@ -169,7 +169,7 @@ const proof = Object.fromEntries(
 export const CLASS_SIGNATURES = {
   ...proof,
   /** Q.E.D.: a chalk slam and a D major chord ringing in pure intervals. */
-  "class.math.qed": {
+  "sfx.signature.qed": {
     category: "combat",
     vary: 0,
     priority: 2,

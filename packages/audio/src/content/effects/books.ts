@@ -1,6 +1,6 @@
 /**
  * Book cues: every book has a cast sound and an impact (its `cues.cast` and `cues.impact` in
- * `packages/content`). A book is one line in `BOOK_TABLE`; its sounds come from a cast flavour
+ * `packages/content`). A book is one line in `LINES`; its sounds come from a cast flavour
  * (how the attack leaves: thrown, sprayed, summoned) and a hit flavour (what it lands as), both
  * defaulting from the attack kind and the class. Adding one of the remaining launch books is one
  * line; giving it its own character is choosing flavours or a `tune`.
@@ -34,7 +34,10 @@ export type AttackKind =
   | "cone"
   | "summon"
   | "telegraph"
-  | "wave";
+  | "wave"
+  | "dash"
+  | "zone"
+  | "none";
 
 type Flavor = (tune: number) => Layer[];
 
@@ -119,6 +122,101 @@ const CAST: Record<string, Flavor> = {
   heave: (t) => [whoosh(500 * t, 1.2, 0.2), thump(100 * t, 0.05, { gain: -8, punch: 0 })],
   /** A ring opening outward. */
   ring: (t) => [whoosh(400 * t, 3, 0.3), ping(440 * t, 0.3, { wave: "tri", slide: 1, gain: -6 })],
+  /** Counting up: three chalk ticks climbing a whole step at a time. */
+  count: (t) => [
+    ping(784 * t, 0.2, {
+      role: "body",
+      wave: "tri",
+      jumps: [
+        { at: 0.06, semitones: 2 },
+        { at: 0.12, semitones: 4 },
+      ],
+    }),
+    chalk(3600, 0.16, { am: { rate: 16, depth: 0.9 } }),
+  ],
+  /** Dice shaken and let go. */
+  dice: (t) => [
+    crackle(120, 1800, 0.22, { band: { freq: 2200 * t, q: 3 } }),
+    tick(2400 * t, 0.02, { delay: 0.2 }),
+  ],
+  /** A dash: a fast swish with the push-off underneath. */
+  dash: (t) => [whoosh(1200 * t, 2.5, 0.16), thump(140 * t, 0.04, { gain: -8, punch: 0 })],
+  /** A pen scribbling a margin note. */
+  scribble: (t) => [chalk(3000 * t, 0.2, { am: { rate: 22, depth: 0.8 }, hold: 0.1 })],
+  /** Gears and a ratchet winding up. */
+  gears: (t) => [
+    crackle(45, 1500, 0.3, { band: { freq: 1800 * t, q: 4 } }),
+    {
+      role: "body",
+      wave: "metal",
+      freq: 600 * t,
+      band: { freq: 1500 * t, q: 3 },
+      attack: 0.01,
+      hold: 0.15,
+      decay: 0.1,
+      gain: -10,
+    },
+  ],
+  /** A bright beam: a high tone with a fast shimmer. */
+  laser: (t) => [
+    ping(2600 * t, 0.25, { role: "body", vibrato: { depth: 0.4, rate: 30 }, slide: -0.5 }),
+    hiss(6000, 0.15, { gain: -12 }),
+  ],
+  /** A field laid on the ground: a low swell drawing in. */
+  zone: (t) => [
+    { role: "body", wave: "sine", freq: 70 * t, slide: 0.4, attack: 0.25, hold: 0.05, decay: 0.3 },
+    whoosh(400 * t, 1.5, 0.5, { gain: -4 }),
+  ],
+  /** One drop from a burette. */
+  drop: (t) => [ping(900 * t, 0.06, { role: "body", slide: 4 }), splash(2000, 0.05, { gain: -8 })],
+  /** Something growing: a soft rising fifth and leaves stirring. */
+  bloom: (t) => [
+    ping(392 * t, 0.4, {
+      role: "body",
+      wave: "tri",
+      jumps: [{ at: 0.12, semitones: 7 }],
+      attack: 0.05,
+    }),
+    crackle(60, 3000, 0.4, { gain: -10 }),
+  ],
+  /** Small defenders circling: a soft whir. */
+  swarm: (t) => [
+    whoosh(900 * t, 0, 0.35, { am: { rate: 11, depth: 0.7 } }),
+    squelch(260 * t, 0.05, { gain: -6 }),
+  ],
+  /** Weather rolling in: wind and the first rain. */
+  storm: (t) => [whoosh(500 * t, 1, 0.6), crackle(300, 2500, 0.5, { gain: -6 })],
+  /**
+   * A falling star for a telegraph: a whistle dropping for 1.2 s, loudest as it lands.
+   * Like the rumble, the engine stretches it to the real delay.
+   */
+  fall: (t) => [
+    {
+      role: "body",
+      wave: "sine",
+      freq: 1800 * t,
+      slide: -1.2,
+      attack: 1.15,
+      hold: 0.03,
+      decay: 0.05,
+      curve: 1,
+      gain: -4,
+    },
+    rumble(250, 0.05, { attack: 1.15, hold: 0.03 }),
+  ],
+  /** A tide coming in. */
+  tide: (t) => [
+    {
+      role: "body",
+      wave: "pink",
+      freq: 0,
+      band: { freq: 500 * t, slide: 1, q: 0.8 },
+      attack: 0.3,
+      hold: 0.1,
+      decay: 0.3,
+    },
+    hiss(4000, 0.4, { delay: 0.2, gain: -10 }),
+  ],
 };
 
 /** What a book lands as: one light impact, three layers at most. */
@@ -189,6 +287,53 @@ const HIT: Record<string, Flavor> = {
     whoosh(800 * t, -2, 0.15, { role: "material" }),
     ping(880 * t, 0.08, { gain: -10 }),
   ],
+  /** Dice landing: two quick ticks and a small chime. */
+  dice: (t) => [
+    tick(2600 * t, 0.02),
+    tick(2200 * t, 0.02, { delay: 0.04 }),
+    ping(1320 * t, 0.06, { gain: -8 }),
+  ],
+  /** Steel parts: a clank. */
+  clank: (t) => [
+    ping(700 * t, 0.1, { role: "body", wave: "tri" }),
+    {
+      role: "material",
+      wave: "metal",
+      freq: 1400 * t,
+      band: { freq: 2800, q: 3 },
+      attack: 0.0005,
+      hold: 0.003,
+      decay: 0.07,
+      gain: -4,
+    },
+    thump(140 * t, 0.05, { gain: -6 }),
+  ],
+  /** Light that burns where it lands. */
+  sizzle: (t) => [
+    hiss(3500, 0.08, { role: "body" }),
+    ping(3000 * t, 0.05, { gain: -6 }),
+    tick(5000, 0.01),
+  ],
+  /** A splash with a bubble in it. */
+  splash: (t) => [
+    splash(1200 * t, 0.1, { role: "body" }),
+    ping(500 * t, 0.06, { slide: 3, gain: -6 }),
+    tick(3000, 0.01, { gain: -10 }),
+  ],
+  /** A soft, living hit. */
+  squish: (t) => [
+    squelch(220 * t, 0.07),
+    splash(900 * t, 0.06, { gain: -4 }),
+    ping(600 * t, 0.04, { wave: "tri", slide: 2, gain: -12 }),
+  ],
+  /** A gust striking. */
+  gust: (t) => [whoosh(900 * t, -1.5, 0.12, { role: "body" }), thump(120 * t, 0.06, { gain: -6 })],
+  /** Something from the sky hitting the ground. */
+  crater: (t) => [
+    thump(50 * t, 0.4, { punch: 0.8 }),
+    crackle(1500, 1200, 0.35),
+    rumble(250, 0.4, { gain: -2 }),
+  ],
 };
 
 const DEFAULT_CAST: Record<AttackKind, string> = {
@@ -200,6 +345,9 @@ const DEFAULT_CAST: Record<AttackKind, string> = {
   summon: "spawn",
   telegraph: "rumble",
   wave: "ring",
+  dash: "dash",
+  zone: "zone",
+  none: "scribble",
 };
 
 const DEFAULT_HIT: Record<HitClass, string> = {
@@ -223,61 +371,67 @@ export interface BookSound {
   readonly tune?: number;
 }
 
-/** The M2 books. One line per book. */
-export const BOOK_TABLE: readonly BookSound[] = [
-  { id: "wangdo", cls: "math", kind: "orbit", cast: "cast", hit: "hit" },
-  { id: "graph-note", cls: "math", kind: "beam", cast: "cast", hit: "hit", hitFlavor: "curve" },
-  { id: "holiday-physics", cls: "physics", kind: "projectile", cast: "throw", hit: "land" },
-  { id: "em-lab", cls: "physics", kind: "chain", cast: "cast", hit: "zap", hitFlavor: "zap" },
-  {
-    id: "zoomin-chem",
-    cls: "chemistry",
-    kind: "projectile",
-    cast: "throw",
-    hit: "shatter",
-    castFlavor: "slosh",
-  },
-  {
-    id: "lab-report",
-    cls: "chemistry",
-    kind: "cone",
-    cast: "spray",
-    hit: "ignite",
-    hitFlavor: "ignite",
-  },
-  {
-    id: "camping-bio",
-    cls: "biology",
-    kind: "summon",
-    cast: "spawn",
-    hit: "divide",
-    hitFlavor: "divide",
-  },
-  {
-    id: "dissection",
-    cls: "biology",
-    kind: "cone",
-    cast: "swish",
-    hit: "cut",
-    castFlavor: "swish",
-  },
-  {
-    id: "round-earth",
-    cls: "earth",
-    kind: "telegraph",
-    cast: "rumble",
-    hit: "crack",
-    hitFlavor: "fault",
-  },
-  {
-    id: "rock-box",
-    cls: "earth",
-    kind: "projectile",
-    cast: "throw",
-    hit: "crack",
-    castFlavor: "heave",
-  },
+type Line = [
+  id: string,
+  cls: HitClass,
+  kind: AttackKind,
+  cast?: string,
+  hit?: string,
+  tune?: number,
 ];
+
+/** The thirty launch books. One line per book: id, class, attack kind, flavours, tune. */
+const LINES: readonly Line[] = [
+  ["wangdo", "math", "orbit"],
+  ["graph-note", "math", "beam", "zing", "curve"],
+  ["sequence", "math", "projectile", "count", "edge", 1.12],
+  ["probability", "math", "projectile", "dice", "dice"],
+  ["coordinate", "math", "dash", "dash", "edge", 1.26],
+  ["proof-note", "math", "none", "scribble", "edge", 1.5],
+  ["holiday-physics", "physics", "projectile", "throw", "land"],
+  ["mechanics-kit", "physics", "orbit", "gears", "clank"],
+  ["em-lab", "physics", "chain", "charge", "zap"],
+  ["optics", "physics", "beam", "laser", "sizzle"],
+  ["momentum-book", "physics", "dash", "dash", "land", 0.85],
+  ["gravity-report", "physics", "zone", "zone", "land", 0.75],
+  ["zoomin-chem", "chemistry", "projectile", "slosh", "shatter"],
+  ["periodic-table", "chemistry", "projectile", "throw", "shatter", 1.3],
+  ["organic", "chemistry", "cone", "spray", "splash", 0.9],
+  ["lab-report", "chemistry", "cone", "spray", "ignite"],
+  ["mole", "chemistry", "cone", "spray", "splash", 1.12],
+  ["titration", "chemistry", "projectile", "drop", "splash", 1.26],
+  ["camping-bio", "biology", "summon", "spawn", "divide"],
+  ["pedigree", "biology", "projectile", "throw", "squish", 1.12],
+  ["dissection", "biology", "cone", "swish", "cut"],
+  ["ecosystem", "biology", "zone", "bloom", "squish", 0.9],
+  ["enzyme", "biology", "zone", "bloom", "squish", 1.2],
+  ["immune", "biology", "orbit", "swarm", "squish", 1.4],
+  ["round-earth", "earth", "telegraph", "rumble", "fault"],
+  ["rock-box", "earth", "projectile", "heave", "rock"],
+  ["weather-map", "earth", "zone", "storm", "gust"],
+  ["star-log", "earth", "telegraph", "fall", "crater"],
+  ["tide-table", "earth", "wave", "tide", "splash", 0.7],
+  ["volcano", "earth", "telegraph", "rumble", "crater", 0.8],
+];
+
+/** Cue names that differ from `cast` and `hit` in the content. */
+const NAMES: Readonly<Record<string, { cast?: string; hit?: string }>> = {
+  "camping-bio": { hit: "divide" },
+  dissection: { cast: "swish" },
+};
+
+export const BOOK_TABLE: readonly BookSound[] = LINES.map(
+  ([id, cls, kind, castFlavor, hitFlavor, tune]) => ({
+    id,
+    cls,
+    kind,
+    cast: NAMES[id]?.cast ?? "cast",
+    hit: NAMES[id]?.hit ?? "hit",
+    ...(castFlavor ? { castFlavor } : {}),
+    ...(hitFlavor ? { hitFlavor } : {}),
+    ...(tune ? { tune } : {}),
+  }),
+);
 
 export function bookEffects(table: readonly BookSound[]): Record<string, EffectSource> {
   const out: Record<string, EffectSource> = {};

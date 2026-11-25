@@ -256,7 +256,7 @@ export class GameAudio {
     if (s === 10) {
       this.lastProof = { at: now, stack: 10 };
       this.cue("class.math.proof.10");
-      this.cue("class.math.qed");
+      this.cue("sfx.signature.qed");
       return;
     }
     // Stacks climb on many targets at once: voice at most one step every 120 ms, never a lower
