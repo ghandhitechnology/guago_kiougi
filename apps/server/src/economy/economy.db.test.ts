@@ -411,17 +411,21 @@ describe("idempotency", () => {
 });
 
 describe("racing requests", () => {
-  /** An economy whose transactions meet at the barrier once their rows are locked. */
+  /**
+   * An economy whose transactions meet at the barrier once their rows are locked. Only the two
+   * racing requests go through it; setup uses a plain economy, so the barrier waits for them.
+   */
   const racing = () => economy({ random: () => 0, hooks: { afterLoad: barrier() } });
 
   it("two 필기 attempts on one book with money for one: one lands", async () => {
-    const eco = racing();
+    const eco = economy();
     const id = await character(eco);
     await fund(eco, id, pilgiCost(0, 0, 1));
     const book = await kitBook(id, "wangdo");
+    const race = racing();
     const results = await Promise.all([
-      op(eco, id, "pilgi", { item: book }),
-      op(eco, id, "pilgi", { item: book }),
+      op(race, id, "pilgi", { item: book }),
+      op(race, id, "pilgi", { item: book }),
     ]);
     expect(oks(results)).toBe(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ error: "pilgi_cost" });
@@ -451,13 +455,14 @@ describe("racing requests", () => {
   });
 
   it("two purchases with money for one: one lands", async () => {
-    const eco = racing();
+    const eco = economy();
     const id = await character(eco);
     const water = VENDING.fixed[0];
     await fund(eco, id, { pinecone: shopPrice(water, PAGE) });
+    const race = racing();
     const results = await Promise.all([
-      op(eco, id, "shop.buy", { item: water.id, qty: 1 }),
-      op(eco, id, "shop.buy", { item: water.id, qty: 1 }),
+      op(race, id, "shop.buy", { item: water.id, qty: 1 }),
+      op(race, id, "shop.buy", { item: water.id, qty: 1 }),
     ]);
     expect(oks(results)).toBe(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ error: "buy_cost" });
@@ -491,8 +496,7 @@ describe("racing requests", () => {
   });
 
   it("a pool claim racing itself pays once", async () => {
-    const eco = racing();
-    const id = await character(eco);
+    const id = await character(economy());
     const rates = { exp: 40, pinecone: 9, sheets: 0.002, ink: 0.01 };
     const started = new Date(NOW.getTime() - 2 * 3600_000);
     await db.pool.query(
@@ -500,7 +504,11 @@ describe("racing requests", () => {
          pool_sheet_book = 'wangdo' where id = $1`,
       [id, started, JSON.stringify(rates)],
     );
-    const results = await Promise.all([op(eco, id, "claimPool", {}), op(eco, id, "claimPool", {})]);
+    const race = racing();
+    const results = await Promise.all([
+      op(race, id, "claimPool", {}),
+      op(race, id, "claimPool", {}),
+    ]);
     expect(oks(results)).toBe(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ error: "pool_empty" });
     const fill = poolFill(rates, 2 * 3600, "field", false, catchUp(1, PAGE));
@@ -509,13 +517,15 @@ describe("racing requests", () => {
   });
 
   it("a drop grant racing a spend: both land and neither is lost", async () => {
-    const eco = racing();
+    const eco = economy();
     const id = await character(eco);
     const cost = pilgiCost(0, 0, 1);
     await fund(eco, id, { pinecone: 1000, ink: cost.ink });
+    const book = await kitBook(id, "wangdo");
+    const race = racing();
     const results = await Promise.all([
-      op(eco, id, "pilgi", { item: await kitBook(id, "wangdo") }),
-      op(eco, id, "grant", { exp: 0, drops: drops({ pinecone: 5000 }) }),
+      op(race, id, "pilgi", { item: book }),
+      op(race, id, "grant", { exp: 0, drops: drops({ pinecone: 5000 }) }),
     ]);
     expect(oks(results)).toBe(2);
     expect(await pinecones(id)).toBe(String(1000 + 5000 - cost.pinecone));
