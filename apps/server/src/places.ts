@@ -23,7 +23,10 @@ class Places {
   enter(characterId: string, place: Place): void {
     const before = this.byCharacter.get(characterId);
     this.byCharacter.set(characterId, place);
-    if (before?.mapId !== place.mapId) this.emit(characterId, place.mapId);
+    // A new instance of the same map is a channel change: friends see channels.
+    if (before?.mapId !== place.mapId || before?.roomId !== place.roomId) {
+      this.emit(characterId, place.mapId);
+    }
   }
 
   /** Ignored when the character has since entered another room (the newer seat owns it). */
@@ -56,7 +59,10 @@ class Places {
     return found;
   }
 
-  /** Called with the new map id (empty when the character left every map). */
+  /**
+   * Called with the new map id (empty when the character left every map), also when only the
+   * map room instance changed.
+   */
   listen(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

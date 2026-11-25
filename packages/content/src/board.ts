@@ -1,4 +1,10 @@
-import { type Cadence, type QuestReward, questReward, type Random } from "@guago/shared";
+import {
+  type Cadence,
+  type HelpTemplate,
+  type QuestReward,
+  questReward,
+  type Random,
+} from "@guago/shared";
 import type { FieldDef } from "./fields.ts";
 import { NARRATIVE } from "./narrative/index.ts";
 import { MILESTONES, type Milestone, type QuestTemplate, type Slot } from "./narrative/schema.ts";
@@ -92,4 +98,46 @@ export function drawNotices(random: Random, draw: BoardDraw): QuestOffer[] {
       ),
     };
   });
+}
+
+// 도움 notices ---------------------------------------------------------------------------------
+
+/** How many of a thing a 도움 notice asks for; only a hunt counts more than one. */
+export const HELP_TARGET: Readonly<Record<HelpTemplate, number>> = {
+  "help-hunt": QUEST_TARGETS.hunt.repeat,
+  "help-walk": 1,
+  "help-finish": 1,
+  "help-revive": 1,
+};
+
+export interface HelpDraw {
+  readonly template: HelpTemplate;
+  /** The field the poster hunts in: its place and its monsters. */
+  readonly field: FieldDef;
+  readonly level: number;
+  readonly posterName: string;
+  /** `help-finish`: the template of the poster's quest, which the client names. */
+  readonly questTemplate?: string;
+}
+
+/** Fills a 도움 notice's slots, deterministically from the server's generator. */
+export function drawHelp(
+  random: Random,
+  d: HelpDraw,
+): { slots: Partial<Record<Slot, string | number>>; count: number } {
+  const t = NARRATIVE.quests.find((q) => q.id === d.template);
+  if (!t) throw new Error(`no help template ${d.template}`);
+  const count = HELP_TARGET[d.template];
+  const hunted = d.field.roster.filter(
+    (r) => !NOT_HUNTED.has(r.monster) && (r.from ?? 0) <= d.level,
+  );
+  const slots: Partial<Record<Slot, string | number>> = {};
+  for (const slot of t.slots) {
+    if (slot === "player") slots.player = d.posterName;
+    if (slot === "place") slots.place = d.field.id;
+    if (slot === "count") slots.count = count;
+    if (slot === "monster") slots.monster = random.weighted(hunted, (r) => r.weight).monster;
+    if (slot === "quest" && d.questTemplate) slots.quest = d.questTemplate;
+  }
+  return { slots, count };
 }

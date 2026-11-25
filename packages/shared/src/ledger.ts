@@ -4,7 +4,15 @@
  * entries); the server runs it inside one transaction under the request's operation id and books
  * each entry under its `key`. A positive amount is a faucet, a negative one a sink.
  */
-export type Currency = "pinecone" | "merit" | "token" | "ink" | "binding" | `sheet:${string}`;
+export type Currency =
+  | "pinecone"
+  | "merit"
+  | "token"
+  | "ink"
+  | "binding"
+  | `sheet:${string}`
+  /** Consumables held in the bag (자판기 goods), counted like materials. */
+  | `snack:${string}`;
 
 /** What one character holds of each currency. Missing means zero. */
 export type Purse = Readonly<Partial<Record<Currency, number>>>;
@@ -23,6 +31,14 @@ export type Outcome<S> =
 export type Amounts = Partial<Record<Currency, number>>;
 
 export const sheet = (book: string): Currency => `sheet:${book}`;
+
+/**
+ * The Korean calendar day (UTC+9) of a moment, `YYYY-MM-DD`: the ledger's `day`, by the server's
+ * clock (PLAN §13 daily totals).
+ */
+export function koreanDay(ms: number): string {
+  return new Date(ms + 9 * 3600_000).toISOString().slice(0, 10);
+}
 
 export function balance(purse: Purse, currency: Currency): number {
   return purse[currency] ?? 0;

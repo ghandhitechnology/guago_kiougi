@@ -123,9 +123,13 @@ export class ChatLog implements ChatSink {
     if (this.queue.length >= MAX_BATCH) void this.flush();
   }
 
-  /** Writes what is queued, unless a write is running or the last one failed recently. */
+  /**
+   * Writes what is queued, after any write already running, unless the last one failed
+   * recently. When it resolves, every line pushed before the call is in the table.
+   */
   async flush(): Promise<void> {
-    if (this.writing || this.queue.length === 0 || Date.now() < this.retryAt) return;
+    while (this.writing) await this.writing;
+    if (this.queue.length === 0 || Date.now() < this.retryAt) return;
     await this.run();
   }
 

@@ -80,7 +80,7 @@ const touchBtn = sprite({
   },
 });
 
-/** The dodge: the button the right thumb rests on, so the largest of the cluster. */
+/** The dodge: the button the right thumb rests on, so the largest of the cluster. 멘토 찬스 wears it in gold. */
 const touchMain = sprite({
   ...ui,
   name: "touch-main",
@@ -103,6 +103,16 @@ const touchMain = sprite({
         [1, "o"],
         [1, lit("N", "n", "b")],
         [2, lit("o", "k", "m")],
+        [1, "o"],
+      ],
+      "k",
+    ),
+    mentor: disc(
+      34,
+      [
+        [1, "o"],
+        [1, lit("y", "Y", "G")],
+        [2, lit("l", "m", "k")],
         [1, "o"],
       ],
       "k",
@@ -133,6 +143,23 @@ const touchIcon = sprite({
       "..............",
       "..............",
       "..............",
+      "..............",
+    ),
+    /** 멘토 찬스: a four-point spark. */
+    mentor: stack(
+      "..............",
+      "......ww......",
+      "......ww......",
+      ".....wwww.....",
+      ".....wwww.....",
+      "...wwwwwwww...",
+      ".wwwwwwwwwwww.",
+      ".wwwwwwwwwwww.",
+      "...wwwwwwww...",
+      ".....wwww.....",
+      ".....wwww.....",
+      "......ww......",
+      "......ww......",
       "..............",
     ),
     /** Interact: an open hand. */

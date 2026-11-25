@@ -11,6 +11,10 @@ export const API = {
   nameAvailable: "/api/name-available",
   character: "/api/character",
   recover: "/api/recover",
+  /** GET: the character's `InventorySnapshot`. */
+  inventory: "/api/inventory",
+  /** POST `{ id, op, req }` (inventory.ts): one item or currency operation, answered by its `OpResult`. */
+  op: "/api/op",
 } as const;
 
 /**
@@ -155,6 +159,20 @@ export function normalizeRecoveryCode(raw: string): string {
 
 /** Room close code sent to a client whose account joined somewhere else. Do not rejoin on it. */
 export const CLOSE_SESSION_REPLACED = 4001;
+/** Room close code: an admin closed this session. The player may log in again. Do not rejoin on it. */
+export const CLOSE_KICKED = 4002;
+/** Room close code: the account was banned. Its sessions are gone; logging in answers `account_banned`. */
+export const CLOSE_BANNED = 4003;
+
+/** How a room link ends for good, by close code; anything else is a drop worth rejoining after. */
+export type LinkEnd = "replaced" | "kicked" | "banned";
+
+export function closeEnd(code: number): LinkEnd | null {
+  if (code === CLOSE_SESSION_REPLACED) return "replaced";
+  if (code === CLOSE_KICKED) return "kicked";
+  if (code === CLOSE_BANNED) return "banned";
+  return null;
+}
 
 // Parsers -------------------------------------------------------------------------------------
 

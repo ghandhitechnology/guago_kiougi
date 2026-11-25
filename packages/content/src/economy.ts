@@ -1,11 +1,14 @@
 import {
+  boardWeek,
   type Currency,
-  type LedgerEntry,
+  earn,
   type Outcome,
   type Purse,
   pageScale,
   pay,
+  Random,
 } from "@guago/shared";
+import type { DropSource } from "./drops.ts";
 
 /**
  * Materials and the 자판기 (PLAN §13). Names and bag text are the narrative's item descriptions,
@@ -25,7 +28,17 @@ export const MATERIALS: readonly MaterialDef[] = [
     currency: "pinecone",
     description: "pinecone",
     sources: ["drop", "pool", "quest"],
-    sinks: ["sink.pilgi", "sink.bind", "sink.forge", "sink.shop", "sink.stat-reset"],
+    sinks: [
+      "sink.pilgi",
+      "sink.bind",
+      "sink.forge",
+      "sink.shop",
+      "sink.stat-reset",
+      "sink.club",
+      "sink.trade-tax",
+      "sink.board-fee",
+      "sink.board-tax",
+    ],
   },
   {
     currency: "sheet",
@@ -92,11 +105,24 @@ export const VENDING = {
   ],
 } as const;
 
+/** The 자판기's week: the weekly board's (PLAN §15), from Monday 05:00 KST. */
+export function vendingWeek(ms: number): number {
+  return boardWeek(ms);
+}
+
+/** This week's stock: the fixed five and one special, drawn by the week number. */
+export function vendingStock(week: number): readonly ShopItem[] {
+  return [...VENDING.fixed, new Random(week).pick(VENDING.weekly)];
+}
+
 export function shopPrice(item: ShopItem, page: number): number {
   return item.price * pageScale(page);
 }
 
-/** Buying from the 자판기: the price leaves the economy as `sink.shop`. */
+/**
+ * Buying from the 자판기: the price leaves the economy as `sink.shop` and the goods land in the
+ * bag as `snack:<id>`, booked as `shop.vending`.
+ */
 export function buy(
   purse: Purse,
   item: ShopItem,
@@ -106,6 +132,42 @@ export function buy(
   if (!Number.isInteger(qty) || qty <= 0) return { ok: false, error: "buy_qty" };
   const paid = pay(purse, { pinecone: shopPrice(item, page) * qty }, "sink.shop");
   if (!paid) return { ok: false, error: "buy_cost" };
-  const ledger: LedgerEntry[] = paid.ledger;
-  return { ok: true, state: { purse: paid.purse, item: item.id, qty }, ledger };
+  const goods = earn(paid.purse, { [goodsOf(item.id)]: qty }, "shop.vending");
+  const ledger = [...paid.ledger, ...goods.ledger];
+  return { ok: true, state: { purse: goods.purse, item: item.id, qty }, ledger };
 }
+
+/** The bag currency a 자판기 item is held as. */
+export const goodsOf = (id: string): Currency => `snack:${id}`;
+
+/**
+ * Where an item is made (PLAN §13 "Bound items"). A bound item never leaves its first owner:
+ * era boss drops, quest rewards and what 상점 or 탐구 토큰 buy. The 신입생 kit is bound too, so
+ * throwaway characters cannot mint books to pass on, and so is what an admin grants, so a grant
+ * cannot be passed on to another account. Bought or received items are not bound;
+ * they wait out `TRADE.retradeHours` instead.
+ */
+export type ItemOrigin =
+  | "kit"
+  | "craft"
+  | "drop"
+  | "era-drop"
+  | "quest"
+  | "council-shop"
+  | "research-shop"
+  | "mentor-shop"
+  | "admin";
+
+const BOUND_ORIGINS: ReadonlySet<ItemOrigin> = new Set([
+  "kit",
+  "era-drop",
+  "quest",
+  "council-shop",
+  "research-shop",
+  "admin",
+]);
+
+export const bindsOn = (origin: ItemOrigin): boolean => BOUND_ORIGINS.has(origin);
+
+/** A monster drop is bound when an era boss dropped it. */
+export const dropOrigin = (source: DropSource): ItemOrigin => (source.era ? "era-drop" : "drop");

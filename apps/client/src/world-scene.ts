@@ -1,7 +1,8 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { LAWN, mapSize } from "@guago/content";
+import { LAWN } from "@guago/content";
 import {
+  type Collidable,
   encodeInput,
   type Facing,
   INPUT_MESSAGE,
@@ -21,15 +22,23 @@ import {
   lookTexture,
 } from "./art.ts";
 import { CameraRig } from "./camera.ts";
+import { sampleMove } from "./controls/move.ts";
+import { devMap, drawDevMap } from "./dev-map.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
-import { Footsteps } from "./footsteps.ts";
 import { drawGround } from "./ground.ts";
+import { hud } from "./hud/store.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { stayConnected } from "./net.ts";
 import { drawProps } from "./props.ts";
 import { SelfMover } from "./self.ts";
+import { enterSoundscape, preloadFor, soundscapeFor } from "./sound/audio.ts";
+import { StepSounds } from "./sound/steps.ts";
+import { builtView, lawnView } from "./world/map-view.ts";
+import { WorldOverlays } from "./world/overlays.ts";
+import { session } from "./world/session.ts";
+import { worldView } from "./world/view.ts";
 
 const PLAYER_RIG = "student";
 /** The camera frames the body, not the feet. */
@@ -37,7 +46,9 @@ const CHEST_PX = 10;
 
 interface Remote<A> {
   readonly track: Track;
-  readonly actor: A;
+  actor: A;
+  /** The look the actor wears, for players. */
+  look?: string;
 }
 
 /**
@@ -50,7 +61,6 @@ export class WorldScene extends Phaser.Scene {
   private look!: string;
   private camera!: CameraRig;
   private keys!: KeyboardMove;
-  private footsteps!: Footsteps;
   private readonly clock = new ServerClock();
   private readonly monsters = new Map<string, Remote<MonsterActor>>();
   private readonly players = new Map<string, Remote<PlayerActor>>();
@@ -59,10 +69,14 @@ export class WorldScene extends Phaser.Scene {
   private selfId: string | undefined;
   private live = false;
   private lastTime: number | undefined;
+  /** The walls the own player is predicted against: the lawn, or a built map in development. */
+  private walls: Collidable = LAWN;
   /** Who is playing, handed over by the front end; absent when the scene runs on its own. */
   private entry: WorldEntry | undefined;
-  /** The player's own look, composited from the character; others wear the default for now. */
+  /** The player's own look, composited from the character. */
   private selfLook: string | undefined;
+  private overlays!: WorldOverlays;
+  private steps!: StepSounds;
 
   constructor() {
     super("world");
@@ -85,23 +99,39 @@ export class WorldScene extends Phaser.Scene {
       composeDoll(this, this.meta, look);
       this.selfLook = dollLook(look);
     }
-    drawGround(this, this.meta, LAWN);
-    drawProps(this, this.meta, LAWN);
-    this.footsteps = new Footsteps(this, this.meta, LAWN);
-
-    const { w, h } = mapSize(LAWN);
+    const dev = devMap();
+    const view = dev ? builtView(dev) : lawnView(LAWN);
+    worldView.enter(view);
+    this.overlays = new WorldOverlays(this);
+    worldView.overlays = this.overlays;
+    this.steps = new StepSounds(view.surfaceAt);
+    preloadFor(view.id);
+    enterSoundscape(soundscapeFor(view.id, dev?.time));
+    if (this.entry) session.start(this.entry);
+    hud.set({ place: { map: view.id, name: view.name } });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => worldView.leave());
+    if (dev) {
+      this.walls = dev;
+      void drawDevMap(this, this.meta, dev);
+    } else {
+      drawGround(this, this.meta, LAWN);
+      drawProps(this, this.meta, LAWN);
+    }
+    const { w, h } = this.walls.collision;
+    const spawn = dev ? (dev.spawns.main ?? LAWN.spawn) : LAWN.spawn;
     this.camera = new CameraRig(this.cameras.main, w * TILE_SIZE, h * TILE_SIZE);
-    this.camera.jumpTo(LAWN.spawn.x, LAWN.spawn.y - CHEST_PX);
+    this.camera.jumpTo(spawn.x, spawn.y - CHEST_PX);
     this.keys = new KeyboardMove();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.keys.dispose());
 
-    void stayConnected((room) => this.attach(room));
+    void stayConnected((room) => this.attach(room), undefined, dev ? { map: dev.id } : {});
   }
 
   private attach(room: Room<unknown, MapState>): () => void {
     this.selfId = room.sessionId;
+    worldView.selfSid = room.sessionId;
     this.live = true;
-    this.self = new SelfMover(LAWN, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
+    this.self = new SelfMover(this.walls, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
     room.onStateChange((state) => this.onPatch(state));
     room.onDrop(() => {
       this.live = false;
@@ -114,6 +144,10 @@ export class WorldScene extends Phaser.Scene {
     if (import.meta.env.DEV) exposeDevStats(this);
     return () => {
       for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
+      for (const sid of this.players.keys()) {
+        this.overlays.remove(sid);
+        worldView.others.delete(sid);
+      }
       this.monsters.clear();
       this.players.clear();
       this.selfActor?.destroy();
@@ -147,20 +181,49 @@ export class WorldScene extends Phaser.Scene {
         continue;
       }
       seated.add(p.sid);
+      // Everyone wears their own look; a body whose look has not synced yet wears the default
+      // until it arrives, then is dressed again.
+      // Schema fields are accessors, so a spread would drop them: read each one.
+      const l = p.look;
+      const look = l?.body
+        ? normalizeLook(this.meta, {
+            body: l.body,
+            hair: l.hair,
+            hairColor: l.hairColor,
+            face: l.face,
+            uniform: l.uniform,
+            accessories: [...l.accessories],
+          })
+        : undefined;
+      const lookId = look ? dollLook(look) : this.look;
       let r = this.players.get(p.sid);
       if (!r) {
-        r = { track: new Track(), actor: this.playerActor() };
+        if (look) composeDoll(this, this.meta, look);
+        r = { track: new Track(), actor: this.playerActor(lookId), look: lookId };
         this.players.set(p.sid, r);
+        this.overlays.plate(p.sid, p.name, "player");
+        worldView.others.set(p.sid, { kind: "player", x: 0, y: 0, name: p.name });
+      } else if (r.look !== lookId) {
+        if (look) composeDoll(this, this.meta, look);
+        r.actor.destroy();
+        r.actor = this.playerActor(lookId);
+        r.look = lookId;
+        this.overlays.plate(p.sid, p.name, "player");
       }
       r.track.push(state.tick, p.x / POS_SCALE, p.y / POS_SCALE, p.facing);
     }
     prune(this.monsters, state.monsters);
+    for (const sid of this.players.keys()) {
+      if (seated.has(sid)) continue;
+      this.overlays.remove(sid);
+      worldView.others.delete(sid);
+    }
     prune(this.players, seated);
   }
 
-  private playerActor(look = this.look): PlayerActor {
+  private playerActor(look = this.look, self = false): PlayerActor {
     const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
-    actor.onStep = (x, y) => this.footsteps.step(x, y);
+    actor.onStep = (x, y) => this.steps.step(x, y, worldView.self, self);
     return actor;
   }
 
@@ -172,14 +235,19 @@ export class WorldScene extends Phaser.Scene {
     const dt = this.lastTime === undefined ? 0 : Math.min(250, time - this.lastTime);
     this.lastTime = time;
 
-    const drawn = this.self?.frame(dt, () => this.keys.sample(), this.live);
+    const drawn = this.self?.frame(dt, () => sampleMove(this.keys), this.live);
     if (drawn) {
       if (!this.selfActor) {
-        this.selfActor = this.playerActor(this.selfLook);
+        this.selfActor = this.playerActor(this.selfLook, true);
         this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
+        if (this.entry && this.selfId) {
+          this.overlays.plate(this.selfId, this.entry.character.name, "self");
+        }
       }
       this.selfActor.update(drawn.x, drawn.y, drawn.facing, dt);
       this.camera.follow(drawn.x, drawn.y - CHEST_PX, drawn.facing, dt);
+      worldView.self = { x: drawn.x, y: drawn.y };
+      if (this.selfId) this.overlays.move(this.selfId, drawn.x, drawn.y);
     }
 
     const t = this.clock.renderTime(time);
@@ -187,10 +255,16 @@ export class WorldScene extends Phaser.Scene {
       const at = track.at(t);
       actor.update(at.x, at.y, at.facing as Facing, dt);
     }
-    for (const { track, actor } of this.players.values()) {
+    for (const [sid, { track, actor }] of this.players) {
       const at = track.at(t);
       if (!at.fresh) this.clock.starved++;
       actor.update(at.x, at.y, at.facing as Facing, dt);
+      this.overlays.move(sid, at.x, at.y);
+      const seen = worldView.others.get(sid);
+      if (seen) {
+        seen.x = at.x;
+        seen.y = at.y;
+      }
     }
   }
 

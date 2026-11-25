@@ -4,6 +4,8 @@ import cafeteriaNoon from "./cafeteria-noon.ts";
 import campusNight from "./campus-night.ts";
 import classroomBreak from "./classroom-break.ts";
 import combat from "./combat.ts";
+import earthKit from "./earth-kit.ts";
+import evolvedHorde from "./evolved-horde.ts";
 import greekHorde from "./greek-horde.ts";
 import makerRoom from "./maker-room.ts";
 import morningAssembly from "./morning-assembly.ts";
@@ -17,6 +19,8 @@ export const SCENES: readonly SceneDef[] = [
   campusNight,
   agoraRift,
   combat,
+  earthKit,
+  evolvedHorde,
   greekHorde,
   studyRoomNight,
   makerRoom,

@@ -468,21 +468,27 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
     return c;
   };
   const grounds = [ground("lawn-field", "field-night"), ground("marble-dust", "greece")];
-  const s = section("combat-effects", "combat effects");
-  for (const [name, sp] of Object.entries(meta.sprites)) {
-    if (sp.atlas !== "combat") continue;
-    const box = el("article");
-    box.id = name;
-    box.append(el("h3", "name", (sp as { blend?: string }).blend ? `${name}  add` : name));
-    const frames = sp.frames.map((f) => frameImage(sp.atlas, f));
-    for (const [anim, a] of Object.entries(sp.anims)) {
-      const imgs = a.frames.map((f) => frames[sp.frames.indexOf(f)] as HTMLCanvasElement);
-      const r = row(box, `${anim} ${a.fps}fps`);
-      for (const scale of [1, 3]) {
-        for (const g of grounds) r.append(cell(player(imgs, a.fps, scale, g)));
-      }
+  for (const [group, title] of [
+    ["combat", "combat effects"],
+    ["combat-evolved", "evolved effects"],
+  ] as const) {
+    const s = section(`${group}-effects`, title);
+    for (const [name, sp] of Object.entries(meta.sprites)) {
+      if (sp.atlas !== group) continue;
+      const box = el("article");
+      box.id = name;
+      box.append(el("h3", "name", (sp as { blend?: string }).blend ? `${name}  add` : name));
+      const frames = sp.frames.map((f) => frameImage(sp.atlas, f));
+      const many = Object.keys(sp.anims).length > 6;
+      Object.entries(sp.anims).forEach(([anim, a], index) => {
+        const imgs = a.frames.map((f) => frames[sp.frames.indexOf(f)] as HTMLCanvasElement);
+        const r = row(box, `${anim} ${a.fps}fps`);
+        for (const scale of many && index >= 3 ? [1] : [1, 3]) {
+          for (const g of grounds) r.append(cell(player(imgs, a.fps, scale, g)));
+        }
+      });
+      s.append(box);
     }
-    s.append(box);
   }
 }
 
@@ -527,7 +533,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
 {
   const s = section("sprites", "sprites");
   for (const [name, sp] of Object.entries(meta.sprites)) {
-    if (sp.atlas === "ui" || sp.atlas === "combat") continue;
+    if (sp.atlas === "ui" || sp.atlas.startsWith("combat")) continue;
     const box = el("article");
     box.id = name;
     box.append(el("h3", "name", name));

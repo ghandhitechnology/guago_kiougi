@@ -15,6 +15,48 @@
       "when": 1795576315674,
       "tag": "0001_chat_log",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795579496699,
+      "tag": "0002_items_economy",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795582672684,
+      "tag": "0003_social",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795586068431,
+      "tag": "0004_live_server",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795587329394,
+      "tag": "0005_trading",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795588282365,
+      "tag": "0006_social_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795589429597,
+      "tag": "0007_moderation",
+      "breakpoints": true
     }
   ]
 }

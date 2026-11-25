@@ -137,7 +137,8 @@ export function isTileArt(a: Compiled): a is TileArt {
 /**
  * Tile indices and decal frames, identical in every theme. Art baked into every theme comes
  * first and art with a `bake` list after it, so a theme that leaves the latter out ends its
- * atlas early without moving anyone's indices.
+ * atlas early without moving anyone's indices. Restricted sets whose themes never meet share
+ * indices.
  */
 export interface TileLayout {
   readonly first: ReadonlyMap<string, number>;
@@ -149,11 +150,25 @@ const size = (t: TileArt): number => t.tiles.length + (t.kind === "terrain" ? t.
 export function tileLayout(sets: readonly TileArt[]): TileLayout {
   const first = new Map<string, number>();
   let n = 0;
-  for (const t of [...sets.filter((s) => !s.bake), ...sets.filter((s) => s.bake)]) {
+  for (const t of sets.filter((s) => !s.bake)) {
     first.set(t.name, n);
     n += size(t);
   }
-  return { first, count: n };
+  // Restricted sets follow. One whose themes share none with an earlier restricted set starts
+  // at the same index as it: no atlas holds both, so neither pads the other's atlases.
+  const placed: { bake: readonly string[]; end: number }[] = [];
+  let count = n;
+  for (const t of sets.filter((s) => s.bake)) {
+    const bake = t.bake ?? [];
+    const start = Math.max(
+      n,
+      ...placed.filter((p) => p.bake.some((b) => bake.includes(b))).map((p) => p.end),
+    );
+    first.set(t.name, start);
+    placed.push({ bake, end: start + size(t) });
+    count = Math.max(count, start + size(t));
+  }
+  return { first, count };
 }
 
 /** Whether a theme's atlas holds a set's tiles. */

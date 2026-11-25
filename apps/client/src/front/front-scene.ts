@@ -4,6 +4,7 @@ import { artMeta } from "../art.ts";
 import { type Backend, backend, type Session } from "../backend/index.ts";
 import { FRONT_SCENE, WORLD_SCENE, type WorldEntry } from "../entry.ts";
 import { t } from "../i18n/index.ts";
+import { titleMusic } from "../sound/audio.ts";
 import { fade, slide, stamp } from "../ui/motion.ts";
 import { toast } from "../ui/overlay.ts";
 import { NightBackdrop } from "./backdrop.ts";
@@ -46,6 +47,7 @@ export class FrontScene extends Phaser.Scene implements Flow {
 
   async create(): Promise<void> {
     this.meta = artMeta(this);
+    titleMusic();
     this.backdrop = new NightBackdrop(this, this.meta);
     this.logo = this.add.image(0, 0, "ui", "logo/idle").setOrigin(0);
     this.logoRest = { x: Math.round((W - this.logo.width) / 2) + 24, y: 40 };
