@@ -47,6 +47,7 @@ const live = createLive(db, {
   world: worldRoom,
   looks: studentLooks,
   testEvents: config.liveTestEvents,
+  adminSecret: config.serverSecret,
 });
 provideLive(live);
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
@@ -111,7 +112,7 @@ startListingSweeper(
 setInterval(
   () => {
     auth.sweep().catch(() => {});
-    economy.prune().catch(() => {});
+    economy.prune(live.progress.inflightIds()).catch(() => {});
     void social.sweep();
   },
   10 * 60 * 1000,

@@ -33,8 +33,24 @@ export function reanchor(
   change: { stepMs?: number; rate?: number },
 ): ClockAnchor {
   const rate = change.rate ?? anchor.rate;
-  if (!(rate > 0 && rate <= CLOCK_MAX_RATE)) throw new Error(`clock rate ${rate} out of range`);
-  return { realMs, gameMs: clockAt(anchor, realMs) + Math.max(0, change.stepMs ?? 0), rate };
+  const step = change.stepMs ?? 0;
+  if (!(step >= 0 && step <= CLOCK_MAX_STEP_MS)) throw new Error(`clock step ${step} out of range`);
+  return checkAnchor({ realMs, gameMs: clockAt(anchor, realMs) + step, rate });
+}
+
+/** One step moves the clock at most a Theme: twelve Pages of thirteen weeks. */
+export const CLOCK_MAX_STEP_MS = 156 * 7 * 24 * 3600 * 1000;
+/** Game time stays a valid `Date` with room to spare (year 10,000). */
+const CLOCK_MAX_MS = 253_402_300_800_000;
+
+/** The anchor, if it can run a clock: finite, a rate in range, game time a valid date. */
+export function checkAnchor(a: ClockAnchor): ClockAnchor {
+  if (!(a.rate > 0 && a.rate <= CLOCK_MAX_RATE))
+    throw new Error(`clock rate ${a.rate} out of range`);
+  if (!Number.isFinite(a.realMs) || !(a.gameMs >= 0 && a.gameMs < CLOCK_MAX_MS)) {
+    throw new Error(`clock anchor ${JSON.stringify(a)} out of range`);
+  }
+  return a;
 }
 
 export const SECOND_MS = 1000;
@@ -164,6 +180,26 @@ export const CLUB_EXP_FOR_NOTICE = {
   story: 20,
   help: 15,
 } as const;
+
+/**
+ * 상점 a day that count toward the week's 층장 tally, by reason. Everything earned is still paid
+ * (it cancels 벌점, the rest is spendable); past the cap it only stops counting for 층장. The
+ * 층장's own +5 never counts, so a 층장 is not chosen again by being one.
+ */
+export const MERIT_TALLY_DAILY: Readonly<Record<MeritReason, number>> = {
+  revive: 5,
+  help: 3,
+  cleaning: 1,
+  "floor-leader": 0,
+};
+
+/** How much of `amount` new 상점 counts toward the tally, with `counted` already today. */
+export function tallyCredit(reason: MeritReason, amount: number, counted: number): number {
+  return Math.max(0, Math.min(amount, MERIT_TALLY_DAILY[reason] - counted));
+}
+
+/** A 도움 between the same helper and poster pays its 상점 once a board day. */
+export const HELP_PAIR_DAILY = 1;
 
 /** 층장: the five players with the most 상점 in a week (PLAN §11). */
 export const FLOOR_LEADERS = 5;
