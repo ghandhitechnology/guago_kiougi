@@ -60,13 +60,15 @@ export interface Doorway {
 
 /**
  * The collision a room walks on: the map's own, with every portal that leads nowhere yet shut
- * like a locked door. Both sides build it the same way, so prediction meets the same doors.
+ * like a locked door, and those named in `closed` (maps the Page clock has not opened). Both
+ * sides build it the same way, so prediction meets the same doors.
  */
 export function shutDoors(
   collision: TileCollision,
-  portals: readonly (Doorway & { readonly built: boolean })[],
+  portals: readonly (Doorway & { readonly id?: string; readonly built: boolean })[],
+  closed: ReadonlySet<string> = new Set(),
 ): TileCollision {
-  const shut = portals.filter((p) => !p.built);
+  const shut = portals.filter((p) => !p.built || (p.id !== undefined && closed.has(p.id)));
   if (shut.length === 0) return collision;
   const rows = collision.rows.map((r) => [...r]);
   for (const { rect } of shut) {
@@ -85,18 +87,20 @@ export function shutDoors(
  * point just past its collider in that direction lies in a portal that leads nowhere yet.
  */
 export function shutDoorAhead(
-  portals: readonly (Doorway & { readonly built: boolean })[],
+  portals: readonly (Doorway & { readonly id?: string; readonly built: boolean })[],
   x: number,
   y: number,
   facing: Facing,
   radius: number,
+  closed: ReadonlySet<string> = new Set(),
 ): number {
   const reach = radius + 3;
   const dx = facing === Facing.Left ? -reach : facing === Facing.Right ? reach : 0;
   const dy = facing === Facing.Up ? -reach : facing === Facing.Down ? reach : 0;
   for (let i = 0; i < portals.length; i++) {
-    const p = portals[i] as Doorway & { readonly built: boolean };
-    if (!p.built && inArea(p.rect, x + dx, y + dy)) return i;
+    const p = portals[i] as Doorway & { readonly id?: string; readonly built: boolean };
+    const shut = !p.built || (p.id !== undefined && closed.has(p.id));
+    if (shut && inArea(p.rect, x + dx, y + dy)) return i;
   }
   return -1;
 }
@@ -200,6 +204,10 @@ export const MAP_MESSAGES = {
   npcLine: "npcLine",
   /** Server to client: `ZoneUpdate`, the zones the player stands in, on change. */
   zones: "zones",
+  /** Server to client: `Caught`, a patrol saw the player and put them back at the entrance. */
+  caught: "caught",
+  /** Server to everyone in the room: `Halt`, a patrol's guard calls out (plays its signature). */
+  halt: "halt",
 } as const;
 
 /**
@@ -229,12 +237,30 @@ export interface Transfer extends Seating {
   readonly via: string;
 }
 
+/**
+ * Why a door does not open, for the line said with it: the map behind it is not built yet, the
+ * Page clock has not opened it, or it is a locked hatch.
+ */
+export type DoorRefusal = "door_unbuilt" | "door_closed" | "door_locked";
+
 /** A shut door or a locked hatch shaken: `id` of a portal or an interactable of the map. */
 export interface DoorRattle {
   readonly id: string;
   readonly of: "portal" | "thing";
   /** Session of the player who pushed it, empty when it was used, not pushed. */
   readonly sid: string;
+  readonly why: DoorRefusal;
+}
+
+export interface Caught {
+  readonly patrol: string;
+  /** Where the player was put back, in pixels. */
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface Halt {
+  readonly patrol: string;
 }
 
 /** `kind` is where a line comes from: a bark said now and then, or the answer to `interact`. */
@@ -266,6 +292,13 @@ export type Interaction =
     }
   | { readonly t: "open"; readonly n: number; readonly id: string; readonly kind: string }
   | { readonly t: "locked"; readonly n: number; readonly id: string }
+  /** The 급식 counter served (or did not): what the living world answered. */
+  | {
+      readonly t: "ate";
+      readonly n: number;
+      readonly id: string;
+      readonly result: "ok" | "meal_full" | "sent_home";
+    }
   | { readonly t: "none"; readonly n: number };
 
 /** Close code of a map room seat the server ends because its player moved to another map. */

@@ -1,15 +1,18 @@
 import { type AuthContext, type Client, type Delayed, Room, ServerError } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import type { BuiltMap, Interactable, Portal } from "@guago/content";
+import { type BuiltMap, type Interactable, type Patrol, patrolPose, sees } from "@guago/content";
 import {
   addPlayer,
+  type Caught,
   type Character,
   CLOSE_MAP_CHANGED,
   type Collidable,
   createWorld,
   type DoorRattle,
+  type DoorRefusal,
   dressPlayer,
   type Facing,
+  type Halt,
   INPUT_MESSAGE,
   InputQueue,
   type Interaction,
@@ -32,9 +35,11 @@ import {
   removePlayer,
   type SimWorld,
   shutDoorAhead,
+  shutDoors,
   skipTicks,
   step,
   stepDoors,
+  TICK_MS,
   TILE_SIZE,
   type Transfer,
   type Usable,
@@ -45,6 +50,7 @@ import {
 import { channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubTags } from "./club-tags.ts";
 import { InterestGrid, type Viewer } from "./interest.ts";
+import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
 import { RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
@@ -52,9 +58,15 @@ import { TickClock } from "./tick-clock.ts";
 import {
   builtMap,
   describe,
+  HOME_MAP,
+  isDesk,
+  MEAL_COUNTERS,
   type Npc,
   npcsOf,
+  PLACE_THINGS,
+  placesAt,
   roomCollision,
+  START_MAP,
   spawnPlace,
   validPlace,
 } from "./world-maps.ts";
@@ -93,6 +105,13 @@ const BARK_GAP = [300, 560] as const;
 const AFTER_TALK = 200;
 /** Interactable kinds that open a panel the UI attaches. */
 const OPENS = new Set(["station", "shop", "board", "quests", "codex", "replay", "hall-of-fame"]);
+/** How often doors ask the Page clock whether the maps behind them are open. */
+const DOORS_EVERY_MS = 5000;
+/** How often the 집 lets players whose 명령퇴사 has ended go back to school. */
+const HOME_EVERY_MS = 2000;
+/** Guards look every other tick; a player they caught is not seen again for this long. */
+const PATROL_EVERY_TICKS = 2;
+const CAUGHT_GRACE_TICKS = 80;
 
 /** A player's body in this room: what is synced, what its client sees, what it asked to do. */
 interface Pawn {
@@ -109,6 +128,10 @@ interface Pawn {
   zoneTile: number;
   lastInteract: number;
   lastRattle: number;
+  /** In reach of a 졸방대, as last told to the living world. */
+  atDesk: boolean;
+  /** Tick until which patrols look past this player, after they were caught. */
+  unseenUntil: number;
 }
 
 /** A cast member standing here, with what the room remembers about them. */
@@ -150,7 +173,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   override autoDispose = false;
 
   private def!: BuiltMap;
-  private map!: Collidable;
+  /** The walls players walk on here; closed doors swap its grid as the Page clock moves. */
+  private map!: { collision: Collidable["collision"] };
   private world!: SimWorld;
   private grid!: InterestGrid;
   private metrics!: RoomMetrics;
@@ -164,6 +188,9 @@ export class MapRoom extends Room<{ state: MapState }> {
   private people: Person[] = [];
   private usable: Thing[] = [];
   private retireTimer: Delayed | undefined;
+  /** Portal ids whose map the Page clock has not opened: shut, as `MapState.closed` says. */
+  private closed = new Set<string>();
+  private patrols: readonly Patrol[] = [];
   private graceMs = 30_000;
   private ticks!: TickClock;
   private unlistenClubs: (() => void) | undefined;
@@ -180,7 +207,9 @@ export class MapRoom extends Room<{ state: MapState }> {
     const def = builtMap(options.map);
     if (!def) throw new Error(`no built map ${options.map}`);
     this.def = def;
-    this.map = roomCollision(def);
+    // Its own copy: closed doors change it as the Page clock opens maps.
+    this.map = { collision: roomCollision(def).collision };
+    this.patrols = def.patrols;
     this.maxClients = Math.max(1, Math.min(MAP_SEATS, options.seats));
     this.graceMs = options.grace * 1000;
     const { w, h } = def.collision;
@@ -204,6 +233,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       this.free.push(slot);
     }
     this.placeCast();
+    this.refreshDoors();
     this.sync();
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: MoveInput) => {
@@ -223,6 +253,8 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    this.clock.setInterval(() => this.refreshDoors(), DOORS_EVERY_MS);
+    if (def.id === HOME_MAP) this.clock.setInterval(() => this.letGoHome(), HOME_EVERY_MS);
     // A club joined, left or restyled shows under the name at once.
     this.unlistenClubs = clubTags.listen((characterId, tag) => {
       for (const pawn of this.pawns.values()) {
@@ -321,6 +353,8 @@ export class MapRoom extends Room<{ state: MapState }> {
       zoneTile: -1,
       lastInteract: 0,
       lastRattle: 0,
+      atDesk: false,
+      unseenUntil: 0,
     };
     this.pawns.set(id, pawn);
     this.world = addPlayer(this.world, id, start.x, start.y);
@@ -352,6 +386,13 @@ export class MapRoom extends Room<{ state: MapState }> {
       at: () => this.placeOf(id),
       zones: () => this.pawns.get(id)?.zones ?? [],
     });
+    this.visit(character.id, placesAt(this.def, player.x, player.y));
+  }
+
+  /** Tells the living world the character is in these places (도감 school entries, notices). */
+  private visit(characterId: string, ids: readonly string[]): void {
+    const events = live()?.events;
+    if (events) for (const id of ids) events.visit(characterId, id);
   }
 
   override onDrop(client: Client): void {
@@ -472,7 +513,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     for (const { id, portal } of doors.entered) {
       const pawn = this.pawns.get(id);
       const p = this.def.portals[portal];
-      if (pawn && p?.built) void this.walkThrough(pawn, p);
+      if (pawn && p?.built) void this.walkThrough(pawn, p.id, p.to, p.spawn);
     }
     const now = Date.now();
     const was = new Map(before.players.map((p) => [p.id, p]));
@@ -486,23 +527,54 @@ export class MapRoom extends Room<{ state: MapState }> {
         if (zones.join() !== pawn.zones.join()) {
           pawn.zones = zones;
           pawn.client.send(MAP_MESSAGES.zones, { zones } satisfies ZoneUpdate);
+          // The living world counts each place once; walking back in costs nothing.
+          this.visit(pawn.character.id, placesAt(this.def, p.x, p.y));
         }
+        this.standAtDesk(pawn, p.x, p.y);
       }
       // Pushing against a shut door: had a move this tick and went nowhere.
       const prev = was.get(p.id);
       if (!prev || (inputs.get(p.id)?.length ?? 0) === 0) continue;
       if (Math.abs(p.x - prev.x) + Math.abs(p.y - prev.y) > 1) continue;
-      const shut = shutDoorAhead(this.def.portals, p.x, p.y, p.facing, PLAYER_RADIUS);
+      const shut = shutDoorAhead(this.def.portals, p.x, p.y, p.facing, PLAYER_RADIUS, this.closed);
       const door = this.def.portals[shut];
       if (!door || now - pawn.lastRattle < RATTLE_COOLDOWN_MS) continue;
       pawn.lastRattle = now;
-      this.broadcast(MAP_MESSAGES.door, {
-        id: door.id,
-        of: "portal",
-        sid: p.id,
-      } satisfies DoorRattle);
+      this.rattle(door.id, "portal", p.id, door.built ? "door_closed" : "door_unbuilt");
     }
     if (this.world.tick % 4 === 0) this.tendCast();
+    if (this.patrols.length > 0 && this.world.tick % PATROL_EVERY_TICKS === 0) this.watchPatrols();
+  }
+
+  /** A shut door or a locked hatch shaken, for everyone near to see and hear. */
+  private rattle(id: string, of: DoorRattle["of"], sid: string, why: DoorRefusal): void {
+    this.broadcast(MAP_MESSAGES.door, { id, of, sid, why } satisfies DoorRattle);
+  }
+
+  /** Standing in reach of a 졸방대 tells the living world, on arriving and on leaving. */
+  private standAtDesk(pawn: Pawn, x: number, y: number): void {
+    const at = this.def.interactables.some(
+      (t) => isDesk(t.id) && nearestUsable([{ kind: "thing", id: t.id, rect: t.rect }], x, y),
+    );
+    if (at === pawn.atDesk) return;
+    pawn.atDesk = at;
+    live()?.events.atDesk(pawn.character.id, at);
+  }
+
+  /**
+   * Asks the Page clock which maps behind this map's doors are open (PLAN §10 page lifecycle).
+   * A door to a closed map is shut like an unbuilt one, on the server's walls and, through
+   * `MapState.closed`, on every client's.
+   */
+  private refreshDoors(): void {
+    const l = live();
+    const closed = new Set(
+      this.def.portals.filter((p) => p.built && l && !l.isOpen(p.to)).map((p) => p.id),
+    );
+    if ([...closed].join() === [...this.closed].join()) return;
+    this.closed = closed;
+    this.map.collision = shutDoors(this.def.collision, this.def.portals, closed);
+    this.state.closed.splice(0, this.state.closed.length, ...closed);
   }
 
   private tileOf(x: number, y: number): number {
@@ -510,21 +582,26 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   /**
-   * Through a door (PLAN §10): the body leaves this world at once, the character is written on
-   * the other side, this room lets go of the account's seat, and only then does the client get
-   * a reserved seat in the target map's room. See `RoomSeats.moveOut` for why nothing can be
-   * lost or doubled in between.
+   * Through a door (PLAN §10), or sent somewhere by the school: the body leaves this world at
+   * once, the character is written on the other side, this room lets go of the account's seat,
+   * and only then does the client get a reserved seat in the target map's room. See
+   * `RoomSeats.moveOut` for why nothing can be lost or doubled in between.
    */
-  private async walkThrough(pawn: Pawn, portal: Portal): Promise<void> {
-    const target = builtMap(portal.to);
+  private async walkThrough(pawn: Pawn, via: string, to: string, spawn: string): Promise<void> {
+    const target = builtMap(to);
     if (!target) return;
+    // The Page clock can close a map between the door check and the step.
+    if (this.closed.has(via)) {
+      this.rattle(via, "portal", pawn.client.sessionId, "door_closed");
+      return;
+    }
     const { client } = pawn;
     const id = client.sessionId;
     const at = this.placeOf(id);
     pawn.leaving = true;
     pawn.queue.clear();
     this.removeBody(id);
-    const arrive = spawnPlace(target, portal.spawn);
+    const arrive = spawnPlace(target, spawn);
     let auth: Awaited<ReturnType<RoomSeats["moveOut"]>>;
     try {
       auth = await this.seats.moveOut(client, target.id, arrive.x, arrive.y);
@@ -547,10 +624,31 @@ export class MapRoom extends Room<{ state: MapState }> {
       client.leave(CLOSE_MAP_CHANGED);
       return;
     }
-    client.send(MAP_MESSAGES.transfer, { ...seating, via: portal.id } satisfies Transfer);
+    client.send(MAP_MESSAGES.transfer, { ...seating, via } satisfies Transfer);
     this.clock.setTimeout(() => {
       if (this.clients.includes(client)) client.leave(CLOSE_MAP_CHANGED);
     }, MOVED_SOCKET_MS);
+  }
+
+  /**
+   * Sends a character standing here to another map: 명령퇴사 to the 집 and back (PLAN §11).
+   * Returns false when they are not here.
+   */
+  relocate(characterId: string, to: string, spawn: string, via: string): boolean {
+    const pawn = [...this.pawns.values()].find((p) => p.character.id === characterId);
+    if (!pawn || pawn.leaving) return false;
+    void this.walkThrough(pawn, via, to, spawn);
+    return true;
+  }
+
+  /** In the 집: whoever has served their time goes back to school. */
+  private letGoHome(): void {
+    const l = live();
+    if (!l) return;
+    for (const pawn of this.pawns.values()) {
+      if (pawn.leaving || l.homeUntil(pawn.character.id) !== null) continue;
+      this.relocate(pawn.character.id, START_MAP, "main", "school");
+    }
   }
 
   /** Puts a body back where it stood after a door that could not be walked through. */
@@ -651,15 +749,19 @@ export class MapRoom extends Room<{ state: MapState }> {
     pawn.lastInteract = now;
     const at = this.world.players.find((p) => p.id === client.sessionId);
     const target = at && nearestUsable(this.usable, at.x, at.y);
-    client.send(MAP_MESSAGES.interaction, this.answer(target, n, at) satisfies Interaction);
+    void this.answer(pawn, target, n, at).then((answer) => {
+      if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
+    });
   }
 
-  private answer(
+  private async answer(
+    pawn: Pawn,
     target: Thing | undefined,
     n: number,
     at: { x: number; y: number } | undefined,
-  ): Interaction {
+  ): Promise<Interaction> {
     if (!target) return { t: "none", n };
+    const who = pawn.character.id;
     if ("npc" in target.what) {
       const person = target.what.npc;
       if (at) {
@@ -667,15 +769,17 @@ export class MapRoom extends Room<{ state: MapState }> {
         person.turnedUntil = this.world.tick + TURN_BACK_TICKS * 2;
       }
       person.nextBark = this.world.tick + AFTER_TALK;
+      live()?.events.met(who, person.npc.speaker);
       return { t: "say", n, npc: person.npc.key, text: this.say(person, "talk") };
     }
     const thing = target.what.thing;
+    if (PLACE_THINGS.has(thing.id)) this.visit(who, [thing.id]);
+    const l = live();
+    if (MEAL_COUNTERS.has(thing.id) && l) {
+      return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+    }
     if (thing.kind === "locked") {
-      this.broadcast(MAP_MESSAGES.door, {
-        id: thing.id,
-        of: "thing",
-        sid: "",
-      } satisfies DoorRattle);
+      this.rattle(thing.id, "thing", "", "door_locked");
       return { t: "locked", n, id: thing.id };
     }
     if (OPENS.has(thing.kind)) return { t: "open", n, id: thing.id, kind: thing.kind };
@@ -683,5 +787,47 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (text) return { t: "read", n, id: thing.id, name: text.name, desc: text.desc };
     if (thing.kind === "notice") return { t: "open", n, id: thing.id, kind: thing.kind };
     return { t: "none", n };
+  }
+
+  // Patrols -------------------------------------------------------------------------------------
+
+  /**
+   * Guards walk their routes on the room's own clock, so the server and every client put a
+   * guard at the same pose for the same tick without sending it. A guard that sees a player
+   * (inside its cone, nothing solid between) calls out; the player gets 벌점 and is put back at
+   * the map's entrance (PLAN §11 위험 구역 patrols).
+   */
+  private watchPatrols(): void {
+    const tick = this.world.tick;
+    const t = (tick * TICK_MS) / 1000;
+    for (const patrol of this.patrols) {
+      const pose = patrolPose(patrol, t);
+      for (const p of this.world.players) {
+        const pawn = this.pawns.get(p.id);
+        if (!pawn || pawn.leaving || tick < pawn.unseenUntil) continue;
+        if (sees(this.map, patrol, pose, p.x, p.y)) this.catch(pawn, patrol);
+      }
+    }
+  }
+
+  private catch(pawn: Pawn, patrol: Patrol): void {
+    const id = pawn.client.sessionId;
+    pawn.unseenUntil = this.world.tick + CAUGHT_GRACE_TICKS;
+    const back = spawnPlace(this.def, "main");
+    pawn.queue.clear();
+    this.world = {
+      ...this.world,
+      players: this.world.players.map((p) =>
+        p.id === id ? { ...p, x: back.x, y: back.y, facing: back.facing } : p,
+      ),
+    };
+    this.inside.delete(id);
+    this.broadcast(MAP_MESSAGES.halt, { patrol: patrol.id } satisfies Halt);
+    pawn.client.send(MAP_MESSAGES.caught, {
+      patrol: patrol.id,
+      x: back.x,
+      y: back.y,
+    } satisfies Caught);
+    void live()?.events.patrolCaught(pawn.character.id);
   }
 }

@@ -2,10 +2,12 @@ import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
 import { type BuiltMap, narrative } from "@guago/content";
 import {
+  type Caught,
   type DoorRattle,
   distanceToArea,
   encodeInput,
   type Facing,
+  type Halt,
   INPUT_MESSAGE,
   type Interaction,
   MAP_MESSAGES,
@@ -34,9 +36,10 @@ import type { WorldEntry } from "./entry.ts";
 import { Curtain } from "./fade.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
-import { ensureMap, enteredMap, mapReady, roomCollision } from "./map-data.ts";
+import { ensureMap, enteredMap, mapReady, wallsOf } from "./map-data.ts";
 import { type MapSeat, stayConnected } from "./net.ts";
 import { NpcActor, npcArt } from "./npc.ts";
+import { Patrols } from "./patrols.ts";
 import { PlaceCard } from "./place-card.ts";
 import { Prompt } from "./prompt.ts";
 import { MapView, onQualityTier } from "./render/index.ts";
@@ -90,6 +93,11 @@ interface Here {
   readonly view: MapView;
   readonly npcs: Map<string, NpcActor>;
   readonly untier: () => void;
+  /** The walls the prediction walks on; their grid changes when a door closes or opens. */
+  readonly walls: { collision: BuiltMap["collision"] };
+  /** Doors the Page clock keeps shut, as the server last said. */
+  closed: ReadonlySet<string>;
+  readonly patrols: Patrols | undefined;
   /** What the prompt can point at: the server's own list, by the same rule. */
   readonly usable: (Usable & { readonly top: number; readonly cx: number })[];
 }
@@ -130,6 +138,8 @@ export class WorldScene extends Phaser.Scene {
   /** The predicted body stepped into a built door at this time and waits for the server. */
   private doorAt: number | undefined;
   private selfInside = -1;
+  /** Where a patrol's catch put the player; the curtain lifts once the server's body is there. */
+  private caughtAt: { x: number; y: number } | undefined;
   /** Where the server last put the player's own body, in pixels. */
   private serverSelf: { x: number; y: number } | undefined;
   private pushFor = 0;
@@ -220,7 +230,15 @@ export class WorldScene extends Phaser.Scene {
       if (this.room === room) this.onInteraction(m);
     });
     room.onMessage(MAP_MESSAGES.door, (m: DoorRattle) => {
-      if (this.room === room && m.sid !== room.sessionId) this.rattle(m.id, m.of, false);
+      if (this.room !== room) return;
+      if (m.sid === room.sessionId) emitWorld({ t: "door", id: m.id, why: m.why });
+      else this.rattle(m.id, m.of, false);
+    });
+    room.onMessage(MAP_MESSAGES.caught, (m: Caught) => {
+      if (this.room === room) this.onCaught(m);
+    });
+    room.onMessage(MAP_MESSAGES.halt, (m: Halt) => {
+      if (this.room === room) this.here?.patrols?.halt(m.patrol);
     });
     room.onDrop(() => {
       if (this.room === room) this.live = false;
@@ -297,13 +315,28 @@ export class WorldScene extends Phaser.Scene {
         top: t.rect.y * T - 2,
       })),
     ];
-    this.here = { room, map, channel: seating.channel, view, npcs, usable, untier };
+    const closed = new Set(room.state.closed);
+    const walls = wallsOf(map, closed);
+    const patrols =
+      map.patrols.length > 0 ? new Patrols(this, this.meta, view, walls, map.patrols) : undefined;
+    this.here = {
+      room,
+      map,
+      channel: seating.channel,
+      view,
+      npcs,
+      usable,
+      untier,
+      walls,
+      closed,
+      patrols,
+    };
     this.selfId = room.sessionId;
     this.camera = new CameraRig(this.cameras.main, map.w * T, map.h * T);
     const x = me.x / POS_SCALE;
     const y = me.y / POS_SCALE;
     this.camera.jumpTo(x, y - CHEST_PX);
-    this.self = new SelfMover(roomCollision(map), (input) => {
+    this.self = new SelfMover(walls, (input) => {
       if (this.room === room) room.send(INPUT_MESSAGE, encodeInput(input));
     });
     this.self.onServer(me);
@@ -376,6 +409,7 @@ export class WorldScene extends Phaser.Scene {
     this.self = undefined;
     this.bubbles.clearAll();
     this.prompt.show(undefined);
+    here?.patrols?.destroy();
     here?.untier();
     here?.view.destroy();
   }
@@ -455,6 +489,16 @@ export class WorldScene extends Phaser.Scene {
       if (p.sid === this.selfId) {
         this.self?.onServer(p);
         this.serverSelf = { x: p.x / POS_SCALE, y: p.y / POS_SCALE };
+        if (
+          this.caughtAt &&
+          Math.hypot(this.serverSelf.x - this.caughtAt.x, this.serverSelf.y - this.caughtAt.y) < 1
+        ) {
+          this.caughtAt = undefined;
+          this.self?.resync();
+          this.camera?.jumpTo(this.serverSelf.x, this.serverSelf.y - CHEST_PX);
+          this.holding = false;
+          void this.curtain.open(160);
+        }
         continue;
       }
       seated.add(p.sid);
@@ -469,6 +513,11 @@ export class WorldScene extends Phaser.Scene {
     this.prune(this.monsters, state.monsters);
     this.prune(this.players, seated);
     for (const [key, n] of state.npcs) this.here.npcs.get(key)?.face(n.facing);
+    if ([...state.closed].join() !== [...this.here.closed].join()) {
+      const closed = new Set(state.closed);
+      this.here.closed = closed;
+      this.here.walls.collision = wallsOf(this.here.map, closed).collision;
+    }
   }
 
   private prune<A extends { readonly body: Phaser.GameObjects.Sprite; destroy(): void }>(
@@ -522,7 +571,18 @@ export class WorldScene extends Phaser.Scene {
       emitWorld({ t: "open", id: m.id, kind: m.kind });
     } else if (m.t === "locked") {
       this.rattle(m.id, "thing", true);
+    } else if (m.t === "ate") {
+      emitWorld({ t: "ate", id: m.id, result: m.result });
     }
+  }
+
+  /** A guard saw the player: a quick dip to ink, and back at the entrance when it lifts. */
+  private onCaught(m: Caught): void {
+    this.holding = true;
+    this.caughtAt = { x: m.x, y: m.y };
+    void this.curtain.close(120);
+    playWorld("sagam.whistle", { volume: 0.5 });
+    emitWorld({ t: "caught", patrol: m.patrol });
   }
 
   /** The interact action (PLAN §6): the server picks the target from where it has us. */
@@ -598,6 +658,8 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const t = this.clock.renderTime(time);
+    // Guards stand where the server had them at the time everyone else is drawn at.
+    here?.patrols?.update(t);
     for (const { track, actor } of this.monsters.values()) {
       const at = track.at(t);
       actor.update(at.x, at.y, at.facing as Facing, dt);
@@ -631,7 +693,9 @@ export class WorldScene extends Phaser.Scene {
     const at = portalAt(map.portals, x, y);
     const was = this.selfInside;
     this.selfInside = at;
-    if (!this.holding && at >= 0 && at !== was && map.portals[at]?.built) {
+    const closed = this.here?.closed ?? new Set<string>();
+    const entered = map.portals[at];
+    if (!this.holding && at >= 0 && at !== was && entered?.built && !closed.has(entered.id)) {
       this.predictDoor();
       return;
     }
@@ -640,7 +704,7 @@ export class WorldScene extends Phaser.Scene {
     const pushing = (mx !== 0 || my !== 0) && moved < 0.05;
     this.pushFor = pushing ? this.pushFor + dt : 0;
     if (this.pushFor < PUSH_MS) return;
-    const shut = shutDoorAhead(map.portals, x, y, facing, PLAYER_RADIUS);
+    const shut = shutDoorAhead(map.portals, x, y, facing, PLAYER_RADIUS, closed);
     const door = map.portals[shut];
     const now = performance.now();
     if (!door || now - this.lastRattle < RATTLE_COOLDOWN_MS) return;

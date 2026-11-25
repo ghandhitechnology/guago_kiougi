@@ -3,6 +3,7 @@
  * that sorts, lights and shadows its own entities; anything at 1 or more draws over it, unlit.
  */
 export const DUST_DEPTH = 1;
+export const CONE_DEPTH = 1.5;
 export const NAME_DEPTH = 2;
 export const MARK_DEPTH = 3;
 export const BUBBLE_DEPTH = 4;

@@ -14,5 +14,6 @@ export * from "./maps/index.ts";
 export * from "./modes.ts";
 export * from "./monsters.ts";
 export * as narrative from "./narrative/index.ts";
+export * from "./places.ts";
 export * from "./social.ts";
 export * from "./statuses.ts";

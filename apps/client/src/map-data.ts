@@ -13,7 +13,6 @@ import { loadMap, unloadMap } from "./render/index.ts";
 /** Maps kept loaded: the one the player is on and the last two they left. */
 const KEEP = 3;
 
-const walls = new Map<string, Collidable>();
 const recent: string[] = [];
 
 /** Whether everything map `id` draws with is in the scene's caches. */
@@ -76,12 +75,14 @@ export function enteredMap(scene: Phaser.Scene, id: string): void {
   }
 }
 
-/** What the player's prediction walks on in `map`. */
-export function roomCollision(map: BuiltMap): Collidable {
-  let c = walls.get(map.id);
-  if (!c) {
-    c = { collision: shutDoors(map.collision, map.portals) };
-    walls.set(map.id, c);
-  }
-  return c;
+/**
+ * What the player's prediction walks on in `map`: its walls with doors to unbuilt maps shut, and
+ * those in `closed` (maps the Page clock has not opened). One object per stay on a map, whose
+ * grid `shut` swaps when the server closes or opens a door, so the predictor sees it at once.
+ */
+export function wallsOf(
+  map: BuiltMap,
+  closed: ReadonlySet<string>,
+): { collision: Collidable["collision"] } {
+  return { collision: shutDoors(map.collision, map.portals, closed) };
 }

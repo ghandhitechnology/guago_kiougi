@@ -11,6 +11,7 @@ import type { ChatSink } from "./chat/log.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { enterRoute } from "./enter.ts";
+import { sendHomeOnExpel } from "./home.ts";
 import type { Live } from "./live/index.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
@@ -58,6 +59,7 @@ export function createGameServer(
   if (world.emptyGraceSeconds !== undefined) channels.graceSeconds = world.emptyGraceSeconds;
   const api = createApiHandler(auth, settings, looks, economy.routes);
   const enter = enterRoute();
+  if (live) sendHomeOnExpel(live);
 
   // Clients join rooms; they never create one. Without `create`, the WorldRoom stays the one the
   // server made. Map rooms refuse every client matchmaking call: their seats come from

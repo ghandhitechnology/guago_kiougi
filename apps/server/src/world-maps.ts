@@ -3,7 +3,7 @@
  * who of the cast stands where. Built once at start from the map sources, the same data the art
  * build writes for the client.
  */
-import { type BuiltMap, buildAllMaps, CAST_ART, narrative } from "@guago/content";
+import { type BuiltMap, buildAllMaps, CAST_ART, narrative, storyPlaces } from "@guago/content";
 import {
   type Collidable,
   type Facing,
@@ -19,6 +19,14 @@ const MAPS: ReadonlyMap<string, BuiltMap> = new Map(buildAllMaps().map((r) => [r
 
 /** Where the story starts. Until the opening sequence is built, new characters stand here. */
 export const START_MAP = "campus-yard";
+/** Where 명령퇴사 sends a player (PLAN §11) until the living world lets them back. */
+export const HOME_MAP = "home";
+/** Interactables that are the 급식 counter: using one eats (PLAN §11 급식). */
+export const MEAL_COUNTERS: ReadonlySet<string> = new Set(["serving-line"]);
+/** Interactables that are 졸방대: standing in reach of one clears 졸음 (PLAN §11). */
+export const isDesk = (id: string): boolean => /^standing-desk(-\d+)?$/.test(id);
+/** Interactables that are places of their own in the story (the codex's 매점 게시판). */
+export const PLACE_THINGS: ReadonlySet<string> = new Set(["corkboard"]);
 
 if (!MAPS.get(START_MAP)?.spawns.main)
   throw new Error(`map ${START_MAP} with a main spawn is missing`);
@@ -120,17 +128,19 @@ export interface Npc {
   readonly lines: readonly string[];
 }
 
-/** Ids of every place a bark can name that exists: maps and the rooms inside them. */
+/** Ids of every place a bark can name that exists: maps, the rooms inside them, their story ids. */
 const builtPlaces = new Set(
-  allMaps().flatMap((m) => [m.id, ...m.zones.filter((z) => z.kind === "room").map((z) => z.id)]),
+  allMaps().flatMap((m) =>
+    [m.id, ...m.zones.filter((z) => z.kind === "room").map((z) => z.id)].flatMap(storyPlaces),
+  ),
 );
 
-/** The places a spot stands in: its map and any room zone around it. */
-function placesAt(map: BuiltMap, x: number, y: number): string[] {
+/** The places a point stands in: its map and any room zone around it, with their story ids. */
+export function placesAt(map: BuiltMap, x: number, y: number): string[] {
   return [
     map.id,
     ...map.zones.filter((z) => z.kind === "room" && inArea(z.rect, x, y)).map((z) => z.id),
-  ];
+  ].flatMap(storyPlaces);
 }
 
 /**

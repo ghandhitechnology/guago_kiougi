@@ -119,6 +119,8 @@ export const MapState = schema(
     map: t.string(),
     channel: t.uint8(),
     npcs: t.map(NpcState),
+    /** Ids of built portals whose map the Page clock has not opened yet: shut like unbuilt ones. */
+    closed: t.array("string"),
   },
   "MapState",
 );
