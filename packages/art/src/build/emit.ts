@@ -134,20 +134,31 @@ export function isTileArt(a: Compiled): a is TileArt {
   return a.kind === "terrain" || a.kind === "overlay";
 }
 
-/** Tile indices and decal frames, identical in every theme. */
+/**
+ * Tile indices and decal frames, identical in every theme. Art baked into every theme comes
+ * first and art with a `bake` list after it, so a theme that leaves the latter out ends its
+ * atlas early without moving anyone's indices.
+ */
 export interface TileLayout {
   readonly first: ReadonlyMap<string, number>;
   readonly count: number;
 }
 
+const size = (t: TileArt): number => t.tiles.length + (t.kind === "terrain" ? t.decals.length : 0);
+
 export function tileLayout(sets: readonly TileArt[]): TileLayout {
   const first = new Map<string, number>();
   let n = 0;
-  for (const t of sets) {
+  for (const t of [...sets.filter((s) => !s.bake), ...sets.filter((s) => s.bake)]) {
     first.set(t.name, n);
-    n += t.tiles.length + (t.kind === "terrain" ? t.decals.length : 0);
+    n += size(t);
   }
   return { first, count: n };
+}
+
+/** Whether a theme's atlas holds a set's tiles. */
+export function bakedIn(t: TileArt, theme: string): boolean {
+  return !t.bake || t.bake.includes(theme);
 }
 
 export function cellOf(index: number): { x: number; y: number } {
@@ -165,12 +176,14 @@ export function bakeTiles(themeName: string, terrains: readonly TileArt[]): Atla
   const map = resolveRemap(theme.remap);
   const layout = tileLayout(terrains);
   const { tile, spacing, columns } = TILE_GRID;
-  const rows = Math.max(1, Math.ceil(layout.count / columns));
+  const baked = terrains.filter((t) => bakedIn(t, themeName));
+  const end = Math.max(0, ...baked.map((t) => (layout.first.get(t.name) as number) + size(t)));
+  const rows = Math.max(1, Math.ceil(end / columns));
   const png = new Rgba(columns * (tile + spacing), rows * (tile + spacing));
   if (png.w > MAX_ATLAS || png.h > MAX_ATLAS)
     throw new Error(`tiles-${themeName} is larger than ${MAX_ATLAS}`);
   const frames: Record<string, AtlasFrame> = {};
-  for (const t of terrains) {
+  for (const t of baked) {
     const first = layout.first.get(t.name) as number;
     t.tiles.forEach((img, i) => {
       const at = cellOf(first + i);
@@ -326,6 +339,7 @@ export function metadata(
             upper: t.upper,
             lower: t.lower,
             themes: t.themes,
+            bake: t.bake,
             masks: shift(t.masks, first),
             tones: t.tones.map((tone) => ({
               name: tone.name,
@@ -369,7 +383,7 @@ export function metadata(
                 ]),
               )
             : null;
-          return [o.name, { themes: o.themes, masks: shift(o.masks, first), shapes }];
+          return [o.name, { themes: o.themes, bake: o.bake, masks: shift(o.masks, first), shapes }];
         }),
     ),
     fonts: Object.fromEntries(fonts.map((f) => [f.name, f.meta])),
