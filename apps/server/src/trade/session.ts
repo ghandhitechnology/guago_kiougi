@@ -24,8 +24,7 @@ import {
   type TradeMessage,
   type TradeOffer,
   type TradeOfferView,
-  type TradeReplyError,
-  type TradeResult,
+  type TradeRefusalCode,
   type TradeUpdate,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
@@ -85,6 +84,11 @@ interface Window {
   queue: Promise<unknown>;
 }
 
+/** One answer per request: `done` with the window's id, or `refused` with a code. */
+export type TradeAnswer =
+  | { ok: true; session: string }
+  | { ok: false; code: TradeRefusalCode; retryMs?: number };
+
 const EMPTY: TradeOffer = { items: [], stacks: {}, pinecone: "0" };
 const emptySide = (): Side => ({
   offer: EMPTY,
@@ -142,7 +146,7 @@ export function createTrades({
   }
 
   /** Why two characters cannot trade where they stand, or null. */
-  function apart(a: string, b: string): TradeReplyError | null {
+  function apart(a: string, b: string): TradeRefusalCode | null {
     const pa = link.place(a);
     const pb = link.place(b);
     if (!pa || !pb || pa.roomId !== pb.roomId) return "trade_far";
@@ -224,15 +228,14 @@ export function createTrades({
     }
   }
 
-  function limited(me: string, kind: "request" | "session"): number {
+  function limited(me: string, kind: "request" | "window"): number {
     return buckets.take(`${me}\u0000${kind}`, TRADE_RATE[kind], now());
   }
 
-  const reply = (id: string, session: string): TradeResult => ({ id, ok: true, session });
-  const fail = (id: string, error: TradeReplyError, retryMs?: number): TradeResult => ({
-    id,
+  const reply = (session: string): TradeAnswer => ({ ok: true, session });
+  const fail = (code: TradeRefusalCode, retryMs?: number): TradeAnswer => ({
     ok: false,
-    error,
+    code,
     ...(retryMs ? { retryMs } : {}),
   });
 
@@ -241,19 +244,19 @@ export function createTrades({
     return w && party(w, me) && !(w.ghost && me !== w.from) ? w : undefined;
   }
 
-  async function request(me: string, id: string, to: string): Promise<TradeResult> {
+  async function request(me: string, to: string): Promise<TradeAnswer> {
     const wait = limited(me, "request");
-    if (wait > 0) return fail(id, "rate_limited", wait);
-    if (to === me) return fail(id, "trade_self");
+    if (wait > 0) return fail("rate_limited", wait);
+    if (to === me) return fail("trade_self");
     const mine = link.member(me);
     const theirs = link.member(to);
-    if (!mine || !theirs) return fail(id, "trade_offline");
-    if (mine.level < TRADE.level || theirs.level < TRADE.level) return fail(id, "trade_level");
-    if (byCharacter.has(me)) return fail(id, "trade_busy");
+    if (!mine || !theirs) return fail("trade_offline");
+    if (mine.level < TRADE.level || theirs.level < TRADE.level) return fail("trade_level");
+    if (byCharacter.has(me)) return fail("trade_busy");
     const far = apart(me, to);
-    if (far) return fail(id, far);
+    if (far) return fail(far);
     const ghost = isBlocked(to, me) || isBlocked(me, to);
-    if (!ghost && byCharacter.has(to)) return fail(id, "trade_busy");
+    if (!ghost && byCharacter.has(to)) return fail("trade_busy");
     const w: Window = {
       id: randomUUID(),
       from: me,
@@ -277,15 +280,15 @@ export function createTrades({
         expiresAt: w.expiresAt,
       });
     }
-    return reply(id, w.id);
+    return reply(w.id);
   }
 
-  function accept(me: string, id: string, w: Window): TradeResult {
-    if (w.to !== me || w.state !== "invited") return fail(id, "trade_no_session");
+  function accept(me: string, w: Window): TradeAnswer {
+    if (w.to !== me || w.state !== "invited") return fail("trade_no_session");
     const far = apart(w.from, w.to);
     if (far) {
       close(w, "far");
-      return fail(id, far);
+      return fail(far);
     }
     w.state = "open";
     w.expiresAt = now() + TRADE.sessionSeconds * 1000;
@@ -303,26 +306,26 @@ export function createTrades({
         expiresAt: w.expiresAt,
       });
     }
-    return reply(id, w.id);
+    return reply(w.id);
   }
 
-  async function offer(me: string, id: string, w: Window, next: TradeOffer): Promise<TradeResult> {
-    if (w.state === "committing") return fail(id, "trade_busy");
-    if (w.state !== "open") return fail(id, "trade_no_session");
+  async function offer(me: string, w: Window, next: TradeOffer): Promise<TradeAnswer> {
+    if (w.state === "committing") return fail("trade_busy");
+    if (w.state !== "open") return fail("trade_no_session");
     const side = await read(me, next);
-    if (typeof side === "string") return fail(id, side as TradeReplyError);
-    if (w.state !== "open") return fail(id, "trade_no_session");
+    if (typeof side === "string") return fail(side as TradeRefusalCode);
+    if (w.state !== "open") return fail("trade_no_session");
     w.sides.set(me, side);
     w.version++;
     w.confirmed.clear();
     push(w, { t: "offer", session: w.id, version: w.version, offers: offersView(w) });
-    return reply(id, w.id);
+    return reply(w.id);
   }
 
-  async function confirm(me: string, id: string, w: Window, version: number): Promise<TradeResult> {
-    if (w.state === "committing") return fail(id, "trade_busy");
-    if (w.state !== "open") return fail(id, "trade_no_session");
-    if (version !== w.version) return fail(id, "trade_changed");
+  async function confirm(me: string, w: Window, version: number): Promise<TradeAnswer> {
+    if (w.state === "committing") return fail("trade_busy");
+    if (w.state !== "open") return fail("trade_no_session");
+    if (version !== w.version) return fail("trade_changed");
     const all = [...w.sides.values()];
     const empty = all.every(
       (s) =>
@@ -330,11 +333,11 @@ export function createTrades({
         Object.keys(s.offer.stacks).length === 0 &&
         s.offer.pinecone === "0",
     );
-    if (empty) return fail(id, "trade_empty");
+    if (empty) return fail("trade_empty");
     w.confirmed.add(me);
     push(w, { t: "confirm", session: w.id, version: w.version, confirmed: [...w.confirmed] });
     if (w.confirmed.size === 2) await commit(w, me);
-    return reply(id, w.id);
+    return reply(w.id);
   }
 
   /** Both sides confirmed this version: positions once more, then one operation moves it all. */
@@ -395,36 +398,35 @@ export function createTrades({
     push(w, { t: "offer", session: w.id, version: w.version, offers: offersView(w) });
   }
 
-  async function handle(me: string, message: TradeMessage): Promise<TradeResult> {
-    const { id } = message;
-    if (message.type === TRADE_MESSAGES.request) return request(me, id, message.req.to);
-    const wait = limited(me, "session");
-    if (wait > 0) return fail(id, "rate_limited", wait);
+  async function handle(me: string, message: TradeMessage): Promise<TradeAnswer> {
+    if (message.type === TRADE_MESSAGES.request) return request(me, message.req.to);
+    const wait = limited(me, "window");
+    if (wait > 0) return fail("rate_limited", wait);
     const w = windowOf(me, message.req.session);
-    if (!w) return fail(id, "trade_no_session");
+    if (!w) return fail("trade_no_session");
     return serial(w, async () => {
-      if (w.state === "closed") return fail(id, "trade_no_session");
+      if (w.state === "closed") return fail("trade_no_session");
       switch (message.type) {
         case "trade.accept":
-          return accept(me, id, w);
+          return accept(me, w);
         case "trade.decline":
-          if (w.to !== me || w.state !== "invited") return fail(id, "trade_no_session");
+          if (w.to !== me || w.state !== "invited") return fail("trade_no_session");
           close(w, "declined");
-          return reply(id, w.id);
+          return reply(w.id);
         case "trade.cancel":
-          if (w.state === "committing") return fail(id, "trade_busy");
+          if (w.state === "committing") return fail("trade_busy");
           close(w, "cancelled");
-          return reply(id, w.id);
+          return reply(w.id);
         case "trade.offer": {
           const { session: _, ...next } = message.req;
-          return offer(me, id, w, next);
+          return offer(me, w, next);
         }
         case "trade.confirm":
-          return confirm(me, id, w, message.req.version);
+          return confirm(me, w, message.req.version);
       }
     }).catch((error) => {
       console.error(`trade message failed: ${describeError(error)}`);
-      return fail(id, "server_error");
+      return fail("server_error");
     });
   }
 

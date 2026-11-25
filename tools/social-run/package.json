@@ -1,0 +1,18 @@
+{
+  "name": "@guago/social-run",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  },
+  "dependencies": {
+    "@colyseus/core": "0.18.29",
+    "@colyseus/sdk": "0.18.10",
+    "@guago/content": "workspace:*",
+    "@guago/shared": "workspace:*"
+  }
+}

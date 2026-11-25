@@ -21,7 +21,6 @@ import {
   TRADE,
   TRADE_KEYS,
   type TradeMessage,
-  type TradeResult,
   type TradeUpdate,
 } from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -984,14 +983,15 @@ let mid = 0;
 const msg = <T extends TradeMessage["type"]>(
   type: T,
   req: Extract<TradeMessage, { type: T }>["req"],
-) => ({ id: `m-${String(++mid).padStart(8, "0")}`, type, req }) as TradeMessage;
+) => ({ n: ++mid, type, req }) as TradeMessage;
 
 async function opened(
   trades: ReturnType<typeof createTrades>,
   a: string,
   b: string,
 ): Promise<string> {
-  const asked = (await trades.handle(a, msg("trade.request", { to: b }))) as TradeResult & {
+  const asked = (await trades.handle(a, msg("trade.request", { to: b }))) as {
+    ok: boolean;
     session: string;
   };
   expect(asked.ok).toBe(true);
@@ -1139,7 +1139,8 @@ describe("direct trade windows", () => {
     });
     w.join(a);
     w.join(b, 16);
-    const asked = (await trades.handle(a, msg("trade.request", { to: b }))) as TradeResult & {
+    const asked = (await trades.handle(a, msg("trade.request", { to: b }))) as {
+      ok: boolean;
       session: string;
     };
     expect(asked.ok).toBe(true);
@@ -1251,7 +1252,10 @@ describe("ledger growth", () => {
     // Per-operation rows: ten purchases, two rows each.
     const water = VENDING.fixed[0];
     for (let i = 0; i < 10; i++) {
-      const bought = await eco.executor.execute(a, randomUUID(), "shop.buy", { item: water.id, qty: 1 });
+      const bought = await eco.executor.execute(a, randomUUID(), "shop.buy", {
+        item: water.id,
+        qty: 1,
+      });
       expect(bought.ok).toBe(true);
     }
     expect(

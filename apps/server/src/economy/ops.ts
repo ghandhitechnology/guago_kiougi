@@ -44,6 +44,7 @@ import {
   type OpOutcome,
   type OpRequests,
   type Purse,
+  payClubFee,
   pilgi,
   pilgiChance,
   resetStats,
@@ -80,6 +81,8 @@ import {
 export interface InternalRequests {
   kit: Record<string, never>;
   grant: GrantRequest;
+  /** The 동아리 founding fee, run inside the founding transaction (social/fees.ts). */
+  "club.found": Record<string, never>;
   "trade.commit": TradeCommitRequest;
   "listing.expire": ExpireRequest;
 }
@@ -213,6 +216,8 @@ export interface World {
   readonly initiator: string;
   readonly parties: ReadonlyMap<string, Loaded>;
   readonly listings: ReadonlyMap<string, ListingRow>;
+  /** What the operation's `facts` read, once everything was locked. */
+  readonly facts: Readonly<Record<string, boolean>>;
 }
 
 export interface PartyApplied {
@@ -253,6 +258,8 @@ export interface PartyOpDef<R> {
    */
   readonly shared?: boolean;
   rows(req: R, party: string, locked: Locked): Rows;
+  /** Yes-or-no facts outside the economy's rows, read in the transaction (a block). */
+  facts?(q: Queryable, req: R, locked: Locked): Promise<Record<string, boolean>>;
   currencies(
     req: R,
     party: string,
@@ -332,6 +339,17 @@ export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
         put.push({ ...row, slot });
       }
       return ok({ put, itemKey: "kit", outcome: { items: put.map((r) => r.id) } });
+    },
+  },
+
+  "club.found": {
+    client: false,
+    rows: () => ({}),
+    currencies: () => ["pinecone"],
+    apply(l, _req, env) {
+      const r = payClubFee(l.purse, env.page);
+      if (!r.ok) return no(r.error);
+      return ok({ purse: r.purse, ledger: r.ledger });
     },
   },
 

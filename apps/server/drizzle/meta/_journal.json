@@ -26,8 +26,15 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1795584835521,
-      "tag": "0003_trading",
+      "when": 1795582672684,
+      "tag": "0003_social",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795586539235,
+      "tag": "0004_trading",
       "breakpoints": true
     }
   ]

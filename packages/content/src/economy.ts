@@ -33,6 +33,7 @@ export const MATERIALS: readonly MaterialDef[] = [
       "sink.forge",
       "sink.shop",
       "sink.stat-reset",
+      "sink.club",
       "sink.trade-tax",
       "sink.board-fee",
       "sink.board-tax",

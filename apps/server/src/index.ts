@@ -7,9 +7,12 @@ import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
 import { startLedgerMaintenance } from "./economy/ledger.ts";
-import { studentLooks } from "./looks.ts";
+import { clubJackets, studentLooks } from "./looks.ts";
+import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
+import { executorFees } from "./social/fees.ts";
+import { createSocial } from "./social/index.ts";
 import { startListingSweeper } from "./trade/board.ts";
 import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
@@ -30,13 +33,17 @@ const auth = createAuthService({
 });
 startChatLogMaintenance(db);
 const chatLog = new ChatLog(db, { onMissingPartition: () => maintainChatLog(db) });
-// Blocks join from the social systems: pass their `isBlocked` here once they land.
+const social = createSocial(db, {
+  fees: executorFees(db, economy.executor),
+  jackets: clubJackets,
+  log: chatLog,
+});
 const trading = createTrading({ db, executor: economy.executor });
 const server = createGameServer(
   auth,
   config,
   studentLooks,
-  { log: chatLog },
+  { log: chatLog, social },
   { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants, trading },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
@@ -55,7 +62,9 @@ setInterval(
   () => {
     auth.sweep().catch(() => {});
     economy.prune().catch(() => {});
+    void social.sweep();
   },
   10 * 60 * 1000,
 ).unref();
-console.log(`game server on :${config.port}`);
+await serveMetrics(config.metricsPort);
+console.log(`game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}`);

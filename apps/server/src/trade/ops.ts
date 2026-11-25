@@ -330,6 +330,14 @@ const buy: PartyOpDef<Requests["listing.buy"]> = {
   others: (q, req) => sellerOf(q, req.listing),
   listings: (req) => [req.listing],
   rows: (req, party, locked) => listedRows(locked.listings.get(req.listing), party),
+  // A seller the buyer blocked is off the board for them (PLAN §12 "Block hides … trades").
+  async facts(q, req, locked) {
+    const seller = locked.listings.get(req.listing)?.sellerId;
+    if (!seller) return { blocked: false };
+    const { rows } = await q.execute(sql`
+      select 1 from blocks where character_id = ${locked.initiator} and other_id = ${seller}`);
+    return { blocked: rows.length > 0 };
+  },
   currencies(req, party, _loaded, locked) {
     const listing = locked.listings.get(req.listing);
     if (!listing || party !== locked.initiator) return ["pinecone"];
@@ -340,6 +348,7 @@ const buy: PartyOpDef<Requests["listing.buy"]> = {
     const listing = world.listings.get(req.listing);
     if (!listing) return refuse("listing_missing");
     if (listing.sellerId === me) return refuse("listing_own");
+    if (world.facts.blocked) return refuse("listing_missing");
     if (listing.state !== "live") return refuse("listing_closed");
     if (listing.expired) return refuse("listing_expired");
     const buyer = world.parties.get(me) as Loaded;

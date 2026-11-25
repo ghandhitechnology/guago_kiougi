@@ -4,7 +4,6 @@
  */
 import { bindsOn, bookById, type ItemOrigin, toolSubject } from "@guago/content";
 import {
-  type BoardCategory,
   type BookGrade,
   type BookItem,
   catchUp,
@@ -12,6 +11,7 @@ import {
   type ItemKind,
   type ItemView,
   type ListedItem,
+  type ListingCategory,
   type LogoutPlace,
   type Major,
   type PoolFill,
@@ -328,7 +328,7 @@ export interface ListingRow {
   id: string;
   sellerId: string;
   state: ListingState;
-  category: BoardCategory;
+  category: ListingCategory;
   def: string;
   grade: number;
   itemId: string | null;
@@ -353,7 +353,7 @@ export function listingFromDb(r: Record<string, unknown>): ListingRow {
     id: r.id as string,
     sellerId: r.seller_id as string,
     state: r.state as ListingState,
-    category: r.category as BoardCategory,
+    category: r.category as ListingCategory,
     def: r.def_id as string,
     grade: r.grade as number,
     itemId: (r.item_id as string | null) ?? null,

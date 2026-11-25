@@ -46,10 +46,11 @@ function view(r: Record<string, unknown>, withState = false): ListingView {
 const VIEW_COLUMNS = sql.raw(`l.id, l.seller_id, c.name as seller_name, l.category, l.def_id,
   l.grade, l.qty, l.unit_price::text as unit_price, l.created_at, l.expires_at, l.item, l.state`);
 
-/** One page of live listings, cheapest (or dearest) first. */
+/** One page of live listings, cheapest (or dearest) first; none of sellers `viewer` blocked. */
 export async function browseListings(
   db: Db,
   req: BoardRequests["listing.browse"],
+  viewer?: string,
 ): Promise<{ listings: ListingView[]; next: string | null }> {
   const size = TRADE.board.pageSize;
   const desc = req.sort === "-price";
@@ -68,6 +69,8 @@ export async function browseListings(
       and (${req.def ?? null}::text is null or l.def_id = ${req.def ?? null})
       and (${req.grade ?? null}::smallint is null or l.grade = ${req.grade ?? null})
       ${after}
+      and not exists (
+        select 1 from blocks b where b.character_id = ${viewer ?? null}::uuid and b.other_id = l.seller_id)
     order by ${order}
     limit ${size + 1}`);
   const page = rows.slice(0, size).map((r) => view(r));

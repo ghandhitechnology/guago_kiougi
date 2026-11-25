@@ -6,6 +6,7 @@ import { SPEAKERS } from "../narrative/speakers.ts";
 import type { BuildResult } from "./build.ts";
 import type { BuiltMap, TileRect } from "./format.ts";
 import type { Actor, Decal, Doll, Prop } from "./layers.ts";
+import { clearLine } from "./patrols.ts";
 
 /**
  * The parts of the art build's metadata (`art.json`) a map is checked against. The art
@@ -272,6 +273,23 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     if (!speakers.has(n.speaker)) say(`npc spot for ${n.speaker}: no such speaker`);
     if (solid(tx, ty) || !reached[ty * map.w + tx])
       say(`npc spot for ${n.speaker} at tile ${tx},${ty} is not walkable from the main spawn`);
+  }
+  // Patrols: every waypoint walkable and reached, every leg a clear straight walk.
+  for (const p of map.patrols) {
+    unique("patrol", p.id);
+    if (!speakers.has(p.walker) && !art.sprites[p.walker])
+      say(`patrol ${p.id}: no speaker or sprite ${p.walker}`);
+    if (p.route.length < 2) say(`patrol ${p.id} needs two waypoints`);
+    if (!(p.speed > 0) || !(p.cone.length > 0) || !(p.cone.angle > 0 && p.cone.angle <= 360))
+      say(`patrol ${p.id}: speed, cone length and angle must be positive`);
+    p.route.forEach((w, i) => {
+      const [tx, ty] = tileOf(w);
+      if (solid(tx, ty) || !reached[ty * map.w + tx])
+        say(`patrol ${p.id} waypoint ${i} at tile ${tx},${ty} is not walkable from the main spawn`);
+      const next = p.route[i + 1] ?? (p.loop === "cycle" ? p.route[0] : undefined);
+      if (next && next !== w && !clearLine(map, w.x, w.y, next.x, next.y))
+        say(`patrol ${p.id} leg ${i} walks through something solid`);
+    });
   }
   for (const a of map.arenas) {
     unique("arena", a.id);

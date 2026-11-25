@@ -1,20 +1,23 @@
 /**
- * Trading in the WorldRoom (PLAN §19: the WorldRoom holds trades): the `trade.*` messages, the
+ * Trading in the WorldRoom (PLAN §19: the WorldRoom holds trades): the `trade.*` requests, the
  * 매점 게시판's reads, and the pushes back. The room registers this once and tells it who
  * joined and left; every rule lives in the modules beside it. Listing create, buy and cancel are
  * item operations and arrive through the room's `op` handlers like the rest.
+ *
+ * Requests follow the social systems' shape: one `done { type, n, data }` or
+ * `refused { type, n, code }` each, and a window's changes pushed on `trade`.
  */
 import {
-  BOARD_MESSAGES,
+  type BoardData,
   type BoardMessage,
   type BoardMessageName,
-  type BoardReply,
   boardSchema,
-  TRADE_MESSAGES,
+  type Refusal,
   TRADE_RATE,
   type TradeMessage,
   type TradeMessageName,
   tradeSchema,
+  WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
 import { type Db, describeError } from "../db/index.ts";
@@ -22,9 +25,9 @@ import { Buckets } from "../economy/buckets.ts";
 import type { Executor } from "../economy/executor.ts";
 import { places } from "../places.ts";
 import { browseListings, myListings, priceHistory } from "./board.ts";
-import { createTrades, type IsBlocked, nobodyBlocked, type Trades } from "./session.ts";
+import { createTrades, type Trades } from "./session.ts";
 
-/** What the room lends: its validated handlers, its members, its sockets. */
+/** What the room lends: its validated handlers, its members, its sockets and its block lists. */
 export interface TradingHost {
   on<T>(
     type: string,
@@ -33,6 +36,8 @@ export interface TradingHost {
   ): void;
   member(characterId: string): { name: string; level: number } | undefined;
   send(characterId: string, type: string, body: unknown): void;
+  /** Whether `owner` (online) blocked `other` (the social hub's block sets). */
+  blocked(owner: string, other: string): boolean;
 }
 
 const TRADE_TYPES: TradeMessageName[] = [
@@ -48,30 +53,43 @@ const BOARD_TYPES: BoardMessageName[] = ["listing.browse", "listing.mine", "list
 export interface TradingOptions {
   db: Db;
   executor: Pick<Executor, "executeAll">;
-  /** Block lists, from the social systems once they land; nobody is blocked until then. */
-  isBlocked?: IsBlocked;
 }
 
-export function createTrading({ db, executor, isBlocked = nobodyBlocked }: TradingOptions) {
+type Answer = { type: string; body: unknown };
+const done = (type: string, n: number, data: unknown): Answer => ({
+  type: WORLD_MESSAGES.done,
+  body: { type, n, data },
+});
+const refused = (type: string, n: number, code: Refusal["code"], retryMs?: number): Answer => ({
+  type: WORLD_MESSAGES.refused,
+  body: { type, n, code, ...(retryMs ? { retryMs } : {}) } satisfies Refusal,
+});
+
+export function createTrading({ db, executor }: TradingOptions) {
   let trades: Trades | undefined;
   const stops: (() => void)[] = [];
   const reads = new Buckets();
 
-  async function board(me: string, m: BoardMessage): Promise<BoardReply> {
+  async function board(me: string, m: BoardMessage): Promise<Answer> {
     const wait = reads.take(me, TRADE_RATE.board, Date.now());
-    if (wait > 0) return { id: m.id, ok: false, error: "rate_limited", retryMs: wait };
+    if (wait > 0) return refused(m.type, m.n, "rate_limited", wait);
     try {
+      let data: BoardData[BoardMessageName];
       switch (m.type) {
         case "listing.browse":
-          return { id: m.id, ok: true, ...(await browseListings(db, m.req)) };
+          data = await browseListings(db, m.req, me);
+          break;
         case "listing.mine":
-          return { id: m.id, ok: true, listings: await myListings(db, me), next: null };
+          data = { listings: await myListings(db, me) };
+          break;
         case "listing.history":
-          return { id: m.id, ok: true, history: await priceHistory(db, m.req) };
+          data = { history: await priceHistory(db, m.req) };
+          break;
       }
+      return done(m.type, m.n, data);
     } catch (error) {
       console.error(`board read failed: ${describeError(error)}`);
-      return { id: m.id, ok: false, error: "server_error" };
+      return refused(m.type, m.n, "server_error");
     }
   }
 
@@ -80,7 +98,8 @@ export function createTrading({ db, executor, isBlocked = nobodyBlocked }: Tradi
       const t = createTrades({
         db,
         executor,
-        isBlocked,
+        // A block either way drops a trade request without a word to either side.
+        isBlocked: host.blocked,
         link: {
           member: host.member,
           place(id) {
@@ -88,21 +107,22 @@ export function createTrading({ db, executor, isBlocked = nobodyBlocked }: Tradi
             const at = p?.at();
             return p && at ? { roomId: p.roomId, x: at.x, y: at.y } : undefined;
           },
-          send: (id, update) => host.send(id, TRADE_MESSAGES.update, update),
+          send: (id, update) => host.send(id, WORLD_MESSAGES.trade, update),
         },
       });
       trades = t;
       for (const type of TRADE_TYPES) {
-        host.on(type, tradeSchema(type) as WorldMessageSchema<TradeMessage>, async (me, m) => ({
-          type: TRADE_MESSAGES.result,
-          body: await t.handle(me, m),
-        }));
+        host.on(type, tradeSchema(type) as WorldMessageSchema<TradeMessage>, async (me, m) => {
+          const a = await t.handle(me, m);
+          return a.ok
+            ? done(m.type, m.n, { session: a.session })
+            : refused(m.type, m.n, a.code, a.retryMs);
+        });
       }
       for (const type of BOARD_TYPES) {
-        host.on(type, boardSchema(type) as WorldMessageSchema<BoardMessage>, async (me, m) => ({
-          type: BOARD_MESSAGES.reply,
-          body: await board(me, m),
-        }));
+        host.on(type, boardSchema(type) as WorldMessageSchema<BoardMessage>, (me, m) =>
+          board(me, m),
+        );
       }
       stops.push(places.listen((id) => t.end(id, "map")));
       stops.push(t.start());

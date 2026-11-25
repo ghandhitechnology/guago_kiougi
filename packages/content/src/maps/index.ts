@@ -3,6 +3,7 @@ import cafeteria from "./cafeteria.ts";
 import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, checkScenes, type MapRegistry } from "./check.ts";
+import ecoPark from "./eco-park.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 // 가설관 and 증명관 interiors.
 import gaseol1f from "./gaseol-1f.ts";
@@ -13,6 +14,17 @@ import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
 import home from "./home.ts";
 import jeungmyeong from "./jeungmyeong.ts";
 import lounge from "./lounge.ts";
+// Page 1 town, 위험 구역 and boss maps.
+import p1Agora from "./p1-agora.ts";
+// Page 1 hunting fields.
+import p1AgoraEdge from "./p1-agora-edge.ts";
+import p1CaveMouth from "./p1-cave-mouth.ts";
+import p1Colonnade from "./p1-colonnade.ts";
+import p1CrotonSchool from "./p1-croton-school.ts";
+import p1EleaTrack from "./p1-elea-track.ts";
+import p1Lyceum from "./p1-lyceum.ts";
+import p1OliveRoad from "./p1-olive-road.ts";
+import p1ShadowCave from "./p1-shadow-cave.ts";
 import saebyeok from "./saebyeok.ts";
 import silheom from "./silheom.ts";
 
@@ -24,6 +36,7 @@ export * from "./interior.ts";
 export * from "./lawn.ts";
 export * from "./lawn-props.ts";
 export * from "./layers.ts";
+export * from "./patrols.ts";
 export * from "./props.ts";
 export * from "./stamp.ts";
 
@@ -43,6 +56,18 @@ export const MAP_SOURCES: readonly MapSource[] = [
   silheom,
   saebyeok,
   home,
+  // Page 1 hunting fields and the 생태공원.
+  p1Colonnade,
+  p1OliveRoad,
+  p1CaveMouth,
+  p1AgoraEdge,
+  ecoPark,
+  // Page 1 town, 위험 구역 and boss maps.
+  p1Agora,
+  p1ShadowCave,
+  p1CrotonSchool,
+  p1EleaTrack,
+  p1Lyceum,
 ];
 
 /**
@@ -54,8 +79,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "gaseol-2f",
   "gaseol-4f",
   "jeungmyeong",
-  "agora",
-  "eco-park",
   // 가설관 and 증명관 interiors: rooms and places their doors lead to before they exist.
   "gaseol-roof",
   "gaseol-b1",
@@ -65,6 +88,12 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "club-4",
   "club-5",
   "club-6",
+  // Page 1: the era town, the 위험 구역, the two lairs and the arena (narrative place ids).
+  "p1-agora",
+  "p1-shadow-cave",
+  "p1-croton-school",
+  "p1-elea-track",
+  "p1-lyceum",
 ]);
 
 /** Builds every map. */

@@ -1,13 +1,19 @@
 /**
  * Player trading (PLAN §13 "Player trading", §12 rate limits, §21): the rules' numbers and
- * formulas, the direct trade messages and their pushes, and the 매점 게시판 reads. Listing
- * create, buy and cancel are item operations (`OPS` in inventory.ts) answered by `result`.
+ * formulas, the direct trade messages and their pushes, and the 매점 게시판 reads.
+ *
+ * Direct trade messages and board reads are requests in the social systems' shape: each carries
+ * `n` (the client's request number, one counter with chat and social) and gets exactly one
+ * answer, `done { type, n, data }` or `refused { type, n, code }`; a trade window's changes are
+ * pushed on one message type, `trade` (`TradeUpdate`). Listing create, buy and cancel move items
+ * and 솔방울, so they are item operations (`OPS` in inventory.ts) with an operation id, answered
+ * by one `result` like every other.
  *
  * Amounts of 솔방울 travel as exact decimal strings, like `WalletView`: prices late in a Theme
  * pass 2^53.
  */
 import type { WorldMessageSchema } from "./chat.ts";
-import type { ChangeNotice, ItemView, OpError, OpRate } from "./inventory.ts";
+import type { ChangeNotice, ItemView, OpError } from "./inventory.ts";
 import type { ItemKind } from "./loadout.ts";
 
 export const TRADE = {
@@ -75,11 +81,11 @@ export const saleTax = (total: bigint) => percentUp(total, TRADE.board.taxPercen
  */
 export const TRADABLE_STACK = /^(ink|binding|(sheet|snack):[a-z0-9-]{1,40})$/;
 
-/** A board category: what a browse filters by. */
-export const BOARD_CATEGORIES = ["book", "tool", "sheet", "material", "snack"] as const;
-export type BoardCategory = (typeof BOARD_CATEGORIES)[number];
+/** A 매점 게시판 category: what a browse filters by. */
+export const LISTING_CATEGORIES = ["book", "tool", "sheet", "material", "snack"] as const;
+export type ListingCategory = (typeof LISTING_CATEGORIES)[number];
 
-export function stackCategory(def: string): BoardCategory {
+export function stackCategory(def: string): ListingCategory {
   if (def.startsWith("sheet:")) return "sheet";
   if (def.startsWith("snack:")) return "snack";
   return "material";
@@ -115,7 +121,10 @@ export type TradeErrorCode = (typeof TRADE_ERRORS)[number];
 
 // Direct trade messages --------------------------------------------------------------------
 
-/** Client to WorldRoom, each `{ id, req }`; each gets one `tradeResult` with its id. */
+/**
+ * Client to WorldRoom, each `{ n, ...TradeRequests[type] }`, answered by one `done` whose data
+ * is `{ session }`, or `refused` with a `TradeRefusalCode`.
+ */
 export const TRADE_MESSAGES = {
   request: "trade.request",
   accept: "trade.accept",
@@ -123,10 +132,6 @@ export const TRADE_MESSAGES = {
   offer: "trade.offer",
   confirm: "trade.confirm",
   cancel: "trade.cancel",
-  /** Server to client: the answer to one trade message. */
-  result: "tradeResult",
-  /** Server to client: `TradeUpdate`, the window's state as it changes. */
-  update: "tradeUpdate",
 } as const;
 
 /** One side's offer, as sent: item ids, stack counts and 솔방울. Replaces that side's offer. */
@@ -146,15 +151,13 @@ export interface TradeRequests {
   "trade.cancel": { session: string };
 }
 export type TradeMessageName = keyof TradeRequests;
+/** A trade request as the server handles it, once parsed: `req` is the body without `n`. */
 export type TradeMessage = {
-  [K in TradeMessageName]: { id: string; type: K; req: TradeRequests[K] };
+  [K in TradeMessageName]: { n: number; type: K; req: TradeRequests[K] };
 }[TradeMessageName];
 
-export type TradeReplyError = TradeErrorCode | "rate_limited" | "server_error";
-
-export type TradeResult =
-  | { id: string; ok: true; session: string }
-  | { id: string; ok: false; error: TradeReplyError; retryMs?: number };
+/** `refused` codes of trade requests and board reads. */
+export type TradeRefusalCode = TradeErrorCode | "rate_limited" | "server_error";
 
 export interface TradePerson {
   id: string;
@@ -217,7 +220,7 @@ export interface ListedItem {
 export interface ListingView {
   id: string;
   seller: TradePerson;
-  category: BoardCategory;
+  category: ListingCategory;
   /** A book or tool def, or a stack id (`ink`, `sheet:<book>`, `snack:<id>`). */
   def: string;
   grade: number;
@@ -242,17 +245,16 @@ export interface PriceDay {
   mean: string;
 }
 
+/** Client to WorldRoom, `{ n, ...BoardRequests[type] }`, answered by `done` with `BoardData`. */
 export const BOARD_MESSAGES = {
   browse: "listing.browse",
   mine: "listing.mine",
   history: "listing.history",
-  /** Server to client: `BoardReply`. */
-  reply: "listings",
 } as const;
 
 export interface BoardRequests {
   "listing.browse": {
-    category?: BoardCategory;
+    category?: ListingCategory;
     def?: string;
     grade?: number;
     sort: "price" | "-price";
@@ -264,25 +266,19 @@ export interface BoardRequests {
 }
 export type BoardMessageName = keyof BoardRequests;
 export type BoardMessage = {
-  [K in BoardMessageName]: { id: string; type: K; req: BoardRequests[K] };
+  [K in BoardMessageName]: { n: number; type: K; req: BoardRequests[K] };
 }[BoardMessageName];
 
-export type BoardReply =
-  | { id: string; ok: true; listings: ListingView[]; next: string | null }
-  | { id: string; ok: true; history: PriceDay[] }
-  | { id: string; ok: false; error: "rate_limited" | "server_error"; retryMs?: number };
-
-/** Per character: trade requests are the spammable ones (PLAN §12 moderation). */
-export const TRADE_RATE: Readonly<Record<"request" | "session" | "board", OpRate>> = {
-  request: { burst: 3, perSecond: 0.1 },
-  session: { burst: 12, perSecond: 4 },
-  board: { burst: 6, perSecond: 1 },
-};
+/** What each board read's `done` carries. */
+export interface BoardData {
+  "listing.browse": { listings: ListingView[]; next: string | null };
+  "listing.mine": { listings: ListingView[] };
+  "listing.history": { history: PriceDay[] };
+}
 
 // Validators ----------------------------------------------------------------------------------
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const MESSAGE_ID = /^[A-Za-z0-9_.-]{8,64}$/;
 const DEF = /^[a-z0-9-]{1,40}$/;
 /** A whole number of 솔방울, 0 allowed in an offer. */
 export const AMOUNT = /^(0|[1-9][0-9]{0,29})$/;
@@ -343,7 +339,7 @@ const BOARD_CHECKS: {
   "listing.browse": (r) => {
     if (!only(r, ["category", "def", "grade", "sort", "after"])) return null;
     const { category, def, grade, sort, after } = r;
-    if (category !== undefined && !(BOARD_CATEGORIES as readonly unknown[]).includes(category)) {
+    if (category !== undefined && !(LISTING_CATEGORIES as readonly unknown[]).includes(category)) {
       return null;
     }
     if (
@@ -362,7 +358,7 @@ const BOARD_CHECKS: {
     }
     return {
       sort,
-      ...(category !== undefined ? { category: category as BoardCategory } : {}),
+      ...(category !== undefined ? { category: category as ListingCategory } : {}),
       ...(def !== undefined ? { def: def as string } : {}),
       ...(grade !== undefined ? { grade } : {}),
       ...(after !== undefined ? { after: after as string } : {}),
@@ -394,19 +390,19 @@ function schemaOf<Out>(
   };
 }
 
+/** `{ n, ...body }`: `n` a whole number, the rest the request's own fields. */
 function parseBody<R>(value: unknown, check: (r: Record<string, unknown>) => R | null) {
-  if (!isObject(value) || !only(value, ["id", "req"])) return null;
-  if (typeof value.id !== "string" || !MESSAGE_ID.test(value.id)) return null;
-  const req = value.req ?? {};
-  if (!isObject(req)) return null;
+  if (!isObject(value)) return null;
+  const { n, ...req } = value;
+  if (!Number.isSafeInteger(n) || (n as number) < 0) return null;
   const parsed = check(req);
-  return parsed === null ? null : { id: value.id, req: parsed };
+  return parsed === null ? null : { n: n as number, req: parsed };
 }
 
-/** The WorldRoom schema of one trade message: `{ id, req }`. */
+/** The WorldRoom schema of one trade message: `{ n, ...fields }`. */
 export function tradeSchema<K extends TradeMessageName>(
   type: K,
-): WorldMessageSchema<{ id: string; type: K; req: TradeRequests[K] }> {
+): WorldMessageSchema<{ n: number; type: K; req: TradeRequests[K] }> {
   return schemaOf((v) => {
     const body = parseBody(
       v,
@@ -418,7 +414,7 @@ export function tradeSchema<K extends TradeMessageName>(
 
 export function boardSchema<K extends BoardMessageName>(
   type: K,
-): WorldMessageSchema<{ id: string; type: K; req: BoardRequests[K] }> {
+): WorldMessageSchema<{ n: number; type: K; req: BoardRequests[K] }> {
   return schemaOf((v) => {
     const body = parseBody(
       v,
@@ -426,9 +422,4 @@ export function boardSchema<K extends BoardMessageName>(
     );
     return body && { ...body, type };
   }, type);
-}
-
-/** Parses a trade message for transports that are not the WorldRoom (tests, tools). */
-export function parseTradeRequest<K extends TradeMessageName>(type: K, req: unknown) {
-  return isObject(req) ? (TRADE_CHECKS[type](req) as TradeRequests[K] | null) : null;
 }

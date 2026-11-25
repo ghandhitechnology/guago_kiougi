@@ -814,9 +814,10 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         listingCount,
       });
     }
+    const facts = (await def.facts?.(q, request, locked)) ?? {};
     await hooks.afterLoad?.(op);
 
-    const world: World = { initiator, parties: loaded, listings };
+    const world: World = { initiator, parties: loaded, listings, facts };
     const step = def.apply(world, request, env);
     const results = new Map<string, ExecResult>();
     const levels = new Map<string, number>();

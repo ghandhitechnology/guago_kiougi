@@ -1,7 +1,7 @@
 /**
  * The WorldRoom (PLAN §12, §19): one per process, held by every client for the whole session
- * beside its map room. Presence and chat for now; parties, clubs and trades join it later.
- * Presence goes out as small events, never as synced state, so an idle room sends nothing.
+ * beside its map room. Presence, chat and the social systems (social/hub.ts); trades join it
+ * later. Presence goes out as small events, never as synced state, so an idle room sends nothing.
  */
 import { type AuthContext, type Client, CloseCode, Room, ServerError } from "@colyseus/core";
 import {
@@ -23,7 +23,10 @@ import {
   type PresenceMessage,
   RECONNECT_SECONDS,
   type Refusal,
+  SOCIAL_RATE,
+  SOCIAL_TYPES,
   type SystemLine,
+  socialSchema,
   TILE_SIZE,
   WORLD_CHAT_LEVEL,
   WORLD_MESSAGES,
@@ -34,6 +37,8 @@ import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
+import { SocialHub } from "./social/hub.ts";
+import type { Social } from "./social/index.ts";
 import type { Trading } from "./trade/room.ts";
 
 /** Past this many handled messages a second, a client is flooding and is dropped for good. */
@@ -48,10 +53,10 @@ const FRAMES_PER_SECOND = 40;
 const KEPT_ANSWERS = 8;
 
 /** Per-type limits for requests a player may simply send too fast (PLAN §21). */
-const LIMITS = {
+const LIMITS: Readonly<Record<string, { burst: number; perSecond: number }>> = {
   [WORLD_MESSAGES.chat]: { burst: CHAT_BURST, perSecond: CHAT_PER_SECOND },
-} as const;
-type Limited = keyof typeof LIMITS;
+  ...SOCIAL_RATE,
+};
 
 const NEAR_RADIUS = NEAR_CHAT_TILES * TILE_SIZE;
 
@@ -67,7 +72,7 @@ interface Member {
 interface Standing {
   lastHit: number;
   mutedUntil: number;
-  buckets: Partial<Record<Limited, { tokens: number; at: number }>>;
+  buckets: Record<string, { tokens: number; at: number }>;
   touched: number;
 }
 
@@ -76,6 +81,8 @@ interface Services {
   log: ChatSink | undefined;
   /** Item and currency operations; without it the room does not take them (tests). */
   ops: OpHandler | undefined;
+  /** Friends, blocks, parties, clubs, the 대자보, reports and emotes; off without it (tests). */
+  social: Social | undefined;
   /** Direct trades and the 매점 게시판's reads (trade/room.ts). */
   trading?: Trading | undefined;
 }
@@ -88,18 +95,25 @@ export function provideWorldServices(s: {
   filter?: ChatFilter;
   log?: ChatSink;
   ops?: OpHandler;
+  social?: Social;
   trading?: Trading;
 }): void {
   services = {
     filter: s.filter ?? ChatFilter.fromFile(),
     log: s.log,
     ops: s.ops,
+    social: s.social,
     trading: s.trading,
   };
 }
 
 function use(): Services {
-  services ??= { filter: ChatFilter.fromFile(), log: undefined, ops: undefined };
+  services ??= {
+    filter: ChatFilter.fromFile(),
+    log: undefined,
+    ops: undefined,
+    social: undefined,
+  };
   return services;
 }
 
@@ -122,6 +136,7 @@ export class WorldRoom extends Room {
   /** Sessions dropped for a malformed message or for flooding: they get no seat back. */
   private kicked = new Set<string>();
   private flood = new Map<string, { count: number; resetAt: number }>();
+  private social: SocialHub<Member> | undefined;
 
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
     return authenticateJoin(ctx);
@@ -142,6 +157,29 @@ export class WorldRoom extends Room {
         this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
       }
     }
+    const social = use().social;
+    if (social) {
+      const hub = new SocialHub<Member>(social, {
+        online: (id) => this.byCharacter.get(id),
+        named: (name) => this.byName.get(name.toLowerCase()),
+        send: (m, type, body) => m.client.send(type, body),
+        // The member may have reconnected or left meanwhile; only its own seat is answered.
+        answer: (m, type, body) => {
+          if (this.members.get(m.client.sessionId) === m) this.answer(m, type, body);
+        },
+        limit: (m, type) => {
+          const now = Date.now();
+          return this.take(this.standingOf(m.characterId, now), type, now);
+        },
+      });
+      this.social = hub;
+      for (const type of SOCIAL_TYPES) {
+        this.handle(type, socialSchema(type), (client, message) => {
+          const me = this.members.get(client.sessionId);
+          if (me) void hub.handle(me, type, message);
+        });
+      }
+    }
     use().trading?.attach({
       on: (type, schema, run) =>
         this.handle(type, schema, (client, message) => {
@@ -150,8 +188,10 @@ export class WorldRoom extends Room {
         }),
       member: (id) => this.byCharacter.get(id)?.entry,
       send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
+      blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
     });
     this.unlisten = places.listen((characterId, mapId) => {
+      this.social?.moved(characterId);
       const member = this.byCharacter.get(characterId);
       if (!member || member.entry.map === mapId) return;
       member.entry.map = mapId;
@@ -166,6 +206,13 @@ export class WorldRoom extends Room {
 
   override async onJoin(client: Client): Promise<void> {
     const character: Character = await this.seats.join(client);
+    let social: Awaited<ReturnType<SocialHub<Member>["load"]>> | undefined;
+    try {
+      social = await this.social?.load(character.id);
+    } catch (error) {
+      await this.seats.leave(client);
+      throw error;
+    }
     const entry: PresenceEntry = {
       id: character.id,
       name: character.name,
@@ -179,6 +226,7 @@ export class WorldRoom extends Room {
     this.byCharacter.set(character.id, member);
     this.byName.set(character.name.toLowerCase(), member);
     this.sendAll(member);
+    if (social) this.social?.join(member, social);
     this.broadcast(WORLD_MESSAGES.presence, { t: "join", p: entry } satisfies PresenceMessage, {
       except: client,
     });
@@ -203,6 +251,7 @@ export class WorldRoom extends Room {
     if (!member) return;
     member.client = client;
     this.sendAll(member);
+    void this.social?.resend(member);
     for (const { type, body } of member.answers) client.send(type, body);
   }
 
@@ -220,6 +269,7 @@ export class WorldRoom extends Room {
       if (this.byCharacter.get(member.characterId) === member) {
         this.byCharacter.delete(member.characterId);
         this.byName.delete(member.entry.name.toLowerCase());
+        this.social?.leave(member.characterId);
         this.broadcast(WORLD_MESSAGES.presence, {
           t: "leave",
           id: member.characterId,
@@ -234,6 +284,7 @@ export class WorldRoom extends Room {
   override async onDispose(): Promise<void> {
     if (current === this) current = undefined;
     this.unlisten?.();
+    this.social?.dispose();
     use().trading?.detach();
     await use().log?.flush();
   }
@@ -263,6 +314,7 @@ export class WorldRoom extends Room {
     const member = this.byCharacter.get(characterId);
     if (!member || member.entry.level === level) return;
     member.entry.level = level;
+    this.social?.setLevel(characterId, level);
     this.broadcast(WORLD_MESSAGES.presence, {
       t: "level",
       id: characterId,
@@ -383,13 +435,32 @@ export class WorldRoom extends Room {
         const other = this.byName.get((message.to ?? "").toLowerCase());
         if (!other) return { code: "target_offline" };
         if (other === me) return { code: "target_self" };
+        if (this.social?.hasBlocked(me.characterId, other.characterId)) return { code: "blocked" };
         target = other.characterId;
         to = { id: other.characterId, name: other.entry.name };
         recipients = [me, other];
         break;
       }
+      case "party":
+      case "club": {
+        const channel =
+          message.ch === "party"
+            ? this.social?.partyChannel(me.characterId)
+            : this.social?.clubChannel(me.characterId);
+        if (!channel) return { code: message.ch === "party" ? "no_party" : "no_club" };
+        target = `${message.ch}:${channel.id}`;
+        recipients = channel.members;
+        break;
+      }
       default:
         return { code: "no_channel" };
+    }
+    // A player who blocked the speaker gets nothing, on every channel; the speaker cannot tell.
+    const social = this.social;
+    if (social) {
+      recipients = recipients.filter(
+        (m) => m === me || !social.hasBlocked(m.characterId, me.characterId),
+      );
     }
 
     const retryMs = this.take(standing, WORLD_MESSAGES.chat, now);
@@ -446,8 +517,8 @@ export class WorldRoom extends Room {
   }
 
   /** Token bucket per type: 0 when the request may go ahead, else ms until it may. */
-  private take(standing: Standing, type: Limited, now: number): number {
-    const { burst, perSecond } = LIMITS[type];
+  private take(standing: Standing, type: string, now: number): number {
+    const { burst, perSecond } = LIMITS[type] ?? { burst: 1, perSecond: 1 };
     standing.buckets[type] ??= { tokens: burst, at: now };
     const bucket = standing.buckets[type];
     bucket.tokens = Math.min(burst, bucket.tokens + ((now - bucket.at) / 1000) * perSecond);
