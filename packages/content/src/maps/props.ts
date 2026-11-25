@@ -53,6 +53,11 @@ export const PROPS = {
   tower: { foot: [3, 1] },
   plane: { foot: [2, 1] },
   "scroll-rack": { foot: [2, 1] },
+  townhouse: { foot: [5, 3] },
+  tholos: { foot: [5, 2] },
+  temple: { foot: [8, 3] },
+  ostraka: { foot: [3, 1] },
+  bouleuterion: { foot: [6, 2] },
 
   // The interior kit: furniture that blocks, by the floor it stands on. Chairs, stools, bags,
   // books and small things on the floor are walked around by eye, not blocked.
