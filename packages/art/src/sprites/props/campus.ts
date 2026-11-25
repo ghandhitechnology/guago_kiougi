@@ -117,10 +117,7 @@ const bench = still(
 const lampPost = (rows: number): string =>
   Array.from({ length: rows }, () => "....JiIJ....").join("\n");
 
-const lamp = still(
-  "lamp",
-  [12, 49],
-  `
+const LAMP = `
     ...JJJJJJ...
     ..JiiIIIjJ..
     .JiIIIIIIjJ.
@@ -135,9 +132,13 @@ const lamp = still(
     ...JiIIjJ...
     ..JiIIIIjJ..
     ..JJJJJJJJ..
-  `,
-  { shadow: oval(12, 49, 6.5, 47.5, 6, 2) },
-);
+  `;
+
+/** The street lamp, and the same lamp dead since the power went at 23:40. */
+const lamp = still("lamp", [12, 49], LAMP, {
+  shadow: oval(12, 49, 6.5, 47.5, 6, 2),
+  frames: { still: LAMP, off: LAMP.replace(/[Yy]/g, "j").replace(/o/g, "I") },
+});
 
 // 자판기 ------------------------------------------------------------------------------------
 
