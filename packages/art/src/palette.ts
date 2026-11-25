@@ -403,9 +403,8 @@ const CAMPUS_NIGHT = theme("campus-night", {
 });
 
 /**
- * Lamp light at night, in two bands from the lamp out. Pavement under the lamp is the lamp-lit
- * grey with warm joints, so it reads as light on stone; the outer band falls to a warm dusk
- * grey, which window spills use too. Grass softens to the lawn's middle green.
+ * Lamp light at night, in three bands from the lamp out. Pavers under the lamp turn the lamp-lit
+ * grey with warm joints, so the pool reads as light on stone; grass softens to the lawn green.
  */
 const CAMPUS_LAMP = theme("campus-lamp", {
   "stone.bright": "gold.pale",
@@ -419,10 +418,11 @@ const CAMPUS_LAMP = theme("campus-lamp", {
   "grass.soft": "grass.mid",
 });
 
+/** The lamp's middle band, and the bright foot of a window's spill: warm greys on stone. */
 const CAMPUS_DUSK = theme("campus-dusk", {
   "ink.mid": "ink.dark",
-  "stone.bright": "stone.light",
-  "stone.pale": "stone.light",
+  "stone.bright": "stone.lamp",
+  "stone.pale": "stone.lamp",
   "stone.light": "stone.vein",
   "stone.lamp": "stone.vein",
   "stone.mid": "stone.dark",
@@ -447,6 +447,26 @@ const CAMPUS_DUSK = theme("campus-dusk", {
   "red.mid": "red.dark",
   "navy.light": "navy.mid",
   "navy.mid": "navy.dark",
+});
+
+/**
+ * The last of any light before the night: the night itself with stone and grass one step up,
+ * so a pool or a spill fades out instead of ending on an edge.
+ */
+const CAMPUS_GLOW = theme("campus-glow", {
+  ...CAMPUS_NIGHT.remap,
+  "stone.bright": "stone.mid",
+  "stone.pale": "stone.dark",
+  "stone.lamp": "stone.dark",
+  "stone.light": "stone.dark",
+  "stone.vein": "ink.mid",
+  "stone.mid": "ink.mid",
+  "stone.dark": "ink.dark",
+  "grass.bright": "board.light",
+  "grass.pale": "board.light",
+  "grass.light": "board.mid",
+  "grass.soft": "board.mid",
+  "grass.mid": "board.dark",
 });
 
 /**
@@ -538,6 +558,7 @@ export const THEMES: readonly Theme[] = [
   CAMPUS_NIGHT,
   CAMPUS_LAMP,
   CAMPUS_DUSK,
+  CAMPUS_GLOW,
   FIELD_NIGHT,
   RIFT_SUN,
   RIFT_WARM,

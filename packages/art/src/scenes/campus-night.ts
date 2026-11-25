@@ -22,13 +22,16 @@ const UW = "up-window";
 const UD = "up-window-dark";
 const UC = "up-curtain";
 
-const LAMP = ["campus-lamp", "campus-dusk"];
+const LAMP = ["campus-lamp", "campus-dusk", "campus-glow"];
 
-/** Light falling from a lit ground-floor window onto the walkway, widening as it falls. */
+/**
+ * Light falling from a lit ground-floor window onto the walkway, widening as it falls: warm at
+ * the foot of the wall, fading into the night.
+ */
 const spill = (col: number): Light => ({
-  bands: ["campus-dusk"],
-  spill: { top: [col * 16 + 2, col * 16 + 14, 144], bottom: [col * 16 - 3, col * 16 + 19, 160] },
-  ragged: 2,
+  bands: ["campus-dusk", "campus-glow"],
+  spill: { top: [col * 16 + 2, col * 16 + 14, 144], bottom: [col * 16 - 4, col * 16 + 20, 166] },
+  ragged: 3,
 });
 
 export default scene({
@@ -134,20 +137,13 @@ export default scene({
     { prop: "shrub", at: [226, 266], flip: true },
     { prop: "shrub", at: [456, 252] },
     // Who is still up: one at the vending machine, one yawning out of the doors, one reading
-    // under the lamp, 도현우 at the corkboard with the notebook, 권 사감 coming up the path.
+    // under the lamp, 도현우 at the corkboard with the notebook, and 권 사감 coming along the
+    // walkway, whistle up.
     { rig: "student", look: "summer", dir: "up", anim: "idle", play: true, at: [218, 174] },
     { rig: "student", look: "bedhead", dir: "down", anim: "yawn", play: true, at: [126, 170] },
     { rig: "student", look: "reader", dir: "down", anim: "page", play: true, at: [338, 190] },
     { rig: "hyunwoo", look: "tired", dir: "up", anim: "remember", play: true, at: [268, 180] },
-    {
-      rig: "sagam",
-      look: "duty",
-      dir: "side",
-      anim: "whistle",
-      play: true,
-      at: [298, 232],
-      flip: true,
-    },
+    { rig: "sagam", look: "duty", dir: "side", anim: "whistle", play: true, at: [62, 176] },
   ],
   overhead: [
     // 엔트로피 asleep on the warm top of the vending machine.
@@ -159,10 +155,15 @@ export default scene({
     { prop: "canopy", at: [96, 116] },
   ],
   lights: [
-    { bands: LAMP, at: [332, 172], r: [74, 36], ragged: 5 },
+    { bands: LAMP, at: [332, 174], r: [80, 40], ragged: 5 },
     // The vending machine's panel lights the pavement cold and white, not like the lamp.
-    { bands: ["campus"], at: [218, 162], r: [24, 11], pulse: { amount: 0.08, period: 2.5 } },
-    { bands: LAMP, spill: { top: [80, 112, 144], bottom: [64, 128, 172] }, ragged: 3 },
+    {
+      bands: ["campus", "campus-glow"],
+      at: [218, 162],
+      r: [28, 13],
+      pulse: { amount: 0.08, period: 2.5 },
+    },
+    { bands: LAMP, spill: { top: [80, 112, 144], bottom: [62, 130, 176] }, ragged: 3 },
     spill(1),
     spill(2),
     spill(8),

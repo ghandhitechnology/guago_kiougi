@@ -542,7 +542,7 @@ const lawnWalk = terrain({
   decals: LAWN_DECALS,
 });
 
-// 운동장 sand: decomposed granite, its sandGrit lit from the top left. Every mark pairs a lit top
+// 운동장 sand: decomposed granite, its grit lit from the top left. Every mark pairs a lit top
 // with a shaded underside, so the field reads as ground in any light and never as glints.
 
 /** A grain: lit on top, its shadow underneath. */
