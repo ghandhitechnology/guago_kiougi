@@ -27,6 +27,26 @@ import { clean, ellipse, light, line, Pic, poly, rect, seal, silhouette } from "
  *
  * When he is freed the spheres crack and fall, the plinth splits, and he steps down onto the
  * ground for the first time.
+ *
+ * The client plays one animation on each part per state (`boss-aristotle-shield` from the arena
+ * file goes on top: `full`, `crack1`, `crack2`, `break` as the class strips it):
+ *
+ *   state                 halo     plinth   body     arms      head      lectern
+ *   lecture (idle)        lecture  still    stand    lecture   lecture   idle
+ *   announcing 논제 N      lecture  still    stand    countN    lecture   slam
+ *   논제 1                 weight   still    stand    scale     lecture   idle
+ *   논제 1 wind-up         weight   still    stand    scale-up  shout     idle
+ *   논제 2                 place    still    stand    raise     lecture   idle
+ *   논제 2 wind-up         place    still    swell    raise     shout     idle
+ *   논제 3                 push     still    stand    fold      neutral   idle
+ *   논제 3 being pushed    push     pushed   lean     pushed    lecture   idle
+ *   논제 3 wind-up         push     still    stand    lecture   shout     slam
+ *   논제 4                 plenum   still    swell    press     lecture   idle
+ *   논제 4 wind-up         plenum   still    swell    flail     shout     idle
+ *   논제 4 the block slides plenum  still    swell    press     stunned   idle
+ *   hit (any)             -        -        hit      -         hit       -
+ *   phase break           break    cracked  stagger  flail     wince     slam
+ *   freed                 shards   split    freed    freed     freed     fallen
  */
 
 const palette: Legend = {
@@ -1012,6 +1032,7 @@ export default [
     stand: { frames: ["stand"], fps: 1 },
     swell: { frames: ["swell0", "swell1"], fps: 3 },
     lean: { frames: ["lean"], fps: 1 },
+    hit: { frames: ["lean", "stand"], fps: 8, loop: false },
     stagger: { frames: ["stagger"], fps: 1, loop: false },
     freed: { frames: ["stand", "ground"], fps: 1, loop: false },
   }),
@@ -1036,6 +1057,7 @@ export default [
     shout: { frames: ["shout"], fps: 1, loop: false },
     stunned: { frames: ["stunned"], fps: 1, loop: false },
     wince: { frames: ["wince"], fps: 1, loop: false },
+    hit: { frames: ["wince", "neutral"], fps: 6, loop: false },
     curious: { frames: ["curious", "curious-nod"], fps: 1 },
     freed: {
       frames: ["stunned", "stunned-ground", "curious-ground", "curious-ground-nod"],
