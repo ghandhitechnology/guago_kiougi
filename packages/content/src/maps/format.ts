@@ -274,7 +274,7 @@ export interface MapSource extends Layers {
   }[];
   /** Guard routes in a 위험 구역, see `patrols.ts`. */
   readonly patrols?: readonly PatrolSource[];
-  /** Dueling grounds (PLAN §14): a floor of open tiles, or a stamp region name. */
+  /** Fight floors: dueling grounds (PLAN §14) or, with no modes, boss floors; tiles or a region. */
   readonly arenas?: readonly {
     readonly id: string;
     readonly rect: TileRect | string;
@@ -308,7 +308,7 @@ export interface BuiltMap {
   readonly npcs: readonly NpcSpot[];
   /** Guard routes in world pixels. */
   readonly patrols: readonly Patrol[];
-  /** Dueling grounds, in tiles. */
+  /** Fight floors, in tiles: dueling grounds, or boss floors when `modes` is empty. */
   readonly arenas: readonly Arena[];
 }
 
@@ -319,9 +319,14 @@ export interface NpcSpot {
   readonly facing: Spawn["facing"];
 }
 
-/** A dueling ground: open floor, and which fights it hosts. */
+/**
+ * Open floor a fight is held on. With duel modes it is a dueling ground (PLAN §14); with no modes
+ * it is a boss fight's floor, or one of its special floors (the counting floor, the ice), and the
+ * boss lane reads it by id.
+ */
 export interface Arena {
   readonly id: string;
   readonly rect: TileRect;
+  /** Duels it hosts; empty for a boss fight floor. */
   readonly modes: readonly ("1v1" | "3v3")[];
 }

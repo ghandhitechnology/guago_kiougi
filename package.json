@@ -27,7 +27,11 @@
     "economy": "node --env-file-if-exists=.env apps/server/src/economy/cli.ts",
     "balance": "pnpm --filter @guago/balance-sim balance",
     "loadtest": "pnpm --filter @guago/loadtest start",
-    "netsim": "pnpm --filter @guago/loadtest netsim"
+    "netsim": "pnpm --filter @guago/loadtest netsim",
+    "social:run": "pnpm --filter @guago/social-run start",
+    "trade:run": "pnpm --filter @guago/trade-run start",
+    "live": "node --env-file-if-exists=.env apps/server/src/live/cli.ts",
+    "live:run": "pnpm --filter @guago/loadtest page-run"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

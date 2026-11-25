@@ -95,6 +95,18 @@ function paintPlan(): string {
 }
 
 const PLAN = paintPlan();
+const ROWS = PLAN.split("\n");
+const water = (x: number, y: number) => ROWS[y]?.[x] === "w";
+
+/** The dawn laid over the sea: a wash of rose and gold on every stretch of open water. */
+function dawnSea(): Prop[] {
+  const out: Prop[] = [];
+  for (let y = 4; y < H; y += 4)
+    for (let x = 0; x < W; x += 4)
+      if (water(x, y) && water(x + 3, y) && water(x, y + 3) && water(x + 3, y + 3))
+        out.push({ prop: "dawn-wash", at: [x * T, y * T], raw: true });
+  return out;
+}
 
 // The school and the floor ----------------------------------------------------------------------
 
@@ -107,11 +119,11 @@ function school(): Partial<Placed> {
   const bays = Array.from({ length: SCHOOL.bays }, (_, i) => BAYS[i % BAYS.length] as string);
   return {
     objects: [
-      { prop: "stoa-end", frame: "w", at: [x0 - T, foot], sort },
+      { prop: "stoa-end-dawn", frame: "w", at: [x0 - T, foot], sort },
       ...bays.map(
-        (frame, i): Prop => ({ prop: "stoa-bay", frame, at: [x0 + i * 2 * T, foot], sort }),
+        (frame, i): Prop => ({ prop: "stoa-bay-dawn", frame, at: [x0 + i * 2 * T, foot], sort }),
       ),
-      { prop: "stoa-end", frame: "e", at: [x0 + SCHOOL.bays * 2 * T, foot], sort },
+      { prop: "stoa-end-dawn", frame: "e", at: [x0 + SCHOOL.bays * 2 * T, foot], sort },
     ],
     // The school's own shadow, thrown west by the sun coming up behind its east end.
     shadows: [
@@ -261,6 +273,9 @@ const map: MapSource = {
   backdrop: [{ prop: "dawn", at: [-60, 4], raw: true }],
   details: [
     ...floor(),
+    // One square near the beans where somebody drew the diagonal, and somebody scrubbed it out.
+    { prop: "scrubbed-diagonal", at: [GRID.x * T, (GRID.y + CELL) * T], raw: true },
+    ...dawnSea(),
     ...tetractys(ALTAR[0] * T + 14, (ALTAR[1] + 2) * T),
     { decal: "marble-dust/shards", at: [180, 300] },
     { decal: "marble-dust/pebbles", at: [130, 560] },
@@ -270,6 +285,27 @@ const map: MapSource = {
   overhead: placed.overhead,
   lights,
   atmosphere: [
+    // The sun's road on the water, from the east toward the shore.
+    ...(
+      [
+        [56, 9],
+        [55, 12],
+        [56, 16],
+        [54, 20],
+        [48, 6],
+        [40, 5],
+        [30, 6],
+      ] as const
+    ).map(
+      ([x, y], i): Prop => ({
+        prop: "dawn-glitter",
+        anim: "glint",
+        play: true,
+        index: i % 3,
+        at: [x * T, y * T],
+        raw: true,
+      }),
+    ),
     ...[
       [56, 10],
       [57, 24],

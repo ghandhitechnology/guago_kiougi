@@ -14,7 +14,7 @@ import {
   OPERATION_RETENTION_MINUTES,
   type Queryable,
 } from "./executor.ts";
-import { GrantBuffer } from "./grants.ts";
+import { GrantBuffer, type GrantBufferOptions } from "./grants.ts";
 import { createOpHandler, KIT_OPERATION_ID } from "./handler.ts";
 import { economyRoutes } from "./routes.ts";
 
@@ -34,6 +34,8 @@ export async function pruneOperations(db: Db, keep: readonly string[]): Promise<
 export interface EconomyOptions extends ExecutorOptions {
   /** A change the player did not ask for landed (a combat grant): its notice, for the client. */
   onChange?(characterId: string, change: ChangeNotice): void;
+  /** Combat credit accepted (`GrantBufferOptions.onCredit`). */
+  onCredit?: GrantBufferOptions["onCredit"];
 }
 
 export function createEconomy(db: Db, options: EconomyOptions = {}) {
@@ -48,6 +50,7 @@ export function createEconomy(db: Db, options: EconomyOptions = {}) {
   });
   const grants = new GrantBuffer(executor, {
     ...(options.onChange ? { onLanded: options.onChange } : {}),
+    ...(options.onCredit ? { onCredit: options.onCredit } : {}),
   });
   return {
     executor,

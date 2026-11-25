@@ -5,7 +5,7 @@ import { clean, ell, framesOf, names, Pic, paintAt, put, rng, turnCw } from "../
  * 화학: sea cyan and glass. Liquids that splash, drip and bubble, rounded pools, and fire that
  * burns the blue-green of an alcohol lamp, so a chemist's flame is never an enemy's red.
  */
-const CHEM: Legend = {
+export const CHEM: Legend = {
   ".": null,
   o: "sea.deep",
   d: "sea.dark",
@@ -22,8 +22,8 @@ const CHEM: Legend = {
   ",": "sea.light",
   ";": "sea.mid",
 };
-const LONE = "*',;";
-const fx = { group: "combat", outline: false, palette: CHEM, lone: LONE } as const;
+export const CHEM_LONE = "*',;";
+const fx = { group: "combat", outline: false, palette: CHEM, lone: CHEM_LONE } as const;
 
 // 줌인 일반화학 -------------------------------------------------------------------------------
 
@@ -88,7 +88,7 @@ function shatter(k: number): Pic {
     ] as const) {
       put(pic, "W", gx + dx, gy - 3 + dy);
     }
-    return clean(pic, LONE);
+    return clean(pic, CHEM_LONE);
   }
   const r = rng(5);
   const t = k * 0.11;
@@ -119,7 +119,7 @@ function shatter(k: number): Pic {
       0,
     );
   }
-  return clean(pic, LONE);
+  return clean(pic, CHEM_LONE);
 }
 
 const flaskShatter = sprite({
@@ -132,7 +132,7 @@ const flaskShatter = sprite({
 });
 
 /** A pool's ragged edge: an ellipse wobbled by two waves round it. */
-function pool(rx: number, ry: number, seed: number): (x: number, y: number) => number {
+export function pool(rx: number, ry: number, seed: number): (x: number, y: number) => number {
   const cx = 20;
   const cy = 10;
   return (x, y) => {
@@ -143,9 +143,9 @@ function pool(rx: number, ry: number, seed: number): (x: number, y: number) => n
 }
 
 /** Bubbles at the three stages of a pop: a bead, a dome with a glint, a broken ring. */
-const BEAD = "pp\npp";
-const DOME = ".pp.\npWlp\n.pp.";
-const POP = "p..p\n....\np..p";
+export const BEAD = "pp\npp";
+export const DOME = ".pp.\npWlp\n.pp.";
+export const POP = "p..p\n....\np..p";
 
 /**
  * The acid pool: it spreads, bubbles where the flask broke, then dries to a crust and is gone.
@@ -184,7 +184,7 @@ function acid(k: number): Pic {
       put(pic, [BEAD, DOME, POP][phase] as string, x - 1, y - 1);
     });
   }
-  return clean(pic, LONE);
+  return clean(pic, CHEM_LONE);
 }
 
 const acidPool = sprite({
@@ -278,7 +278,7 @@ const label = sprite({
   },
 });
 
-interface Tongue {
+export interface Tongue {
   readonly x: number;
   /** Height in pixels above the base. */
   readonly h: number;
@@ -293,7 +293,7 @@ interface Tongue {
  * banded by how deep inside it a pixel is, so every tongue gets a dark edge, a cyan body and a
  * white heart low in the bulb whatever its size.
  */
-function fire(w: number, h: number, base: number, tongues: readonly Tongue[]): Pic {
+export function fire(w: number, h: number, base: number, tongues: readonly Tongue[]): Pic {
   return clean(
     paintAt(w, h, (x, y) => {
       let depth = -1;

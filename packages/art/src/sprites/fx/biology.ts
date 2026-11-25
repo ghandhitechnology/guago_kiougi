@@ -1,12 +1,12 @@
 import { type Legend, sprite } from "../../format.ts";
-import { clean, framesOf, line, names, Pic, paintAt, put } from "../../fx.ts";
+import { aimedFrames, clean, framesOf, line, names, Pic, paintAt, put } from "../../fx.ts";
 import { shade } from "../../paint.ts";
 
 /**
  * 생명: grass green, soft and round. Cells that wobble, stretch and split; membranes with a pale
  * rim; cuts that leave green light. Nothing with a corner except the scalpel.
  */
-const BIO: Legend = {
+export const BIO: Legend = {
   ".": null,
   o: "grass.deep",
   d: "grass.dark",
@@ -28,15 +28,15 @@ const BIO: Legend = {
   ",": "grass.pale",
   "^": "rose.light",
 };
-const LONE = "*',^";
+export const LONE = "*',^";
 
 // 캠핑 생명과학 -------------------------------------------------------------------------------
 
-const CW = 26;
-const CH = 15;
-const BASE = 13;
+export const CW = 26;
+export const CH = 15;
+export const BASE = 13;
 
-interface Blob {
+export interface Blob {
   readonly x: number;
   readonly y: number;
   readonly rx: number;
@@ -47,7 +47,7 @@ interface Blob {
 }
 
 /** A union of soft blobs, shaded as one membrane lit from the top left. */
-function cellBody(blobs: readonly Blob[], cut?: (x: number, y: number) => boolean): Pic {
+export function cellBody(blobs: readonly Blob[], cut?: (x: number, y: number) => boolean): Pic {
   const inside = (x: number, y: number) =>
     !cut?.(x + 0.5, y + 0.5) &&
     blobs.some((b) => {
@@ -61,14 +61,14 @@ function cellBody(blobs: readonly Blob[], cut?: (x: number, y: number) => boolea
 }
 
 /** The nucleus: a dark disc with a white glint, which reads as the cell's one eye. */
-function eye(pic: Pic, x: number, y: number, blink = false): Pic {
+export function eye(pic: Pic, x: number, y: number, blink = false): Pic {
   if (blink) return clean(put(pic, "nnn", x - 1, y), LONE);
   put(pic, ".nn.\nnnnn\nnnnn\n.nn.", x - 2, y - 2, "lmpb");
   put(pic, "WW", x - 1, y - 1, "n");
   return clean(pic, LONE);
 }
 
-const single = (rx: number, ry: number, dx = 0, phase = 0): Blob => ({
+export const single = (rx: number, ry: number, dx = 0, phase = 0): Blob => ({
   x: CW / 2 + dx,
   y: BASE - ry,
   rx,
@@ -164,68 +164,81 @@ const cell = sprite({
 // 해부 실습서 ---------------------------------------------------------------------------------
 
 /**
- * One cut: a tapered slash from the apex outward, white along its middle with a green edge
+ * One cut from an apex: a tapered slash outward, white along its middle with a green edge
  * below. `dim` is the same cut fading.
  */
-function cut(pic: Pic, angle: number, r0: number, r1: number, dim: boolean): void {
-  const ax = 2;
-  const ay = 14;
-  const x0 = ax + Math.cos(angle) * r0;
-  const y0 = ay + Math.sin(angle) * r0;
-  const x1 = ax + Math.cos(angle) * r1;
-  const y1 = ay + Math.sin(angle) * r1;
-  const mx0 = ax + Math.cos(angle) * (r0 + (r1 - r0) * 0.25);
-  const my0 = ay + Math.sin(angle) * (r0 + (r1 - r0) * 0.25);
-  const mx1 = ax + Math.cos(angle) * (r0 + (r1 - r0) * 0.8);
-  const my1 = ay + Math.sin(angle) * (r0 + (r1 - r0) * 0.8);
+export function cut(
+  pic: Pic,
+  ax: number,
+  ay: number,
+  angle: number,
+  r0: number,
+  r1: number,
+  dim: boolean,
+): void {
+  const at = (r: number): [number, number] => [ax + Math.cos(angle) * r, ay + Math.sin(angle) * r];
+  const [x0, y0] = at(r0);
+  const [x1, y1] = at(r1);
+  const [mx0, my0] = at(r0 + (r1 - r0) * 0.25);
+  const [mx1, my1] = at(r0 + (r1 - r0) * 0.8);
   line(pic, x0, y0, x1, y1, dim ? "l" : "p");
   line(pic, mx0, my0 + 1, mx1, my1 + 1, dim ? "m" : "b");
   if (!dim) line(pic, mx0 - Math.cos(angle) * 3, my0 - Math.sin(angle) * 3, mx1, my1, "W");
 }
 
-/** The fan: three cuts in quick order, top to bottom, each fading as the next lands. */
-function fan(k: number): Pic {
-  const pic = Pic.blank(40, 28);
-  const angles = [-0.42, 0, 0.42];
-  if (k === 4) {
-    angles.forEach((a, i) => {
-      for (const r of [16, 24, 31]) {
+/**
+ * A fan of cuts from an apex at the canvas centre, aimed at `aim`: the cuts land one after
+ * another across the fan, each fading as the next lands, then the fan breaks into motes. Drawn
+ * per direction, so the client never turns it.
+ */
+export function fanAt(
+  size: number,
+  aim: number,
+  spread: readonly number[],
+  range: number,
+  k: number,
+): Pic {
+  const c = Math.floor(size / 2);
+  const pic = Pic.blank(size, size);
+  const last = spread.length;
+  if (k > last) {
+    spread.forEach((a, i) => {
+      for (const r of [range * 0.45, range * 0.7, range * 0.9]) {
         pic.set(
-          Math.round(2 + Math.cos(a) * (r + i)),
-          Math.round(14 + Math.sin(a) * (r + i)),
+          Math.round(c + Math.cos(aim + a) * (r + i)),
+          Math.round(c + Math.sin(aim + a) * (r + i)),
           i % 2 ? "'" : ",",
         );
       }
     });
     return pic;
   }
-  angles.forEach((a, i) => {
+  spread.forEach((a, i) => {
     if (i > k) return;
-    const fresh = i === k && k < 3;
-    cut(pic, a, fresh ? 6 : 9, fresh ? 36 : 33, !fresh);
+    const fresh = i === k && k < last;
+    cut(pic, c, c, aim + a, fresh ? 6 : 9, fresh ? range : range - 3, !fresh);
   });
   // The blade itself at the apex, turned to the cut being made.
-  if (k < 3) {
-    const a = angles[k] as number;
+  if (k < last) {
+    const a = aim + (spread[k] as number);
+    line(pic, c + Math.cos(a), c + Math.sin(a), c + Math.cos(a) * 5, c + Math.sin(a) * 5, "W");
     line(
       pic,
-      2 + Math.cos(a) * 1,
-      14 + Math.sin(a) * 1,
-      2 + Math.cos(a) * 5,
-      14 + Math.sin(a) * 5,
-      "W",
-    );
-    line(
-      pic,
-      2 + Math.cos(a) * 1,
-      15 + Math.sin(a) * 1,
-      2 + Math.cos(a) * 4,
-      15 + Math.sin(a) * 4,
+      c + Math.cos(a),
+      c + 1 + Math.sin(a),
+      c + Math.cos(a) * 4,
+      c + 1 + Math.sin(a) * 4,
       "m",
     );
   }
   return clean(pic, LONE);
 }
+
+/** Sixteen aims round the circle; the content's cone is 50° wide and 44 px long. */
+const SCALPEL_SPREAD = [-0.42, 0, 0.42];
+const scalpelSets = Array.from({ length: 16 }, (_, d) =>
+  [0, 1, 2, 3, 4].map((k) => fanAt(84, (d / 16) * Math.PI * 2, SCALPEL_SPREAD, 38, k)),
+);
 
 const scalpel = sprite({
   name: "fx-scalpel",
@@ -234,10 +247,19 @@ const scalpel = sprite({
   blend: "add",
   palette: BIO,
   lone: LONE,
-  size: [40, 28],
-  origin: [2, 14],
-  frames: framesOf("cut", [0, 1, 2, 3, 4].map(fan)),
-  anim: { fan: { frames: names("cut", 5), fps: 24, loop: false, jump: 1 } },
+  size: [84, 84],
+  origin: [42, 42],
+  frames: aimedFrames("d", scalpelSets),
+  anim: {
+    // `fan` is the rightward fan; `fan0` to `fan15` aim clockwise from the right.
+    fan: { frames: names("d0-", 5), fps: 24, loop: false, jump: 1 },
+    ...Object.fromEntries(
+      scalpelSets.map((_, d) => [
+        `fan${d}`,
+        { frames: names(`d${d}-`, 5), fps: 24, loop: false, jump: 1 },
+      ]),
+    ),
+  },
 });
 
 /** A drop at three sizes: a bead, a swelling drop, a falling drop, and a splash. */

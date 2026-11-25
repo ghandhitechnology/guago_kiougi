@@ -167,27 +167,6 @@ const lights: LightSource[] = [
     color: "gold.light",
     intensity: 1.5,
     flicker: { amount: 0.16, period: 0.6 },
-    paint: {
-      bands: ["rift-sun", "rift-warm", "rift-ember"],
-      at: [FIRE[0] * T + 8, FIRE[1] * T - 30],
-      r: [230, 150],
-      ragged: 7,
-      pulse: { amount: 0.05, period: 0.6 },
-    },
-  },
-  // The back wall takes the fire whole: the brightest thing anyone in here has seen.
-  {
-    at: [30 * T, WALL_Y * T - 20],
-    radius: 0,
-    color: "gold.light",
-    intensity: 0,
-    paint: {
-      bands: ["rift-sun", "rift-warm"],
-      at: [30 * T, WALL_Y * T - 24],
-      r: [118, 28],
-      ragged: 6,
-      pulse: { amount: 0.05, period: 0.6 },
-    },
   },
   // Noon at the end of the tunnel.
   {
@@ -195,12 +174,6 @@ const lights: LightSource[] = [
     radius: 140,
     color: "stone.bright",
     intensity: 1,
-    paint: {
-      bands: ["greece", "rift-sun", "rift-warm"],
-      at: [GATE[0] * T, H * T],
-      r: [80, 120],
-      ragged: 5,
-    },
   },
   ...TORCHES.map(
     ([x, y]): LightSource => ({
@@ -209,36 +182,97 @@ const lights: LightSource[] = [
       color: "gold.light",
       intensity: 1,
       flicker: { amount: 0.22, period: 0.5 },
-      paint: {
-        bands: ["rift-warm", "rift-ember"],
-        at: [x * T + 8, y * T + 4],
-        r: [34, 22],
-        ragged: 4,
-      },
     }),
   ),
 ];
 
-const placed = merge(chamber(), {
-  objects: [
-    ...STALAGMITES.map(([frame, x, y]) => place("stalagmite", x, y, { frame })),
-    ...TORCHES.map(
-      ([x, y], i): Prop => ({
-        prop: "wall-torch",
-        anim: "burn",
-        play: true,
-        index: i % 3,
-        at: [x * T + 8, y * T + 2],
-        sort: y * T - 8,
-      }),
-    ),
-    place("boulder", 18, 37),
-    place("boulder-big", 30, 38),
-    place("amphora", 11, 27),
-    { prop: "amphora-tipped", at: [px(50, 25)[0], px(50, 25)[1] + 5] },
-  ],
-  shadows: [blob(FIRE[0] * T + 16, FIRE[1] * T + 14, 22, 5, 0)],
-});
+/** The plan as rows, for placing rock art against the walls it belongs to. */
+const ROWS = PLAN.split("\n");
+const cell = (x: number, y: number) => ROWS[y]?.[x] ?? "x";
+const pick = (x: number, y: number, n: number) => (((x * 7 + y * 13) % n) + n) % n;
+
+/** A face of rock under every wall the floor runs up to, with height going up into the dark. */
+function faces(): Prop[] {
+  const out: Prop[] = [];
+  for (let y = 0; y < H - 1; y++)
+    for (let x = 0; x < W; x++)
+      if (cell(x, y) !== "_" && cell(x, y + 1) === "_")
+        out.push({
+          prop: "cave-face",
+          frame: "abcd"[pick(x, y, 4)] as string,
+          at: [x * T, (y + 1) * T],
+          sort: (y + 1) * T - 1,
+        });
+  return out;
+}
+
+/** Stalactites along the tops of the walls, every few tiles. */
+function hanging(): Prop[] {
+  const out: Prop[] = [];
+  for (let y = 0; y < H - 1; y++)
+    for (let x = 0; x < W; x += 3)
+      if (cell(x, y) !== "_" && cell(x, y + 1) === "_" && pick(x, y, 3) !== 0)
+        out.push({
+          prop: "stalactites",
+          frame: pick(x, y, 2) ? "a" : "b",
+          at: [x * T - 8, (y + 1) * T - 30],
+        });
+  return out;
+}
+
+/** Rock forms far off in the dark past the rim, only just there. */
+function depth(): Prop[] {
+  const out: Prop[] = [];
+  for (let y = 0; y < H; y += 5)
+    for (let x = 0; x < W; x += 6)
+      if (cell(x, y) === "x" && cell(x + 3, y + 4) === "x" && pick(x, y, 4) !== 0)
+        out.push({
+          prop: "far-rock",
+          frame: ["pillar", "ledge", "spire"][pick(x, y, 3)] as string,
+          at: [x * T - 8, y * T - 16],
+          raw: true,
+        });
+  return out;
+}
+
+/** The floor's own marks, sparse and never in a row. */
+function floorMarks(): Prop[] {
+  const out: Prop[] = [];
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (cell(x, y) === "_" && pick(x * 3, y * 5, 11) === 0)
+        out.push({
+          prop: "cave-floor",
+          frame: ["crack", "gravel", "puddle", "rubble"][pick(x, y, 4)] as string,
+          at: [x * T, y * T + 6],
+        });
+  return out;
+}
+
+const placed = merge(
+  chamber(),
+  { objects: faces(), overhead: hanging() },
+  {
+    objects: [
+      ...STALAGMITES.map(([frame, x, y]) => place("stalagmite", x, y, { frame })),
+      ...TORCHES.map(
+        ([x, y], i): Prop => ({
+          prop: "wall-torch",
+          anim: "burn",
+          play: true,
+          index: i % 3,
+          at: [x * T + 8, y * T + 2],
+          sort: y * T - 8,
+        }),
+      ),
+      place("boulder", 18, 37),
+      place("boulder-big", 30, 38),
+      place("amphora", 11, 27),
+      { prop: "amphora-tipped", at: [px(50, 25)[0], px(50, 25)[1] + 5] },
+    ],
+    shadows: [blob(FIRE[0] * T + 16, FIRE[1] * T + 14, 22, 5, 0)],
+  },
+);
 
 const map: MapSource = {
   id: "p1-shadow-cave",
@@ -250,7 +284,9 @@ const map: MapSource = {
   ambient: { color: "ink.deep", intensity: 0.1, unlit: "greece" },
   plan: PLAN,
   legend: { ...GREEK_LEGEND, x: { terrain: null, solid: "#" } },
+  backdrop: depth(),
   details: [
+    ...floorMarks(),
     { decal: "marble-dust/pebbles", at: [420, 560] },
     { decal: "marble-dust/pebbles", at: [600, 300] },
     { prop: "tracks", frame: "h", at: [470, 220] },
