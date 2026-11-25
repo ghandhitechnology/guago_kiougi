@@ -1,6 +1,12 @@
 /**
  * Hunting field pacing (PLAN §6, §10). A field runs in cycles: a surge that refills the horde,
  * then 쉬는 시간, a lull with no spawns where the survivors are mopped up and pages collected.
+ *
+ * Refill follows clear speed. During a surge every kill queues one respawn `respawnDelay` later,
+ * so a field that is cleared fast churns fast, and a weak player still faces a full horde. The
+ * churn is bounded twice: never more than `population` alive (PLAN §6, at most 150) and never
+ * more than `refillCap` spawns per second for the field, which grows with the players present.
+ * A character strong enough to outpace the cap gets more out of hunting higher regions.
  */
 export const FIELD_PACING = {
   surgeSeconds: 50,
@@ -12,14 +18,20 @@ export const FIELD_PACING = {
   populationPerPlayer: 15,
   populationMin: 60,
   populationMax: 150,
-  /** Refill per second during a surge: 1 + 0.5 per player. Solo, about 73 kills a minute at most. */
-  spawnBase: 1,
-  spawnPerPlayer: 0.5,
+  /** A killed monster comes back this many seconds later, during a surge. */
+  respawnDelay: 1.5,
+  /** Spawns per second the field may add at most: 3 + 2 per player, 19 for eight players. */
+  refillBase: 3,
+  refillPerPlayer: 2,
   /** Spawns land off every player's screen but close enough to arrive within seconds. */
   spawnMinDistance: 280,
   spawnMaxDistance: 480,
-  /** A spawn's level is within this many levels of the nearby players' average. */
-  levelSpread: 2,
+  /**
+   * Each field is cut into regions of this many levels, shallow near the entrance and deeper
+   * toward the far edge. A region's monsters spawn within its levels, whoever is there, so a
+   * player chooses how far above their level to hunt by where they walk.
+   */
+  regionLevels: 5,
   /** Monsters this far from every player for this long are recycled. */
   despawnDistance: 800,
   despawnSeconds: 20,
@@ -34,6 +46,11 @@ export function wavePhase(secondsInField: number): WavePhase {
   return secondsInField % cycle < FIELD_PACING.surgeSeconds ? "surge" : "lull";
 }
 
+/** Share of a cycle spent in a surge. */
+export function surgeShare(): number {
+  return FIELD_PACING.surgeSeconds / (FIELD_PACING.surgeSeconds + FIELD_PACING.lullSeconds);
+}
+
 export function fieldPopulation(players: number): number {
   const p = FIELD_PACING;
   return Math.min(
@@ -42,10 +59,15 @@ export function fieldPopulation(players: number): number {
   );
 }
 
-/** Monsters per second the field may add while under its population target. */
-export function spawnRate(players: number, phase: WavePhase): number {
+/** The most monsters per second a field may add, whatever its players kill. */
+export function refillCap(players: number, phase: WavePhase): number {
   if (phase === "lull" || players <= 0) return 0;
-  return FIELD_PACING.spawnBase + FIELD_PACING.spawnPerPlayer * players;
+  return FIELD_PACING.refillBase + FIELD_PACING.refillPerPlayer * players;
+}
+
+/** Spawns per second: one for each kill, up to the cap. */
+export function refill(players: number, phase: WavePhase, killsPerSecond: number): number {
+  return Math.min(Math.max(0, killsPerSecond), refillCap(players, phase));
 }
 
 export interface FieldRosterEntry {
@@ -66,10 +88,21 @@ export interface FieldDef {
   readonly roster: readonly FieldRosterEntry[];
 }
 
-export function spawnLevel(field: FieldDef, nearbyAverage: number, roll: number): number {
-  const spread = FIELD_PACING.levelSpread;
-  const level = Math.round(nearbyAverage) - spread + Math.floor(roll * (2 * spread + 1));
-  return Math.min(field.levels.max, Math.max(field.levels.min, level));
+export function regionCount(field: FieldDef): number {
+  return Math.ceil((field.levels.max - field.levels.min + 1) / FIELD_PACING.regionLevels);
+}
+
+/** Levels of region `region` (0 at the entrance). */
+export function regionLevels(field: FieldDef, region: number): { min: number; max: number } {
+  const r = Math.min(regionCount(field) - 1, Math.max(0, Math.floor(region)));
+  const min = field.levels.min + r * FIELD_PACING.regionLevels;
+  return { min, max: Math.min(field.levels.max, min + FIELD_PACING.regionLevels - 1) };
+}
+
+/** A spawn's level in its region; `roll` from the server's generator. */
+export function spawnLevel(field: FieldDef, region: number, roll: number): number {
+  const { min, max } = regionLevels(field, region);
+  return min + Math.min(max - min, Math.floor(roll * (max - min + 1)));
 }
 
 const TORTOISE: FieldRosterEntry = { monster: "tortoise", weight: 0.05, maxAlive: 1 };

@@ -12,14 +12,14 @@ export type RankName = "normal" | "elite" | "boss";
  * only from elites and bosses, so a tool is an event.
  */
 export const DROPS = {
-  pageChance: { normal: 0.005, elite: 0.25, boss: 1 },
+  pageChance: { normal: 0.0007, elite: 0.035, boss: 1 },
   pageCount: { normal: [1, 1], elite: [1, 1], boss: [3, 5] },
   /** Per-monster chance overrides: the tortoise is a treasure. */
   pageChanceFor: { tortoise: 0.25 } as Readonly<Record<string, number>>,
-  inkChance: { normal: 0.03, elite: 1, boss: 1 },
-  inkCount: { normal: [1, 2], elite: [5, 10], boss: [20, 30] },
-  bindingChance: { normal: 0.002, elite: 0.2, boss: 1 },
-  toolChance: { normal: 0, elite: 0.01, boss: 1 },
+  inkChance: { normal: 0.007, elite: 1, boss: 1 },
+  inkCount: { normal: [1, 2], elite: [1, 3], boss: [20, 30] },
+  bindingChance: { normal: 0.0005, elite: 0.05, boss: 1 },
+  toolChance: { normal: 0, elite: 0.0025, boss: 1 },
   spotlightWeight: 1.5,
   /** A coin drop splits into this many 솔방울 pickups for the burst. */
   coinPickups: [1, 3],

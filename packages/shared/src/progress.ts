@@ -85,19 +85,26 @@ export function resetStats(purse: Purse, level: number): Outcome<{ purse: Purse 
 
 // ── 자습 pool (PLAN §9) ─────────────────────────────────────────────────────
 
-/** Income per second of one kind, measured by the server over a window. */
+/**
+ * Income per second, measured by the server over a window. The pool pays all four; 잉크 is an
+ * addition to PLAN §9's list so a player who mostly lives on the pool can still write 필기.
+ */
 export interface Rate {
   readonly exp: number;
   readonly pinecone: number;
   readonly sheets: number;
+  readonly ink: number;
 }
+
+const RATE_KEYS = ["exp", "pinecone", "sheets", "ink"] as const;
+const ZERO_RATE: Rate = { exp: 0, pinecone: 0, sheets: 0, ink: 0 };
 
 export type LogoutPlace = "field" | "hub" | "study-hall" | "dorm";
 
 export const POOL = {
-  share: 0.03,
+  share: 0.08,
   capSeconds: 8 * 3600,
-  studyHallShare: 0.042,
+  studyHallShare: 0.112,
   studyHallCapSeconds: 10 * 3600,
   /** 층장 of the week: one more hour on the cap (PLAN §11). */
   floorLeaderSeconds: 3600,
@@ -116,14 +123,11 @@ export function poolTerms(place: LogoutPlace, floorLeader = false): { share: num
   };
 }
 
-export interface PoolFill {
-  readonly exp: number;
-  readonly pinecone: number;
-  readonly sheets: number;
+export interface PoolFill extends Rate {
   readonly seconds: number;
 }
 
-/** What a pool holds after `offlineSeconds`. Sheets stay fractional until claimed. */
+/** What a pool holds after `offlineSeconds`. Sheets and 잉크 stay fractional until claimed. */
 export function poolFill(
   rate: Rate,
   offlineSeconds: number,
@@ -136,48 +140,36 @@ export function poolFill(
   const k = share * seconds;
   return {
     exp: rate.exp * k * catchUpMult,
-    pinecone: rate.pinecone * k * catchUpMult,
-    sheets: rate.sheets * k * catchUpMult,
+    pinecone: rate.pinecone * k,
+    sheets: rate.sheets * k,
+    ink: rate.ink * k,
     seconds,
   };
 }
 
-export interface IncomeEvent {
-  /** Seconds since the session started. */
+/** Income that landed at `t`, seconds since the session started. */
+export interface IncomeEvent extends Rate {
   readonly t: number;
-  readonly exp: number;
-  readonly pinecone: number;
-  readonly sheets: number;
 }
+
+const add = (a: Rate, b: Rate, sign: 1 | -1): Rate =>
+  Object.fromEntries(RATE_KEYS.map((k) => [k, a[k] + sign * b[k]])) as unknown as Rate;
 
 /** Best `window`-second income in a session, chosen by EXP. Zero below one full window. */
 export function bestWindowRate(events: readonly IncomeEvent[], window = POOL.windowSeconds): Rate {
-  let best: Rate = { exp: 0, pinecone: 0, sheets: 0 };
+  let best = ZERO_RATE;
   const last = events.at(-1);
   if (!last || last.t < window) return best;
   let start = 0;
-  let sum = { exp: 0, pinecone: 0, sheets: 0 };
+  let sum = ZERO_RATE;
   for (const e of events) {
-    sum = {
-      exp: sum.exp + e.exp,
-      pinecone: sum.pinecone + e.pinecone,
-      sheets: sum.sheets + e.sheets,
-    };
+    sum = add(sum, e, 1);
     while ((events[start] as IncomeEvent).t <= e.t - window) {
-      const s = events[start] as IncomeEvent;
-      sum = {
-        exp: sum.exp - s.exp,
-        pinecone: sum.pinecone - s.pinecone,
-        sheets: sum.sheets - s.sheets,
-      };
+      sum = add(sum, events[start] as IncomeEvent, -1);
       start++;
     }
     if (e.t >= window && sum.exp / window > best.exp)
-      best = {
-        exp: sum.exp / window,
-        pinecone: sum.pinecone / window,
-        sheets: sum.sheets / window,
-      };
+      best = Object.fromEntries(RATE_KEYS.map((k) => [k, sum[k] / window])) as unknown as Rate;
   }
   return best;
 }
@@ -188,7 +180,7 @@ export function claimPool(
   fill: PoolFill,
   sheetBook: string | undefined,
 ): Outcome<{ purse: Purse; exp: number }> {
-  const gain: Amounts = { pinecone: Math.floor(fill.pinecone) };
+  const gain: Amounts = { pinecone: Math.floor(fill.pinecone), ink: Math.floor(fill.ink) };
   if (sheetBook && fill.sheets >= 1) gain[`sheet:${sheetBook}`] = Math.floor(fill.sheets);
   const paid = earn(purse, gain, "pool");
   return { ok: true, state: { purse: paid.purse, exp: fill.exp }, ledger: paid.ledger };
@@ -196,11 +188,19 @@ export function claimPool(
 
 // ── EXP modifiers (PLAN §9 catch-up, §11) ───────────────────────────────────
 
-/** In a sealed Page: ×(1 + Pages between it and the frontier), at most ×8. */
+/**
+ * Catch-up, measured on the character: below the live Page's band every EXP they earn is
+ * ×`CATCH_UP_MAX`, fading in a straight line to ×1 over the last `CATCH_UP_FADE` levels before
+ * the band. A character at or above the frontier gets ×1 wherever they hunt, so a veteran cannot
+ * farm sealed Pages with it. It multiplies EXP only, never 솔방울 or 낱장.
+ */
 export const CATCH_UP_MAX = 8;
+export const CATCH_UP_FADE = 25;
 
-export function catchUp(zonePage: number, frontierPage: number): number {
-  return Math.min(CATCH_UP_MAX, 1 + Math.max(0, frontierPage - zonePage));
+export function catchUp(level: number, frontierPage: number): number {
+  const below = (frontierPage - 1) * 100 + 1 - level;
+  if (below <= 0) return 1;
+  return Math.min(CATCH_UP_MAX, 1 + ((CATCH_UP_MAX - 1) * below) / CATCH_UP_FADE);
 }
 
 /** 숙면: logging out in the 기숙사 gives +50% EXP for the first 30 minutes of the next session. */
@@ -234,9 +234,9 @@ export const BOARD = {
 export const QUEST_REWARD: Readonly<
   Record<Cadence, { kills: number; ink: number; binding: number; sheets: number }>
 > = {
-  daily: { kills: 150, ink: 10, binding: 0, sheets: 0 },
-  weekly: { kills: 1200, ink: 60, binding: 2, sheets: 3 },
-  repeat: { kills: 50, ink: 0, binding: 0, sheets: 0 },
+  daily: { kills: 450, ink: 330, binding: 0, sheets: 0 },
+  weekly: { kills: 3600, ink: 300, binding: 2, sheets: 3 },
+  repeat: { kills: 150, ink: 0, binding: 0, sheets: 0 },
 };
 
 export function repeatShare(completedToday: number): number {
