@@ -89,7 +89,10 @@ async function start(): Promise<void> {
 }
 
 function stop(): void {
-  if (!running()) return console.log("postgres is not running");
+  if (!running()) {
+    console.log("postgres is not running");
+    return;
+  }
   execFileSync("pg_ctl", ["stop", "-w", "-D", DATA, "-m", "fast"], { stdio: "ignore", env: ENV });
   console.log("postgres stopped");
 }
