@@ -297,6 +297,69 @@ const CHEMISTRY_TOOLS = {
   ),
 };
 
+const BIOLOGY_TOOLS = {
+  /** 완두콩: a pod split open on its peas. */
+  peas: sealed(
+    "",
+    "",
+    "",
+    "...FFFFFFFFF",
+    "..FhhhhhhhhhF",
+    ".FHjjHjjHjjhF",
+    ".FHjjHjjHjjhF",
+    "..FhhhhhhhhhF",
+    "...FFFFFFFFF.f",
+    "............ff",
+  ),
+  /** 화분: a clay pot with a sprout in it. */
+  flowerpot: sealed(
+    "......jj",
+    ".....jHH.jj",
+    "......HhjH",
+    ".......hh",
+    ".......hh",
+    "...MMMMMMMMM",
+    "...LLLLLLLLL",
+    "....MMMMMMM",
+    "....MLLLLLL",
+    "....MLLLLLL",
+    ".....MLLLL",
+    ".....LLLLL",
+    ".....KKKKK",
+  ),
+  /** 시험관: a test tube, green culture in it. */
+  "test-tube": sealed(
+    "",
+    "........WWW",
+    "........W5W",
+    ".......W5W",
+    ".......W5W",
+    "......W5W",
+    "......WjW",
+    ".....WjjW",
+    ".....WhhW",
+    "....WhhW",
+    "....WhW",
+    "....WW",
+  ),
+  /** 백신: a syringe, its plunger and needle. */
+  vaccine: sealed(
+    "...........SS",
+    "..........SSS",
+    ".........SS",
+    "........WWW",
+    ".......W55W",
+    "......W5jjW",
+    ".....W5jjW",
+    "....W5jjW",
+    "...WjjjW",
+    "...WWWW",
+    "...SS",
+    "..S",
+    ".S",
+  ),
+};
+
 const tool = sprite({
   ...ui,
   name: "tool",
@@ -308,6 +371,7 @@ const tool = sprite({
     ...MATH_TOOLS,
     ...PHYSICS_TOOLS,
     ...CHEMISTRY_TOOLS,
+    ...BIOLOGY_TOOLS,
     /** 컴퍼스: a drawing compass, needle leg and pencil leg. */
     compass: compass(),
     /** 모눈자: a clear ruler printed with a grid and ticks. */

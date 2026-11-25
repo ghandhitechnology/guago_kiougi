@@ -293,6 +293,64 @@ const CHEMISTRY = {
   buffer: evolved(SEA_DEEP, stack(".HH.PP.", "HHHHPPP", "HHHHPPP", ".HH.PP."), [5, 6]),
 };
 
+// 생명 ------------------------------------------------------------------------------------
+
+const BIOLOGY = {
+  /** 유전 가계도 문제집: a pedigree, one square filled. */
+  pedigree: book(
+    GRASS_DEEP,
+    stack("ww.HH..", "ww.HH..", ".w..w..", "wwwwww.", "w....w.", "ww..ww.", "ww..ww."),
+    [5, 4],
+  ),
+  /** 생태계 보고서: a sapling and its roots. */
+  ecosystem: book(
+    GRASS,
+    stack(".jjj...", "jjjjj..", ".jjj...", "..w....", "..w....", ".w.w...", "w...w.."),
+    [6, 4],
+  ),
+  /** 효소 반응 노트: the enzyme and the substrate that fits it. */
+  enzyme: book(GRASS_PALE, stack(".hhh...", "hh.h...", "h...hh.", "hh.hhh.", ".hhh..."), [5, 5]),
+  /** 면역 필기: an antibody. */
+  immune: book(
+    GRASS_DEEP,
+    stack("w.....w", ".w...w.", "..w.w..", "...w...", "...w...", "...w..."),
+    [5, 4],
+  ),
+
+  /** 줄기세포: the cell, a cross on it. */
+  "stem-cell": evolved(
+    GRASS,
+    stack("..www..", ".wjwjw.", "wjjwjjw", "wwwwwww", "wjjwjjw", ".wjwjw.", "..www.."),
+    [5, 4],
+  ),
+  /** 멘델의 법칙: three squares filled to one open, 3 : 1. */
+  mendel: evolved(GRASS_DEEP, stack("HH.HH..", "HH.HH..", ".......", "HH.ww..", "HH.ww.."), [5, 5]),
+  /** 정밀 해부도: the scalpel over its dotted guide lines. */
+  "precise-anatomy": evolved(
+    GRASS_PALE,
+    stack("w.w.w.S", ".....SS", "w.w.SS.", "...hf..", "..hf...", ".hf....", "hf....."),
+    [5, 4],
+  ),
+  /** 극상림: a wood of three trees. */
+  "climax-forest": evolved(
+    GRASS,
+    stack(".j...j.", "jjj.jjj", ".w.j.w.", ".wjjj..", "...w...", "...w..."),
+    [5, 4],
+  ),
+  /** 촉매: the enzyme held in a ring. */
+  catalyst: evolved(
+    GRASS_PALE,
+    stack(".hhhhh.", "h.....h", "h.hh..h", "h.h.h.h", "h..hh.h", "h.....h", ".hhhhh."),
+    [5, 4],
+  ),
+  /** 집단 면역: antibodies round a crowd. */
+  "herd-immunity": evolved(
+    GRASS_DEEP,
+    stack("w.w.w.w", ".w...w.", ".w...w.", ".......", "w.w.w.w", ".w...w.", ".w...w."),
+    [5, 4],
+  ),
+};
+
 const books = sprite({
   ...ui,
   name: "book",
@@ -303,6 +361,7 @@ const books = sprite({
     ...MATH,
     ...PHYSICS,
     ...CHEMISTRY,
+    ...BIOLOGY,
     /** 홀리데이 일반물리: the heavy plum tome with its gold band and a thrown arc. */
     "holiday-physics": over(
       book(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),
