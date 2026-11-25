@@ -1,4 +1,5 @@
 import {
+  boardWeek,
   type Currency,
   earn,
   type Outcome,
@@ -7,6 +8,7 @@ import {
   pay,
   Random,
 } from "@guago/shared";
+import type { DropSource } from "./drops.ts";
 
 /**
  * Materials and the 자판기 (PLAN §13). Names and bag text are the narrative's item descriptions,
@@ -26,7 +28,17 @@ export const MATERIALS: readonly MaterialDef[] = [
     currency: "pinecone",
     description: "pinecone",
     sources: ["drop", "pool", "quest"],
-    sinks: ["sink.pilgi", "sink.bind", "sink.forge", "sink.shop", "sink.stat-reset"],
+    sinks: [
+      "sink.pilgi",
+      "sink.bind",
+      "sink.forge",
+      "sink.shop",
+      "sink.stat-reset",
+      "sink.club",
+      "sink.trade-tax",
+      "sink.board-fee",
+      "sink.board-tax",
+    ],
   },
   {
     currency: "sheet",
@@ -93,13 +105,9 @@ export const VENDING = {
   ],
 } as const;
 
-/**
- * The 자판기's week, counted from Monday 05:00 KST like the weekly board (PLAN §15). 1970-01-01
- * was a Thursday, so three days shift the count onto Mondays.
- */
+/** The 자판기's week: the weekly board's (PLAN §15), from Monday 05:00 KST. */
 export function vendingWeek(ms: number): number {
-  const day = Math.floor((ms + (9 - 5) * 3600_000) / 86_400_000);
-  return Math.floor((day + 3) / 7);
+  return boardWeek(ms);
 }
 
 /** This week's stock: the fixed five and one special, drawn by the week number. */
@@ -131,3 +139,32 @@ export function buy(
 
 /** The bag currency a 자판기 item is held as. */
 export const goodsOf = (id: string): Currency => `snack:${id}`;
+
+/**
+ * Where an item is made (PLAN §13 "Bound items"). A bound item never leaves its first owner:
+ * era boss drops, quest rewards and what 상점 or 탐구 토큰 buy. The 신입생 kit is bound too, so
+ * throwaway characters cannot mint books to pass on. Bought or received items are not bound;
+ * they wait out `TRADE.retradeHours` instead.
+ */
+export type ItemOrigin =
+  | "kit"
+  | "craft"
+  | "drop"
+  | "era-drop"
+  | "quest"
+  | "council-shop"
+  | "research-shop"
+  | "mentor-shop";
+
+const BOUND_ORIGINS: ReadonlySet<ItemOrigin> = new Set([
+  "kit",
+  "era-drop",
+  "quest",
+  "council-shop",
+  "research-shop",
+]);
+
+export const bindsOn = (origin: ItemOrigin): boolean => BOUND_ORIGINS.has(origin);
+
+/** A monster drop is bound when an era boss dropped it. */
+export const dropOrigin = (source: DropSource): ItemOrigin => (source.era ? "era-drop" : "drop");

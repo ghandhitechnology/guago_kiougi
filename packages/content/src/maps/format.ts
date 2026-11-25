@@ -20,6 +20,7 @@ import type {
   ShadowShape,
   Vec,
 } from "./layers.ts";
+import type { Patrol, PatrolSource } from "./patrols.ts";
 
 // Time and light --------------------------------------------------------------------------------
 
@@ -265,6 +266,8 @@ export interface MapSource extends Layers {
     readonly tile: Vec;
     readonly facing?: Spawn["facing"];
   }[];
+  /** Guard routes in a 위험 구역, see `patrols.ts`. */
+  readonly patrols?: readonly PatrolSource[];
   /** Dueling grounds (PLAN §14): a floor of open tiles, or a stamp region name. */
   readonly arenas?: readonly {
     readonly id: string;
@@ -297,6 +300,8 @@ export interface BuiltMap {
   readonly marks: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
   /** Cast stand points: speaker id, feet in world pixels, facing. */
   readonly npcs: readonly NpcSpot[];
+  /** Guard routes in world pixels. */
+  readonly patrols: readonly Patrol[];
   /** Dueling grounds, in tiles. */
   readonly arenas: readonly Arena[];
 }
