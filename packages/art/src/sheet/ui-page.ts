@@ -3,9 +3,12 @@
  * the rest of the page it draws only from the build output (atlases, art.json and the font
  * files), so what shows here is what the game will load.
  */
+
+import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
+import { SCENES } from "../scenes/index.ts";
 import { type BmFont, measure, parseBmFont, place } from "./bmfont.ts";
 import { FONT_SAMPLES, KIT, NUMERAL_SAMPLES, SHEET } from "./ui-content.ts";
-import { type Kit, type Op, type Screen, sliceRects } from "./ui-ops.ts";
+import { type Kit, type Op, type Screen, shadePixels, sliceRects, swept } from "./ui-ops.ts";
 import { screens } from "./ui-screens.ts";
 
 interface Rect {
@@ -31,6 +34,7 @@ interface Meta {
     {
       atlas: string;
       size: [number, number];
+      origin: [number, number];
       frames: string[];
       slice?: { left: number; right: number; top: number; bottom: number };
     }
@@ -79,6 +83,8 @@ class PageKit implements Kit {
   readonly fontImages: Map<string, HTMLImageElement>;
   readonly tinted = new Map<string, HTMLCanvasElement>();
   readonly looks = new Map<string, HTMLCanvasElement>();
+  readonly scenes = new Map<string, HTMLCanvasElement>();
+  readonly pixels = new Map<string, SceneAtlas>();
 
   constructor(
     meta: Meta,
@@ -92,6 +98,33 @@ class PageKit implements Kit {
       this.fonts.set(name, f.bm);
       this.fontImages.set(name, f.img);
     }
+    for (const [name, a] of atlases) {
+      const c = canvas(a.img.width, a.img.height);
+      const ctx = ctx2d(c);
+      ctx.drawImage(a.img, 0, 0);
+      const data = ctx.getImageData(0, 0, c.width, c.height).data;
+      this.pixels.set(name, { w: c.width, h: c.height, data, frames: a.frames });
+    }
+  }
+
+  /** A scene at time zero, `shade` palette steps darker. */
+  scene(name: string, shade: number): HTMLCanvasElement {
+    const key = `${name}:${shade}`;
+    const done = this.scenes.get(key);
+    if (done) return done;
+    const def = SCENES.find((d) => d.name === name);
+    if (!def) throw new Error(`no scene ${name}`);
+    const img = renderScene(def, this.meta as unknown as SceneMeta, this.pixels, 0);
+    const data = new Uint8ClampedArray(img.data);
+    shadePixels(data, (this.meta as unknown as SceneMeta).shade, shade);
+    const c = canvas(img.w, img.h);
+    ctx2d(c).putImageData(new ImageData(data, img.w, img.h), 0, 0);
+    this.scenes.set(key, c);
+    return c;
+  }
+
+  origin(sprite: string): readonly [number, number] | undefined {
+    return this.meta.sprites[sprite]?.origin;
   }
 
   size(sprite: string): readonly [number, number] | undefined {
@@ -190,22 +223,37 @@ class PageKit implements Kit {
   }
 
   draw(ctx: CanvasRenderingContext2D, op: Op): void {
-    if (op.op === "fill") {
+    if (op.op === "scene") {
+      ctx.drawImage(this.scene(op.name, op.shade ?? 0), 0, 0);
+    } else if (op.op === "fill") {
       ctx.fillStyle = this.color(op.color);
       ctx.fillRect(op.x, op.y, op.w, op.h);
     } else if (op.op === "frame") {
       const { img, f } = this.frame(op.sprite, op.frame);
-      ctx.drawImage(
+      const src = canvas(f.sourceSize.w, f.sourceSize.h);
+      const sctx = ctx2d(src);
+      sctx.drawImage(
         img,
         f.frame.x,
         f.frame.y,
         f.frame.w,
         f.frame.h,
-        op.x + f.spriteSourceSize.x,
-        op.y + f.spriteSourceSize.y,
+        f.spriteSourceSize.x,
+        f.spriteSourceSize.y,
         f.frame.w,
         f.frame.h,
       );
+      const part = op.sweep;
+      if (part !== undefined) {
+        const data = sctx.getImageData(0, 0, src.width, src.height);
+        for (let i = 0; i < src.width * src.height; i++) {
+          if (!swept(i % src.width, Math.floor(i / src.width), src.width, src.height, part)) {
+            data.data[i * 4 + 3] = 0;
+          }
+        }
+        sctx.putImageData(data, 0, 0);
+      }
+      ctx.drawImage(src, op.x, op.y);
     } else if (op.op === "slice") {
       const s = this.meta.sprites[op.sprite]?.slice;
       if (!s) throw new Error(`${op.sprite} is not a nine-slice`);

@@ -52,7 +52,7 @@ if (values.png) {
     sprites: spriteSheet(fonts, art),
     rigs: rigSheet(fonts, art),
     terrain: terrainSheet(fonts, art),
-    ...uiSheets(art, built),
+    ...uiSheets(art, built, meta, atlases),
   };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);

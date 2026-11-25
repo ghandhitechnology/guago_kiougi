@@ -4,7 +4,7 @@ import { UI } from "../../ui-legend.ts";
 
 /**
  * Icons. 12×12 for currencies, stats and HUD markers; 16×16 for menu entries and the five
- * class emblems. Every one is a thing from school: a whistle for 벌점, a desk lamp for 자습.
+ * class emblems. Every one is a thing from school: a whistle for 벌점, a set square for 수학.
  */
 const ui = { group: "ui", origin: [0, 0], anim: {} } as const;
 
@@ -65,20 +65,20 @@ const icon = sprite({
   palette: ICON,
   lone: LONE,
   frames: {
-    /** 솔방울: a black-pine cone, scales lit from the top left. */
+    /** 솔방울: a cone of the 해솔, the school's black pine, still on its twig of needles. */
     pinecone: stack(
-      ".....aa.....",
-      "....acca....",
-      "...aEECCa...",
-      "..aEaCCaCa..",
-      "..aEEaCCca..",
-      ".aEaECaCcca.",
-      ".aEEaCCacca.",
-      "..aEaECaca..",
-      "..aEEaCcca..",
-      "...aEacca...",
-      "....acca....",
-      ".....aa.....",
+      ".....F..F...",
+      "......FF....",
+      "....aaaaa...",
+      "...aEZcEZa..",
+      "..aEZcEZcZa.",
+      "..acEZcEZca.",
+      ".aEZcEZcEZca",
+      ".aaEZcEZcEa.",
+      "..aEZcEZcca.",
+      "..aaEZcEZa..",
+      "...aEZcca...",
+      "....aaaa....",
     ),
     /** 상점: a gold praise sticker. */
     merit: body(
@@ -164,20 +164,20 @@ const icon = sprite({
       ),
       stack("............", "..........!.", "........!..?", "........o..?", "..........?."),
     ),
-    /** 자습: the desk lamp in the 자습실, switched on. */
-    lamp: stack(
-      "......oooo..",
-      ".....obnnNo.",
-      "....obnnnNo.",
-      "...oooooooo.",
-      "....oyyyyo..",
-      ".....oooo...",
-      "......oSo...",
-      ".....oSo....",
-      "....oSo.....",
-      "...oSo......",
-      ".ooooooooo..",
-      ".ooooooooo..",
+    /** 자습 pool: an hourglass filling while you are away. */
+    pool: stack(
+      ".oooooooooo.",
+      ".oEEEEEEEEo.",
+      ".oCCCCCCCCo.",
+      "..oWppppWo..",
+      "..oWYYYYWo..",
+      "...oWYYWo...",
+      "....oYYo....",
+      "...oWpYWo...",
+      "..oWpYYYWo..",
+      "..oYYYYYYo..",
+      ".oCCCCCCCCo.",
+      ".oooooooooo.",
     ),
     /** 이해력: a bulb going on. */
     insight: stack(
@@ -548,13 +548,22 @@ const emblem = sprite({
   palette: ICON,
   lone: LONE,
   frames: {
-    /** 수학: a drawing compass. */
+    /** 수학: a set square. */
     math: patch(
       "k",
       "b",
       "n",
       "N",
-      stack("...ww...", "...ww...", "..w..w..", "..w..w..", ".w....w.", ".w....w.", "w......w"),
+      stack(
+        "w.......",
+        "ww......",
+        "www.....",
+        "w.ww....",
+        "w..ww...",
+        "w...ww..",
+        "wwwwwww.",
+        "wwwwwwww",
+      ),
       4,
     ),
     /** 물리: a horseshoe magnet. */

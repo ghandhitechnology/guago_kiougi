@@ -1,4 +1,4 @@
-import { disc, grid, lit, over, stack, turn } from "../../draw.ts";
+import { disc, grid, lit, over, stack } from "../../draw.ts";
 import { sprite } from "../../format.ts";
 import { UI } from "../../ui-legend.ts";
 
@@ -89,48 +89,57 @@ const fillsThin = sprite({
 });
 
 /**
- * Boss bar: a medallion with the red 오답 X, then a groove for the four 논제. The groove
- * stretches; segments are drawn into it with `fill` frames, one pixel apart.
+ * Boss bar: the raid the whole server shares, so the proudest piece of the HUD. A gilt
+ * medallion with the red 오답 X, then a gilt-rimmed groove for the four 논제. The groove
+ * stretches; segments are drawn into it with `fill` frames, one pixel apart, a gold tick in
+ * each gap.
  */
-const BOSS_H = 13;
-const MEDAL = 13;
+const MEDAL = 19;
+const BOSS_W = MEDAL + 4;
 const medal = over(
   disc(
     MEDAL,
     [
       [1, "o"],
-      [1, lit("l", "m", "o")],
+      [2, lit("y", "Y", "G")],
+      [1, "o"],
     ],
     "k",
   ),
-  stack(
-    ".............",
-    ".............",
-    ".............",
-    "...RR...RR...",
-    "....RR.RR....",
-    ".....RRR.....",
-    "....rr.rr....",
-    "...rr...rr...",
-  ),
+  stack("RR.....RR", ".RR...RR.", "..RR.RR..", "...RRR...", "..rr.rr..", ".rr...rr.", "rr.....rr"),
+  5,
+  6,
 );
 const bossBar = sprite({
   ...ui,
   name: "boss-bar",
-  size: [MEDAL + 4, BOSS_H],
-  slice: [MEDAL, 2, 6, 6],
+  size: [BOSS_W, MEDAL],
+  slice: [MEDAL, 2, 9, 9],
   palette: HUD,
   frames: {
     idle: over(
-      grid(MEDAL + 4, BOSS_H, (x, y) => {
-        if (x < 7 || y < 2 || y > 10) return ".";
-        const right = x === MEDAL + 3;
-        if (y === 2 || y === 10) return right ? "." : "o";
-        return right ? "o" : "k";
+      grid(BOSS_W, MEDAL, (x, y) => {
+        if (x < 10 || y < 3 || y > 15) return ".";
+        if (x === BOSS_W - 1) return y === 3 || y === 15 ? "." : "o";
+        if (y === 3 || y === 15) return "o";
+        if (x === BOSS_W - 2) return "g";
+        if (y === 4) return "Y";
+        if (y === 14) return "G";
+        return "k";
       }),
       medal,
     ),
   },
+});
+
+/** The gold tick between two 논제 in the boss groove. */
+const bossTick = sprite({
+  ...ui,
+  name: "boss-tick",
+  size: [1, 9],
+  outline: false,
+  palette: HUD,
+  frames: { idle: stack(["g", 9]) },
 });
 
 /** Control-mode chip, one colour per mode, from cool (auto) to hot (manual). */
@@ -158,37 +167,16 @@ const mode = sprite({
   },
 });
 
-/** The mode dial: a gauge whose needle swings from auto to manual. */
-function dial(needle: readonly (readonly [number, number])[]): string {
-  const base = stack("..ooooo..", ".oWWWWWo.", "oWWWWWWWo", "oWWWWWWWo", "oWWWWWWWo", "ooooooooo");
-  const n = grid(9, 6, (x, y) =>
-    (x === 4 && y === 4) || needle.some(([nx, ny]) => nx === x && ny === y) ? "k" : ".",
-  );
-  return over(base, n);
-}
-
-const modeDial = sprite({
+/** The mode chip's glyph: a cycle arrow, because a tap moves to the next mode. */
+const modeIcon = sprite({
   ...ui,
-  name: "mode-dial",
-  size: [9, 6],
-  palette: HUD,
+  name: "mode-icon",
+  size: [7, 7],
+  outline: false,
+  lone: "w",
+  palette: { ...HUD, w: "stone.bright" },
   frames: {
-    auto: dial([
-      [2, 4],
-      [3, 4],
-    ]),
-    semi: dial([
-      [2, 2],
-      [3, 3],
-    ]),
-    skill: dial([
-      [6, 2],
-      [5, 3],
-    ]),
-    manual: dial([
-      [5, 4],
-      [6, 4],
-    ]),
+    cycle: stack(".www.w.", "w...ww.", "w..www.", "w......", "w.....w", ".w...w.", "..www.."),
   },
 });
 
@@ -231,9 +219,10 @@ const bookSlot = sprite({
 });
 
 /**
- * Cooldown sweep over a book slot, 16 steps. Frame `cd00` is a fresh cooldown, fully shaded;
- * the shade clears clockwise from 12 o'clock. Shade is a 50% dither of ink, so the book still
- * reads under it.
+ * Cooldown, 16 steps. Under it the book is drawn one palette step darker (`book-dim`), and the
+ * bright book is revealed clockwise from 12 o'clock as the cooldown runs out. This overlay is the
+ * hand of that clock: a gold line from the centre to the rim at the revealed edge. Frame `cd00`
+ * is a fresh cooldown.
  */
 const STEPS = 16;
 const cooldownFrames = Object.fromEntries(
@@ -241,9 +230,14 @@ const cooldownFrames = Object.fromEntries(
     `cd${String(i).padStart(2, "0")}`,
     grid(SLOT, SLOT, (x, y) => {
       const r = Math.hypot(x + 0.5 - SLOT / 2, y + 0.5 - SLOT / 2);
-      if (r > SLOT / 2 - 4.25) return ".";
-      if (turn(x, y, SLOT) < i / STEPS) return ".";
-      return (x + y) % 2 === 0 ? "c" : ".";
+      if (r > SLOT / 2 - 4.25 || r < 1) return ".";
+      const a = (i / STEPS) * 2 * Math.PI;
+      // Distance from the hand: the ray from the centre at angle a, clockwise from 12.
+      const dx = x + 0.5 - SLOT / 2;
+      const dy = y + 0.5 - SLOT / 2;
+      const along = dx * Math.sin(a) - dy * Math.cos(a);
+      const across = dx * Math.cos(a) + dy * Math.sin(a);
+      return along > 0 && Math.abs(across) < 0.75 ? "c" : ".";
     }),
   ]),
 );
@@ -251,7 +245,8 @@ const cooldown = sprite({
   ...ui,
   name: "cooldown",
   size: [SLOT, SLOT],
-  palette: { ...HUD, c: "ink.deep" },
+  outline: false,
+  palette: { ...HUD, c: "gold.pale" },
   lone: "c",
   frames: cooldownFrames,
 });
@@ -321,8 +316,9 @@ export default [
   fills,
   fillsThin,
   bossBar,
+  bossTick,
   mode,
-  modeDial,
+  modeIcon,
   bookSlot,
   cooldown,
   lock,

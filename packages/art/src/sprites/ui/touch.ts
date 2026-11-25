@@ -80,6 +80,36 @@ const touchBtn = sprite({
   },
 });
 
+/** The dodge: the button the right thumb rests on, so the largest of the cluster. */
+const touchMain = sprite({
+  ...ui,
+  name: "touch-main",
+  size: [34, 34],
+  palette: TOUCH,
+  frames: {
+    idle: disc(
+      34,
+      [
+        [1, "o"],
+        [1, lit("B", "b", "N")],
+        [2, lit("l", "m", "k")],
+        [1, "o"],
+      ],
+      "k",
+    ),
+    pressed: disc(
+      34,
+      [
+        [1, "o"],
+        [1, lit("N", "n", "b")],
+        [2, lit("o", "k", "m")],
+        [1, "o"],
+      ],
+      "k",
+    ),
+  },
+});
+
 const touchIcon = sprite({
   ...ui,
   name: "touch-icon",
@@ -125,4 +155,4 @@ const touchIcon = sprite({
   },
 });
 
-export default [stickBase, stickKnob, touchBtn, touchIcon];
+export default [stickBase, stickKnob, touchBtn, touchMain, touchIcon];

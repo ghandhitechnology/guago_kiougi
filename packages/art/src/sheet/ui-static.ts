@@ -4,14 +4,17 @@
  */
 import { PNG } from "pngjs";
 import type { Compiled } from "../build/compile.ts";
+import type { Atlas } from "../build/emit.ts";
 import type { BuiltFont } from "../fonts.ts";
 import { colorIndex, INDEX_RGB, previewLut } from "../palette.ts";
 import { CLEAR, type Indexed, Rgba } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
+import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
+import { SCENES } from "../scenes/index.ts";
 import type { CompiledSprite } from "../sprite.ts";
 import { type BmFont, measure, parseBmFont, place } from "./bmfont.ts";
 import { FONT_SAMPLES, KIT, NUMERAL_SAMPLES, SHEET } from "./ui-content.ts";
-import { type Kit, type Op, type Screen, sliceRects } from "./ui-ops.ts";
+import { type Kit, type Op, type Screen, shadePixels, sliceRects, swept } from "./ui-ops.ts";
 import { screens } from "./ui-screens.ts";
 
 const rgb = (name: string) => INDEX_RGB[colorIndex(name)] as readonly number[];
@@ -27,8 +30,19 @@ export class StaticKit implements Kit {
   readonly loaded = new Map<string, LoadedFont>();
   readonly sprites = new Map<string, CompiledSprite>();
   readonly rigs = new Map<string, CompiledRig>();
+  readonly meta: SceneMeta;
+  readonly pixels: Map<string, SceneAtlas>;
 
-  constructor(art: readonly Compiled[], fonts: readonly BuiltFont[]) {
+  constructor(
+    art: readonly Compiled[],
+    fonts: readonly BuiltFont[],
+    meta: SceneMeta,
+    atlases: readonly Atlas[],
+  ) {
+    this.meta = meta;
+    this.pixels = new Map(
+      atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
+    );
     for (const a of art) {
       if (a.kind === "sprite") this.sprites.set(a.name, a);
       if (a.kind === "rig") this.rigs.set(a.name, a);
@@ -42,6 +56,10 @@ export class StaticKit implements Kit {
 
   size(sprite: string): readonly [number, number] | undefined {
     return this.sprites.get(sprite)?.size;
+  }
+
+  origin(sprite: string): readonly [number, number] | undefined {
+    return this.sprites.get(sprite)?.origin;
   }
 
   frames(sprite: string): readonly string[] {
@@ -97,10 +115,35 @@ function region(
 }
 
 export function drawOp(c: Rgba, kit: StaticKit, op: Op, scale: number, ox = 0, oy = 0): void {
-  if (op.op === "fill") {
+  if (op.op === "scene") {
+    const def = SCENES.find((d) => d.name === op.name);
+    if (!def) throw new Error(`no scene ${op.name}`);
+    const img = renderScene(def, kit.meta, kit.pixels, 0);
+    const data = new Uint8Array(img.data);
+    shadePixels(data, kit.meta.shade, op.shade ?? 0);
+    for (let y = 0; y < img.h; y++) {
+      for (let x = 0; x < img.w; x++) {
+        const o = (y * img.w + x) * 4;
+        c.rect(ox + x * scale, oy + y * scale, scale, scale, [
+          data[o] as number,
+          data[o + 1] as number,
+          data[o + 2] as number,
+        ]);
+      }
+    }
+  } else if (op.op === "fill") {
     c.rect(ox + op.x * scale, oy + op.y * scale, op.w * scale, op.h * scale, rgb(op.color));
   } else if (op.op === "frame") {
-    const img = kit.img(op.sprite, op.frame);
+    let img = kit.img(op.sprite, op.frame);
+    const f = op.sweep;
+    if (f !== undefined) {
+      img = {
+        ...img,
+        px: img.px.map((v, i) =>
+          swept(i % img.w, Math.floor(i / img.w), img.w, img.h, f) ? v : CLEAR,
+        ),
+      };
+    }
     const r = { sx: 0, sy: 0, sw: img.w, sh: img.h, dx: op.x, dy: op.y, dw: img.w, dh: img.h };
     region(c, img, r, ox, oy, scale);
   } else if (op.op === "rig") {
@@ -363,8 +406,10 @@ export function kitSheet(kit: StaticKit): Rgba {
 export function uiSheets(
   art: readonly Compiled[],
   fonts: readonly BuiltFont[],
+  meta: SceneMeta,
+  atlases: readonly Atlas[],
 ): Record<string, Rgba> {
-  const kit = new StaticKit(art, fonts);
+  const kit = new StaticKit(art, fonts, meta, atlases);
   const out: Record<string, Rgba> = { fonts: fontSheet(kit), "ui-kit": kitSheet(kit) };
   for (const screen of screens(kit)) {
     out[`screen-${screen.name}`] = renderScreen(kit, screen, 1);

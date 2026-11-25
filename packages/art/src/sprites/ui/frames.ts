@@ -9,39 +9,90 @@ import { UI } from "../../ui-legend.ts";
  */
 const ui = { group: "ui", origin: [0, 0], anim: {} } as const;
 
-/** Spine tape, cover rows above the page; the page is the stretched middle. */
-function cover(top: number) {
-  return stack(
-    ".oooooooooooo.",
-    "omkkbbbbbbbbno",
-    ["omkkbnnnnnnnNo", top - 2],
-    ["omkkbnnWWsNnNo", 2],
-    "omkkbnnsssNnNo",
-    "omkkbnnNNNNnNo",
-    "omkkbnnnnnnnNo",
-    "omkkNNNNNNNNNo",
-    ".oooooooooooo.",
-  );
+/** Left inset of a cover: outline, three columns of spine tape, then three of cover. */
+const SPINE = 7;
+
+/**
+ * A notebook cover with a page on it: spine tape on the left, `top` rows of cover above the
+ * page, and the page's bottom-right corner dog-eared by `fold` pixels (0 for none). The page is
+ * the stretched middle; the fold sits in the fixed corner, so it never stretches.
+ */
+function cover(
+  top: number,
+  fold: number,
+): { grid: string; size: [number, number]; slice: [number, number, number, number] } {
+  const right = 5 + fold;
+  const bottom = 5 + fold;
+  const w = SPINE + 2 + right;
+  const h = top + 2 + bottom;
+  const pageR = w - 5;
+  const pageB = h - 5;
+  const onPage = (x: number, y: number) => x >= SPINE && x <= pageR && y >= top && y <= pageB;
+  const cut = (x: number, y: number) => fold > 0 && pageR - x + (pageB - y) < fold;
+  const page = (x: number, y: number) => onPage(x, y) && !cut(x, y);
+  const art = grid(w, h, (x, y) => {
+    const edgeX = x === 0 || x === w - 1;
+    const edgeY = y === 0 || y === h - 1;
+    if (edgeX && edgeY) return ".";
+    if (edgeX || edgeY) return "o";
+    if (x === 1) return "m";
+    if (x < 4) return "k";
+    if (page(x, y)) {
+      const u = pageR - x;
+      const v = pageB - y;
+      if (fold > 0 && u <= fold && v <= fold) {
+        // The folded flap shows the back of the page; its crease and rims are a step darker.
+        if (u + v === fold) return "S";
+        if (u + v > fold) return u === fold || v === fold ? "s" : "p";
+      }
+      return u === 0 || v === 0 ? "s" : "W";
+    }
+    // The page's shadow on the cover, right and below, and under the lifted flap.
+    const shadowRight =
+      x === pageR + 1 && y >= top && y <= pageB + 1 && page(pageR, Math.min(y, pageB));
+    const shadowBelow =
+      y === pageB + 1 && x >= SPINE && x <= pageR + 1 && page(Math.min(x, pageR), pageB);
+    const underFlap = onPage(x, y) && cut(x, y) && pageR - x + (pageB - y) === fold - 1;
+    if (shadowRight || shadowBelow || underFlap) return "N";
+    if (y === 1) return x === w - 2 ? "n" : "b";
+    if (x === 4) return "b";
+    if (x === w - 2 || y === h - 2) return "N";
+    return "n";
+  });
+  return { grid: art, size: [w, h], slice: [SPINE, right, top, bottom] };
 }
 
-/** Main panel: title on the cover's top band, content on the page. */
+const PANEL = cover(19, 6);
+const DIALOG = cover(5, 0);
+
+/** Main panel: title on the cover's top band, content on the page, its last corner dog-eared. */
 const panel = sprite({
   ...ui,
   name: "panel",
-  size: [14, 24],
-  slice: [7, 5, 17, 5],
+  size: PANEL.size,
+  slice: PANEL.slice,
   palette: UI,
-  frames: { idle: cover(17) },
+  frames: { idle: PANEL.grid },
 });
 
 /** Dialogue box: the same notebook with a thin cover. */
 const dialog = sprite({
   ...ui,
   name: "dialog",
-  size: [14, 12],
-  slice: [7, 5, 5, 5],
+  size: DIALOG.size,
+  slice: DIALOG.slice,
   palette: UI,
-  frames: { idle: cover(5) },
+  frames: { idle: DIALOG.grid },
+});
+
+/** The name label stuck on a cover, where a student writes the subject. */
+const label = sprite({
+  ...ui,
+  name: "label",
+  size: [7, 15],
+  slice: [3, 3, 7, 7],
+  palette: UI,
+  frames: { idle: stack(".ooooo.", ["oWWWWWo", 12], "opppppo", ".ooooo.") },
 });
 
 /** Answer box ruled into the page: recessed, shadow at the top left. */
@@ -205,6 +256,7 @@ const nameplate = sprite({
 export default [
   panel,
   dialog,
+  label,
   inset,
   row,
   nametab,

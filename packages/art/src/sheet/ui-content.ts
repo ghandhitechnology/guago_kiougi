@@ -64,6 +64,7 @@ export const KIT: readonly KitGroup[] = [
     title: "surfaces",
     sprites: [
       "panel",
+      "label",
       "dialog",
       "nametab",
       "portrait-slot",
@@ -76,8 +77,12 @@ export const KIT: readonly KitGroup[] = [
     ],
     stretch: {
       panel: [
-        [64, 40],
-        [160, 96],
+        [72, 56],
+        [180, 110],
+      ],
+      label: [
+        [36, 15],
+        [60, 15],
       ],
       dialog: [
         [80, 32],
@@ -168,10 +173,9 @@ export const KIT: readonly KitGroup[] = [
       "fill",
       "fill-thin",
       "boss-bar",
-      "boss-fill",
-      "boss-notch",
+      "boss-tick",
       "mode",
-      "mode-dial",
+      "mode-icon",
       "book-slot",
       "cooldown",
       "lock",
@@ -197,12 +201,8 @@ export const KIT: readonly KitGroup[] = [
         [80, 3],
       ],
       "boss-bar": [
-        [120, 11],
-        [200, 11],
-      ],
-      "boss-fill": [
-        [30, 7],
-        [48, 7],
+        [120, 19],
+        [200, 19],
       ],
       mode: [
         [52, 14],
@@ -220,11 +220,11 @@ export const KIT: readonly KitGroup[] = [
   },
   {
     title: "touch",
-    sprites: ["stick-base", "stick-knob", "touch-btn", "touch-icon"],
+    sprites: ["stick-base", "stick-knob", "touch-main", "touch-btn", "touch-icon"],
   },
   {
     title: "icons",
     paper: true,
-    sprites: ["icon", "menu", "emblem", "book"],
+    sprites: ["icon", "menu", "emblem", "book", "book-dim"],
   },
 ];

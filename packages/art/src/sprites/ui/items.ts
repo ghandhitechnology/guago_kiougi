@@ -1,5 +1,6 @@
 import { grid, over, stack } from "../../draw.ts";
-import { sprite } from "../../format.ts";
+import { sprite, variant } from "../../format.ts";
+import { RAMP_LIST } from "../../palette.ts";
 import { UI } from "../../ui-legend.ts";
 
 /**
@@ -197,4 +198,12 @@ const books = sprite({
   },
 });
 
-export default [item, itemEmpty, itemSelect, books];
+/** Every colour one step down its ramp: the book under a running cooldown. */
+const DIM = Object.fromEntries(
+  RAMP_LIST.flatMap((r) =>
+    r.steps.slice(1).map((step, i) => [`${r.name}.${step}`, `${r.name}.${r.steps[i]}`]),
+  ),
+);
+const booksDim = variant(books, { name: "book-dim", recolor: DIM });
+
+export default [item, itemEmpty, itemSelect, books, booksDim];

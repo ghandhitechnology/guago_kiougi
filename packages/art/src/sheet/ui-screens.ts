@@ -1,8 +1,12 @@
 /**
- * Three composed 480×270 screens built from the UI kit and the bitmap fonts: the HUD in an
- * era boss raid, 엔트로피's first line, and the 가방 with a book's 필기 card. Values follow the
- * PLAN's formulas (§8, §9) for a level 87 수학 student. Browser-safe.
+ * Three composed 480×270 screens built from the UI kit and the bitmap fonts, laid over the real
+ * scenes by name: the HUD over the fight at the 아고라 rift, 엔트로피's first line on campus at
+ * night, and the 가방 with a book's 필기 card. Damage numbers and nameplates are placed on the
+ * scene's own monsters and students, so the screens follow the scenes when they change. Values
+ * follow the PLAN's formulas (§8, §9) for a level 87 수학 student. Browser-safe.
  */
+import type { Actor, Doll, SceneDef } from "../scene.ts";
+import { SCENES } from "../scenes/index.ts";
 import { measure } from "./bmfont.ts";
 import type { Kit, Op, Screen } from "./ui-ops.ts";
 
@@ -30,8 +34,24 @@ class Draw {
     this.ops.push({ op: "fill", color, x, y, w, h });
   }
 
-  frame(sprite: string, frame: string, x: number, y: number): void {
-    this.ops.push({ op: "frame", sprite, frame, x, y });
+  frame(sprite: string, frame: string, x: number, y: number, sweep?: number): void {
+    this.ops.push(
+      sweep === undefined
+        ? { op: "frame", sprite, frame, x, y }
+        : { op: "frame", sprite, frame, x, y, sweep },
+    );
+  }
+
+  scene(name: string, shade = 0): void {
+    this.ops.push({ op: "scene", name, shade });
+  }
+
+  /** A nameplate centred under a character's feet. */
+  nameplate(name: string, cx: number, feet: number): void {
+    const w = this.width("galmuri9", name) + 6;
+    const x = cx - Math.ceil(w / 2);
+    this.slice("nameplate", "idle", x, feet + 2, w, 13);
+    this.text("galmuri9", name, x + 3, feet + 4, "stone.bright");
   }
 
   slice(sprite: string, frame: string, x: number, y: number, w: number, h: number): void {
@@ -86,59 +106,108 @@ function bar(
     d.slice(fill, frame, x + 1, y + 1, Math.round((w - 2) * f), h - 2);
 }
 
+function sceneDef(name: string): SceneDef | undefined {
+  return SCENES.find((d) => d.name === name);
+}
+
+/** The scene's monsters, and its students whose look the build has. */
+function cast(kit: Kit, def: SceneDef | undefined) {
+  const objects = def?.objects ?? [];
+  const monsters = objects.filter((o): o is Actor => "actor" in o);
+  const students = objects.filter(
+    (o): o is Doll => "rig" in o && (o.look === undefined || kit.hasLook(o.rig, o.look)),
+  );
+  return { monsters, students };
+}
+
+/** A round book slot: the book, darkened under a running cooldown and swept back to bright. */
+function bookSlot(d: Draw, book: string | null, x: number, y: number, state: string, cd?: number) {
+  if (!book) {
+    d.frame("book-slot", "locked", x, y);
+    d.frame("lock", "idle", x + 8, y + 7);
+    return;
+  }
+  d.frame("book-slot", state, x, y);
+  if (cd === undefined) {
+    d.frame("book", book, x + 4, y + 4);
+    return;
+  }
+  d.frame("book-dim", book, x + 4, y + 4);
+  d.frame("book", book, x + 4, y + 4, cd / 16);
+  d.frame("cooldown", `cd${String(cd).padStart(2, "0")}`, x, y);
+}
+
 function hud(kit: Kit): Screen {
   const d = new Draw(kit);
-  d.fill("grass.mid", 0, 0, SCREEN_W, SCREEN_H);
+  const def = sceneDef("agora-rift");
+  d.scene("agora-rift");
 
-  // The field: you, three 오답, and what your books just did to one of them.
-  d.frame("odap", "idle0", 172, 150);
-  d.frame("odap", "hop1", 318, 162);
-  d.frame("odap", "hit", 290, 104);
-  d.numerals("dmg-small", "1,181", 270, 90);
-  d.numerals("dmg-crit", "2,953!", 292, 76);
-  d.rig("student", "blazer", "down/attack1", 232, 124);
-  const name = "졸린과학도";
-  const nw = d.width("galmuri9", name) + 6;
-  d.slice("nameplate", "idle", 240 - Math.ceil(nw / 2), 150, nw, 13);
-  d.text("galmuri9", name, 240 - Math.ceil(nw / 2) + 3, 152, "stone.bright");
+  // The scene's own fight: names under the students, numbers over the 오답 being hit.
+  const { monsters, students } = cast(kit, def);
+  const you = students.find((s) => s.anim === "attack") ?? students[0];
+  const others = ["밤샘연구생", "새벽세시"];
+  for (const s of students)
+    d.nameplate(s === you ? "졸린과학도" : (others.shift() ?? ""), s.at[0], s.at[1]);
+  const struck = monsters.find((m) => m.anim === "hit") ?? monsters[0];
+  const top = (m: Actor) => m.at[1] - (kit.origin(m.actor)?.[1] ?? 15);
+  if (struck) {
+    const crit = "2,953!";
+    d.numerals(
+      "dmg-crit",
+      crit,
+      struck.at[0] - Math.floor(d.width("dmg-crit", crit) / 2),
+      top(struck) - 16,
+    );
+  }
+  const next = monsters.find((m) => m !== struck);
+  if (next) {
+    const hit = "1,181";
+    d.numerals(
+      "dmg-small",
+      hit,
+      next.at[0] - Math.floor(d.width("dmg-small", hit) / 2),
+      top(next) - 11,
+    );
+  }
 
   // You: level, HP with the chunk just lost trailing, EXP.
   d.slice("hud-plate", "idle", 6, 6, 26, 19);
+  const lv = "87";
   d.text(
     "galmuri11-bold",
-    "87",
-    19 - Math.ceil(d.width("galmuri11-bold", "87") / 2),
+    lv,
+    19 - Math.ceil(d.width("galmuri11-bold", lv) / 2),
     10,
     "stone.bright",
   );
-  bar(d, "bar", "fill", 34, 6, 104, 13, [
+  bar(d, "bar", "fill", 34, 6, 98, 13, [
     ["lag", 0.67],
     ["hp", 1204 / 1927],
   ]);
   const hp = "1,204 / 1,927";
-  d.lifted("galmuri9", hp, 86 - Math.floor(d.width("galmuri9", hp) / 2), 8);
-  bar(d, "bar-thin", "fill-thin", 34, 20, 104, 5, [["exp", 0.614]]);
+  d.lifted("galmuri9", hp, 83 - Math.floor(d.width("galmuri9", hp) / 2), 8);
+  bar(d, "bar-thin", "fill-thin", 34, 20, 98, 5, [["exp", 0.614]]);
 
   // Control mode: tap to cycle.
   const label = "반자동";
-  const chipW = 17 + d.width("galmuri9", label) + 4;
-  d.slice("mode", "semi", 6, 29, chipW, 13);
-  d.frame("mode-dial", "semi", 10, 33);
-  d.text("galmuri9", label, 22, 31, "stone.bright");
+  d.slice("mode", "semi", 6, 29, 14 + d.width("galmuri9", label) + 4, 13);
+  d.frame("mode-icon", "cycle", 10, 32);
+  d.text("galmuri9", label, 20, 31, "stone.bright");
 
   // Chat, collapsed.
   d.slice("hud-plate", "idle", 6, 46, 18, 16);
   d.frame("icon", "chat", 9, 48);
 
-  // Era boss: four 논제, the first already won.
-  const bx = 150;
-  const bw = 180;
-  d.lifted("galmuri11-bold", "아리스토텔레스", bx + 14, 5);
-  const phase = "논제 2";
-  d.lifted("galmuri9", phase, bx + bw - 2 - d.width("galmuri9", phase), 7);
-  d.slice("boss-bar", "idle", bx, 17, bw, 13);
-  const gx = bx + 13;
-  const gw = bw - 13 - 1;
+  // Era boss: the raid the whole server shares. Four 논제, the first already won.
+  const bw = 200;
+  const bx = 240 - bw / 2;
+  d.slice("hud-plate", "idle", bx + 9, 2, bw - 9, 33);
+  d.text("galmuri11-bold", "아리스토텔레스", bx + 23, 5, "stone.bright");
+  const phase = "논제 2 / 4";
+  d.text("galmuri9", phase, bx + bw - 6 - d.width("galmuri9", phase), 7, "gold.light");
+  d.slice("boss-bar", "idle", bx, 14, bw, 19);
+  const gx = bx + 19;
+  const gw = bw - 19 - 2;
   const seg = Math.floor((gw - 3) / 4);
   const segs = [
     ["cleared", 1],
@@ -148,18 +217,19 @@ function hud(kit: Kit): Screen {
   ] as const;
   segs.forEach(([frame, f], i) => {
     const w = i === 3 ? gw - 3 * (seg + 1) : seg;
-    d.slice("fill", frame, gx + i * (seg + 1), 20, Math.round(w * f), 7);
+    d.slice("fill", frame, gx + i * (seg + 1), 19, Math.round(w * f), 9);
+    if (i > 0) d.frame("boss-tick", "idle", gx + i * (seg + 1) - 1, 19);
   });
 
   // 벌점 and the 자습 pool.
-  d.slice("hud-plate", "idle", 352, 6, 60, 16);
-  d.frame("icon", "whistle", 355, 8);
-  d.text("galmuri9", "벌점 3", 370, 9, "stone.bright");
-  d.slice("hud-plate", "idle", 352, 24, 60, 16);
-  d.frame("icon", "lamp", 355, 26);
-  bar(d, "bar-thin", "fill-thin", 370, 29, 38, 5, [["pool", 200 / 480]]);
+  d.slice("hud-plate", "idle", 350, 6, 62, 16);
+  d.frame("icon", "whistle", 353, 8);
+  d.text("galmuri9", "벌점 3", 368, 9, "stone.bright");
+  d.slice("hud-plate", "idle", 350, 24, 62, 16);
+  d.frame("icon", "pool", 353, 26);
+  bar(d, "bar-thin", "fill-thin", 368, 29, 40, 5, [["pool", 200 / 480]]);
 
-  // Minimap of the arena.
+  // Minimap of the arena, named underneath.
   d.fill("grass.dark", 420, 10, 50, 50);
   d.slice("minimap", "idle", 416, 6, 58, 58);
   d.frame("map-dot", "boss", 442, 16);
@@ -167,33 +237,38 @@ function hud(kit: Kit): Screen {
   d.frame("map-dot", "party", 452, 40);
   d.frame("map-dot", "me", 442, 34);
   d.frame("map-dot", "portal", 424, 50);
-  const map = "리케이온";
-  d.lifted("galmuri9", map, 445 - Math.ceil(d.width("galmuri9", map) / 2), 67);
+  const map = "아고라";
+  d.slice("hud-plate", "idle", 416, 63, 58, 15);
+  d.text("galmuri9", map, 445 - Math.ceil(d.width("galmuri9", map) / 2), 66, "stone.bright");
 
-  // Phone controls: the stick, the context button, the dodge and the six-book fan.
-  d.frame("stick-base", "idle", 12, 212);
-  d.frame("stick-knob", "idle", 32, 222);
-  const px = 428;
-  const py = 234;
-  d.frame("touch-btn", "idle", px - 14, py - 14);
-  d.frame("touch-icon", "dodge", px - 7, py - 7);
-  d.frame("touch-btn", "idle", 330, 234);
-  d.frame("touch-icon", "interact", 337, 241);
-  const books = ["probability", "sequence", "graph", "proof", null, null] as const;
-  books.forEach((book, i) => {
-    const a = ((163 + i * 31) * Math.PI) / 180;
-    const x = Math.round(px + 48 * Math.cos(a)) - 12;
-    const y = Math.round(py + 48 * Math.sin(a)) - 12;
-    if (!book) {
-      d.frame("book-slot", "locked", x, y);
-      d.frame("lock", "idle", x + 8, y + 7);
-      return;
-    }
-    d.frame("book-slot", i === 2 ? "ready" : "idle", x, y);
-    d.frame("book", book, x + 4, y + 4);
-    if (i === 1) d.frame("cooldown", "cd05", x, y);
-    if (i === 3) d.frame("cooldown", "cd11", x, y);
-  });
+  // The right thumb's cluster: dodge in the corner, three books close around it, the fourth
+  // and the two locked slots on the outer arc, interact at the arc's lower end.
+  d.frame("stick-base", "idle", 14, 210);
+  d.frame("stick-knob", "idle", 34, 220);
+  const cx = 446;
+  const cy = 236;
+  d.frame("touch-main", "idle", cx - 17, cy - 17);
+  d.frame("touch-icon", "dodge", cx - 7, cy - 7);
+  const at = (r: number, deg: number) =>
+    [
+      Math.round(cx + r * Math.cos((deg * Math.PI) / 180)) - 12,
+      Math.round(cy + r * Math.sin((deg * Math.PI) / 180)) - 12,
+    ] as const;
+  const slots: readonly (readonly [string | null, number, number, string, number?])[] = [
+    ["probability", 38, 180, "idle"],
+    ["sequence", 38, 225, "idle", 5],
+    ["graph", 38, 270, "ready"],
+    ["proof", 66, 195, "idle", 11],
+    [null, 66, 228, "locked"],
+    [null, 66, 261, "locked"],
+  ];
+  for (const [book, r, deg, state, cd] of slots) {
+    const [x, y] = at(r, deg);
+    bookSlot(d, book, x, y, state, cd);
+  }
+  const [ix, iy] = at(72, 165);
+  d.frame("touch-btn", "idle", ix - 2, iy - 2);
+  d.frame("touch-icon", "interact", ix + 5, iy + 5);
 
   return { name: "hud", w: SCREEN_W, h: SCREEN_H, ops: d.ops };
 }
@@ -202,8 +277,12 @@ function hud(kit: Kit): Screen {
 
 function dialogue(kit: Kit): Screen {
   const d = new Draw(kit);
-  d.fill("ink.dark", 0, 0, SCREEN_W, SCREEN_H);
-  d.rig("student", "blazer", "up/idle0", 232, 118);
+  d.scene("campus-night");
+  // 엔트로피 sits at the student's feet, looking unimpressed.
+  const { students } = cast(kit, sceneDef("campus-night"));
+  const near = students.find((s) => s.dir === "up") ?? students[0];
+  const cat = kit.origin("entropy");
+  if (near && cat) d.frame("entropy", "sit0", near.at[0] + 14 - cat[0], near.at[1] - cat[1]);
 
   // A notebook page: the portrait pasted in the margin, lines ruled for what the cat says.
   const x = 8;
@@ -244,16 +323,18 @@ const num = (n: number) => n.toLocaleString("en-US");
 
 function bag(kit: Kit): Screen {
   const d = new Draw(kit);
-  d.fill("grass.mid", 0, 0, SCREEN_W, SCREEN_H);
-  d.rig("student", "blazer", "down/idle0", 232, 8);
+  // The field stays in view, two palette steps down, behind the open notebook.
+  d.scene("campus-night", 2);
 
-  // The panel rises from the bottom edge.
+  // The panel rises from the bottom edge; its title is on the cover's name label.
   const px = 6;
-  const py = 36;
+  const py = 32;
   const pw = 468;
-  const ph = 230;
+  const ph = 234;
   d.slice("panel", "idle", px, py, pw, ph);
-  d.text("galmuri11-bold", "가방", px + 11, py + 4, "stone.bright");
+  const title = "가방";
+  d.slice("label", "idle", px + 10, py + 2, d.width("galmuri11-bold", title) + 12, 15);
+  d.text("galmuri11-bold", title, px + 16, py + 4, "ink.dark");
   d.frame("close", "idle", px + pw - 17, py + 4);
 
   // Purse, on the cover, where 필기 spends from.
@@ -262,17 +343,17 @@ function bag(kit: Kit): Screen {
   let cx = px + pw - 26;
   const purse = (icon: string, value: string) => {
     cx -= d.width("galmuri9", value);
-    d.text("galmuri9", value, cx, py + 6, "stone.bright");
+    d.text("galmuri9", value, cx, py + 7, "stone.bright");
     cx -= 14;
-    d.frame("icon", icon, cx, py + 3);
+    d.frame("icon", icon, cx, py + 4);
     cx -= 10;
   };
   purse("ink", num(ink));
   purse("pinecone", num(coins));
 
   // Books tab open over the bag's well.
-  const wx = px + 10;
-  const wy = py + 34;
+  const wx = px + 11;
+  const wy = py + 36;
   const cols = 7;
   const rows = 7;
   const ww = cols * 26 + 4 + 8;
@@ -329,8 +410,8 @@ function bag(kit: Kit): Screen {
 
   // The detail card of the selected book.
   const dx = wx + ww + 8;
-  const dy = py + 21;
-  const dw = px + pw - 8 - dx;
+  const dy = py + 23;
+  const dw = px + pw - 12 - dx;
   const dh = wy + wh - dy;
   d.slice("inset", "idle", dx, dy, dw, dh);
   d.frame("item", "advanced", dx + 8, dy + 8);
