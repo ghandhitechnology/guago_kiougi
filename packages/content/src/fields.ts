@@ -59,8 +59,8 @@ export interface FieldRosterEntry {
 }
 
 export interface FieldDef {
+  /** Also the id of its place description in the narrative (name and blurb). */
   readonly id: string;
-  readonly name: string;
   readonly page: number;
   readonly levels: { readonly min: number; readonly max: number };
   readonly roster: readonly FieldRosterEntry[];
@@ -78,7 +78,6 @@ const TORTOISE: FieldRosterEntry = { monster: "tortoise", weight: 0.05, maxAlive
 export const PAGE1_FIELDS: readonly FieldDef[] = [
   {
     id: "p1-colonnade",
-    name: "무너진 열주",
     page: 1,
     levels: { min: 1, max: 25 },
     roster: [
@@ -91,7 +90,6 @@ export const PAGE1_FIELDS: readonly FieldDef[] = [
   },
   {
     id: "p1-olive-road",
-    name: "올리브 숲길",
     page: 1,
     levels: { min: 26, max: 50 },
     roster: [
@@ -105,7 +103,6 @@ export const PAGE1_FIELDS: readonly FieldDef[] = [
   },
   {
     id: "p1-cave-mouth",
-    name: "동굴 입구",
     page: 1,
     levels: { min: 51, max: 75 },
     roster: [
@@ -120,7 +117,6 @@ export const PAGE1_FIELDS: readonly FieldDef[] = [
   },
   {
     id: "p1-agora-edge",
-    name: "아고라 외곽",
     page: 1,
     levels: { min: 76, max: 100 },
     roster: [

@@ -4,10 +4,15 @@ import { sprite } from "../../format.ts";
  * 유리수 병사: a hoplite of the Pythagorean order. Everything is a ratio of whole numbers, so the
  * shield carries a ÷ and the spear is a ruler with its ticks marked. Rigid and easily offended:
  * between steps it snaps back to attention and polishes the shield until it shines.
+ *
+ * 방패형: it faces its target and the shield is always in front, so the side you must not hit
+ * from is the side the ÷ is on. Braced, it crouches behind the shield with the ruler levelled
+ * over the rim; a hit on the shield flashes it white and shoves the soldier back a step.
  */
 export default sprite({
   name: "rational",
-  size: [16, 24],
+  size: [24, 24],
+  origin: [8, 23],
   palette: {
     ".": null,
     D: "gold.deep",
@@ -32,7 +37,7 @@ export default sprite({
   lone: "^*",
   parts: {
     spear: {
-      at: [12, 1],
+      at: [0, 1],
       grid: `
         .GG.
         GwqG
@@ -79,7 +84,7 @@ export default sprite({
         ..DDDDDD..
         .DaAAaadDD
         .DaAaaadaD
-        .DaaaaddaD
+        .DaaaddddD
         .RmmRmmRDD
         .RRRRRRRR.
         ..DaD.DaD.
@@ -95,7 +100,7 @@ export default sprite({
         ..DDDDDD..
         .DaAAaadDD
         .DaAaaadaD
-        .DaaaaddaD
+        .DaaaddddD
         .RmmRmmRDD
         .RRRRRRRR.
         ..DaD.DaD.
@@ -111,7 +116,7 @@ export default sprite({
         ..DDDDDD..
         .DaAAaadDD
         .DaAaaadaD
-        .DaaaaddaD
+        .DaaaddddD
         .RmmRmmRDD
         .RRRRRRRR.
         ..DaD.DaD.
@@ -122,7 +127,7 @@ export default sprite({
       `,
     },
     shield: {
-      at: [0, 9],
+      at: [10, 9],
       grid: `
         ..DDDD..
         .DwwwpD.
@@ -136,7 +141,7 @@ export default sprite({
       `,
     },
     shine: {
-      at: [0, 9],
+      at: [10, 9],
       grid: `
         ........
         ..^.....
@@ -150,7 +155,7 @@ export default sprite({
       `,
     },
     shine2: {
-      at: [0, 9],
+      at: [10, 9],
       grid: `
         ........
         ........
@@ -163,9 +168,60 @@ export default sprite({
         ........
       `,
     },
+    // Braced: crouched behind the shield, the ruler levelled over the rim at the target.
+    level: {
+      at: [0, 11],
+      grid: `
+        WWWWWWWWWWWWWWWWWWWW.GG.
+        WbWbWbWbWbWbWbWbWbbWGwwG
+        WbbbbbbbbbbbbbbbbbbWGqqG
+        WWWWWWWWWWWWWWWWWWWW.GG.
+      `,
+    },
+    brace: {
+      at: [3, 11],
+      grid: `
+        ..DDDDDD..
+        .DaAAaadDD
+        .DaAaaaddD
+        .DaaaddddD
+        .RmmRmmRDD
+        .RRRRRRRR.
+        .DaD..DaD.
+        DaD...DaD.
+        DaD...DaD.
+        DDDD..DDDD
+      `,
+    },
+    // A hit on the shield: the face flashes white and the soldier is shoved back.
+    flash: {
+      at: [11, 8],
+      grid: `
+        ..DDDD..
+        .DwwwwD.
+        DwwwwwwD
+        DwwwwwwD
+        DwwwwwwD
+        DwwwwwwD
+        DwwwwwwD
+        .DwwwwD.
+        ..DDDD..
+      `,
+    },
+    sparks: {
+      at: [19, 5],
+      grid: `
+        ..*.
+        *...
+        ...*
+        .*..
+        ....
+        ..*.
+      `,
+    },
     // Hit and death.
     halfTop: {
-      at: [0, 8],
+      at: [10, 8],
       grid: `
         ..DDDD..
         .DwwwpD.
@@ -175,7 +231,7 @@ export default sprite({
       `,
     },
     halfBottom: {
-      at: [0, 14],
+      at: [10, 14],
       grid: `
         DDDDDDDD
         DwwwwppD
@@ -195,7 +251,7 @@ export default sprite({
       `,
     },
     helmet: {
-      at: [9, 18],
+      at: [12, 18],
       grid: `
         ..RR..
         .DDDD.
@@ -205,7 +261,7 @@ export default sprite({
       `,
     },
     bits: {
-      at: [0, 2],
+      at: [3, 2],
       grid: `
         ...*..........*.
         ................
@@ -219,8 +275,8 @@ export default sprite({
   frames: {
     idle0: ["spear", "body", "head", "shield"],
     idle1: [["spear", 0, -1], "body", "head", "shield"],
-    idle2: ["spear", "body", ["head", -1, 1], "shield", "shine"],
-    idle3: ["spear", "body", ["head", -1, 1], "shield", "shine2"],
+    idle2: ["spear", "body", ["head", 1, 1], "shield", "shine"],
+    idle3: ["spear", "body", ["head", 1, 1], "shield", "shine2"],
     walk0: [
       ["spear", 0, -1],
       ["stepA", 0, 0],
@@ -235,7 +291,21 @@ export default sprite({
       ["shield", 0, -1],
     ],
     walk3: ["spear", "body", "head", "shield"],
-    hit: [["spear", 0, -1], "body", ["head", 1, 0], ["shield", 1, -2]],
+    guard0: ["level", "brace", ["head", 1, 2], ["shield", 2, -1]],
+    guard1: [["level", 0, 1], "brace", ["head", 1, 2], ["shield", 2, 0]],
+    block0: ["level", ["brace", -1, 0], ["head", 0, 2], "flash", "sparks"],
+    block1: [
+      ["level", 0, 1],
+      ["brace", -1, 0],
+      ["head", -1, 3],
+      ["shield", 1, -1],
+    ],
+    hit: [
+      ["spear", 1, -1],
+      ["body", 1, 0],
+      ["head", 2, 0],
+      ["shield", 2, -2],
+    ],
     die0: ["spear", "body", "head", ["halfTop", 0, 0], ["halfBottom", 0, 0]],
     die1: ["fallen", "helmet", ["halfTop", 0, -2], ["halfBottom", 0, 4]],
     die2: ["fallen", "helmet", "bits"],
@@ -246,6 +316,9 @@ export default sprite({
       fps: 4,
     },
     walk: { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 8 },
+    move: { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 8 },
+    guard: { frames: ["guard0", "guard0", "guard1", "guard1"], fps: 4 },
+    block: { frames: ["block0", "block1", "guard0"], fps: 10, loop: false },
     hit: { frames: ["hit"], fps: 1, loop: false },
     die: { frames: ["die0", "die1", "die2"], fps: 10, loop: false, jump: 1 },
   },
