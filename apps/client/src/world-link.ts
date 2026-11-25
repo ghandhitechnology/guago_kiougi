@@ -87,12 +87,21 @@ function defaultEndpoint(): string {
   return `${location.origin}${ROOMS_PATH}`;
 }
 
-/** Joins the WorldRoom and keeps it joined until replaced, signed out or closed. */
-export function connectWorld(endpoint = defaultEndpoint()): WorldLink {
-  const client = new Client(endpoint);
+/**
+ * Joins the WorldRoom and keeps it joined until replaced, signed out or closed. `sdk` is passed
+ * to the Colyseus client (headless bots send the session cookie through it).
+ */
+export function connectWorld(
+  endpoint = defaultEndpoint(),
+  sdk?: ConstructorParameters<typeof Client>[1],
+): WorldLink {
+  const client = new Client(endpoint, sdk);
   const listeners = new Set<(event: WorldEvent) => void>();
   const presence = new Map<string, PresenceEntry>();
-  const pending = new Map<number, { resolve: (r: SendResult) => void; timer: number }>();
+  const pending = new Map<
+    number,
+    { resolve: (r: SendResult) => void; timer: ReturnType<typeof setTimeout> }
+  >();
   let status: WorldStatus = "connecting";
   let me: string | undefined;
   let room: Room | undefined;
@@ -229,10 +238,7 @@ export function connectWorld(endpoint = defaultEndpoint()): WorldLink {
         ...(channel === "whisper" && target ? { to: target } : {}),
       };
       return new Promise<SendResult>((resolve) => {
-        const timer = window.setTimeout(
-          () => settle(n, { ok: false, code: "timeout" }),
-          SEND_TIMEOUT_MS,
-        );
+        const timer = setTimeout(() => settle(n, { ok: false, code: "timeout" }), SEND_TIMEOUT_MS);
         pending.set(n, { resolve, timer });
         open.send(WORLD_MESSAGES.chat, message);
       });

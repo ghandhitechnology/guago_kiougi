@@ -277,9 +277,6 @@ export class WorldRoom extends Room {
     for (const member of recipients) {
       member.client.send(WORLD_MESSAGES.chat, member === me ? { ...line, n: message.n } : line);
     }
-    if (standing.mutedUntil > now) {
-      this.system({ key: "muted", params: { until: standing.mutedUntil } }, me.characterId);
-    }
     this.log({
       channel: message.ch,
       senderId: me.characterId,
@@ -288,6 +285,9 @@ export class WorldRoom extends Room {
       masked: filtered.masked,
       at: new Date(now),
     });
+    if (standing.mutedUntil > now) {
+      this.system({ key: "muted", params: { until: standing.mutedUntil } }, me.characterId);
+    }
     return undefined;
   }
 
