@@ -12,7 +12,7 @@ import type {
 } from "./format.ts";
 import type { Cell, Light, Prop, SceneDef } from "./layers.ts";
 import { fractal } from "./noise.ts";
-import { buildPatrol } from "./patrols.ts";
+import { buildPatrol, buildWalk } from "./patrols.ts";
 import { gridLines, parseStamp } from "./stamp.ts";
 
 /** A map in the middle of being built: plan characters and collision per tile. */
@@ -314,6 +314,7 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
         facing: n.facing ?? "down",
       })),
       patrols: (src.patrols ?? []).map(buildPatrol),
+      walks: (src.walks ?? []).map(buildWalk),
       arenas: (src.arenas ?? []).map((a) => ({
         id: a.id,
         rect: rect(a.rect, `arena ${a.id}`),
