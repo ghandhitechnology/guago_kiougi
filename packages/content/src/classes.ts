@@ -1,4 +1,3 @@
-import { COLLISION_SHARE } from "@guago/shared";
 import type { StatusApply } from "./attacks.ts";
 import type { StatusId } from "./statuses.ts";
 
@@ -45,14 +44,14 @@ export function qedDamage(triggerHit: number, strength: number): number {
 // ── 물리: 운동량 ─────────────────────────────────────────────────────────────
 
 /**
- * Knockback collisions deal `collisionShare` of the launching hit instead of the base 20%, and
+ * Knockback collisions deal `collisionShare` of the launching hit (other classes only push), and
  * moving adds damage: `speedDamage` × current speed ÷ base walking speed. Standing still adds
  * nothing; walking adds 30%; a fast build with 순발력 adds up to 45%.
  */
 export const MOMENTUM = { collisionShare: 0.6, speedDamage: 0.3 } as const;
 
 export function momentumCollisionShare(strength: number): number {
-  return COLLISION_SHARE + (MOMENTUM.collisionShare - COLLISION_SHARE) * strength;
+  return MOMENTUM.collisionShare * strength;
 }
 
 export function momentumDamage(speed: number, baseSpeed: number, strength: number): number {

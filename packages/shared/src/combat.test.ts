@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  COLLISION_SHARE,
   collisionDamage,
   critMultiplier,
   DODGE,
@@ -77,9 +76,9 @@ describe("knockback", () => {
   });
 
   it("collisions hurt by remaining speed and pass momentum on", () => {
-    expect(collisionDamage(100, 90, 90, COLLISION_SHARE)).toBeCloseTo(20, 9);
-    expect(collisionDamage(100, 45, 90, COLLISION_SHARE)).toBeCloseTo(10, 9);
-    expect(collisionDamage(100, 20, 90, COLLISION_SHARE)).toBe(0);
+    expect(collisionDamage(100, 90, 90, 0.6)).toBeCloseTo(60, 9);
+    expect(collisionDamage(100, 45, 90, 0.6)).toBeCloseTo(30, 9);
+    expect(collisionDamage(100, 20, 90, 0.6)).toBe(0);
     expect(elasticCollision(100, 1, 1)).toEqual({ a: 0, b: 100 });
     const heavy = elasticCollision(100, 1, 3);
     expect(heavy.a).toBeCloseTo(-50, 9);

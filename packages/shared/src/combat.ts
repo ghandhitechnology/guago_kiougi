@@ -68,16 +68,16 @@ export function knockbackDistance(speed: number): number {
   return (speed * TICK_MS) / 1000 / KNOCK_DECAY;
 }
 
-/**
- * A knocked monster that runs into another deals collision damage to both, a share of the hit
- * that launched it scaled by how much of the launch speed is left. 물리's 운동량 raises the share.
- */
-export const COLLISION_SHARE = 0.2;
 /** Slower than this, a knocked monster only nudges. */
 export const COLLISION_MIN_SPEED = 30;
 /** A collision passes momentum on; chains stop after this many links to bound server work. */
 export const COLLISION_CHAIN_MAX = 3;
 
+/**
+ * A knocked monster that runs into another passes its momentum on. With 물리's 운동량 the impact
+ * also hurts both: a share of the hit that launched it (`momentumCollisionShare` in content),
+ * scaled by how much launch speed is left.
+ */
 export function collisionDamage(
   launchHit: number,
   impactSpeed: number,

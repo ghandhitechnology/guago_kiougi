@@ -95,9 +95,9 @@ describe("class signatures", () => {
   });
 
   it("운동량 raises collision share and rewards speed", () => {
-    expect(momentumCollisionShare(0)).toBeCloseTo(0.2, 12);
+    expect(momentumCollisionShare(0)).toBe(0);
     expect(momentumCollisionShare(1)).toBeCloseTo(0.6, 12);
-    expect(momentumCollisionShare(0.5)).toBeCloseTo(0.4, 12);
+    expect(momentumCollisionShare(0.5)).toBeCloseTo(0.3, 12);
     expect(momentumDamage(0, 72, 1)).toBe(1);
     expect(momentumDamage(72, 72, 1)).toBeCloseTo(1.3, 12);
   });

@@ -159,7 +159,7 @@ export const WANGDO = book<OrbitAttack>({
   attack: {
     kind: "orbit",
     cooldown: 3,
-    damage: 0.6,
+    damage: 0.8,
     knock: 40,
     count: 3,
     orbitRadius: 28,
@@ -201,8 +201,8 @@ export const GRAPH_NOTE = book<BeamAttack>({
   base: BOOK_BASE_DAMAGE,
   attack: {
     kind: "beam",
-    cooldown: 2.2,
-    damage: 1.6,
+    cooldown: 2,
+    damage: 2.4,
     knock: 20,
     length: 160,
     width: 10,
@@ -429,7 +429,7 @@ export const CAMPING_BIO = book<SummonAttack>({
   attack: {
     kind: "summon",
     cooldown: 4,
-    damage: 0.4,
+    damage: 0.25,
     knock: 15,
     perCast: 1,
     cap: 4,
