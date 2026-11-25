@@ -755,7 +755,6 @@ const GREECE_NOON = theme("greece-noon", {
   "wood.light": "clay.pale",
   "wood.mid": "clay.dust",
   "wood.dark": "clay.light",
-  "clay.pale": "stone.bright",
   "grass.bright": "stone.bright",
   "grass.pale": "gold.pale",
   "grass.light": "olive.light",

@@ -6,6 +6,7 @@ import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
+import { startLedgerMaintenance } from "./economy/ledger.ts";
 import { LiveClock } from "./live/clock.ts";
 import { provideLive, provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
@@ -17,6 +18,8 @@ import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
 import { createSocial } from "./social/index.ts";
+import { startListingSweeper } from "./trade/board.ts";
+import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
 
 assertServable(config);
@@ -63,12 +66,19 @@ const social = createSocial(db, {
   log: chatLog,
   mayPin: (id) => live.isFloorLeader(id),
 });
+const trading = createTrading({ db, executor: economy.executor, clock: () => clock.date() });
 const server = createGameServer(
   auth,
   config,
   studentLooks,
   { log: chatLog, social },
-  { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants, live },
+  {
+    ops: economy.ops,
+    routes: economy.routes(auth),
+    grants: economy.grants,
+    live,
+    trading,
+  },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
@@ -82,6 +92,13 @@ await server.listen(config.port);
 await matchMaker.createRoom(WORLD_ROOM, {});
 economy.grants.start();
 await live.start();
+startLedgerMaintenance(db, () => clock.now());
+startListingSweeper(
+  db,
+  economy.executor,
+  () => clock.date(),
+  (id, change) => worldRoom()?.notify(id, change),
+);
 setInterval(
   () => {
     auth.sweep().catch(() => {});

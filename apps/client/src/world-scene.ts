@@ -14,6 +14,7 @@ import {
   MODE_MESSAGE,
   NULL_SINK,
   PLAYER_SPEED,
+  type PlayerState,
   Q,
   SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
@@ -33,17 +34,25 @@ import {
   lookTexture,
 } from "./art.ts";
 import { CameraRig } from "./camera.ts";
+import { sampleMove } from "./controls/move.ts";
 import { devMap, drawDevMap } from "./dev-map.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
 import { FightKeys } from "./fight-keys.ts";
 import { FightSketch } from "./fight-sketch.ts";
 import { drawGround } from "./ground.ts";
+import { hud } from "./hud/store.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { stayConnected } from "./net.ts";
 import { drawProps } from "./props.ts";
 import { SelfMover } from "./self.ts";
+import { enterSoundscape, preloadFor, soundscapeFor } from "./sound/audio.ts";
+import { StepSounds } from "./sound/steps.ts";
+import { builtView, lawnView } from "./world/map-view.ts";
+import { WorldOverlays } from "./world/overlays.ts";
+import { session } from "./world/session.ts";
+import { worldView } from "./world/view.ts";
 
 const PLAYER_RIG = "student";
 /** The camera frames the body, not the feet. */
@@ -51,7 +60,9 @@ const CHEST_PX = 10;
 
 interface Remote<A> {
   readonly track: Track;
-  readonly actor: A;
+  actor: A;
+  /** The look the actor wears, for players. */
+  look?: string;
 }
 
 /**
@@ -66,7 +77,9 @@ export class WorldScene extends Phaser.Scene {
   private keys!: KeyboardMove;
   private readonly clock = new ServerClock();
   private readonly monsters = new Map<number, Remote<MonsterActor>>();
-  private readonly players = new Map<number, Remote<PlayerActor>>();
+  /** Other players by session id; their bodies come in the snapshot, who they are in the schema. */
+  private readonly players = new Map<string, Remote<PlayerActor>>();
+  private mapState: MapState | undefined;
   /** The fight snapshot as this client holds it (`fight/wire.ts`). */
   private reader = new SnapshotReader();
   private selfSlot = -1;
@@ -82,8 +95,10 @@ export class WorldScene extends Phaser.Scene {
   private walls: Collidable = LAWN;
   /** Who is playing, handed over by the front end; absent when the scene runs on its own. */
   private entry: WorldEntry | undefined;
-  /** The player's own look, composited from the character; others wear the default for now. */
+  /** The player's own look, composited from the character. */
   private selfLook: string | undefined;
+  private overlays!: WorldOverlays;
+  private steps!: StepSounds;
 
   constructor() {
     super("world");
@@ -107,6 +122,16 @@ export class WorldScene extends Phaser.Scene {
       this.selfLook = dollLook(look);
     }
     const dev = devMap();
+    const view = dev ? builtView(dev) : lawnView(LAWN);
+    worldView.enter(view);
+    this.overlays = new WorldOverlays(this);
+    worldView.overlays = this.overlays;
+    this.steps = new StepSounds(view.surfaceAt);
+    preloadFor(view.id);
+    enterSoundscape(soundscapeFor(view.id, dev?.time));
+    if (this.entry) session.start(this.entry);
+    hud.set({ place: { map: view.id, name: view.name } });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => worldView.leave());
     if (dev) {
       this.walls = dev;
       void drawDevMap(this, this.meta, dev);
@@ -126,6 +151,7 @@ export class WorldScene extends Phaser.Scene {
 
   private attach(room: Room<unknown, MapState>): () => void {
     this.selfId = room.sessionId;
+    worldView.selfSid = room.sessionId;
     this.live = true;
     this.self = new SelfMover(this.walls, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
     const cell = SNAP_CELL_TILES * TILE_SIZE;
@@ -178,6 +204,10 @@ export class WorldScene extends Phaser.Scene {
       this.fightKeys?.dispose();
       this.sketch?.clear();
       for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
+      for (const sid of this.players.keys()) {
+        this.overlays.remove(sid);
+        worldView.others.delete(sid);
+      }
       this.monsters.clear();
       this.players.clear();
       this.selfActor?.destroy();
@@ -191,6 +221,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** Who this client is among the bodies; the bodies themselves come in the snapshot. */
   private onPatch(state: MapState): void {
+    this.mapState = state;
     for (const [slot, p] of state.players) {
       if (p.sid !== this.selfId) continue;
       this.selfSlot = Number(slot);
@@ -216,16 +247,15 @@ export class WorldScene extends Phaser.Scene {
     const tick = reader.tick;
     this.clock.observe(tick, performance.now());
     const rules = simRules();
+    const seated = new Set<string>();
     for (const m of reader.members.values()) {
       const x = m.qx / Q;
       const y = m.qy / Q;
       if (m.kind === WirePlayer) {
-        if (m.slot === this.selfSlot) continue;
-        let r = this.players.get(m.id);
-        if (!r) {
-          r = { track: new Track(), actor: this.playerActor() };
-          this.players.set(m.id, r);
-        }
+        const p = this.mapState?.players.get(String(m.slot));
+        if (m.slot === this.selfSlot || !p?.sid || p.sid === this.selfId) continue;
+        seated.add(p.sid);
+        const r = this.dressed(p);
         r.track.push(tick, x, y, m.state & 3);
       } else if (m.kind !== WireMinion) {
         let r = this.monsters.get(m.id);
@@ -244,11 +274,52 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     prune(this.monsters, reader.members);
-    prune(this.players, reader.members);
+    for (const sid of this.players.keys()) {
+      if (seated.has(sid)) continue;
+      this.overlays.remove(sid);
+      worldView.others.delete(sid);
+    }
+    prune(this.players, seated);
   }
 
-  private playerActor(look = this.look): PlayerActor {
+  /**
+   * Another player's view, made or dressed again: everyone wears their own look, and a body whose
+   * look has not synced yet wears the default until it arrives.
+   */
+  private dressed(p: InstanceType<typeof PlayerState>): Remote<PlayerActor> {
+    // Schema fields are accessors, so a spread would drop them: read each one.
+    const l = p.look;
+    const look = l?.body
+      ? normalizeLook(this.meta, {
+          body: l.body,
+          hair: l.hair,
+          hairColor: l.hairColor,
+          face: l.face,
+          uniform: l.uniform,
+          accessories: [...l.accessories],
+        })
+      : undefined;
+    const lookId = look ? dollLook(look) : this.look;
+    let r = this.players.get(p.sid);
+    if (!r) {
+      if (look) composeDoll(this, this.meta, look);
+      r = { track: new Track(), actor: this.playerActor(lookId), look: lookId };
+      this.players.set(p.sid, r);
+      this.overlays.plate(p.sid, p.name, "player");
+      worldView.others.set(p.sid, { kind: "player", x: 0, y: 0, name: p.name });
+    } else if (r.look !== lookId) {
+      if (look) composeDoll(this, this.meta, look);
+      r.actor.destroy();
+      r.actor = this.playerActor(lookId);
+      r.look = lookId;
+      this.overlays.plate(p.sid, p.name, "player");
+    }
+    return r;
+  }
+
+  private playerActor(look = this.look, self = false): PlayerActor {
     const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
+    actor.onStep = (x, y) => this.steps.step(x, y, worldView.self, self);
     return actor;
   }
 
@@ -260,14 +331,19 @@ export class WorldScene extends Phaser.Scene {
     const dt = this.lastTime === undefined ? 0 : Math.min(250, time - this.lastTime);
     this.lastTime = time;
 
-    const drawn = this.self?.frame(dt, () => this.keys.sample(), this.live);
+    const drawn = this.self?.frame(dt, () => sampleMove(this.keys), this.live);
     if (drawn) {
       if (!this.selfActor) {
-        this.selfActor = this.playerActor(this.selfLook);
+        this.selfActor = this.playerActor(this.selfLook, true);
         this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
+        if (this.entry && this.selfId) {
+          this.overlays.plate(this.selfId, this.entry.character.name, "self");
+        }
       }
       this.selfActor.update(drawn.x, drawn.y, drawn.facing, dt);
       this.camera.follow(drawn.x, drawn.y - CHEST_PX, drawn.facing, dt);
+      worldView.self = { x: drawn.x, y: drawn.y };
+      if (this.selfId) this.overlays.move(this.selfId, drawn.x, drawn.y);
     }
 
     const t = this.clock.renderTime(time);
@@ -276,10 +352,16 @@ export class WorldScene extends Phaser.Scene {
       const at = track.at(t);
       actor.update(at.x, at.y, at.facing as Facing, dt);
     }
-    for (const { track, actor } of this.players.values()) {
+    for (const [sid, { track, actor }] of this.players) {
       const at = track.at(t);
       if (!at.fresh) this.clock.starved++;
       actor.update(at.x, at.y, at.facing as Facing, dt);
+      this.overlays.move(sid, at.x, at.y);
+      const seen = worldView.others.get(sid);
+      if (seen) {
+        seen.x = at.x;
+        seen.y = at.y;
+      }
     }
   }
 
@@ -297,9 +379,9 @@ export class WorldScene extends Phaser.Scene {
   }
 }
 
-function prune<A extends { destroy(): void }>(
-  views: Map<number, Remote<A>>,
-  live: { has(id: number): boolean },
+function prune<K, A extends { destroy(): void }>(
+  views: Map<K, Remote<A>>,
+  live: { has(id: K): boolean },
 ): void {
   for (const [id, r] of views) {
     if (live.has(id)) continue;

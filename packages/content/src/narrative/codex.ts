@@ -50,6 +50,12 @@ const scientist = (
   };
 };
 
+/**
+ * PLAN §15 unlocks an 오개념 entry at 100 kills. The tortoise is rare and runs away, and the
+ * golem is met once in the opening, so they unlock sooner and the set can be finished.
+ */
+const KILLS: Readonly<Record<string, number>> = { tortoise: 10, "odap-golem": 1 };
+
 const misconception = (
   id: string,
   monsters: readonly string[],
@@ -62,7 +68,7 @@ const misconception = (
     id,
     section: "misconception",
     name: s.t(name),
-    unlock: { when: "kills", monsters, count: 100 },
+    unlock: { when: "kills", monsters, count: KILLS[id] ?? 100 },
     body: s.t(body),
     sources,
   };

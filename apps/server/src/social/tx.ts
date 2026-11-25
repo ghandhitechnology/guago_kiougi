@@ -35,7 +35,9 @@ const CONSTRAINTS: Readonly<Record<string, RefusalCode>> = {
   clubs_application_count_check: "applications_full",
   clubs_invite_count_check: "invites_full",
   board_posts_author_key: "post_active",
-  // A club disbanded under a join or an invite: the foreign key into `clubs` fails.
+  // A well-formed id of no character: its counter row cannot be made.
+  social_counts_character_id_characters_id_fk: "no_player",
+  // Clubs are kept when disbanded, so these fail only if a club row is ever deleted by hand.
   club_members_club_id_clubs_id_fk: "no_club",
   club_applications_club_id_clubs_id_fk: "no_club",
   club_invites_club_id_clubs_id_fk: "no_club",
@@ -53,6 +55,12 @@ export function refusalOf(error: unknown): RefusalCode | undefined {
 const RETRY = new Set(["40P01", "40001"]);
 
 /**
+ * Transactions `transact` ran again after a deadlock or serialization failure. Lock order should
+ * make these never happen; a test that races two changes checks this stays put.
+ */
+export const retries = { count: 0 };
+
+/**
  * Runs `work` in a transaction. A `Refuse` (thrown or from a known constraint) rolls back and is
  * returned; a deadlock or serialization failure runs `work` again, up to three times.
  */
@@ -64,7 +72,10 @@ export async function transact<T>(db: Db, work: (tx: Tx) => Promise<T>): Promise
       if (error instanceof Refuse) return error;
       const known = refusalOf(error);
       if (known) return new Refuse(known);
-      if (attempt < 3 && RETRY.has(pgErrorCode(error).code ?? "")) continue;
+      if (attempt < 3 && RETRY.has(pgErrorCode(error).code ?? "")) {
+        retries.count++;
+        continue;
+      }
       throw error;
     }
   }

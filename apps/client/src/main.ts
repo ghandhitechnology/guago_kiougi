@@ -25,6 +25,8 @@ const game = new Phaser.Game({
   backgroundColor: "#000000",
   banner: false,
   render: { pixelArt: true },
+  // Sound comes from @guago/audio; Phaser must not open a second audio context.
+  audio: { noAudio: true },
   scale: { mode: Phaser.Scale.NONE },
   // Back to front; the UI scene stays on top of the world.
   scene: viewer
