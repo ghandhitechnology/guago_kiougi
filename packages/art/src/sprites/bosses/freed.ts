@@ -2,7 +2,7 @@ import { type Legend, type PartDef, type Piece, part, type RigDef, rig } from ".
 import { DEEP_INDICES, nameOf, rampsOf, SLOT_STEPS, slotOf } from "../../palette.ts";
 import { CLEAR } from "../../raster.ts";
 import { compileRig } from "../../rig.ts";
-import { frame, garment, ink, lone, shadow, skin, walkArms } from "../characters/student.ts";
+import { garment, ink, lone, shadow, walkArms } from "../characters/student.ts";
 import { clean, Pic, seal } from "./kit.ts";
 
 /** Folds stray single pixels of a hand-typed piece into their neighbours. */
@@ -28,7 +28,7 @@ const tidy = (g: string): string => clean(Pic.of(g), `${lone}.`, "XGOKETWNDR").t
  */
 
 /** Sandalled feet under a robe, on the student's leg bones. */
-const sandal = {
+export const sandal = {
   rest: `
     ....
     ....
@@ -45,7 +45,7 @@ const sandal = {
     OOOO
   `,
 };
-const sandalSide = {
+export const sandalSide = {
   rest: `
     ........
     ........
@@ -71,7 +71,7 @@ const sandalSide = {
     .OOOOO..
   `,
 };
-const feet = part({
+export const feet = part({
   palette: ink,
   pieces: {
     legR: {
@@ -90,7 +90,7 @@ const feet = part({
 });
 
 /** Short linen sleeves, bare forearms. */
-const LINEN_SLEEVE: Legend = {
+export const LINEN_SLEEVE: Legend = {
   "1": "stone.deep",
   "2": "stone.bright",
   "3": "stone.light",
@@ -98,7 +98,7 @@ const LINEN_SLEEVE: Legend = {
   "5": "skin.light",
   "6": "skin.mid",
 };
-const ROBE_INK: Legend = {
+export const ROBE_INK: Legend = {
   K: "plum.deep",
   P: "plum.dark",
   Q: "plum.mid",
@@ -109,7 +109,7 @@ const ROBE_INK: Legend = {
   B: "sea.mid",
   Z: "sea.light",
 };
-const robe = (
+export const robe = (
   torso: Record<"down" | "up" | "side", string>,
   sleeve: Legend = LINEN_SLEEVE,
 ): PartDef =>
@@ -119,7 +119,7 @@ const robe = (
     false,
   );
 
-const himation = robe({
+export const himation = robe({
   down: `
     GwwKQYPK
     GwKQYQPK
@@ -158,7 +158,7 @@ const himation = robe({
   `,
 });
 
-const seaRobe = robe({
+export const seaRobe = robe({
   down: `
     GwwEBZFE
     GwEBZBFE
@@ -197,7 +197,7 @@ const seaRobe = robe({
   `,
 });
 
-const whiteRobe = robe({
+export const whiteRobe = robe({
   down: `
     GwwppqqG
     GwwpgqqG
@@ -237,7 +237,7 @@ const whiteRobe = robe({
 });
 
 /** A knee-length ochre chiton belted with a cord, for walking out to measure shadows. */
-const ochre = robe(
+export const ochre = robe(
   {
     down: `
       TUUuuutT
@@ -279,7 +279,7 @@ const ochre = robe(
   { ...LINEN_SLEEVE, "1": "clay.deep", "2": "clay.light", "3": "clay.mid" },
 );
 /** Bare shins under the short chiton. */
-const shins = part({
+export const shins = part({
   palette: ink,
   pieces: {
     legR: {
@@ -307,7 +307,7 @@ const shins = part({
 
 // Hair, beards and hats --------------------------------------------------------------------------
 
-const GREY: Legend = {
+export const GREY: Legend = {
   ...ink,
   X: "ink.deep",
   x: "ink.mid",
@@ -315,10 +315,19 @@ const GREY: Legend = {
   H: "stone.mid",
   g: "stone.light",
 };
-const DARK: Legend = { ...ink, X: "ink.deep", x: "ink.dark", h: "ink.mid", H: "ink.light" };
-const BROWN: Legend = { ...ink, X: "wood.deep", x: "wood.dark", h: "wood.mid", H: "wood.light" };
+export const DARK: Legend = { ...ink, X: "ink.deep", x: "ink.dark", h: "ink.mid", H: "ink.light" };
+export const BROWN: Legend = {
+  ...ink,
+  X: "wood.deep",
+  x: "wood.dark",
+  h: "wood.mid",
+  H: "wood.light",
+};
 
-const hairPart = (palette: Legend, head: Piece & Record<"down" | "up" | "side", string>): PartDef =>
+export const hairPart = (
+  palette: Legend,
+  head: Piece & Record<"down" | "up" | "side", string>,
+): PartDef =>
   part({
     palette,
     lone,
@@ -326,7 +335,7 @@ const hairPart = (palette: Legend, head: Piece & Record<"down" | "up" | "side", 
   });
 
 /** Steel-grey curls receding at the temples and a square beard. */
-const aristotleHair = hairPart(GREY, {
+export const aristotleHair = hairPart(GREY, {
   at: { down: [4, 1], up: [4, 1], side: [0, 1] },
   down: `
     ....XXXXXXXX....
@@ -377,7 +386,7 @@ const aristotleHair = hairPart(GREY, {
 });
 
 /** Short dark curls and a trimmed beard. */
-const zenoHair = hairPart(DARK, {
+export const zenoHair = hairPart(DARK, {
   at: { down: [4, 1], up: [4, 1], side: [0, 1] },
   down: `
     .....XXXXXX.....
@@ -425,7 +434,7 @@ const zenoHair = hairPart(DARK, {
 });
 
 /** Long black hair tied back, the white fillet of the school. */
-const pythagoreanHair = hairPart(DARK, {
+export const pythagoreanHair = hairPart(DARK, {
   at: { down: [4, 1], up: [4, 1], side: [0, 1] },
   down: `
     .....XXXXXX.....
@@ -472,7 +481,7 @@ const pythagoreanHair = hairPart(DARK, {
 });
 
 /** Sun-bleached brown hair under a wide traveller's hat. */
-const aristarchusHair = hairPart(
+export const aristarchusHair = hairPart(
   { ...BROWN, T: "clay.deep", t: "clay.dark", u: "clay.mid", U: "clay.light", y: "clay.pale" },
   {
     at: { down: [2, 0], up: [2, 0], side: [-1, 1] },
@@ -514,14 +523,14 @@ const aristarchusHair = hairPart(
 
 // Faces ---------------------------------------------------------------------------------------
 
-const facePart = (down: Record<string, string>, side: Record<string, string>): PartDef =>
+export const facePart = (down: Record<string, string>, side: Record<string, string>): PartDef =>
   part({
     palette: ink,
     lone,
     pieces: { head: { at: { down: [5, 8], up: [5, 8], side: [3, 8] }, down, up: null, side } },
   });
 
-const aristotleFace = facePart(
+export const aristotleFace = facePart(
   {
     rest: `
       ..**......**..
@@ -543,7 +552,7 @@ const aristotleFace = facePart(
     `,
   },
 );
-const zenoFace = facePart(
+export const zenoFace = facePart(
   {
     rest: `
       ...**....**...
@@ -573,7 +582,7 @@ const zenoFace = facePart(
     `,
   },
 );
-const pythagoreanFace = facePart(
+export const pythagoreanFace = facePart(
   {
     rest: `
       ...**....**...
@@ -603,7 +612,7 @@ const pythagoreanFace = facePart(
     `,
   },
 );
-const aristarchusFace = facePart(
+export const aristarchusFace = facePart(
   {
     rest: `
       ...**....**...
@@ -637,7 +646,7 @@ const aristarchusFace = facePart(
 // Accessories and things in hand --------------------------------------------------------------
 
 /** The 방과후 강사 lanyard, worn the way other men wear a gold chain. */
-const lanyard = part({
+export const lanyard = part({
   palette: ink,
   lone,
   pieces: {
@@ -663,7 +672,7 @@ const lanyard = part({
 });
 
 /** A wax tablet in a wooden frame, a stylus tucked in. */
-const tablet = part({
+export const tablet = part({
   palette: ink,
   lone,
   pieces: {
@@ -713,7 +722,7 @@ const tablet = part({
 });
 
 /** The measuring stick: a straight staff notched along its length. */
-const gnomon = part({
+export const gnomon = part({
   palette: ink,
   pieces: {
     hand: {
@@ -790,7 +799,7 @@ const gnomon = part({
 
 // Rigs -----------------------------------------------------------------------------------------
 
-const base = {
+export const base = {
   idle0: {},
   idle1: { torso: [0, 1], hand: [0, 1] },
   walk0: (d: "down" | "up" | "side") => walkArms(d, "R") as never,
@@ -798,15 +807,15 @@ const base = {
   walk2: (d: "down" | "up" | "side") => walkArms(d, "L") as never,
   walk3: { torso: [0, -1], hand: [0, -1] },
 } as const;
-const walk = { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 6 };
-const idle = { frames: ["idle0", "idle0", "idle1", "idle1"], fps: 2 };
+export const walk = { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 6 };
+export const idle = { frames: ["idle0", "idle0", "idle1", "idle1"], fps: 2 };
 
-const look = (name: string, parts: Record<string, string>, skinTone: string) => ({
+export const look = (name: string, parts: Record<string, string>, skinTone: string) => ({
   [name]: { parts: { shadow: "blob", body: "base", ...parts }, slots: { skin: skinTone } },
 });
 
 /** Composites a layered one-look rig into a two-layer rig: its shadow, and one cleaned body. */
-function bake(def: RigDef): RigDef {
+export function bake(def: RigDef): RigDef {
   const name = def.name as string;
   const compiled = compileRig(def, name, `bake ${name}`);
   const look = compiled.looks[0];
@@ -903,153 +912,5 @@ function bake(def: RigDef): RigDef {
 }
 type Vec2 = readonly [number, number];
 
-export default [
-  bake(
-    rig({
-      name: "aristotle-campus",
-      ...frame,
-      parts: {
-        shadow: { blob: shadow },
-        body: { base: skin },
-        uniform: { himation },
-        jacket: { feet },
-        face: { aristotleFace },
-        hair: { aristotleHair },
-        accessory: { lanyard },
-        book: { tablet },
-      },
-      frames: {
-        ...base,
-        jot0: { head: "look", hand: "write", armR: "read" },
-        jot1: { head: ["look", 0, 1], hand: ["write", 1, 0], armR: "read", torso: [0, 1] },
-      },
-      anim: {
-        idle,
-        walk,
-        jot: {
-          frames: ["idle0", "jot0", "jot1", "jot0", "jot1", "jot0", "idle0"],
-          fps: 4,
-          loop: false,
-        },
-      },
-      looks: look(
-        "lecturer",
-        {
-          uniform: "himation",
-          jacket: "feet",
-          face: "aristotleFace",
-          hair: "aristotleHair",
-          accessory: "lanyard",
-          book: "tablet",
-        },
-        "warm",
-      ),
-    }),
-  ),
-  bake(
-    rig({
-      name: "zeno-campus",
-      ...frame,
-      parts: {
-        shadow: { blob: shadow },
-        body: { base: skin },
-        uniform: { seaRobe },
-        jacket: { feet },
-        face: { zenoFace },
-        hair: { zenoHair },
-      },
-      frames: {
-        ...base,
-        half0: { legR: "lift" },
-        bow0: { head: ["bow", 0, 1], torso: [0, 1] },
-      },
-      anim: {
-        idle,
-        walk,
-        half: {
-          frames: ["idle0", "half0", "half0", "idle0", "bow0", "bow0", "idle0"],
-          fps: 4,
-          loop: false,
-        },
-      },
-      looks: look(
-        "polite",
-        { uniform: "seaRobe", jacket: "feet", face: "zenoFace", hair: "zenoHair" },
-        "warm",
-      ),
-    }),
-  ),
-  bake(
-    rig({
-      name: "pythagorean-campus",
-      ...frame,
-      parts: {
-        shadow: { blob: shadow },
-        body: { base: skin },
-        uniform: { whiteRobe },
-        jacket: { feet },
-        face: { pythagoreanFace },
-        hair: { pythagoreanHair },
-      },
-      frames: {
-        ...base,
-        count0: { armR: "raise", head: "count" },
-        count1: { armR: ["raise", 0, -1], head: "count" },
-      },
-      anim: {
-        idle,
-        walk,
-        count: {
-          frames: ["idle0", "count0", "count1", "count0", "count1", "idle0"],
-          fps: 4,
-          loop: false,
-        },
-      },
-      looks: look(
-        "first",
-        { uniform: "whiteRobe", jacket: "feet", face: "pythagoreanFace", hair: "pythagoreanHair" },
-        "deep",
-      ),
-    }),
-  ),
-  bake(
-    rig({
-      name: "aristarchus-campus",
-      ...frame,
-      parts: {
-        shadow: { blob: shadow },
-        body: { base: skin },
-        uniform: { ochre },
-        jacket: { shins },
-        face: { aristarchusFace },
-        hair: { aristarchusHair },
-        book: { gnomon },
-      },
-      frames: {
-        ...base,
-        squint0: { armL: "raise", head: "squint" },
-        squint1: { armL: "raise", head: ["squint", 0, -1] },
-      },
-      anim: {
-        idle,
-        walk,
-        squint: {
-          frames: ["idle0", "squint0", "squint1", "squint1", "squint0", "idle0"],
-          fps: 3,
-          loop: false,
-        },
-      },
-      looks: look(
-        "measuring",
-        {
-          uniform: "ochre",
-          jacket: "shins",
-          face: "aristarchusFace",
-          hair: "aristarchusHair",
-          book: "gnomon",
-        },
-        "fair",
-      ),
-    }),
-  ),
-];
+/** The rigs built from these parts live with the rest of Page 1's people, in `characters/page1-mentors.ts`. */
+export default [];
