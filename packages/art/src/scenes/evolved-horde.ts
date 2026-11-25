@@ -37,6 +37,16 @@ function spectrum(x0: number, y0: number, length: number, spread: number): Prop[
   return out;
 }
 
+/** The elite, at the client's double size, behind its aura. */
+const ELITE: ScaledActor = {
+  actor: "element-earth",
+  anim: "move",
+  play: true,
+  at: [262, 150],
+  shadow: "shadow-s/blob",
+  scale: 2,
+};
+
 export default scene({
   name: "evolved-horde",
   seed: 83,
@@ -88,15 +98,7 @@ export default scene({
       ],
       13,
     ),
-    // The elite, at the client's double size, behind its aura.
-    {
-      actor: "element-earth",
-      anim: "move",
-      play: true,
-      at: [262, 150],
-      shadow: "shadow-s/blob",
-      scale: 2,
-    } satisfies ScaledActor,
+    ELITE,
     mob("odap", 30, 150, "hop", 1, false),
     mob("odap-pencil", 24, 250, "hop", 2, false),
     student("reader", MATH[0], MATH[1], 1),
