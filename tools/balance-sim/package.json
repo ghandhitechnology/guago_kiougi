@@ -10,6 +10,7 @@
     "@types/node": "^26.6.6"
   },
   "dependencies": {
+    "@guago/audio": "workspace:*",
     "@guago/content": "workspace:*",
     "@guago/shared": "workspace:*"
   }

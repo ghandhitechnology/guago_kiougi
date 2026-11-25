@@ -10,7 +10,9 @@
  *
  *   pnpm --filter @guago/balance-sim sanity
  */
+
 import { existsSync, readFileSync } from "node:fs";
+import { hasCue } from "@guago/audio/cues";
 import {
   type Attack,
   BOOKS,
@@ -276,8 +278,9 @@ if (existsSync(artPath)) {
   const missing = ids.filter((id) => !exists(id));
   console.log(`\nArt the combat content names but the atlases lack (${missing.length}):`);
   console.log(`  ${missing.join(", ")}`);
-  console.log(`Sound cues to record (${sounds.length}):`);
-  console.log(`  ${sounds.join(", ")}`);
+  const unheard = sounds.filter((id) => !hasCue(id));
+  console.log(`Sound cues the audio library lacks (${unheard.length}):`);
+  console.log(`  ${unheard.join(", ")}`);
 } else {
   console.log("\nRun pnpm art:build to list missing art");
 }

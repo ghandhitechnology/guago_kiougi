@@ -10,7 +10,7 @@ import { title } from "./music/title.ts";
 import { wakeup } from "./music/wakeup.ts";
 
 export const SONGS: Record<SongId, SongSource> = { title, hub, "field-night": fieldNight, wakeup };
-export const EFFECTS: Readonly<Record<string, EffectSource>> &
-  Readonly<Record<EffectId, EffectSource>> = ALL_EFFECTS;
+export const EFFECTS = ALL_EFFECTS as Readonly<Record<string, EffectSource>> &
+  Readonly<Record<EffectId, EffectSource>>;
 export { JINGLES } from "./jingles.ts";
 export const BEDS: Record<AmbientId, BedSource> = BEDS_SOURCE;
