@@ -74,20 +74,25 @@ export async function signIn(http: string, prefix: string, index: number): Promi
   if (me.body.recoveryCode) me = await call("GET", API.me);
   if (!me.body.character) {
     const options = lookOptions(JSON.parse(readFileSync(ART_JSON, "utf8")) as LookSource);
-    const pick = (xs: readonly string[]) => xs[index % xs.length] as string;
-    const look = {
-      body: pick(options.body),
-      hair: pick(options.hair),
-      hairColor: pick(options.hairColor),
-      face: pick(options.face),
-      uniform: pick(options.uniform),
-      accessories: [],
-    };
-    const made = await call("POST", API.character, {
-      name: `${prefix === "bot" ? "봇" : prefix}${String(index).padStart(4, "0")}`.slice(0, 8),
-      major: MAJORS[index % MAJORS.length],
-      look,
-    });
+    // Some parts do not go together; the next combination is tried until the server takes one.
+    let made: Awaited<ReturnType<typeof call>> = { status: 0, body: {} };
+    for (let k = 0; k < 24; k++) {
+      const pick = (xs: readonly string[], step: number) =>
+        xs[(index + k * step) % xs.length] as string;
+      made = await call("POST", API.character, {
+        name: `${prefix === "bot" ? "봇" : prefix}${String(index).padStart(4, "0")}`.slice(0, 8),
+        major: MAJORS[index % MAJORS.length],
+        look: {
+          body: pick(options.body, 0),
+          hair: pick(options.hair, 1),
+          hairColor: pick(options.hairColor, 0),
+          face: pick(options.face, 0),
+          uniform: pick(options.uniform, 3),
+          accessories: [],
+        },
+      });
+      if (made.status === 200 || (made.body as { error?: string }).error !== "look_invalid") break;
+    }
     if (made.status !== 200) throw new Error(`${loginId} character: ${JSON.stringify(made.body)}`);
   }
   saveSession(loginId, header(jar));
