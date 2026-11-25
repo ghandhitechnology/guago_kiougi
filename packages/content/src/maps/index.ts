@@ -4,6 +4,7 @@ import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 // 가설관 and 증명관 interiors.
+import gaseol1f from "./gaseol-1f.ts";
 import gaseol4f from "./gaseol-4f.ts";
 import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
 
@@ -23,6 +24,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   campusField,
   // 가설관 and 증명관 interiors.
   gaseolgwanStairs,
+  gaseol1f,
   gaseol4f,
 ];
 
@@ -43,6 +45,7 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "eco-park",
   // 가설관 and 증명관 interiors: rooms and places their doors lead to before they exist.
   "gaseol-roof",
+  "gaseol-b1",
 ]);
 
 /** Builds every map. */

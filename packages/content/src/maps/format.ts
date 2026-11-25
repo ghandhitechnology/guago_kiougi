@@ -86,7 +86,15 @@ export type InteractableKind =
   | "sit"
   | "lore"
   | "locked"
-  | "notice";
+  | "notice"
+  /** A crafting station players stand at: the 제본대, the 제련기. */
+  | "station"
+  /** The 도감, read at the 물음표 서고. */
+  | "codex"
+  /** Cutscene replays, in the 시청각실. */
+  | "replay"
+  /** The 수행평가 board: the day's tasks. */
+  | "quests";
 
 export interface Interactable {
   readonly id: string;
