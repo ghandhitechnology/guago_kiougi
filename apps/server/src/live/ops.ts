@@ -19,6 +19,7 @@ import {
   type LedgerEntry,
   type LogoutPlace,
   MEAL,
+  MERITS,
   type MeritReason,
   mayHelp,
   mayPostHelp,
@@ -90,6 +91,8 @@ export interface LiveRequests {
   "live.meal": { meal: string; week: number };
   "live.drowsy": { drowsy: boolean };
   "live.award": { award: string };
+  /** 층장 of board week `week`: +5 상점, paid once by the row's `paid` flag. */
+  "live.floorLeader": { week: number };
   "live.boardDay": { day: number };
   "live.helpPost": {
     notice: {
@@ -487,6 +490,35 @@ export function liveOps(h: Helpers): Defs {
           character: {},
           live: { character: { titles: addTitle(l.character, req.award) } },
           outcome: { award: req.award },
+        });
+      },
+    },
+
+    "live.floorLeader": {
+      client: false,
+      rows: (req) => ({ live: { leader: req.week } }),
+      currencies: () => ["merit"],
+      apply(l, req) {
+        const row = l.live.leader;
+        if (!row) return no("not_leader");
+        if (row.paid) return ok({ outcome: { paid: false } });
+        const m = earnMerits(
+          l.character,
+          l.purse,
+          MERITS["floor-leader"],
+          "floor-leader",
+          req.week,
+        );
+        return ok({
+          character: {},
+          purse: m.purse,
+          ledger: m.ledger,
+          live: { ...m.live, leaderPaid: req.week },
+          outcome: {
+            paid: true,
+            cancelled: m.cancelled,
+            demerits: l.character.demerits - m.cancelled,
+          },
         });
       },
     },

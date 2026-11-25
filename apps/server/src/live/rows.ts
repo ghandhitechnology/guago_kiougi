@@ -17,6 +17,8 @@ export interface LiveRows {
   notice?: string;
   /** Whether the character posted a notice still up, or holds one as helper. */
   helpState?: boolean;
+  /** The character's `floor_leaders` row of this board week, locked. */
+  leader?: number;
 }
 
 export interface HelpNoticeRow {
@@ -39,6 +41,8 @@ export interface LiveLoaded {
   /** The character's own notice still up, and the one it helps with. */
   posted: boolean;
   helping: boolean;
+  /** The 층장 row asked for: absent, or whether it was paid. */
+  leader: { paid: boolean } | null;
 }
 
 export const NO_LIVE: LiveLoaded = {
@@ -46,6 +50,7 @@ export const NO_LIVE: LiveLoaded = {
   notice: null,
   posted: false,
   helping: false,
+  leader: null,
 };
 
 /** Living-world columns an operation sets on the character. */
@@ -84,6 +89,8 @@ export interface LiveWrite {
   /** Notices to post; one already there under its id is left as it is. */
   quests?: readonly NewQuest[];
   notice?: { update: Pick<HelpNoticeRow, "id" | "state" | "helperId"> } | { insert: HelpNoticeRow };
+  /** Marks the character's 층장 row of this week paid. */
+  leaderPaid?: number;
 }
 
 export async function loadLive(
@@ -118,7 +125,14 @@ export async function loadLive(
     posted = rows[0]?.posted === true;
     helping = rows[0]?.helping === true;
   }
-  return { kills, notice, posted, helping };
+  let leader: LiveLoaded["leader"] = null;
+  if (want.leader !== undefined) {
+    const { rows } = await q.execute(sql`
+      select paid from floor_leaders where week = ${want.leader} and character_id = ${characterId}
+      for update`);
+    if (rows[0]) leader = { paid: rows[0].paid === true };
+  }
+  return { kills, notice, posted, helping, leader };
 }
 
 export function noticeFromDb(r: Record<string, unknown>): HelpNoticeRow {
@@ -226,6 +240,11 @@ export async function writeLive(
       returning quest_id`);
     const made = new Set(rows.map((r) => r.quest_id as string));
     quests = n.filter((x) => made.has(x.row.id)).map((x) => questView(x.row));
+  }
+  if (w.leaderPaid !== undefined) {
+    await q.execute(sql`
+      update floor_leaders set paid = true
+      where week = ${w.leaderPaid} and character_id = ${characterId}`);
   }
   if (w.notice && "insert" in w.notice) {
     const n = w.notice.insert;

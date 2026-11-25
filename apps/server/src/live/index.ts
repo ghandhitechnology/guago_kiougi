@@ -581,20 +581,48 @@ export function createLive(db: Db, o: LiveOptions) {
     for (const id of online.keys()) background("board", () => ensureBoard(id, true));
   }
 
-  /** The week turned: the last week's five most 상점 become 층장, the most meals 다 먹었상. */
+  /**
+   * The week turned: the last week's five most 상점 become 층장, the most meals 다 먹었상. Safe
+   * to run again after a crash at any point: the leaders are chosen once (the rows written the
+   * first time stand, `on conflict do nothing`), each is paid once by its row's `paid` flag
+   * inside the paying transaction, and the award once by the title.
+   */
   async function onWeek(week: number, previous: number): Promise<void> {
-    const leaders = await db.execute(sql`
-      select character_id from weekly_tally where week = ${previous} and kind = 'merit' and n > 0
-      order by n desc, character_id limit ${FLOOR_LEADERS}`);
-    const ids = leaders.rows.map((r) => r.character_id as string);
-    for (const [rank, id] of ids.entries()) {
-      await db.execute(sql`
-        insert into floor_leaders (week, character_id, rank) values (${week}, ${id}, ${rank + 1})
-        on conflict do nothing`);
+    const fault = (point: string) => page.fault?.(`week:${week}:${point}`);
+    const exists = await db.execute(sql`select 1 from floor_leaders where week = ${week} limit 1`);
+    if (exists.rows.length === 0) {
+      const top = await db.execute(sql`
+        select character_id from weekly_tally where week = ${previous} and kind = 'merit' and n > 0
+        order by n desc, character_id limit ${FLOOR_LEADERS}`);
+      await fault("chosen");
+      const ids = top.rows.map((r) => r.character_id as string);
+      if (ids.length > 0) {
+        await db.execute(sql`
+          insert into floor_leaders (week, character_id, rank)
+          select ${week}, u.id, u.rank
+          from unnest(${sql.param(ids)}::uuid[], ${sql.param(ids.map((_, i) => i + 1))}::smallint[])
+            as u(id, rank)
+          on conflict do nothing`);
+      }
+      await fault("written");
     }
-    floorLeaders = { week, ids: new Set(ids) };
-    for (const id of ids) {
-      await conduct(id, { kind: "merit", reason: "floor-leader" }, `floor-leader:${week}`);
+    const rows = await db.execute(
+      sql`select character_id, paid from floor_leaders where week = ${week} order by rank`,
+    );
+    const ids = rows.rows.map((r) => r.character_id as string);
+    if (week === boardWeek(now())) floorLeaders = { week, ids: new Set(ids) };
+    for (const r of rows.rows.filter((x) => x.paid !== true)) {
+      const id = r.character_id as string;
+      const paid = await run(id, `floor-leader:${week}`, "live.floorLeader", { week });
+      if (paid.ok && paid.outcome.paid) {
+        notify(id, paid);
+        line("merit.floor-leader", undefined, id);
+        if (Number(paid.outcome.cancelled) > 0) {
+          line("merit.cancel", { count: Number(paid.outcome.demerits) }, id);
+        }
+        if (online.has(id)) await refreshRules(id);
+      }
+      await fault(`paid:${id}`);
     }
     const meals = await db.execute(sql`
       select character_id from weekly_tally where week = ${previous} and kind = 'meal' and n > 0
@@ -607,6 +635,7 @@ export function createLive(db: Db, o: LiveOptions) {
         push(eater, { t: "award", award: "ate-it-all" });
       }
     }
+    await fault("awarded");
   }
 
   // Listening to operations -------------------------------------------------------------------
@@ -1007,6 +1036,7 @@ export function createLive(db: Db, o: LiveOptions) {
     });
   };
 
+  page.log = log;
   page.hooks = {
     announce: (key, params) => line(key, params),
     milestone: onMilestone,

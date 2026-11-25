@@ -20,7 +20,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { clubActivity } from "../club-activity.ts";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
-import { isReplay } from "../economy/executor.ts";
+import { type ExecutorOptions, isReplay } from "../economy/executor.ts";
 import { createEconomy } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { LiveClock } from "./clock.ts";
@@ -52,8 +52,14 @@ afterEach(async () => {
 const pools: Db[] = [];
 
 async function world(
-  o: { listen?: (id: string, name: string) => void; testEvents?: boolean; secret?: string } = {},
+  o: {
+    listen?: (id: string, name: string) => void;
+    testEvents?: boolean;
+    secret?: string;
+    hooks?: ExecutorOptions["hooks"];
+  } = {},
 ) {
+  const lines: string[] = [];
   const clock = new LiveClock({ realMs: 0, gameMs: T0, rate: 1 }, () => 0);
   const page = new PageClock(db, clock);
   await page.load(1);
@@ -65,18 +71,20 @@ async function world(
       o.listen?.(id, name);
       live?.onApplied(id, name, r);
     },
+    ...(o.hooks ? { hooks: o.hooks } : {}),
   });
   live = createLive(db, {
     clock,
     page,
     economy,
-    world: () => undefined,
+    world: () => ({ sendTo() {}, notify() {}, system: (l) => void lines.push(l.key) }),
     log: () => {},
     ...(o.testEvents ? { testEvents: true } : {}),
     ...(o.secret ? { adminSecret: o.secret } : {}),
   });
+  page.log = () => {};
   await page.tick();
-  return { clock, page, economy, live };
+  return { clock, page, economy, live, lines };
 }
 
 /**
@@ -447,3 +455,94 @@ async function until(check: () => Promise<boolean>, ms = 3000): Promise<void> {
     await new Promise((r) => setTimeout(r, 20));
   }
 }
+
+describe("week turnover", () => {
+  /**
+   * Three players earn 상점 and one eats, then the clock jumps two board weeks. The turnover is
+   * cut at its k-th step (a fault that never returns: the process died there), or a paying
+   * transaction fails, and a fresh server takes over the same database.
+   */
+  async function scenario(crash: { at?: number; tx?: boolean }) {
+    await db.pool.query("truncate accounts, server_state, notebook cascade");
+    let calls = 0;
+    let hit = false;
+    const hooks: ExecutorOptions["hooks"] = {
+      beforeCommit(op) {
+        if (crash.tx && op.opId.startsWith("floor-leader:") && !hit) {
+          hit = true;
+          throw new Error("killed inside the transaction");
+        }
+      },
+    };
+    const a = await world({ hooks });
+    const [x, y, z] = [await character(a), await character(a), await character(a)];
+    for (const [c, n] of [
+      [x, 3],
+      [y, 2],
+      [z, 1],
+    ] as const) {
+      for (let i = 0; i < n; i++) await a.live.events.cleaning(c.id);
+    }
+    expect(await a.live.events.eat(z.id)).toBe("ok");
+    a.clock.step(12 * DAY_MS);
+    await a.page.saveClock(a.clock.state);
+    a.page.fault = () => {
+      if (crash.at !== undefined && calls++ === crash.at) {
+        hit = true;
+        return new Promise<void>(() => {});
+      }
+    };
+    void a.page.tick();
+    await new Promise((r) => setTimeout(r, 300));
+    // A new process on the same database.
+    const b = await world();
+    return { hit, ids: [x.id, y.id, z.id], lines: [...a.lines, ...b.lines], b };
+  }
+
+  async function paidOnce(lines: string[], b: World): Promise<void> {
+    const rows = await db.pool.query("select week, character_id, paid from floor_leaders");
+    expect(rows.rows.length).toBeGreaterThan(0);
+    for (const r of rows.rows) {
+      expect(r.paid).toBe(true);
+      const paid = await db.pool.query(
+        "select count(*)::int as n from conduct_ledger where character_id = $1 and operation_id = $2 and reason = 'floor-leader'",
+        [r.character_id, `floor-leader:${r.week}`],
+      );
+      expect(paid.rows[0].n).toBe(1);
+    }
+    const all = await db.pool.query(
+      "select count(*)::int as n from conduct_ledger where reason = 'floor-leader'",
+    );
+    expect(all.rows[0].n).toBe(rows.rows.length);
+    const state = await db.pool.query("select last_day, last_week from server_state");
+    const now = b.clock.now();
+    expect(state.rows[0]).toEqual({
+      last_day: Math.floor((now + 4 * HOUR_MS) / DAY_MS),
+      last_week: Math.floor((Math.floor((now + 4 * HOUR_MS) / DAY_MS) + 3) / 7),
+    });
+    expect(lines).toContain("daily-reset");
+  }
+
+  it("pays every 층장 once and runs the day, wherever a crash cuts it", async () => {
+    let k = 0;
+    for (; ; k++) {
+      const run = await scenario({ at: k });
+      await paidOnce(run.lines, run.b);
+      const week1 = await db.pool.query(
+        "select character_id from floor_leaders where week = (select min(week) from floor_leaders) order by rank",
+      );
+      expect(week1.rows.map((r) => r.character_id)).toEqual(run.ids);
+      const titles = (await row(run.ids[2] as string)).titles as string[];
+      expect(titles.filter((t) => t === "ate-it-all")).toHaveLength(1);
+      if (!run.hit) break;
+    }
+    // Every step of two week turnovers and a day was cut at least once.
+    expect(k).toBeGreaterThan(8);
+  }, 120_000);
+
+  it("pays every 층장 once when a paying transaction fails", async () => {
+    const run = await scenario({ tx: true });
+    expect(run.hit).toBe(true);
+    await paidOnce(run.lines, run.b);
+  });
+});

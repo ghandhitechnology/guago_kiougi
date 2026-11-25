@@ -718,6 +718,8 @@ export const floorLeaders = pgTable(
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
     rank: smallint("rank").notNull(),
+    /** The +5 상점 went out: the turnover pays each row once, whatever it was doing on a crash. */
+    paid: boolean("paid").notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.week, t.characterId] })],
 );
