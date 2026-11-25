@@ -40,14 +40,20 @@ export interface Position {
   readonly row: number;
 }
 
-/** The row after `p`, following the loop, or null at the end of a song that plays once. */
+/**
+ * The row after `p`, following the loop, or null at the end of a song that plays once. Inside a
+ * part (`range`, first and last frame) the song loops that part instead.
+ */
 export function nextRow(
   frameRows: readonly number[],
   loop: number | false,
   p: Position,
+  range?: readonly [number, number] | null,
 ): Position | null {
   const rows = frameRows[p.frame] ?? 0;
   if (p.row + 1 < rows) return { frame: p.frame, row: p.row + 1 };
+  if (range)
+    return p.frame + 1 <= range[1] ? { frame: p.frame + 1, row: 0 } : { frame: range[0], row: 0 };
   if (p.frame + 1 < frameRows.length) return { frame: p.frame + 1, row: 0 };
   return loop === false ? null : { frame: loop, row: 0 };
 }

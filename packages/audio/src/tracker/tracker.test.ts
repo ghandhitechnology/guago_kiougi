@@ -83,6 +83,13 @@ describe("timing", () => {
     expect(nextRow(frames, false, { frame: 2, row: 127 })).toBeNull();
     expect(songShape(frames, 1)).toEqual({ intro: 32, loop: 256 });
   });
+
+  it("loops inside a part instead of the whole song", () => {
+    const frames = [32, 64, 64, 64];
+    expect(nextRow(frames, 0, { frame: 2, row: 63 }, [1, 2])).toEqual({ frame: 1, row: 0 });
+    expect(nextRow(frames, 0, { frame: 1, row: 63 }, [1, 2])).toEqual({ frame: 2, row: 0 });
+    expect(nextRow(frames, false, { frame: 3, row: 63 }, [3, 3])).toEqual({ frame: 3, row: 0 });
+  });
 });
 
 describe("songs", () => {
