@@ -56,11 +56,52 @@ export class Tooltip {
   }
 }
 
-/** Short notices that drop in at the top of the screen, one after another. */
+/**
+ * Where toasts land while a screen is open: centred on `x`, at most `w` wide, hanging from
+ * `top` or standing on `bottom`. Screen pixels.
+ */
+export interface ToastSpot {
+  readonly x: number;
+  readonly w: number;
+  readonly top?: number;
+  readonly bottom?: number;
+}
+
+/** Spots held by open screens, the newest last; a function so a moved screen is followed. */
+const spots: (() => ToastSpot)[] = [];
+
+function spot(): ToastSpot {
+  const held = spots.at(-1);
+  return held ? held() : { x: screen.w / 2, w: 313, top: 4 + screen.safe.top };
+}
+
+/**
+ * Toasts land at `at` instead of the top of the screen until the returned release is called:
+ * an open panel keeps them off its own controls. The newest hold wins; a toast on screen moves
+ * when the spot changes.
+ */
+export function holdToasts(at: () => ToastSpot): () => void {
+  spots.push(at);
+  toaster?.moved();
+  return () => {
+    const i = spots.indexOf(at);
+    if (i < 0) return;
+    spots.splice(i, 1);
+    toaster?.moved();
+  };
+}
+
+/**
+ * Short notices that drop in from the top of the screen, one after another, to the spot the
+ * newest open screen holds (the top of the screen when none does).
+ */
 export class Toaster {
   private readonly scene: Phaser.Scene;
   private readonly queue: string[] = [];
   private busy = false;
+  private shown:
+    | { box: Phaser.GameObjects.Container; w: number; h: number; landed: boolean; leaving: boolean }
+    | undefined;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -68,7 +109,27 @@ export class Toaster {
 
   push(text: string): void {
     this.queue.push(text);
-    if (!this.busy) this.next();
+    if (this.busy) return;
+    this.busy = true;
+    // A tick later, so a sheet that toasts and then closes leaves the spot to what is under it.
+    this.scene.time.delayedCall(0, () => this.next());
+  }
+
+  /** The spot changed: a toast on screen slides to the new one. */
+  moved(): void {
+    const s = this.shown;
+    if (!s || s.leaving) return;
+    this.scene.time.delayedCall(0, () => {
+      if (this.shown !== s || s.leaving) return;
+      slide(s.box, this.rest(s.w, s.h), 160, s.landed ? undefined : () => this.landed(s));
+    });
+  }
+
+  private rest(w: number, h: number): { x: number; y: number } {
+    const at = spot();
+    const x = Phaser.Math.Clamp(Math.round(at.x - w / 2), 2, screen.w - w - 2);
+    const y = at.top ?? (at.bottom ?? 4 + h) - h;
+    return { x, y: Math.max(Math.round(y), 2 + screen.safe.top) };
   }
 
   private next(): void {
@@ -77,17 +138,23 @@ export class Toaster {
       this.busy = false;
       return;
     }
-    this.busy = true;
-    const n = note(this.scene, text, 300);
-    const x = Math.round((screen.w - n.w) / 2);
-    n.box.setPosition(x, -n.h - 2).setDepth(2000);
+    const n = note(this.scene, text, Math.min(300, spot().w - 13));
+    const s = { box: n.box, w: n.w, h: n.h, landed: false, leaving: false };
+    this.shown = s;
+    const at = this.rest(n.w, n.h);
+    n.box.setPosition(at.x, -n.h - 2).setDepth(2000);
     sound("toast");
-    slide(n.box, { x, y: 4 + screen.safe.top }, 160, () => {
-      this.scene.time.delayedCall(2200, () => {
-        slide(n.box, { x, y: -n.h - 2 }, 140, () => {
-          n.box.destroy();
-          this.next();
-        });
+    slide(n.box, at, 160, () => this.landed(s));
+  }
+
+  private landed(s: NonNullable<Toaster["shown"]>): void {
+    s.landed = true;
+    this.scene.time.delayedCall(2200, () => {
+      s.leaving = true;
+      slide(s.box, { x: s.box.x, y: -s.h - 2 }, 140, () => {
+        s.box.destroy();
+        if (this.shown === s) this.shown = undefined;
+        this.next();
       });
     });
   }
@@ -99,7 +166,7 @@ export function setToaster(t: Toaster | undefined): void {
   toaster = t;
 }
 
-/** Shows a short notice at the top of the screen, above every scene. */
+/** Shows a short notice, above every scene, where the open screen keeps it off its controls. */
 export function toast(text: string): void {
   toaster?.push(text);
 }
@@ -130,6 +197,7 @@ export class Modal {
   private readonly dim: Phaser.GameObjects.Rectangle;
   private readonly panel: Panel;
   private readonly onClosed: (() => void) | undefined;
+  private readonly unhold: () => void;
   private closing = false;
 
   constructor(scene: Phaser.Scene, opts: ModalOptions) {
@@ -183,6 +251,7 @@ export class Modal {
     });
     this.scope.onBack = back;
     pushScope(this.scope);
+    this.unhold = holdToasts(() => this.panel.toastSpot());
     this.panel.open();
     // The last action, drawn rightmost, is the one to keep going with; it takes focus first.
     this.scope.focus(buttons[0]);
@@ -192,6 +261,7 @@ export class Modal {
     if (this.closing) return;
     this.closing = true;
     popScope(this.scope);
+    this.unhold();
     this.onClosed?.();
     fade(this.dim, 0, 120, () => this.dim.destroy());
     this.panel.hide(() => {

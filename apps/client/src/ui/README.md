@@ -12,7 +12,7 @@ themselves in the scope, which handles keyboard focus, Enter, Escape and arrow k
 | `registerMenuTab` | `../menu/notebook.ts` | A notebook tab: `{ id, label, icon, order, build(ctx, page, size) }`. Tabs exist only once registered. |
 | `Panel` | `panel.ts` | A notebook page with a title tab and a close cross. |
 | `Modal` | `overlay.ts` | A page over a dimmed screen with a few actions. |
-| `toast(text)` | `overlay.ts` | One line dropping in at the top. |
+| `toast(text)`, `holdToasts` | `overlay.ts` | One line dropping in at the top, or where the open screen holds them (`holdToasts(() => panel.toastSpot())`, the cover band) so they never cover its controls. |
 | `Tooltip` | `overlay.ts` | A sticky note over what it explains. |
 | `worldUi` | `world-ui.ts` | Calls other lanes make on the world's UI: dialogue, banners, prompts, nameplates. |
 

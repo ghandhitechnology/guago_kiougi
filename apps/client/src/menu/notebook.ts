@@ -1,6 +1,7 @@
 import type * as Phaser from "phaser";
 import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { turnPage } from "../ui/motion.ts";
+import { holdToasts } from "../ui/overlay.ts";
 import { Panel } from "../ui/panel.ts";
 import { screen } from "../ui/screen.ts";
 import { TabRow } from "../ui/tabs.ts";
@@ -51,6 +52,7 @@ export class Notebook {
   private page: Phaser.GameObjects.Container | undefined;
   private current = "";
   private closing = false;
+  private unhold: (() => void) | undefined;
 
   constructor(scene: Phaser.Scene, onClosed: () => void) {
     this.scene = scene;
@@ -107,6 +109,7 @@ export class Notebook {
     this.closing = false;
     scope.onBack = () => this.close();
     pushScope(scope);
+    this.unhold = holdToasts(() => panel.toastSpot());
     this.build(first, content, { w: page.w, h: page.h - (top - page.y) });
     panel.open();
     scope.focus(scope.first(), "key");
@@ -117,6 +120,8 @@ export class Notebook {
     if (!panel || this.closing) return;
     this.closing = true;
     if (this.scope) popScope(this.scope);
+    this.unhold?.();
+    this.unhold = undefined;
     panel.hide(() => {
       panel.destroy();
       if (this.panel === panel) {

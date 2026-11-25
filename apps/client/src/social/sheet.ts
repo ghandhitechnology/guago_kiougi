@@ -1,6 +1,7 @@
 import type * as Phaser from "phaser";
 import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { fade, stamp } from "../ui/motion.ts";
+import { holdToasts } from "../ui/overlay.ts";
 import { Panel } from "../ui/panel.ts";
 import { sound } from "../ui/sound.ts";
 import { paint } from "../ui/theme.ts";
@@ -45,6 +46,7 @@ export function openSheet(
     .setInteractive();
   fade(dim, 0.6, 140);
   let closing = false;
+  let unhold = () => {};
   const panel = new Panel(
     ctx,
     Math.round((sw - opts.w) / 2),
@@ -64,6 +66,7 @@ export function openSheet(
       if (closing) return;
       closing = true;
       popScope(scope);
+      unhold();
       opts.onClosed?.();
       fade(dim, 0, 120, () => dim.destroy());
       panel.hide(() => {
@@ -81,6 +84,7 @@ export function openSheet(
   };
   scope.onBack = () => sheet.close();
   pushScope(scope);
+  unhold = holdToasts(() => panel.toastSpot());
   opts.build(sheet);
   panel.open();
   scope.focus(scope.first(), "key");

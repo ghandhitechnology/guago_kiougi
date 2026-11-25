@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
 import type { Rect } from "./focus.ts";
 import { layDown, pickUp, type Rest } from "./motion.ts";
+import type { ToastSpot } from "./overlay.ts";
 import { sound } from "./sound.ts";
 import { Label } from "./text.ts";
 import { sliceOf } from "./theme.ts";
@@ -55,6 +56,8 @@ export class Panel extends Phaser.GameObjects.Container {
   readonly page: Rect;
   readonly rest: Rest;
   private readonly onClose: (() => void) | undefined;
+  /** The free stretch of the cover band, between the name label and the close cross. */
+  private readonly band: { l: number; r: number; bottom: number };
 
   constructor(ctx: Ctx, x: number, y: number, w: number, h: number, opts: PanelOptions = {}) {
     super(ctx.scene, Math.round(x), Math.round(y));
@@ -72,6 +75,7 @@ export class Panel extends Phaser.GameObjects.Container {
       kind === "panel"
         ? { x: 7, y: 19, w: w - 11, h: h - 23 }
         : { x: 7, y: 5, w: w - 11, h: h - 9 };
+    let bandL = 4;
 
     if (opts.title && kind === "panel") {
       const title = new Label(ctx.scene, 0, 0, opts.title, { font: "galmuri11-bold" });
@@ -81,11 +85,23 @@ export class Panel extends Phaser.GameObjects.Container {
         .setOrigin(0);
       title.at(16, 4);
       this.add([tag, title.obj]);
+      bandL = 10 + tag.width + 4;
     }
     if (opts.onClose && kind === "panel") {
       this.add(new CloseButton(ctx, w - 17, 4, opts.onClose));
     }
+    const bandR = opts.onClose && kind === "panel" ? w - 21 : w - 4;
+    this.band = { l: bandL, r: bandR, bottom: kind === "panel" ? 20 : 4 };
     this.setVisible(false);
+  }
+
+  /**
+   * Where toasts land while this panel is open (`holdToasts`): standing on its cover band,
+   * between the name label and the cross, so they cover none of the page's controls.
+   */
+  toastSpot(): ToastSpot {
+    const { l, r, bottom } = this.band;
+    return { x: this.rest.x + (l + r) / 2, w: r - l, bottom: this.rest.y + bottom };
   }
 
   /** The panel's close action, for Escape. */

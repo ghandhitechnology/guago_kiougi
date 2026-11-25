@@ -1,4 +1,4 @@
-import { cells, disc, grid, lit, stack, turn } from "../../draw.ts";
+import { cells, disc, grid, lit, over, stack, turn } from "../../draw.ts";
 import { type Paint, type SpriteDef, sprite, variant } from "../../format.ts";
 import { UI } from "../../ui-legend.ts";
 
@@ -6,7 +6,8 @@ import { UI } from "../../ui-legend.ts";
  * Pieces for the social screens (PLAN §12, §13): the 학생증 a player card is printed on, the
  * emote wheel and its eight icons, the party frame's crown, health fill and mode pips, the
  * trade window's seal, and the 대자보: cork, its wooden frame, paper in four colours, the
- * 층장's notice, thumbtacks and tape.
+ * 층장's notice, thumbtacks and tape, and the furniture years of use left on it: a faded
+ * 시간표, a 분실물 slip, the 층장's notice frame and rosette, a torn poster corner, scraps and old tape.
  */
 const ui = { group: "ui", origin: [0, 0], anim: {} } as const;
 
@@ -403,13 +404,26 @@ function seal(on: boolean): string {
   return base.map((r) => r.join("")).join("\n");
 }
 
+/** Where the player's own seal will land: a shallow round dent in the paper, lit from above. */
+function sealSlot(): string {
+  const shade = (t: number) => t > 0.6 || t < 0.1;
+  return disc(
+    21,
+    [
+      [1, (t) => (shade(t) ? "d" : "S")],
+      [1, (t) => (shade(t) ? "S" : "p")],
+    ],
+    "p",
+  );
+}
+
 const seals = sprite({
   ...ui,
   name: "seal",
   size: [21, 21],
   outline: false,
   palette: UI,
-  frames: { on: seal(true), off: seal(false) },
+  frames: { on: seal(true), off: seal(false), slot: sealSlot() },
 });
 
 /** Two arrows passing each other: what goes, what comes. */
@@ -591,6 +605,286 @@ const tape = sprite({
   },
 });
 
+// The board's furniture: what has been on the corridor board for years, under the notes.
+
+/**
+ * Paper lying flat on the cork from a shape: `at` names each pixel ("." for none), and a
+ * one-pixel shadow falls to the bottom right wherever paper does not cover it.
+ */
+function onCork(w: number, h: number, at: (x: number, y: number) => string): string {
+  const has = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && at(x, y) !== ".";
+  const shade = (x: number, y: number) => !has(x, y) && has(x - 1, y - 1);
+  // A lone speck of shadow in a ragged edge reads as dirt: it is left out.
+  const kept = (x: number, y: number) =>
+    shade(x, y) &&
+    [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => (dx || dy) && shade(x + dx, y + dy)));
+  return grid(w + 1, h + 1, (x, y) => (has(x, y) ? at(x, y) : kept(x, y) ? "z" : "."));
+}
+
+/**
+ * The 시간표: a sun-faded grid of five days and seven periods, the subjects told apart by the
+ * pale colours someone coloured them in, the day heads and period numbers worn to marks.
+ */
+function timetable(): string {
+  const W = 61;
+  const H = 54;
+  const cols = [2, 8, 18, 28, 38, 48, 58];
+  const rows = [2, 9, 15, 21, 27, 33, 39, 45, 51];
+  // Subjects by period (rows) and day (columns); "." left white.
+  const plan = ["nrgq.", "cngvr", "qo.nc", "rvqgn", "gcnrq", ".qvc.", "on.r."];
+  // Worn day heads: two short strokes and a dot each, none the same.
+  const heads = [
+    ["...........", "..mm..m....", "..m...mm...", "..mm..m....", "..........."],
+    ["...........", "..m.m.mm...", "..mmm..m...", "..m.m.mm...", "..........."],
+    ["...........", "..mm.mm....", "...m..m....", "..mm..m....", "..........."],
+    ["...........", "..mm..mm...", "..m...m....", "..mm..mm...", "..........."],
+    ["...........", "..m..mm....", "..mm..m....", "..m..mm....", "..........."],
+  ];
+  return onCork(W, H, (x, y) => {
+    // The bottom left corner has torn away.
+    if (x + (H - 1 - y) < 4) return ".";
+    if (x + (H - 1 - y) === 4) return "L";
+    if (x === W - 1 || y === H - 1) return "L";
+    const c = cols.findIndex((cx, i) => x > cx && x < (cols[i + 1] ?? -1));
+    const r = rows.findIndex((ry, i) => y > ry && y < (rows[i + 1] ?? -1));
+    const onLine = cols.includes(x) && y >= 2 && y <= 51;
+    const onRow = rows.includes(y) && x >= 2 && x <= 58;
+    if (onLine || onRow) return "L";
+    if (c < 0 || r < 0) return "P";
+    if (r === 0) {
+      if (c === 0) return "L";
+      return heads[c - 1]?.[y - 4]?.[x - (cols[c] as number) - 0] === "m" ? "m" : "L";
+    }
+    if (c === 0) {
+      // Period numbers: a short tick per row.
+      return x === 5 && y - (rows[r] as number) >= 2 && y - (rows[r] as number) <= 3 ? "m" : "P";
+    }
+    const subject = plan[r - 1]?.[c - 1] ?? ".";
+    return subject === "." ? "P" : subject;
+  });
+}
+
+const timetableSprite = sprite({
+  ...ui,
+  name: "board-timetable",
+  size: [62, 55],
+  outline: false,
+  palette: {
+    ".": null,
+    P: "stone.pale",
+    L: "stone.light",
+    m: "stone.mid",
+    n: "navy.pale",
+    r: "rose.pale",
+    g: "gold.pale",
+    q: "grass.bright",
+    c: "sea.pale",
+    v: "plum.pale",
+    o: "clay.pale",
+    z: "wood.mid",
+  },
+  frames: { idle: timetable() },
+});
+
+/**
+ * A 분실물 slip: someone's umbrella drawn in pen, two lines about it, and a fringe of tear-off
+ * tabs, two of them taken.
+ */
+function lostSlip(): string {
+  const W = 35;
+  const H = 44;
+  const umbrella = cells(
+    stack(
+      "......n......",
+      "....nnnnn....",
+      "..nnbbbbbnn..",
+      ".nbBbbbbbbbn.",
+      "nbBbbbbbbbbbn",
+      "nnnnnnknnnnnn",
+      "n..n..k..n..n",
+      "......k......",
+      "...k..k......",
+      "....kk.......",
+    ),
+  );
+  const taken = [1, 4];
+  return onCork(W, H, (x, y) => {
+    if (y >= 26) {
+      // The fringe: six tabs a pixel apart.
+      const tab = Math.floor(x / 6);
+      if (x % 6 === 5) return ".";
+      if (taken.includes(tab)) return y <= 27 && (x + y) % 3 !== 0 ? "p" : ".";
+      if (y === H - 1 || x % 6 === 4) return "p";
+      // A number written down the tab.
+      const ty = y - 29;
+      return x % 6 === 2 && ty >= 0 && ty <= 10 && ty % 4 !== 3 ? "S" : "W";
+    }
+    // Where the tabs are cut.
+    if (y === 25) return x % 3 === 2 ? "W" : "s";
+    if (x === W - 1) return "p";
+    const u = umbrella[y - 3]?.[x - 11];
+    if (u && u !== ".") return u;
+    // Two lines in pen, broken into words.
+    if ((y === 17 || y === 18) && x >= 5 && x <= 29 && ![11, 12, 20].includes(x)) return "S";
+    if ((y === 21 || y === 22) && x >= 5 && x <= 22 && ![9, 10, 16].includes(x)) return "S";
+    return "W";
+  });
+}
+
+const lostSprite = sprite({
+  ...ui,
+  name: "board-lost",
+  size: [36, 45],
+  outline: false,
+  palette: { ...UI, z: "wood.mid" },
+  frames: { idle: lostSlip() },
+});
+
+/**
+ * The corner of an old 축제 poster, torn off down to its tack: a printed sun and stripes on
+ * faded pink, white paper showing along the tear.
+ */
+function posterCorner(): string {
+  const W = 30;
+  const H = 22;
+  const jag = [0, 1, 1, 0, 2, 1, 0, 1, 2, 2, 1, 0, 1, 0, 2, 1, 1, 0, 2, 1, 0, 1];
+  return onCork(W, H, (x, y) => {
+    const edge = Math.round(y * 1.25) + (jag[y] ?? 0);
+    if (x < edge) return ".";
+    if (x === edge || x === edge + 1) return "W";
+    if (y === 0 || x === W - 1) return "e";
+    if (Math.hypot(x - 23, y - 7) < 6) return "y";
+    if ((x + y * 2) % 9 < 2) return "E";
+    return "e";
+  });
+}
+
+const posterSprite = sprite({
+  ...ui,
+  name: "board-poster",
+  size: [31, 23],
+  outline: false,
+  palette: { ...UI, e: "rose.pale", E: "rose.light", z: "wood.mid" },
+  frames: { idle: posterCorner() },
+});
+
+/** Bits of paper left under a tack when a note was pulled off. */
+const scraps = sprite({
+  ...ui,
+  name: "board-scrap",
+  size: [9, 7],
+  outline: false,
+  palette: {
+    ".": null,
+    W: "stone.bright",
+    p: "stone.pale",
+    y: "gold.pale",
+    Y: "gold.light",
+    z: "wood.mid",
+  },
+  frames: {
+    white: stack(
+      "WWWWWWW..",
+      "WWWWWWWz.",
+      "WWWWWppz.",
+      "WWWWppz..",
+      "WWppzz...",
+      ".Wzz.....",
+      ".........",
+    ),
+    yellow: stack(
+      "..yyyyyy.",
+      ".yyyyyyyz",
+      "yyyyyyyyz",
+      ".yyYyyYzz",
+      "..YYzYYz.",
+      "...zz.z..",
+      ".........",
+    ),
+  },
+});
+
+/** Tape gone yellow, left where a poster was taken down. */
+const oldTape = sprite({
+  ...ui,
+  name: "board-tape",
+  size: [12, 6],
+  outline: false,
+  palette: { ".": null, y: "gold.pale", Y: "gold.light", W: "stone.bright" },
+  frames: {
+    long: stack(
+      "YyyyyyyyyyY.",
+      ".YyyyyyyyyYY",
+      "YYyyyyyyyyY.",
+      ".YyyyyyyyyYY",
+      "............",
+      "............",
+    ),
+    stub: stack(
+      "....yyyyy...",
+      "...yyyyyyy..",
+      "...yyWWyyy..",
+      "...yWWWyy...",
+      "....yyyy....",
+      "............",
+    ),
+  },
+});
+
+/**
+ * The 층장's notice frame: an aluminium frame screwed to the cork, lit top left, with a lip
+ * where the notice sits. Its middle is clear.
+ */
+const noticeFrame = sprite({
+  ...ui,
+  name: "notice-frame",
+  size: [12, 12],
+  slice: [4, 4, 4, 4],
+  outline: false,
+  palette: {
+    ".": null,
+    D: "stone.deep",
+    d: "stone.dark",
+    S: "stone.mid",
+    s: "stone.light",
+    W: "stone.bright",
+  },
+  frames: {
+    idle: stack(
+      "DDDDDDDDDDDD",
+      "DWWWWWWWWWsD",
+      "DWssssssssSD",
+      "DWsDDDDDDDSD",
+      ["DWsD....DdSD", 4],
+      "DWsDDDDDDdSD",
+      "DssddddddSSD",
+      "DsSSSSSSSSSD",
+      "DDDDDDDDDDDD",
+    ),
+  },
+});
+
+/** The 층장's rosette, pinned to the top of the frame: a gold disc on two red tails. */
+const rosette = sprite({
+  ...ui,
+  name: "floor-rosette",
+  size: [9, 13],
+  palette: UI,
+  frames: {
+    idle: over(
+      stack([".........", 8], ".XrX.XrX.", ".XrX.XrX.", ".XrX.XrX.", "XrX...XrX", "XX.....XX"),
+      disc(
+        9,
+        [
+          [1, "u"],
+          [1, lit("y", "Y", "G")],
+        ],
+        "g",
+      ),
+    ),
+  },
+});
+
 export default [
   idcard,
   emoteBubbles,
@@ -608,4 +902,11 @@ export default [
   notice,
   ...tacks,
   tape,
+  timetableSprite,
+  lostSprite,
+  posterSprite,
+  scraps,
+  oldTape,
+  noticeFrame,
+  rosette,
 ];
