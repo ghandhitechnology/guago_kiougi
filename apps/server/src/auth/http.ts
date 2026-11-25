@@ -13,15 +13,18 @@ import {
   parseRecover,
   parseSignup,
 } from "@guago/shared";
-import { ipHash } from "./crypto.ts";
-import type { AuthService, Session } from "./service.ts";
+import { describeError } from "../db/index.ts";
+import { deviceSource, ipHash, newDeviceToken } from "./crypto.ts";
+import type { AuthService, Origin, Session } from "./service.ts";
 
 export interface HttpSettings {
   clientOrigin: string;
   secureCookies: boolean;
   trustProxy: boolean;
-  ipHashSecret: string;
+  serverSecret: string;
 }
+
+const DEVICE_COOKIE_DAYS = 365;
 
 const MAX_BODY = 4 * 1024;
 
@@ -42,6 +45,11 @@ const STATUS: Partial<Record<ApiErrorCode, number>> = {
 /** `__Host-` pins the cookie to this exact host over HTTPS; plain-http dev cannot use it. */
 export function sessionCookieName(secure: boolean): string {
   return secure ? "__Host-sid" : "sid";
+}
+
+/** The device cookie is only ever read by the API, so it never leaves `/api`. */
+export function deviceCookieName(secure: boolean): string {
+  return secure ? "__Secure-did" : "did";
 }
 
 export function readCookie(header: string | null | undefined, name: string): string | undefined {
@@ -85,6 +93,7 @@ export function createApiHandler(
   looks: () => LookOptions,
 ) {
   const cookieName = sessionCookieName(settings.secureCookies);
+  const deviceName = deviceCookieName(settings.secureCookies);
 
   function clientIp(req: IncomingMessage): string {
     if (settings.trustProxy) {
@@ -109,11 +118,30 @@ export function createApiHandler(
     return parts.join("; ");
   }
 
-  function send(res: ServerResponse, status: number, body: unknown, cookie?: string): void {
+  /** Issued after every success that proves the password or recovery code for `loginId`. */
+  function deviceCookie(loginId: string): string {
+    const parts = [
+      `${deviceName}=${newDeviceToken(loginId, settings.serverSecret)}`,
+      "Path=/api",
+      "HttpOnly",
+      "SameSite=Strict",
+      `Max-Age=${DEVICE_COOKIE_DAYS * 24 * 3600}`,
+    ];
+    if (settings.secureCookies) parts.push("Secure");
+    return parts.join("; ");
+  }
+
+  function send(
+    res: ServerResponse,
+    status: number,
+    body: unknown,
+    ...cookies: (string | undefined)[]
+  ): void {
     res.statusCode = status;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
-    if (cookie) res.setHeader("Set-Cookie", cookie);
+    const set = cookies.filter((c): c is string => c !== undefined);
+    if (set.length > 0) res.setHeader("Set-Cookie", set);
     res.end(JSON.stringify(body));
   }
 
@@ -140,7 +168,12 @@ export function createApiHandler(
       return error(res, "bad_request");
     }
     const token = readCookie(req.headers.cookie, cookieName);
-    const ip = ipHash(clientIp(req), settings.ipHashSecret);
+    const ip = ipHash(clientIp(req), settings.serverSecret);
+    const device = readCookie(req.headers.cookie, deviceName);
+    const from = (loginId: string): Origin => ({
+      ip,
+      source: deviceSource(device, loginId, settings.serverSecret) ?? ip,
+    });
 
     if (post && path === API.signup) {
       const parsed = parseSignup(await readJson(req));
@@ -148,15 +181,27 @@ export function createApiHandler(
       const result = await auth.signup(parsed.value, ip);
       if (!result.ok) return error(res, result.error);
       const { session, recoveryCode } = result.value;
-      return send(res, 200, { recoveryCode }, sessionCookie(session));
+      return send(
+        res,
+        200,
+        { recoveryCode },
+        sessionCookie(session),
+        deviceCookie(parsed.value.loginId),
+      );
     }
     if (post && path === API.login) {
       const parsed = parseLogin(await readJson(req));
       if (!parsed.ok) return error(res, parsed.error);
-      const result = await auth.login(parsed.value, ip);
+      const result = await auth.login(parsed.value, from(parsed.value.loginId));
       if (!result.ok) return error(res, result.error);
       const { session, account, character } = result.value;
-      return send(res, 200, { account, character }, sessionCookie(session));
+      return send(
+        res,
+        200,
+        { account, character },
+        sessionCookie(session),
+        deviceCookie(account.loginId),
+      );
     }
     if (post && path === API.logout) {
       await auth.logout(token);
@@ -185,9 +230,10 @@ export function createApiHandler(
     if (post && path === API.recover) {
       const parsed = parseRecover(await readJson(req));
       if (!parsed.ok) return error(res, parsed.error);
-      const result = await auth.recover(parsed.value, ip);
+      const result = await auth.recover(parsed.value, from(parsed.value.loginId));
       if (!result.ok) return error(res, result.error);
-      return send(res, 200, { ok: true });
+      const { recoveryCode } = result.value;
+      return send(res, 200, { ok: true, recoveryCode }, deviceCookie(parsed.value.loginId));
     }
     res.statusCode = 404;
     res.end();
@@ -207,8 +253,8 @@ export function createApiHandler(
     route(req, res, url.pathname, url.searchParams).catch((e: unknown) => {
       if (res.headersSent) return;
       if (e instanceof BodyError) return error(res, "bad_request");
-      // Never log the request body: it can hold a password.
-      console.error(`api ${req.method} ${url.pathname} failed:`, (e as Error)?.message ?? e);
+      // Never log the body or query parameters: they can hold passwords and hashes.
+      console.error(`api ${req.method} ${url.pathname} failed: ${describeError(e)}`);
       error(res, "server_error");
     });
   };

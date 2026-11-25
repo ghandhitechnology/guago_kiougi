@@ -33,3 +33,21 @@ export function pgErrorCode(error: unknown): { code?: string; constraint?: strin
     ...(typeof constraint === "string" ? { constraint } : {}),
   };
 }
+
+/**
+ * A log line for a failed query that never carries its parameters: Drizzle's own message embeds
+ * them (password and recovery-code hashes included), and Postgres messages can quote input.
+ */
+export function describeError(error: unknown): string {
+  const cause = (error as { cause?: unknown })?.cause ?? error;
+  const { code, constraint } = pgErrorCode(cause);
+  if (code) {
+    const { table, routine } = cause as { table?: unknown; routine?: unknown };
+    return [`postgres ${code}`, constraint, table, routine]
+      .filter((v) => typeof v === "string")
+      .join(" ");
+  }
+  if (!(error instanceof Error)) return "unknown error";
+  // A query error without a database code still has the parameters in its message.
+  return "params" in error ? error.name : `${error.name}: ${error.message}`;
+}

@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@colyseus/sdk": "0.18.10",
     "@types/node": "^26.6.6",
     "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.11"

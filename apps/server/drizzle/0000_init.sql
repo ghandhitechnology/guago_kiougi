@@ -37,6 +37,7 @@ CREATE TABLE "characters" (
 CREATE TABLE "login_failures" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "login_failures_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
 	"login_id" text NOT NULL,
+	"source" text NOT NULL,
 	"ip_hash" text NOT NULL,
 	"at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -45,13 +46,14 @@ CREATE TABLE "sessions" (
 	"token_hash" text PRIMARY KEY NOT NULL,
 	"account_id" uuid NOT NULL,
 	"expires_at" timestamp with time zone NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "sessions_account_id_unique" UNIQUE("account_id")
 );
 --> statement-breakpoint
 ALTER TABLE "characters" ADD CONSTRAINT "characters_account_id_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."accounts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sessions" ADD CONSTRAINT "sessions_account_id_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."accounts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "accounts_signup_ip_idx" ON "accounts" USING btree ("signup_ip_hash","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "characters_name_key" ON "characters" USING btree (lower("name"));--> statement-breakpoint
-CREATE INDEX "login_failures_key_idx" ON "login_failures" USING btree ("login_id","ip_hash","at");--> statement-breakpoint
-CREATE INDEX "sessions_account_idx" ON "sessions" USING btree ("account_id");--> statement-breakpoint
+CREATE INDEX "login_failures_key_idx" ON "login_failures" USING btree ("login_id","source","at");--> statement-breakpoint
+CREATE INDEX "login_failures_ip_idx" ON "login_failures" USING btree ("ip_hash","at");--> statement-breakpoint
 CREATE INDEX "sessions_expires_idx" ON "sessions" USING btree ("expires_at");

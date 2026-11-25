@@ -123,6 +123,11 @@ export interface RecoverRequest {
 export interface OkResponse {
   ok: true;
 }
+/** Recovery spends the old code and issues a new one to show and save. */
+export interface RecoverResponse {
+  ok: true;
+  recoveryCode: string;
+}
 
 // Rules ---------------------------------------------------------------------------------------
 

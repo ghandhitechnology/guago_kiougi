@@ -5,14 +5,18 @@
  */
 import { type AuthContext, type Client, ClientState, Deferred, ServerError } from "@colyseus/core";
 import { type Character, CLOSE_SESSION_REPLACED } from "@guago/shared";
+import { sessionTokenHash } from "./auth/crypto.ts";
 import { readCookie, sessionCookieName } from "./auth/http.ts";
 import type { AuthService } from "./auth/service.ts";
+import { describeError } from "./db/index.ts";
 
 export const SAVE_INTERVAL_MS = 30_000;
 
 export interface RoomAuth {
   accountId: string;
   characterId: string;
+  /** Re-checked when the socket arrives: a logout in between voids the reservation. */
+  tokenHash: string;
 }
 
 interface Services {
@@ -39,11 +43,13 @@ export async function authenticateJoin(ctx: AuthContext): Promise<RoomAuth> {
   const origin = ctx.headers.get("origin");
   if (origin && origin !== clientOrigin) throw new ServerError(403, "forbidden");
   const token = readCookie(ctx.headers.get("cookie"), sessionCookieName(secureCookies));
-  const me = await auth.authenticate(token);
+  if (!token || token.length > 128) throw new ServerError(401, "unauthorized");
+  const tokenHash = sessionTokenHash(token);
+  const me = await auth.authenticateHash(tokenHash);
   if (!me) throw new ServerError(401, "unauthorized");
   const character = await auth.characterOf(me.account.id);
   if (!character) throw new ServerError(403, "no_character");
-  return { accountId: me.account.id, characterId: character.id };
+  return { accountId: me.account.id, characterId: character.id, tokenHash };
 }
 
 // One seat per account, across rooms ---------------------------------------------------------
@@ -84,6 +90,8 @@ async function claim(accountId: string, evict: () => void): Promise<() => void> 
 type Reconnection = Deferred | Promise<unknown>;
 
 interface Seat {
+  /** The live connection; replaced when the player reconnects. */
+  client: Client;
   characterId: string;
   saved: { x: number; y: number };
   evicted: boolean;
@@ -113,18 +121,24 @@ export class RoomSeats {
 
   /** Takes the account's seat (closing an older one) and loads the character fresh. */
   async join(client: Client): Promise<Character> {
-    const { accountId } = client.auth as RoomAuth;
+    const { accountId, tokenHash } = client.auth as RoomAuth;
     const seat: Seat = {
+      client,
       characterId: "",
       saved: { x: 0, y: 0 },
       evicted: false,
       release: () => {},
     };
-    seat.release = await claim(accountId, () => this.evict(client, seat));
+    seat.release = await claim(accountId, () => this.evict(seat));
     try {
-      if (seat.evicted) throw new ServerError(409, "session_replaced");
-      const character = await use().auth.characterOf(accountId);
+      const { auth } = use();
+      // The session was checked at matchmaking; a logout or recovery since then voids the seat.
+      const me = await auth.authenticateHash(tokenHash);
+      if (me?.account.id !== accountId) throw new ServerError(401, "unauthorized");
+      const character = await auth.characterOf(accountId);
       if (!character) throw new ServerError(403, "no_character");
+      // A newer session may have taken the account while this one was loading.
+      if (seat.evicted) throw new ServerError(409, "session_replaced");
       const here = character.mapId === this.mapId;
       seat.characterId = character.id;
       seat.saved = here ? { x: character.x, y: character.y } : { x: -1, y: -1 };
@@ -148,9 +162,14 @@ export class RoomSeats {
     if (seat) seat.reconnection = reconnection;
   }
 
+  /** `client` is the new connection; the dropped one stays behind, marked reconnected. */
   reconnected(client: Client): void {
     const seat = this.seats.get(client.sessionId);
-    if (seat) delete seat.reconnection;
+    if (!seat) return;
+    delete seat.reconnection;
+    seat.client = client;
+    // Taken by a newer session while the socket was coming back.
+    if (seat.evicted) client.leave(CLOSE_SESSION_REPLACED);
   }
 
   /** Writes the place back and frees the account's seat. Call before removing the player. */
@@ -177,19 +196,17 @@ export class RoomSeats {
       await use().auth.saveCharacterPlace(seat.characterId, this.mapId, at.x, at.y);
       seat.saved = { x: at.x, y: at.y };
     } catch (error) {
-      console.error(`saving character ${seat.characterId} failed:`, (error as Error).message);
+      console.error(`saving character ${seat.characterId} failed: ${describeError(error)}`);
     }
   }
 
-  private evict(client: Client, seat: Seat): void {
+  private evict(seat: Seat): void {
     seat.evicted = true;
+    const { client } = seat;
     if (seat.reconnection instanceof Deferred) seat.reconnection.reject(false);
-    else if (client.state === ClientState.JOINED) client.leave(CLOSE_SESSION_REPLACED);
-    else if (client.state === ClientState.JOINING) {
-      // Still finishing onJoin: close it as soon as the join completes.
-      setTimeout(() => {
-        if (client.state === ClientState.JOINED) client.leave(CLOSE_SESSION_REPLACED);
-      }, 0);
+    // A joining client is closed too: its onJoin then fails, or ends at once if already past.
+    else if (client.state === ClientState.JOINED || client.state === ClientState.JOINING) {
+      client.leave(CLOSE_SESSION_REPLACED);
     }
   }
 }

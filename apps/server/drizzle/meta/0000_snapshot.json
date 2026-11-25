@@ -1,5 +1,5 @@
 {
-  "id": "405a4201-3d5c-4489-b04d-cb67cb2d60e9",
+  "id": "5ad0b623-5f45-4352-aa13-1108a79087dd",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -289,6 +289,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "ip_hash": {
           "name": "ip_hash",
           "type": "text",
@@ -313,6 +319,27 @@
               "asc": true,
               "nulls": "last"
             },
+            {
+              "expression": "source",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "login_failures_ip_idx": {
+          "name": "login_failures_ip_idx",
+          "columns": [
             {
               "expression": "ip_hash",
               "isExpression": false,
@@ -370,21 +397,6 @@
         }
       },
       "indexes": {
-        "sessions_account_idx": {
-          "name": "sessions_account_idx",
-          "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "sessions_expires_idx": {
           "name": "sessions_expires_idx",
           "columns": [
@@ -413,7 +425,13 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "sessions_account_id_unique": {
+          "name": "sessions_account_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["account_id"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

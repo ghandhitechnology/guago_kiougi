@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomInt } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { RECOVERY_CODE_ALPHABET, RECOVERY_CODE_LENGTH } from "@guago/shared";
 import { type Algorithm, hash, verify } from "@node-rs/argon2";
 
@@ -13,25 +13,67 @@ const ARGON2 = {
   parallelism: 1,
 };
 
+// Hashing slots -------------------------------------------------------------------------------
+
+/**
+ * Argon2 runs on libuv's pool (4 threads by default), which file and DNS work share. At most
+ * this many hashes run at once and this many wait; anything past that is refused at once.
+ */
+export const MAX_HASHING = 2;
+export const MAX_HASH_WAITING = 32;
+
+export class HashBusy extends Error {
+  constructor() {
+    super("hashing is saturated");
+  }
+}
+
+let running = 0;
+const waiting: (() => void)[] = [];
+
+/** Hashes started since boot; lets tests prove a refused request did no Argon2 work. */
+export const hashingStats = { started: 0 };
+
+async function withSlot<T>(work: () => Promise<T>): Promise<T> {
+  if (running >= MAX_HASHING) {
+    if (waiting.length >= MAX_HASH_WAITING) throw new HashBusy();
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  } else {
+    running++;
+  }
+  hashingStats.started++;
+  try {
+    return await work();
+  } finally {
+    const next = waiting.shift();
+    if (next) next();
+    else running--;
+  }
+}
+
 export function hashSecret(secret: string): Promise<string> {
-  return hash(secret, ARGON2);
+  return withSlot(() => hash(secret, ARGON2));
 }
 
 /** Constant-time inside Argon2. A malformed stored hash counts as a mismatch. */
-export async function verifySecret(stored: string, secret: string): Promise<boolean> {
-  try {
-    return await verify(stored, secret);
-  } catch {
-    return false;
-  }
+export function verifySecret(stored: string, secret: string): Promise<boolean> {
+  return withSlot(async () => {
+    try {
+      return await verify(stored, secret);
+    } catch {
+      return false;
+    }
+  });
 }
 
 let dummy: Promise<string> | undefined;
 /** A real hash to verify against when the account does not exist, so both paths cost the same. */
 export function dummyHash(): Promise<string> {
-  dummy ??= hashSecret(randomBytes(16).toString("hex"));
+  dummy ??= hash(randomBytes(16).toString("hex"), ARGON2);
   return dummy;
 }
+
+// Tokens --------------------------------------------------------------------------------------
 
 /** A 256-bit session token for the cookie, and the hash stored in its place. */
 export function newSessionToken(): string {
@@ -51,7 +93,29 @@ export function newRecoveryCode(): { code: string; display: string } {
   return { code, display: code.match(/.{4}/g)?.join("-") ?? code };
 }
 
+const hmac = (secret: string, purpose: string, value: string) =>
+  createHmac("sha256", secret).update(`${purpose}\0${value}`).digest();
+
 /** Keyed hash of a client IP: lets limits count per IP without storing the address. */
-export function ipHash(ip: string, key: string): string {
-  return createHmac("sha256", key).update(ip).digest("hex");
+export function ipHash(ip: string, secret: string): string {
+  return hmac(secret, "ip", ip).toString("hex");
+}
+
+/**
+ * A device cookie, set after a successful login and bound to that login id. It gives the device
+ * its own failure counter, so a lockout on a shared IP does not lock the owner out.
+ */
+export function newDeviceToken(loginId: string, secret: string): string {
+  const id = randomBytes(16).toString("base64url");
+  return `${id}.${hmac(secret, "device", `${loginId}\0${id}`).toString("base64url")}`;
+}
+
+/** The device's counter key when the token is genuine and bound to `loginId`, else null. */
+export function deviceSource(token: string | undefined, loginId: string, secret: string) {
+  const [id, mac] = token?.split(".") ?? [];
+  if (!id || !mac || id.length > 32) return null;
+  const expected = hmac(secret, "device", `${loginId}\0${id}`);
+  const given = Buffer.from(mac, "base64url");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  return `device:${hmac(secret, "device-key", id).toString("hex")}`;
 }

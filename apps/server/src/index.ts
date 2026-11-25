@@ -1,40 +1,20 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { defineRoom, defineServer, matchMaker } from "@colyseus/core";
-import { WebSocketTransport } from "@colyseus/ws-transport";
-import { MAP_ROOM } from "@guago/shared";
-import { createApiHandler } from "./auth/http.ts";
+import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
-import { assertDeployConfig, config } from "./config.ts";
+import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { studentLooks } from "./looks.ts";
-import { MapRoom } from "./map-room.ts";
-import { evictAccount, provideSeatServices } from "./seats.ts";
+import { evictAccount } from "./seats.ts";
 
-assertDeployConfig();
+assertServable(config);
 studentLooks();
 
 const db = createDb(config.databaseUrl);
-const auth = createAuthService({ db, onSessionsRevoked: evictAccount });
-provideSeatServices({ auth, ...config });
-const api = createApiHandler(auth, config, studentLooks);
-
-// Colyseus echoes any Origin with credentials by default; only the client's origin may call us.
-matchMaker.controller.getCorsHeaders = () => ({
-  "Access-Control-Allow-Origin": config.clientOrigin,
-  Vary: "Origin",
+const auth = createAuthService({
+  db,
+  onSessionsRevoked: evictAccount,
+  limits: { signupsPerIpPerDay: config.signupsPerIpPerDay },
 });
-
-type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
-
-const server = defineServer({
-  transport: new WebSocketTransport(),
-  rooms: { [MAP_ROOM]: defineRoom(MapRoom) },
-  express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
-    app.disable("x-powered-by");
-    app.use(api);
-  },
-  greet: false,
-});
+const server = createGameServer(auth, config, studentLooks);
 
 await server.listen(config.port);
 setInterval(() => auth.sweep().catch(() => {}), 10 * 60 * 1000).unref();

@@ -45,19 +45,16 @@ export const sessions = pgTable(
   {
     /** SHA-256 of the cookie token, hex. */
     tokenHash: text("token_hash").primaryKey(),
+    /** Unique: one live session per account (PLAN §19); a new login replaces the row. */
     accountId: uuid("account_id")
       .notNull()
+      .unique()
       .references(() => accounts.id, { onDelete: "cascade" }),
     expiresAt: at("expires_at").notNull(),
     createdAt: at("created_at").notNull().defaultNow(),
   },
-  (t) => [
-    index("sessions_account_idx").on(t.accountId),
-    index("sessions_expires_idx").on(t.expiresAt),
-  ],
+  (t) => [index("sessions_expires_idx").on(t.expiresAt)],
 );
-
-export const CONTROL_MODES = ["auto", "semi", "skill", "manual"] as const;
 
 export const characters = pgTable(
   "characters",
@@ -98,14 +95,22 @@ export const characters = pgTable(
   ],
 );
 
-/** Failed logins and recoveries, kept 15 minutes, keyed by login id and IP hash (PLAN §22). */
+/**
+ * Failed logins and recoveries, kept 15 minutes (PLAN §22). `source` is the counter the attempt
+ * belongs to: the IP hash, or a device cookie's key; `ip_hash` is always the IP, for the per-IP
+ * ceiling.
+ */
 export const loginFailures = pgTable(
   "login_failures",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     loginId: text("login_id").notNull(),
+    source: text("source").notNull(),
     ipHash: text("ip_hash").notNull(),
     at: at("at").notNull().defaultNow(),
   },
-  (t) => [index("login_failures_key_idx").on(t.loginId, t.ipHash, t.at)],
+  (t) => [
+    index("login_failures_key_idx").on(t.loginId, t.source, t.at),
+    index("login_failures_ip_idx").on(t.ipHash, t.at),
+  ],
 );
