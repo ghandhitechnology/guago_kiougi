@@ -17,7 +17,7 @@ import {
   questView,
 } from "./rows.ts";
 
-/** Null when the character does not exist, or has no wallet yet (no kit was made). */
+/** Null when the character does not exist. A character with no wallet row yet holds nothing. */
 export async function readInventory(
   db: Db,
   characterId: string,
@@ -34,8 +34,12 @@ export async function readInventory(
         sql`select pinecones, merit_points, tokens from wallets where character_id = ${characterId}`,
       );
       const charRow = c.rows[0];
-      const wallet = w.rows[0] as Record<string, string> | undefined;
-      if (!charRow || !wallet) return null;
+      const wallet = (w.rows[0] as Record<string, string> | undefined) ?? {
+        pinecones: "0",
+        merit_points: "0",
+        tokens: "0",
+      };
+      if (!charRow) return null;
       const character = characterFromDb(charRow);
       const [materials, items, codex, quests] = [
         await tx.execute(

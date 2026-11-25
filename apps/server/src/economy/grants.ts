@@ -1,8 +1,8 @@
 /**
  * Batched kill credit. Combat calls `add` once per credited kill, with no I/O; every few seconds
- * (and when a character leaves, and at shutdown) each character's pending credit goes to the
- * executor as one `grant` operation. A horde's kills cost one transaction per player per flush,
- * never one per monster.
+ * each character's pending credit goes to the executor as one `grant` operation, and the map
+ * room calls `flush(characterId)` when a character leaves and `flush()` before the process
+ * exits. A horde's kills cost one transaction per player per flush, never one per monster.
  *
  * A batch takes its operation id when it leaves the buffer and keeps it until it lands. A flush
  * that failed or whose answer was lost is retried under the same id, so it applies exactly once.

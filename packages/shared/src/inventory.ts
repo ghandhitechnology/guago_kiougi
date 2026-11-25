@@ -211,8 +211,11 @@ export type OpResult =
 
 // Validators ----------------------------------------------------------------------------------
 
-/** Client-made operation ids: a UUID fits, so do other short opaque tokens. */
-export const OP_ID_PATTERN = /^[A-Za-z0-9_:.-]{8,64}$/;
+/**
+ * Client-made operation ids: a UUID fits, so do other short opaque tokens. No `:`, which the
+ * server's own ids (`kit`, `grant:…`) use, so a client can never take one of them first.
+ */
+export const OP_ID_PATTERN = /^[A-Za-z0-9_.-]{8,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const DEF = /^[a-z0-9-]{1,40}$/;
 

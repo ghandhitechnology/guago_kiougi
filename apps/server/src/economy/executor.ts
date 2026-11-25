@@ -557,7 +557,10 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         const { code, constraint } = pgErrorCode(error);
         // Reachable past the character lock only if a double above 2^53 rounded an
         // affordability check up: the exact balance refuses it, and nothing was written.
-        if (code === "23514" && /^(wallets|materials)_/.test(constraint ?? "")) {
+        if (
+          code === "23514" &&
+          (constraint === "wallets_nonnegative_check" || constraint === "materials_qty_check")
+        ) {
           return { id: opId, op: name, ok: false, error: "insufficient" };
         }
         // Another transaction recorded this id first; its result is the answer.

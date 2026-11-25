@@ -12,6 +12,7 @@ import {
   type OpResult,
   parseOpMessage,
 } from "@guago/shared";
+import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
 import type { Executor } from "./executor.ts";
 import { readInventory } from "./reads.ts";
@@ -98,11 +99,14 @@ export function createOpHandler({
      * the same operation id character creation uses, so it can only ever be given once.
      */
     async snapshot(characterId: string): Promise<InventorySnapshot | null> {
-      const read = () => readInventory(db, characterId, new Date(now()), page());
-      const snapshot = await read();
-      if (snapshot) return snapshot;
-      const kit = await executor.execute(characterId, KIT_OP, "kit", {});
-      return kit.ok ? read() : null;
+      const given = await db.execute(
+        sql`select 1 from operations where character_id = ${characterId} and op_id = ${KIT_OP}`,
+      );
+      if (given.rows.length === 0) {
+        const kit = await executor.execute(characterId, KIT_OP, "kit", {});
+        if (!kit.ok) return null;
+      }
+      return readInventory(db, characterId, new Date(now()), page());
     },
   };
 }
