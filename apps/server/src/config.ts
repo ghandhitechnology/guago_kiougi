@@ -1,4 +1,4 @@
-import { SERVER_PORT } from "@guago/shared";
+import { CHANNEL_SEATS, MAP_SEATS, SERVER_PORT } from "@guago/shared";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -37,6 +37,11 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     serverSecretSet: Boolean(env.SERVER_SECRET),
     /** PLAN §12: 3. A dormitory behind one address may need more. */
     signupsPerIpPerDay: positiveInt(env.SIGNUPS_PER_IP_PER_DAY, 3, "SIGNUPS_PER_IP_PER_DAY"),
+    /** PLAN §10: 60 players a channel. Load tests raise it (up to MAP_SEATS) to fill one room. */
+    channelSeats: Math.min(
+      MAP_SEATS,
+      positiveInt(env.MAP_CHANNEL_SEATS, CHANNEL_SEATS, "MAP_CHANNEL_SEATS"),
+    ),
   };
 }
 

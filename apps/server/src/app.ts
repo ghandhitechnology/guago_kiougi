@@ -5,8 +5,10 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
 import { type LookOptions, MAP_ROOM, WORLD_ROOM } from "@guago/shared";
 import { createApiHandler, type HttpSettings } from "./auth/http.ts";
 import type { AuthService } from "./auth/service.ts";
+import { channels } from "./channels.ts";
 import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
+import { enterRoute } from "./enter.ts";
 import { MapRoom } from "./map-room.ts";
 import { allRooms } from "./metrics.ts";
 import { provideSeatServices } from "./seats.ts";
@@ -36,13 +38,18 @@ export function createGameServer(
   settings: HttpSettings,
   looks: () => LookOptions,
   chat: { filter?: ChatFilter; log?: ChatSink } = {},
+  world: { channelSeats?: number; emptyGraceSeconds?: number } = {},
 ) {
   provideSeatServices({ auth, ...settings });
   provideWorldServices(chat);
+  if (world.channelSeats !== undefined) channels.seats = world.channelSeats;
+  if (world.emptyGraceSeconds !== undefined) channels.graceSeconds = world.emptyGraceSeconds;
   const api = createApiHandler(auth, settings, looks);
+  const enter = enterRoute();
 
-  // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays
-  // the one the server made, and map rooms open only through `joinOrCreate`, when none has room.
+  // Clients join rooms; they never create one. Without `create`, the WorldRoom stays the one the
+  // server made. Map rooms refuse every client matchmaking call: their seats come from
+  // `POST /api/enter` and from doors, reserved by the server (channels.ts).
   matchMaker.controller.exposedMethods = ["joinOrCreate", "join", "joinById", "reconnect"];
   // Colyseus echoes any Origin with credentials by default; only the client's origin may call us.
   matchMaker.controller.getCorsHeaders = () => ({
@@ -56,6 +63,7 @@ export function createGameServer(
     express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
       app.disable("x-powered-by");
       app.use(metrics);
+      app.use(enter);
       app.use(api);
     },
     greet: false,

@@ -10,6 +10,7 @@ export * from "./korean.ts";
 export * from "./ledger.ts";
 export * from "./messages.ts";
 export * from "./movement.ts";
+export * from "./navigation.ts";
 export * from "./numbers.ts";
 export * from "./prediction.ts";
 export * from "./progress.ts";

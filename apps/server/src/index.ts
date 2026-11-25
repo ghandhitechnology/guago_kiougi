@@ -19,7 +19,13 @@ const auth = createAuthService({
 });
 startChatLogMaintenance(db);
 const chatLog = new ChatLog(db, { onMissingPartition: () => maintainChatLog(db) });
-const server = createGameServer(auth, config, studentLooks, { log: chatLog });
+const server = createGameServer(
+  auth,
+  config,
+  studentLooks,
+  { log: chatLog },
+  { channelSeats: config.channelSeats },
+);
 
 await server.listen(config.port);
 // The one WorldRoom exists from the start, so two first joins can never make two.

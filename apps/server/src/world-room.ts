@@ -114,14 +114,16 @@ export class WorldRoom extends Room {
     this.handle(WORLD_MESSAGES.chat, chatSendSchema, (client, message) =>
       this.chat(client, message),
     );
-    this.unlisten = places.listen((characterId, mapId) => {
+    this.unlisten = places.listen((characterId, mapId, channel) => {
       const member = this.byCharacter.get(characterId);
-      if (!member || member.entry.map === mapId) return;
+      if (!member || (member.entry.map === mapId && member.entry.ch === channel)) return;
       member.entry.map = mapId;
+      member.entry.ch = channel;
       this.broadcast(WORLD_MESSAGES.presence, {
         t: "map",
         id: characterId,
         map: mapId,
+        ch: channel,
       } satisfies PresenceMessage);
     });
     this.clock.setInterval(() => this.forget(), 60_000);
@@ -135,6 +137,7 @@ export class WorldRoom extends Room {
       major: character.major,
       level: character.level,
       map: places.get(character.id)?.mapId ?? "",
+      ch: places.get(character.id)?.channel ?? 0,
     };
     const member: Member = { client, characterId: character.id, entry, answers: [] };
     this.members.set(client.sessionId, member);
