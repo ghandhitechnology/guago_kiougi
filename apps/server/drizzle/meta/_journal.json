@@ -40,8 +40,15 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1795588179419,
-      "tag": "0005_live_review",
+      "when": 1795587329394,
+      "tag": "0005_trading",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795588329951,
+      "tag": "0006_live_review",
       "breakpoints": true
     }
   ]

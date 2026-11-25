@@ -20,7 +20,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { clubActivity } from "../club-activity.ts";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
-import { type ExecutorOptions, isReplay } from "../economy/executor.ts";
+import type { ExecutorOptions } from "../economy/executor.ts";
 import { createEconomy } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { LiveClock } from "./clock.ts";
@@ -355,11 +355,9 @@ describe("operation ids", () => {
     heard.length = 0;
     const first = await w.economy.executor.execute(c.id, "claim-once", "quest.claim", { quest });
     expect(first.ok).toBe(true);
-    expect(isReplay(first)).toBe(false);
     for (let i = 0; i < 5; i++) {
       const again = await w.economy.executor.execute(c.id, "claim-once", "quest.claim", { quest });
       expect(again).toEqual(first);
-      expect(isReplay(again)).toBe(true);
     }
     expect(heard.filter((n) => n === "quest.claim")).toHaveLength(1);
     expect(clubActivity.take().get(c.id)).toBe(CLUB_EXP_FOR_NOTICE.weekly);

@@ -8,6 +8,7 @@ import {
   pay,
   Random,
 } from "@guago/shared";
+import type { DropSource } from "./drops.ts";
 
 /**
  * Materials and the 자판기 (PLAN §13). Names and bag text are the narrative's item descriptions,
@@ -27,7 +28,17 @@ export const MATERIALS: readonly MaterialDef[] = [
     currency: "pinecone",
     description: "pinecone",
     sources: ["drop", "pool", "quest"],
-    sinks: ["sink.pilgi", "sink.bind", "sink.forge", "sink.shop", "sink.stat-reset", "sink.club"],
+    sinks: [
+      "sink.pilgi",
+      "sink.bind",
+      "sink.forge",
+      "sink.shop",
+      "sink.stat-reset",
+      "sink.club",
+      "sink.trade-tax",
+      "sink.board-fee",
+      "sink.board-tax",
+    ],
   },
   {
     currency: "sheet",
@@ -128,3 +139,32 @@ export function buy(
 
 /** The bag currency a 자판기 item is held as. */
 export const goodsOf = (id: string): Currency => `snack:${id}`;
+
+/**
+ * Where an item is made (PLAN §13 "Bound items"). A bound item never leaves its first owner:
+ * era boss drops, quest rewards and what 상점 or 탐구 토큰 buy. The 신입생 kit is bound too, so
+ * throwaway characters cannot mint books to pass on. Bought or received items are not bound;
+ * they wait out `TRADE.retradeHours` instead.
+ */
+export type ItemOrigin =
+  | "kit"
+  | "craft"
+  | "drop"
+  | "era-drop"
+  | "quest"
+  | "council-shop"
+  | "research-shop"
+  | "mentor-shop";
+
+const BOUND_ORIGINS: ReadonlySet<ItemOrigin> = new Set([
+  "kit",
+  "era-drop",
+  "quest",
+  "council-shop",
+  "research-shop",
+]);
+
+export const bindsOn = (origin: ItemOrigin): boolean => BOUND_ORIGINS.has(origin);
+
+/** A monster drop is bound when an era boss dropped it. */
+export const dropOrigin = (source: DropSource): ItemOrigin => (source.era ? "era-drop" : "drop");
