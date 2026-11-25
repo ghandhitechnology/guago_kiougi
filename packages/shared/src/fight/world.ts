@@ -113,6 +113,8 @@ export class Player {
   /** A reviver channelling on this player, and since when. */
   reviver = -1;
   reviveFrom = 0;
+  /** Tick the reviver last asked to keep reviving. */
+  reviveHeld = 0;
   contactSafeUntil = 0;
   /** Aim offset from the feet, px, while `aiming`. */
   aimX = 0;
@@ -153,6 +155,13 @@ export class Player {
   expMult = 1;
   /** The kit at a new level; set by whoever seated the player. */
   rebuild: ((level: number) => PlayerKit) | null = null;
+  /** Duel side (duel.ts): 1 or 2 while fighting a duel on this world, 0 everywhere else. */
+  team = 0;
+  /** A fighter's statuses and slow, carried over from its stand-in; 0 off a duel floor. */
+  statusMask = 0;
+  slow = 0;
+  /** Hit this tick, for the wire's flash; only a duel sets it. */
+  flash = false;
 
   constructor(index: number) {
     this.index = index;
@@ -232,6 +241,8 @@ export class Monster {
   killedWith: Weapon | null = null;
   /** Set when it should leave without a death (despawned, escaped). */
   gone = false;
+  /** A duel fighter's stand-in (duel.ts): hits on it land on this player index; -1 otherwise. */
+  fighter = -1;
 
   constructor(index: number, statuses: number) {
     this.index = index;
@@ -474,7 +485,35 @@ export interface Grant {
   drop: SimDrop;
 }
 
-const MONSTER_CAP = 512;
+/**
+ * Player-versus-player on a world (duel.ts). Null on every world but a duel floor's, so on a
+ * field no player has a stand-in and nothing a player casts can reach another player.
+ */
+export interface PvpHook {
+  /** Before players' books, effects and minions act: fighters' stand-ins take their places. */
+  before(w: FightWorld): void;
+  /** After: what struck the stand-ins moves the fighters; rounds are decided. */
+  after(w: FightWorld): void;
+  /** Stand-ins `actor` may not see (its own side's, or all of them for a non-fighter). */
+  hidden(actor: number): Uint8Array | null;
+  /** A hit on stand-in `m` lands on its fighter; returns what was dealt. */
+  land(
+    w: FightWorld,
+    by: Player | null,
+    m: Monster,
+    amount: number,
+    fromX: number,
+    fromY: number,
+    knock: number,
+    flags: number,
+    cast: number,
+    slot: number,
+  ): number;
+  /** The Hit event `land` wrote last, or null. */
+  readonly hit: FightEvent | null;
+}
+
+export const MONSTER_CAP = 512;
 const EFFECT_CAP = 1024;
 const MINION_CAP = 256;
 const PICKUP_CAP = 1024;
@@ -517,6 +556,8 @@ export class FightWorld {
   spawned = 0;
   /** Monsters killed this tick, handled after every hit has landed. */
   readonly dead: Monster[] = [];
+  /** What bodies removed between ticks left behind, ended at the next tick (`endDeparted`). */
+  readonly departed: { effects: Effect[]; minions: Minion[] } = { effects: [], minions: [] };
   private nextEntity = 1;
   private readonly live = new Uint8Array(65536);
   private nextFx = 1;
@@ -552,6 +593,8 @@ export class FightWorld {
   readonly scratch = new Int32Array(1024);
   readonly scratch2 = new Int32Array(1024);
   readonly scratch3 = new Int32Array(256);
+  /** Player-versus-player, only on a duel floor's world. */
+  pvp: PvpHook | null = null;
 
   constructor(map: FightMap, rules: SimRules, field: FieldRule | null, seed: number) {
     this.map = map;
@@ -707,7 +750,8 @@ export class FightWorld {
   private effectCursor = 0;
 
   freeMonster(): Monster | null {
-    const n = this.monsters.length;
+    // Past the pool are a duel's stand-ins, which are never spawned into.
+    const n = MONSTER_CAP;
     for (let k = 0; k < n; k++) {
       const i = (this.monsterCursor + k) % n;
       const m = this.monsters[i] as Monster;
@@ -791,6 +835,12 @@ export class FightWorld {
     for (const k of this.pickups) if (k.alive) this.drops.push(k);
   }
 
+  /** The players' books, effects and minions of `actor` act next: on a duel floor they see
+   * only the other side's stand-ins. */
+  actAs(actor: number): void {
+    if (this.pvp) this.monsterHash.skip = this.pvp.hidden(actor);
+  }
+
   // ── Players ──────────────────────────────────────────────────────────────
 
   /** Seats a player at (x, y) with its kit. Indices are reused, longest free first. */
@@ -800,47 +850,15 @@ export class FightWorld {
       p = new Player(this.players.length);
       this.players.push(p);
     }
+    resetPlayer(p);
     p.id = id;
     p.slot = slot;
     p.entity = this.allocEntity();
     p.joined = true;
     p.x = snap(x);
     p.y = snap(y);
-    p.facing = Facing.Down;
-    p.seq = 0;
-    p.movedX = 0;
-    p.movedY = 0;
-    p.rollLeft = 0;
-    p.invulnerableUntil = 0;
-    p.dodgeReadyAt = 0;
-    p.forceX = 0;
-    p.forceY = 0;
-    p.forceTicks = 0;
     p.level = level;
-    p.exp = 0;
-    p.downAt = -1;
-    p.reviver = -1;
-    p.shield = 0;
-    p.shieldUntil = 0;
-    p.contactSafeUntil = 0;
-    p.aiming = false;
-    p.casts = 0;
-    p.party = null;
-    p.minions = 0;
-    p.expEarned = 0;
-    p.expMult = 1;
-    p.away = false;
-    p.aiX = 0;
-    p.aiY = 0;
-    p.aiHold = 0;
     p.aiKeep = 52 + this.random.int(25);
-    p.ready.fill(0);
-    p.burst.fill(0);
-    p.burstHit.fill(0);
-    p.statusTurn.fill(0);
-    p.grow.fill(0);
-    p.growUntil.fill(0);
-    p.bestRoll.fill(0);
     this.setKit(p, kit);
     p.hp = kit.maxHp;
     // Books open staggered so a new arrival does not fire everything at once.
@@ -854,26 +872,47 @@ export class FightWorld {
     p.hp = Math.min(kit.maxHp, Math.max(p.down ? 0 : 1, share * kit.maxHp));
   }
 
+  /**
+   * Takes a body out of the fight, between ticks: nothing in the world names its index after this
+   * (tags, damage over time, launches, proof stacks, targets, revives), and its effects, minions
+   * and drops end at the start of the next tick, where the wire hears about them.
+   */
   removePlayer(id: string): void {
     const p = this.players.find((q) => q.joined && q.id === id);
     if (!p) return;
     p.joined = false;
     this.freeEntity(p.entity);
-    for (const m of this.minions) {
-      if (m.alive && m.owner === p.index) this.killMinion(m);
-    }
-    for (const e of this.effects) if (e.alive && e.owner === p.index) this.endFx(e);
-    for (const k of this.pickups) if (k.alive && k.owner === p.index) k.alive = false;
-    for (const q of this.players) if (q.reviver === p.index) q.reviver = -1;
-    // Its tags go with it, so whoever takes the slot next never inherits a share of a kill.
+    const i = p.index;
+    for (const n of this.minions) if (n.alive && n.owner === i) this.departed.minions.push(n);
+    for (const e of this.effects) if (e.alive && e.owner === i) this.departed.effects.push(e);
+    for (const k of this.pickups) if (k.alive && k.owner === i) k.alive = false;
+    for (const q of this.players) if (q.reviver === i) q.reviver = -1;
     for (const m of this.monsters) {
       if (!m.alive) continue;
-      for (let i = 0; i < m.contribBy.length; i++) {
-        if (m.contribBy[i] !== p.index) continue;
-        m.contribBy[i] = -1;
-        m.contribDamage[i] = 0;
+      for (let s = 0; s < m.contribBy.length; s++) {
+        if (m.contribBy[s] !== i) continue;
+        m.contribBy[s] = -1;
+        m.contribDamage[s] = 0;
       }
+      for (let s = 0; s < m.statusBy.length; s++) if (m.statusBy[s] === i) m.statusBy[s] = -1;
+      for (let s = 0; s < m.proofBy.length; s++) {
+        if (m.proofBy[s] !== i) continue;
+        m.proofBy[s] = -1;
+        m.proofStacks[s] = 0;
+      }
+      if (m.launchBy === i) m.launchBy = -1;
+      if (m.target === i) m.target = -1;
     }
+    resetPlayer(p);
+  }
+
+  /** Ends what departed bodies left behind; the step calls it first, after the counters reset. */
+  endDeparted(): void {
+    const d = this.departed;
+    for (const e of d.effects) if (e.alive) this.endFx(e);
+    for (const n of d.minions) if (n.alive) this.killMinion(n);
+    d.effects.length = 0;
+    d.minions.length = 0;
   }
 
   playerById(id: string): Player | undefined {
@@ -888,4 +927,72 @@ export class FightWorld {
     const owner = this.players[m.owner];
     if (owner) owner.minions = Math.max(0, owner.minions - 1);
   }
+}
+
+/**
+ * Every per-body field of a pooled player back to how a new body starts, so nothing of the last
+ * occupant (its mode, buffs, cooldowns, aim, party, revive, EXP) carries over to the next.
+ */
+export function resetPlayer(p: Player): void {
+  p.id = "";
+  p.slot = 0;
+  p.entity = 0;
+  p.x = 0;
+  p.y = 0;
+  p.facing = Facing.Down;
+  p.seq = 0;
+  p.movedX = 0;
+  p.movedY = 0;
+  p.rollLeft = 0;
+  p.rollDx = 0;
+  p.rollDy = 0;
+  p.invulnerableUntil = 0;
+  p.dodgeReadyAt = 0;
+  p.forceX = 0;
+  p.forceY = 0;
+  p.forceTicks = 0;
+  p.forceKeep = false;
+  p.mode = Mode.Semi;
+  p.level = 1;
+  p.exp = 0;
+  p.hp = 1;
+  p.shield = 0;
+  p.shieldUntil = 0;
+  p.downAt = -1;
+  p.reviver = -1;
+  p.reviveFrom = 0;
+  p.reviveHeld = 0;
+  p.contactSafeUntil = 0;
+  p.aimX = 0;
+  p.aimY = 0;
+  p.aiming = false;
+  p.ready.fill(0);
+  p.burst.fill(0);
+  p.burstHit.fill(0);
+  p.statusTurn.fill(0);
+  p.grow.fill(0);
+  p.growUntil.fill(0);
+  p.bestRoll.fill(0);
+  p.casts = 0;
+  p.attackSpeed = 0;
+  p.cooldownBuff = 0;
+  p.buffUntil = 0;
+  p.party = null;
+  p.minions = 0;
+  p.expEarned = 0;
+  p.aiX = 0;
+  p.aiY = 0;
+  p.aiHold = 0;
+  p.aiKeep = 64;
+  p.aiGoalX = 0;
+  p.aiGoalY = 0;
+  p.aiGoalUntil = 0;
+  p.lastHurt = -1000;
+  p.away = false;
+  p.expMult = 1;
+  p.rebuild = null;
+  p.team = 0;
+  p.statusMask = 0;
+  p.slow = 0;
+  p.flash = false;
 }

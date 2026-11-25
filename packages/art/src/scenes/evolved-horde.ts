@@ -81,7 +81,7 @@ export default scene({
     fx("fx-aqua-regia-pool", 336, 254, { anim: "bubble", play: true, index: 1 }),
     fx("fx-forest", 300, 66, { anim: "hold", play: true }),
     fx("fx-typhoon", EARTH[0], EARTH[1], { anim: "turn", play: true }),
-    fx("tele-circle", PHYS[0] + 4, PHYS[1] + 2, { frame: "t3" }),
+    fx("tele-circle", PHYS[0] + 4, PHYS[1] + 2, { frame: "r24-3" }),
     fx("fx-elite-aura", 262, 150, { anim: "aura", play: true }),
   ],
   objects: [

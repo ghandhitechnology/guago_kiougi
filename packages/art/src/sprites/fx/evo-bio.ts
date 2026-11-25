@@ -1,5 +1,5 @@
 import { sprite } from "../../format.ts";
-import { aimedFrames, clean, framesOf, names, Pic, put, rng } from "../../fx.ts";
+import { aimedFrames, clean, framesOf, names, Pic, paintAt, put, rng } from "../../fx.ts";
 import { antibody, aura, pea, roots } from "./bio-kit.ts";
 import { BASE, BIO, CH, CW, cellBody, eye, fanAt, LONE, single } from "./biology.ts";
 
@@ -204,19 +204,64 @@ const catalystSprite = sprite({
 
 /**
  * 집단 면역: the antibodies now guard the party too, so they shine: white bodies, a green rim,
- * eight turns as before.
+ * eight turns as before. Under each member they guard, a ring of interlocking links on the
+ * ground (`ring`), turning: the herd held together, readable from across a field as a chain no
+ * other book draws.
  */
+function chainRing(k: number): Pic {
+  const w = 44;
+  const h = 26;
+  const cx = w / 2;
+  const cy = h / 2;
+  const n = 16;
+  const pic = Pic.blank(w, h);
+  for (let i = 0; i < n; i++) {
+    const a = ((i + k / 2) / n) * Math.PI * 2;
+    const x = cx + Math.cos(a) * 18;
+    const y = cy + Math.sin(a) * 9;
+    // Links alternate: one lying along the ring, the next standing across it.
+    const along = i % 2 === 0;
+    const tx = -Math.sin(a) * 18;
+    const ty = Math.cos(a) * 9;
+    const tl = Math.hypot(tx, ty);
+    const [lx, ly] = along ? [tx / tl, ty / tl] : [-ty / tl, tx / tl];
+    const front = y >= cy;
+    put(
+      pic,
+      paintAt(w, h, (px, py) => {
+        const u = (px - x) * lx + (py - y) * ly;
+        const v = -(px - x) * ly + (py - y) * lx;
+        const e = Math.hypot(u / (along ? 3.6 : 2.4), v / (along ? 2.1 : 1.8));
+        if (e > 1 || e < 0.42) return null;
+        if (e > 0.8) return "o";
+        return front ? (v < 0 ? "W" : "p") : v < 0 ? "l" : "m";
+      }),
+      0,
+      0,
+    );
+  }
+  return clean(pic, LONE);
+}
+
 const herd = sprite({
   ...evo,
   name: "evo-herd-immunity",
-  size: [13, 13],
-  origin: [6, 6],
-  frames: framesOf(
-    "t",
-    [0, 1, 2, 3, 4, 5, 6, 7].map((k) => antibody((k * Math.PI) / 4, "m", "W", "*")),
-  ),
+  size: [44, 26],
+  origin: [22, 13],
+  frames: {
+    ...framesOf(
+      "t",
+      [0, 1, 2, 3, 4, 5, 6, 7].map((k) =>
+        put(Pic.blank(44, 26), antibody((k * Math.PI) / 4, "m", "W", "*"), 16, 7),
+      ),
+    ),
+    ...framesOf("ring", [0, 1, 2, 3].map(chainRing)),
+  },
   lone: `${LONE}W`,
-  anim: { tumble: { frames: names("t", 8), fps: 12, jump: 1 } },
+  anim: {
+    tumble: { frames: names("t", 8), fps: 12, jump: 1 },
+    ring: { frames: names("ring", 4), fps: 6, jump: 1 },
+  },
 });
 
 export default [stemCell, mendel, preciseAnatomy, forestSprite, catalystSprite, herd];

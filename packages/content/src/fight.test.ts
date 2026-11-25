@@ -1,5 +1,7 @@
 import {
+  applyBetween,
   applyStatus,
+  type Between,
   ByteReader,
   cast,
   castFlag,
@@ -9,6 +11,7 @@ import {
   type FightInput,
   FightNet,
   type FightWorld,
+  FxKind,
   gridOf,
   InputFlag,
   knockbackDistance,
@@ -27,6 +30,7 @@ import {
   snapshotCells,
   snapshotReaderFor,
   spawnMonster,
+  startRevive,
   stepFight,
   TILE_SIZE,
 } from "@guago/shared";
@@ -101,7 +105,12 @@ function session(seed: number, ticks: number): FightInput[][][] {
   return plan;
 }
 
-function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => void) {
+function fight(
+  seed: number,
+  plan: FightInput[][][],
+  check?: (w: FightWorld) => void,
+  between?: ReadonlyMap<number, readonly Between[]>,
+) {
   const map = fightMapOf(mapById("p1-colonnade") as never);
   const w = createFight(map, rules, fieldOf("p1-colonnade"), seed);
   const majors = Object.keys(STARTER_BOOKS);
@@ -127,6 +136,7 @@ function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => 
     tick.forEach((list, i) => {
       inputs.set(`p${i}`, list);
     });
+    for (const e of between?.get(t) ?? []) applyBetween(w, e);
     stepFight(w, inputs);
     check?.(w);
     if (t % 100 === 99) digests.push(digest(w));
@@ -134,7 +144,43 @@ function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => 
   return { w, digests };
 }
 
+/** Aim, mode and revive records a room would queue between ticks, from a seed. */
+function asks(seed: number, ticks: number): Map<number, Between[]> {
+  let s = seed >>> 0;
+  const roll = () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 2 ** 32;
+  };
+  const out = new Map<number, Between[]>();
+  for (let t = 0; t < ticks; t++) {
+    if (roll() > 0.15) continue;
+    const player = `p${Math.floor(roll() * 10)}`;
+    const k = roll();
+    const e: Between =
+      k < 0.5
+        ? {
+            t: "aim",
+            player,
+            aim: roll() < 0.2 ? null : { dx: roll() * 400 - 200, dy: roll() * 400 - 200 },
+          }
+        : k < 0.8
+          ? { t: "mode", player, mode: Math.floor(roll() * 4) as Mode }
+          : { t: "revive", player, target: `p${Math.floor(roll() * 10)}` };
+    out.set(t, [e]);
+  }
+  return out;
+}
+
 describe("combat replay", () => {
+  it("replays the records a room applies between ticks, too", () => {
+    const plan = session(11, 900);
+    const a = fight(77, plan, undefined, asks(5, 900));
+    const b = fight(77, plan, undefined, asks(5, 900));
+    const c = fight(77, plan, undefined, asks(6, 900));
+    expect(a.digests).toEqual(b.digests);
+    expect(c.digests).not.toEqual(a.digests);
+  });
+
   // 1300 ticks: a whole 50 s surge, the start of 쉬는 시간, kills, elites, knock-outs.
   const plan = session(17, 1300);
   const first = fight(4242, plan);
@@ -182,6 +228,85 @@ describe("combat replay", () => {
     // A pixel and a half, plus the quarter-pixel rounding.
     expect(worst).toBeLessThanOrEqual(1.5 + 0.25);
     expect(viewers.reduce((a, x) => a + x.r.broken, 0)).toBe(0);
+  });
+
+  it("decodes through joins mid-stream, leaves, index reuse and reconnects, players and monsters", () => {
+    let net: FightNet | undefined;
+    const clients = new Map<string, { v: ReturnType<typeof newViewer>; r: SnapshotReader }>();
+    let worst = 0;
+    let players = 0;
+    let monsters = 0;
+    let broken = 0;
+    const join = (w: FightWorld, id: string) => {
+      const p = w.playerById(id);
+      if (!net || !p) return;
+      const v = newViewer();
+      v.player = p;
+      net.viewers.add(v);
+      clients.set(id, { v, r: snapshotReaderForMap("p1-colonnade") });
+    };
+    const leave = (w: FightWorld, id: string) => {
+      const c = clients.get(id);
+      if (c) {
+        broken += c.r.broken;
+        net?.viewers.delete(c.v);
+      }
+      clients.delete(id);
+      w.removePlayer(id);
+    };
+    fight(23, session(9, 700), (w) => {
+      if (!net) {
+        net = new FightNet(w);
+        for (const id of ["p0", "p1", "p2"]) join(w, id);
+      }
+      const t = w.tick;
+      if (t === 120) for (const id of ["p3", "p4"]) join(w, id); // mid-stream
+      if (t === 200) leave(w, "p1");
+      if (t === 210) {
+        // A new body takes the freed index, and its client joins.
+        const q = w.addPlayer(
+          "late",
+          1,
+          w.map.spawn.x + 30,
+          w.map.spawn.y,
+          kitFor("math", ["wangdo"]),
+          5,
+        );
+        q.mode = Mode.Auto;
+        join(w, "late");
+      }
+      if (t === 300) {
+        // A reconnect: the server marks the viewer fresh, the client starts over.
+        const c = clients.get("p0");
+        if (c) {
+          c.v.fresh = true;
+          c.r.reset();
+        }
+      }
+      net.update();
+      for (const [, c] of clients) {
+        c.r.read(net.message(c.v).slice(), NULL_SINK);
+        for (const q of w.players) {
+          if (!q.joined || q === c.v.player) continue;
+          const seen = c.r.members.get(q.entity);
+          if (!seen) continue;
+          worst = Math.max(worst, Math.abs(seen.qx / Q - q.x), Math.abs(seen.qy / Q - q.y));
+          players++;
+        }
+        for (const m of w.monsters) {
+          if (!m.alive) continue;
+          const seen = c.r.members.get(m.entity);
+          if (!seen) continue;
+          worst = Math.max(worst, Math.abs(seen.qx / Q - m.x), Math.abs(seen.qy / Q - m.y));
+          monsters++;
+        }
+      }
+    });
+    for (const [, c] of clients) broken += c.r.broken;
+    expect(players).toBeGreaterThan(1000);
+    expect(monsters).toBeGreaterThan(1000);
+    expect(worst).toBeLessThanOrEqual(1.5 + 0.25);
+    expect(broken).toBe(0);
   });
 
   it("decodes with the browser's reader setup on maps of different sizes, and fails loudly when misread", () => {
@@ -472,6 +597,173 @@ describe("the other behaviours hit what their shape covers", () => {
     const struck = hitsOn(w, 80, p);
     expect(struck.has(near.entity)).toBe(true);
     expect(struck.has(far.entity)).toBe(false);
+  });
+});
+
+describe("a body leaving", () => {
+  it("leaves nothing that names its slot, and the next body in it starts fresh", () => {
+    const w = arena();
+    const a = w.addPlayer("a", 0, 200, 200, kitFor("chemistry", ["zoomin-chem"], 10), 10);
+    a.mode = Mode.Auto;
+    a.attackSpeed = 0.5;
+    a.buffUntil = w.tick + 1000;
+    a.aiming = true;
+    const m = post(w, 260, 200);
+    applyStatus(w, m, status("acid"), 1, 100, a, null);
+    m.proofBy[0] = a.index;
+    m.proofStacks[0] = 5;
+    m.launchBy = a.index;
+    // Until one of its shots is in the air.
+    for (let t = 0; t < 200 && !w.effects.some((e) => e.alive && e.owner === a.index); t++)
+      stepFight(w, new Map());
+    const inFlight = w.effects.filter((e) => e.alive && e.owner === a.index).map((e) => e.fx);
+    expect(inFlight.length).toBeGreaterThan(0);
+    w.removePlayer("a");
+    const b = w.addPlayer("b", 2, 200, 200, kitFor("math", ["wangdo"], 10), 10);
+    expect(b.index).toBe(a.index);
+    expect(b.mode).toBe(Mode.Semi);
+    expect([b.attackSpeed, b.buffUntil, b.aiming]).toEqual([0, 0, false]);
+    expect([...m.statusBy].includes(b.index)).toBe(false);
+    expect([m.proofBy[0], m.proofStacks[0], m.launchBy]).toEqual([-1, 0, -1]);
+    // What the leaver had in the air ends in the next tick's records, which the wire reads.
+    stepFight(w, new Map());
+    const ended = new Set(w.ended.slice(0, w.endedCount).map((e) => e.fx));
+    for (const fx of inFlight) expect(ended.has(fx)).toBe(true);
+  });
+});
+
+describe("a reconnect", () => {
+  it("sends the client its drops again in its next message", () => {
+    const w = arena();
+    const p = w.addPlayer("p", 0, 200, 200, kitFor("math", ["wangdo"], 10), 10);
+    const k = w.freePickup();
+    if (!k) throw new Error("no pickup");
+    Object.assign(k, { alive: true, id: w.allocPickup(), owner: p.index, x: 300, y: 300 });
+    Object.assign(k, { fromX: 300, fromY: 300, born: w.tick, until: w.tick + 1000 });
+    k.drop = { kind: 0, payload: null } as never;
+    const net = new FightNet(w);
+    const v = newViewer();
+    v.player = p;
+    net.viewers.add(v);
+    stepFight(w, new Map());
+    net.update();
+    net.message(v);
+    net.resendDrops(v);
+    stepFight(w, new Map());
+    net.update();
+    let drops = 0;
+    snapshotReaderFor(w.map).read(net.message(v).slice(), { ...NULL_SINK, drop: () => drops++ });
+    expect(drops).toBe(1);
+  });
+});
+
+describe("reviving", () => {
+  it("needs the reviver to hold it, and works on one player at a time", () => {
+    const w = arena();
+    const r = w.addPlayer("r", 0, 200, 200, kitFor("math", ["wangdo"], 10), 10);
+    const a = w.addPlayer("a", 1, 210, 200, kitFor("math", ["wangdo"], 10), 10);
+    const b = w.addPlayer("b", 2, 200, 210, kitFor("math", ["wangdo"], 10), 10);
+    for (const q of [a, b]) {
+      q.hp = 0;
+      q.downAt = w.tick;
+    }
+    // Asked once and let go: no revive.
+    expect(startRevive(w, r, a)).toBe(true);
+    for (let t = 0; t < 60; t++) stepFight(w, new Map());
+    expect(a.down).toBe(true);
+    // Starting on b lets go of a.
+    startRevive(w, r, a);
+    startRevive(w, r, b);
+    expect(a.reviver).toBe(-1);
+    // Held: b gets up after the channel.
+    for (let t = 0; t < 60; t++) {
+      startRevive(w, r, b);
+      stepFight(w, new Map());
+    }
+    expect(b.down).toBe(false);
+    expect(a.down).toBe(true);
+  });
+});
+
+describe("the effects budget", () => {
+  it("holds other players' bursts to the budget and always sends a player its own", () => {
+    const w = arena();
+    const me = w.addPlayer("me", 0, 300, 300, kitFor("math", ["wangdo"], 10), 10);
+    const other = w.addPlayer("other", 1, 330, 300, kitFor("chemistry", ["zoomin-chem"], 10), 10);
+    me.mode = Mode.Manual;
+    other.mode = Mode.Manual;
+    const net = new FightNet(w);
+    const v = newViewer();
+    v.player = me;
+    net.viewers.add(v);
+    const r = snapshotReaderFor(w.map);
+    let theirs = 0;
+    let mine = 0;
+    const sink = {
+      ...NULL_SINK,
+      fx: (f: { kind: number; owner: number }) => {
+        if (f.kind !== FxKind.Burst) return;
+        if (f.owner === me.entity) mine++;
+        else theirs++;
+      },
+    };
+    for (let t = 0; t < 3; t++) {
+      stepFight(w, new Map());
+      if (t === 2) {
+        for (let i = 0; i < 20; i++) {
+          const ev = w.event(Ev.Reaction);
+          Object.assign(ev, { a: other.index, d: 0, x: 330 + i, y: 300 });
+        }
+        for (let i = 0; i < 3; i++) {
+          const ev = w.event(Ev.Reaction);
+          Object.assign(ev, { a: me.index, d: 0, x: 300, y: 300 + i });
+        }
+      }
+      net.update();
+      r.read(net.message(v).slice(), sink);
+    }
+    expect(mine).toBe(3);
+    expect(theirs).toBeGreaterThan(0);
+    expect(theirs * 13).toBeLessThanOrEqual(40);
+  });
+});
+
+describe("aim", () => {
+  it("never carries a book past its reach or through a wall", () => {
+    const w = arena();
+    const p = w.addPlayer("aimer", 0, 64, 64, kitFor("physics", ["em-lab"], 10), 10);
+    p.mode = Mode.Semi;
+    // The only monster is 500 px away along the aim; the chain reaches about 120.
+    const far = post(w, 64 + 400, 64 + 300);
+    p.aiming = true;
+    p.aimX = 400;
+    p.aimY = 300;
+    for (let t = 0; t < 200; t++) stepFight(w, new Map());
+    expect(far.hp).toBe(far.maxHp);
+    // Within reach but behind a wall: still nothing.
+    const open = gridOf(60, 40).collision;
+    const rows = open.rows.map((r) => `${r.slice(0, 8)}#${r.slice(9)}`);
+    const walled = createFight(
+      {
+        id: "walled",
+        collision: { ...open, rows },
+        spawn: { x: 32, y: 32 },
+        safe: [],
+        spawnZones: [],
+        eliteZones: [],
+      },
+      rules,
+      null,
+      1,
+    );
+    const q = walled.addPlayer("aimer", 0, 100, 100, kitFor("physics", ["em-lab"], 10), 10);
+    q.mode = Mode.Semi;
+    const behind = post(walled, 100 + 90, 100);
+    q.aiming = true;
+    q.aimX = 90;
+    q.aimY = 0;
+    for (let t = 0; t < 200; t++) stepFight(walled, new Map());
+    expect(behind.hp).toBe(behind.maxHp);
   });
 });
 

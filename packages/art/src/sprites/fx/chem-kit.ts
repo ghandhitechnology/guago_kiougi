@@ -176,11 +176,14 @@ const chain = sprite({
 
 // 몰 계산 문제집 ------------------------------------------------------------------------------
 
-/** One particle of the many: a tiny molecule, three looks so a spray never repeats. */
-const PARTICLES = [".,.\n,*,\n.,.", "',\n,;", ".'\n',"];
+/**
+ * One particle of the many: a tiny molecule, three looks so a spray never repeats. Each is pale
+ * on top and sea-dark underneath, so the spray holds on sunlit dirt as well as at night.
+ */
+const PARTICLES = ["ll.\nl*l\n.dd", "pp\ndd", "ll\ndd"];
 
 /**
- * The spray the particles fly through: a faint fan of sea motes, drawn in sixteen directions so
+ * The spray the particles fly through: a fan of sea particles, drawn in sixteen directions so
  * the cone is never turned by the client. Range 64 at 40°.
  */
 function spray(a: number, k: number): Pic {
@@ -190,20 +193,19 @@ function spray(a: number, k: number): Pic {
   const pic = Pic.blank(s, s);
   // The front of the spray moves out over three frames; particles crowd at the front.
   const front = [26, 46, 64][k] as number;
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 34; i++) {
     const t = (r() - 0.5) * 0.7;
     const d = front * (0.45 + r() * 0.55);
     const x = c + Math.cos(a + t) * d;
     const y = c + Math.sin(a + t) * d;
     put(pic, PARTICLES[i % PARTICLES.length] as string, x - 1, y - 1);
   }
-  return pic;
+  return clean(pic, CHEM_LONE);
 }
 
 const particles = sprite({
   ...fx,
   name: "atk-particles",
-  blend: "add",
   size: [144, 144],
   origin: [72, 72],
   frames: {
@@ -230,6 +232,84 @@ const particles = sprite({
       ]),
     ),
   },
+});
+
+// 실험 보고서 -----------------------------------------------------------------------------------
+
+/** Drops of fuel: round, pale where the light catches them, sea-dark underneath. */
+const FUEL = [".l.\nl'l\n.dd", "ll\ndd", "'l.\nll.\n.dd"];
+
+/**
+ * 실험 보고서's cone: the alcohol lamp's fuel thrown out in a fan of drops that land wet on the
+ * ground, where the spark will find them. Sixteen aims, never turned. A jet near the hand first,
+ * the drops spreading to the front, then most of them down as dark wet spots with the last few
+ * still falling. `fan` reaches 60 over ±40° (the book's 70°, 85° at 25); `wide` reaches 72 over
+ * ±47° for 테르밋 and the book past level 50.
+ */
+function fuel(a: number, k: number, reach: number, half: number): Pic {
+  const s = 156;
+  const c = s / 2;
+  const r = rng(Math.round(a * 1000) + reach);
+  const pic = Pic.blank(s, s);
+  const front = [0.3, 0.62, 0.92, 1][k] as number;
+  if (k === 0) {
+    for (const off of [-0.18, 0, 0.18]) {
+      const ux = Math.cos(a + off);
+      const uy = Math.sin(a + off);
+      line(pic, c + ux * 5, c + uy * 5, c + ux * reach * 0.28, c + uy * reach * 0.28, "l");
+      line(
+        pic,
+        c + ux * 5,
+        c + uy * 5 + 1,
+        c + ux * reach * 0.28,
+        c + uy * reach * 0.28 + 1,
+        "d",
+        ".",
+      );
+    }
+  }
+  const count = Math.round(reach * 0.7);
+  for (let i = 0; i < count; i++) {
+    const t = (r() * 2 - 1) * half;
+    const spread = r();
+    const d = reach * front * (k === 3 ? 0.55 + spread * 0.45 : 0.35 + spread * 0.65);
+    const x = c + Math.cos(a + t) * d;
+    const y = c + Math.sin(a + t) * d;
+    if (k === 3 && i % 3 !== 0) put(pic, "dd", x - 1, y);
+    else put(pic, FUEL[i % FUEL.length] as string, x - 1, y - 1);
+  }
+  return clean(pic, CHEM_LONE);
+}
+
+const FUEL_SIZES = [
+  ["fan", 60, 0.7],
+  ["wide", 72, 0.82],
+] as const;
+
+const fuelSpray = sprite({
+  ...fx,
+  name: "atk-fuel-spray",
+  size: [156, 156],
+  origin: [78, 78],
+  frames: Object.fromEntries(
+    FUEL_SIZES.flatMap(([name, reach, half]) =>
+      Array.from({ length: 16 }, (_, d) =>
+        [0, 1, 2, 3].map((k) => [
+          `${name}${d}-${k}`,
+          fuel((d / 16) * Math.PI * 2, k, reach, half).toString(),
+        ]),
+      ).flat(),
+    ),
+  ),
+  anim: Object.fromEntries(
+    FUEL_SIZES.flatMap(([name]) => [
+      ...Array.from({ length: 16 }, (_, d) => [
+        `${name}${d}`,
+        { frames: names(`${name}${d}-`, 4), fps: 14, loop: false, jump: 1 },
+      ]),
+      [name, { frames: names(`${name}0-`, 4), fps: 14, loop: false, jump: 1 }],
+    ]),
+  ),
 });
 
 // 산·염기 적정 노트 ---------------------------------------------------------------------------
@@ -425,6 +505,7 @@ export default [
   element,
   chain,
   particles,
+  fuelSpray,
   drops,
   neutralizeSprite,
   corrosionSprite,

@@ -229,8 +229,8 @@ const map: MapSource = {
     },
   ],
   spawns: {
-    main: { tile: [3, 6], facing: "down" },
-    walkway: { tile: [3, 6], facing: "down" },
+    main: { tile: [4, 6], facing: "down" },
+    walkway: { tile: [4, 6], facing: "down" },
     colosseum: { tile: [37, 21], facing: "up" },
   },
   landmark: { name: "콜로세움", tile: [37, 13] },

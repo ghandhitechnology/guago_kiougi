@@ -11,6 +11,8 @@ export class SpatialHash {
   readonly rows: number;
   private readonly head: Int32Array;
   private next: Int32Array;
+  /** Indices a query leaves out (a duel's stand-ins the acting player may not see), or null. */
+  skip: Uint8Array | null = null;
 
   constructor(widthPx: number, heightPx: number, capacity: number) {
     this.cols = Math.max(1, Math.ceil(widthPx / SPATIAL_HASH_CELL_PX));
@@ -52,12 +54,13 @@ export class SpatialHash {
     const y1 = Math.min(this.rows - 1, Math.floor((y + r) / S));
     let n = 0;
     const cap = out.length;
+    const skip = this.skip;
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         let i = this.head[cy * this.cols + cx] as number;
         while (i !== -1) {
           if (n === cap) return n;
-          out[n++] = i;
+          if (skip === null || skip[i] !== 1) out[n++] = i;
           i = this.next[i] as number;
         }
       }

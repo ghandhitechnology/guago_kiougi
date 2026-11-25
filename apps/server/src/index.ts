@@ -4,17 +4,21 @@ import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
 import { background } from "./background.ts";
+import { channels } from "./channels.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
+import { createDueling, localRooms } from "./duel/hub.ts";
+import { dbRecords } from "./duel/records.ts";
 import { createEconomy } from "./economy/index.ts";
 import { startLedgerMaintenance } from "./economy/ledger.ts";
+import { dbModes } from "./fight/carry.ts";
 import { LiveClock } from "./live/clock.ts";
 import { provideLive, provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
-import { fightLoadoutChanged } from "./map-room.ts";
+import { fightLoadoutChanged, provideFightServices } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
@@ -84,6 +88,10 @@ const social = createSocial(db, {
   mayPin: (id) => live.isFloorLeader(id),
 });
 const trading = createTrading({ db, executor: economy.executor, clock: () => clock.date() });
+const dueling = createDueling({
+  records: dbRecords(db),
+  rooms: localRooms((map) => channels.openExtra(map)),
+});
 const server = createGameServer(
   auth,
   config,
@@ -95,9 +103,12 @@ const server = createGameServer(
     grants: economy.grants,
     live,
     trading,
+    dueling,
   },
   { channelSeats: config.channelSeats },
 );
+// Each character fights in the control mode it last chose.
+provideFightServices({ modes: dbModes(db) });
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
 onShutdown("grants", () => economy.grants.flush());
