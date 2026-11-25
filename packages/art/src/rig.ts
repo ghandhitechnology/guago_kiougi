@@ -147,8 +147,10 @@ export function drawPart(
   dir: Dir,
   skeleton: Skeleton,
   size: Vec,
+  clean = false,
 ): Indexed {
-  const img = indexed(size[0], size[1]);
+  const [w, h] = size;
+  const layers: Indexed[] = [];
   for (const bone of bones) {
     const piece = pieces.get(bone);
     const byPose = piece?.grids.get(dir);
@@ -157,9 +159,34 @@ export function drawPart(
     if (!s) continue;
     const pose = byPose.get(s.pose) ?? (byPose.get("rest") as ParsedPose);
     const at = pose.at ?? piece.at.get(dir) ?? [0, 0];
-    stamp(img, pose.img, at[0] + s.offset[0], at[1] + s.offset[1]);
+    const one = indexed(w, h);
+    stamp(one, pose.img, at[0] + s.offset[0], at[1] + s.offset[1]);
+    layers.push(one);
   }
-  return img;
+  // With the rig's `clean` rule, a piece drawn over another of the same part (an arm across the
+  // torso) hides the strays it leaves too; this is baked into the part's own frame.
+  return stackIndexed(layers, w, h, clean);
+}
+
+/** Stacks indexed images with `stackLayers`, carrying the lone marks along. */
+function stackIndexed(layers: readonly Indexed[], w: number, h: number, clean: boolean): Indexed {
+  const { px, owner, source } = stackLayers(
+    layers.map((img) => img.px),
+    w,
+    h,
+    CLEAR,
+    clean,
+    isOutlineIndex,
+  );
+  const out = indexed(w, h);
+  px.forEach((v, i) => {
+    out.px[i] = v;
+    const j = source[i] as number;
+    const at = j >= 0 ? j : i;
+    const own = layers[owner[i] as number];
+    if (own && own.px[at] === v) out.lone[i] = own.lone[at] as number;
+  });
+  return out;
 }
 
 export function compileRig(def: RigDef, name: string, where: string): CompiledRig {
@@ -190,7 +217,7 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
       const frames = new Map<string, Indexed>();
       for (const [key, skeleton] of skeletons) {
         const dir = key.split("/")[0] as Dir;
-        frames.set(key, drawPart(pieces, bones, dir, skeleton, def.size));
+        frames.set(key, drawPart(pieces, bones, dir, skeleton, def.size, def.clean ?? false));
       }
       const anchors = new Map<string, Map<string, Vec>>();
       for (const [anchor, a] of Object.entries(partDef.anchors ?? {})) {
@@ -241,21 +268,7 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
     const stacked = shown.filter((p) => !def.unchecked?.includes(p.layer));
     for (const key of skeletons.keys()) {
       const imgs = stacked.map((p) => p.frames.get(key) as Indexed);
-      const { px, owner } = stackLayers(
-        imgs.map((img) => img.px),
-        w,
-        h,
-        CLEAR,
-        def.clean ?? false,
-        isOutlineIndex,
-      );
-      const some = indexed(w, h);
-      px.forEach((v, i) => {
-        some.px[i] = v;
-        const l = owner[i] as number;
-        const own = imgs[l];
-        if (own && own.px[i] === v) some.lone[i] = own.lone[i] as number;
-      });
+      const some = stackIndexed(imgs, w, h, def.clean ?? false);
       const all = indexed(w, h);
       for (const p of below) stamp(all, p.frames.get(key) as Indexed, 0, 0);
       stamp(all, some, 0, 0);

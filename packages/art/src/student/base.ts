@@ -322,7 +322,7 @@ export const away = `
   .1.
 `;
 
-const armR: Piece = {
+const armRBase: Piece = {
   at: { down: [6, 14], up: [15, 14], side: [8, 14] },
   down: {
     ...armLit,
@@ -416,7 +416,7 @@ const armR: Piece = {
   },
 };
 
-const armL: Piece = {
+const armLBase: Piece = {
   at: { down: [15, 14], up: [6, 14], side: [8, 14] },
   down: {
     ...armShade,
@@ -454,6 +454,353 @@ const armL: Piece = {
   side: armSideFar,
 };
 
+// Poses for sitting, sleeping, the emotes and the story's small moments. Down: the right arm
+// (on the left of the picture) is drawn after the torso, so poses with both hands in front of
+// the body draw both forearms in it and leave the left arm its upper half. Up: arms in front of
+// the body show their upper half only.
+
+/** Both forearms folded on a desk, elbows out. */
+const fold = `
+  .11144444444111.
+  1222555556663331
+  .11144444444111.
+`;
+
+/** The free hand up and waving, palm out, then tipped in. */
+const wave = {
+  out: `
+    ......O.
+    .....O&O
+    .....O&O
+    ....464.
+    ...464..
+    ..131...
+    .131....
+    131.....
+    11......
+  `,
+  in: `
+    .....O..
+    ....O&O.
+    ....O&O.
+    ....464.
+    ...464..
+    ..131...
+    .131....
+    131.....
+    11......
+  `,
+};
+
+/** 박수: hands apart, then together, in front of the chest. */
+const clap = {
+  apart: `
+    .11..........
+    121O%O...O&O.
+    121O%O...O&O.
+    .1454.....464
+    ..11.......1.
+  `,
+  together: `
+    .11..........
+    121...OO.....
+    121..O%&O....
+    .1454O%&O4641
+    ..11..OO..11.
+  `,
+};
+
+/** ㅋㅋ: one hand holding the stomach. */
+const belly = `
+  .11....
+  121....
+  121....
+  .1544O.
+  ..444%O
+  .....O.
+`;
+
+/** 화이팅: both fists up in front of the chest, then pumped down. */
+const fists = {
+  up: `
+    .11.......11.
+    1O%O.....O&O1
+    1O%O.....O&O1
+    .454.....464.
+    1454.....4641
+    .11.......11.
+  `,
+  down: `
+    .11..........
+    121..........
+    121..........
+    .1454...4641.
+    ..1O%O.O&O1..
+    ...O%O.O&O...
+  `,
+};
+
+/** 공수: hands folded over the stomach before a bow. */
+const gongsu = `
+  .11.........
+  121.........
+  121.........
+  .1544...4451
+  ..1.O%&O..1.
+  ....OOOO....
+`;
+
+/** 절: hands flat on the floor either side of the head. */
+const floor = `
+  .1144OOOOOO4411.
+  12555O%OO&O66631
+  .1144OOOOOO4411.
+`;
+
+/** Carrying: forearms forward under a box. */
+const hold = `
+  .11........11.
+  121........131
+  121........131
+  .1454....4641.
+  ..O%O....O&O..
+`;
+
+/**
+ * In profile an arm raised across the head would sit under the hair, so the near arm reaches
+ * up and forward past the face instead: open and waving, or a fist round a book.
+ */
+const reach = {
+  out: `
+    ..........O.
+    .........O%O
+    .........O%O
+    ........454.
+    ........454.
+    .......454..
+    ......454...
+    .111.454....
+    .1214541....
+    .1225551....
+    .111111.....
+  `,
+  in: `
+    .........O..
+    ........O%O.
+    ........O%O.
+    ........454.
+    ........454.
+    .......454..
+    ......454...
+    .111.454....
+    .1214541....
+    .1225551....
+    .111111.....
+  `,
+  fist: `
+    .........O%O
+    .........O%O
+    ........454.
+    ........454.
+    ........454.
+    .......454..
+    ......454...
+    .111.454....
+    .1214541....
+    .1225551....
+    .111111.....
+  `,
+};
+
+/** 레벨 업: the book arm straight up. */
+const aloft = `
+  .O%O
+  .O%O
+  .454
+  .454
+  .121
+  .121
+  .11.
+`;
+
+/** 멘붕: both hands clutching the head. */
+const clutch = `
+  O%O...
+  454...
+  .454..
+  ..121.
+  ...121
+  ....11
+`;
+
+const armR: Piece = {
+  ...armRBase,
+  down: {
+    ...(armRBase.down as Record<string, PoseGrid>),
+    fold: { at: [4, 18], grid: fold },
+    clap0: { at: [6, 14], grid: clap.apart },
+    clap1: { at: [6, 14], grid: clap.together },
+    belly: { at: [6, 14], grid: belly },
+    fist0: { at: [5, 13], grid: fists.up },
+    fist1: { at: [5, 14], grid: fists.down },
+    floor: { at: [4, 20], grid: floor },
+    hold: { at: [5, 14], grid: hold },
+    aloft: { at: [5, 7], grid: aloft },
+    clutch: { at: [3, 8], grid: clutch },
+    gongsu: { at: [6, 14], grid: gongsu },
+  },
+  up: {
+    ...(armRBase.up as Record<string, PoseGrid>),
+    gongsu: { at: [15, 14], grid: away },
+    fold: { at: [15, 14], grid: away },
+    clap0: { at: [15, 14], grid: away },
+    clap1: { at: [15, 14], grid: away },
+    belly: { at: [15, 14], grid: away },
+    fist0: { at: [15, 14], grid: away },
+    fist1: { at: [15, 14], grid: away },
+    floor: { at: [15, 14], grid: away },
+    hold: { at: [15, 14], grid: away },
+    aloft: { at: [15, 7], grid: mirror(aloft) },
+    clutch: { at: [17, 8], grid: mirror(clutch) },
+  },
+  side: {
+    ...(armRBase.side as Record<string, PoseGrid>),
+    fold: {
+      at: [9, 14],
+      grid: `
+        .111.....
+        .121.....
+        .1214444O
+        .1155555O
+        ..444444.
+      `,
+    },
+    clap0: {
+      at: [9, 13],
+      grid: `
+        .111....
+        .121.O..
+        .1214%O.
+        .1255O..
+        ..44....
+      `,
+    },
+    clap1: {
+      at: [9, 13],
+      grid: `
+        .111...
+        .121...
+        .1214O.
+        .1255%O
+        ..444O.
+      `,
+    },
+    belly: {
+      at: [9, 14],
+      grid: `
+        .111..
+        .121..
+        .121..
+        .1554O
+        ..444O
+      `,
+    },
+    fist0: {
+      at: [9, 12],
+      grid: `
+        ......O%O
+        ......O%O
+        .111.454.
+        .1214541.
+        .12255551
+        .1111111.
+      `,
+    },
+    fist1: {
+      at: [9, 14],
+      grid: `
+        .111....
+        .121....
+        .1214O%O
+        .1255O%O
+        ..4444..
+      `,
+    },
+    hold: {
+      at: [9, 14],
+      grid: `
+        .111....
+        .121....
+        .1214444
+        .125555O
+        ..44444O
+      `,
+    },
+    aloft: { at: [9, 4], grid: reach.fist },
+    clutch: {
+      at: [7, 7],
+      grid: `
+        .O%O.
+        .454.
+        .454.
+        .454.
+        ..121
+        ..121
+        ..111
+      `,
+    },
+    wave0: { at: [9, 4], grid: reach.out },
+    wave1: { at: [9, 4], grid: reach.in },
+    gongsu: {
+      at: [9, 14],
+      grid: `
+        .111..
+        .121..
+        .121..
+        .1554O
+        ..44O%
+      `,
+    },
+    floor: {
+      at: [12, 21],
+      grid: `
+        .1144444O.
+        12555555%O
+        .1144444O.
+      `,
+    },
+  },
+};
+
+const armL: Piece = {
+  ...armLBase,
+  down: {
+    ...(armLBase.down as Record<string, PoseGrid>),
+    fold: ".",
+    wave0: { at: [15, 6], grid: wave.out },
+    wave1: { at: [15, 6], grid: wave.in },
+    upper: { at: [15, 14], grid: mirror(away) },
+    floor: ".",
+    clutch: { at: [17, 8], grid: mirror(clutch) },
+  },
+  up: {
+    ...(armLBase.up as Record<string, PoseGrid>),
+    fold: { at: [6, 14], grid: mirror(away) },
+    wave0: { at: [1, 6], grid: mirror(wave.out) },
+    wave1: { at: [1, 6], grid: mirror(wave.in) },
+    upper: { at: [6, 14], grid: mirror(away) },
+    floor: { at: [6, 14], grid: mirror(away) },
+    clutch: { at: [3, 8], grid: clutch },
+  },
+  side: {
+    ...(armLBase.side as Record<string, PoseGrid>),
+    fold: ".",
+    upper: ".",
+    floor: ".",
+    clutch: ".",
+  },
+};
+
 const legLit = {
   rest: `
     .eIe
@@ -468,6 +815,23 @@ const legLit = {
     .eIe
     .eIe
     GwwG
+    GGGG
+  `,
+  /** Seated, seen from in front: the lap under the hem, then the shoes. */
+  sit: `
+    ....
+    ....
+    eIIe
+    eIIe
+    GwwG
+    GGGG
+  `,
+  /** Seated, seen from behind: a calf and the heel under the seat. */
+  tuck: `
+    ....
+    ....
+    ....
+    .eIe
     GGGG
   `,
 };
@@ -485,6 +849,21 @@ const legShade = {
     eie.
     eie.
     GwwG
+    GGGG
+  `,
+  sit: `
+    ....
+    ....
+    eiie
+    eiie
+    GwwG
+    GGGG
+  `,
+  tuck: `
+    ....
+    ....
+    ....
+    eie.
     GGGG
   `,
 };
@@ -513,22 +892,54 @@ const legSide = {
     GwwwG...
     GGGGG...
   `,
+  /** Seated in profile: the thigh along the seat, the shin down to the floor. */
+  sit: `
+    .eeeeeee...
+    .iiiiiiie..
+    .iiiiiiie..
+    .eeeeeiie..
+    ......GwwGG
+    ......GGGGG
+  `,
 };
 const far = (g: string) => g.replaceAll("I", "z").replaceAll("i", "z");
-const legSideFar = { rest: far(legSide.rest), fwd: far(legSide.fwd), back: far(legSide.back) };
+const legSideFar = {
+  rest: far(legSide.rest),
+  fwd: far(legSide.fwd),
+  back: far(legSide.back),
+  sit: far(legSide.sit),
+};
+
+/** Kneeling: the knees seen from in front; the soles seen from behind; the folded leg in profile. */
+const knees = {
+  lit: "....\n....\n....\neIIe\neIIe\neeee",
+  shade: "....\n....\n....\neiie\neiie\neeee",
+};
+const soles = "....\n....\neiie\nGGGG\nGwwG\nGGGG";
+const kneelSide = {
+  at: [6, 19] as Vec,
+  grid: `
+    ..........
+    ..........
+    ...eeeeee.
+    ...iiiiiie
+    GGeiiiiiie
+    GGeeeeeee.
+  `,
+};
 
 const legs = {
   legR: {
     at: { down: [8, 19], up: [12, 19], side: [8, 19] },
-    down: legLit,
-    up: legShade,
-    side: legSide,
+    down: { ...legLit, kneel: knees.lit },
+    up: { ...legShade, kneel: soles },
+    side: { ...legSide, kneel: kneelSide },
   },
   legL: {
     at: { down: [12, 19], up: [8, 19], side: [8, 19] },
-    down: legShade,
-    up: legLit,
-    side: legSideFar,
+    down: { ...legShade, kneel: knees.shade },
+    up: { ...legLit, kneel: soles },
+    side: { ...legSideFar, kneel: { at: kneelSide.at, grid: far(kneelSide.grid) } },
   },
 } satisfies Record<string, Piece>;
 

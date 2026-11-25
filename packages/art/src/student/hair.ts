@@ -434,30 +434,28 @@ export const twintails = hair({
     `,
   },
   tail: {
-    at: { down: [0, 5], up: [0, 5], side: [0, 5] },
+    at: { down: [1, 5], up: [1, 5], side: [0, 5] },
     down: `
-      ..XX................XX..
-      .XmmX..............XmmX.
-      XHrrX..............XrrxX
-      XHhhX..............XhhxX
-      XHhhX..............XhhxX
-      XhhxX..............XhhxX
-      XhhxX..............XhxxX
-      .XhxX..............XhxX.
-      .XxX................XxX.
-      ..X..................X..
+      .XX................XX.
+      XmmX..............XmmX
+      XrrX..............XrrX
+      XHhX..............XhxX
+      XHhX..............XhxX
+      XhhX..............XhxX
+      XhxX..............XxxX
+      XhxX..............XxxX
+      .XX................XX.
     `,
     up: `
-      ..XX................XX..
-      .XmmX..............XmmX.
-      XHrrX..............XrrxX
-      XHhhX..............XhhxX
-      XHhhX..............XhhxX
-      XhhxX..............XhhxX
-      XhhxX..............XhxxX
-      .XhxX..............XhxX.
-      .XxX................XxX.
-      ..X..................X..
+      .XX................XX.
+      XmmX..............XmmX
+      XrrX..............XrrX
+      XHhX..............XhxX
+      XHhX..............XhxX
+      XhhX..............XhxX
+      XhxX..............XxxX
+      XhxX..............XxxX
+      .XX................XX.
     `,
     side: `
       ..XX..

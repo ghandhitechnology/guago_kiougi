@@ -54,9 +54,11 @@ export function stackLayers(
   empty: number,
   clean: boolean,
   isOutline: (color: number) => boolean,
-): { px: Int32Array; owner: Int16Array } {
+): { px: Int32Array; owner: Int16Array; source: Int32Array } {
   const px = new Int32Array(w * h).fill(empty);
   const owner = new Int16Array(w * h).fill(-1);
+  /** For a cleaned stray, the pixel whose colour it took; -1 elsewhere. */
+  const source = new Int32Array(w * h).fill(-1);
   layers.forEach((layer, l) => {
     for (let i = 0; i < w * h; i++) {
       const c = layer[i] as number;
@@ -65,38 +67,47 @@ export function stackLayers(
       owner[i] = l;
     }
   });
-  if (!clean) return { px, owner };
+  if (!clean) return { px, owner, source };
   const at = (img: ArrayLike<number>, x: number, y: number): number =>
     x < 0 || y < 0 || x >= w || y >= h ? empty : (img[y * w + x] as number);
-  const strays: [number, number, number][] = [];
+  // Find every stray first, so a stray never hands its colour to another stray.
+  const stray = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const l = owner[i] as number;
       if (l < 0) continue;
       const c = px[i] as number;
-      const own = layers[l] as ArrayLike<number>;
       if (N8.some(([dx, dy]) => at(px, x + dx, y + dy) === c)) continue;
-      if (!N8.some(([dx, dy]) => at(own, x + dx, y + dy) === c)) continue;
-      const above = N8.map(([dx, dy]) => [x + dx, y + dy] as const).filter(
-        ([nx, ny]) => nx >= 0 && ny >= 0 && nx < w && ny < h && (owner[ny * w + nx] as number) > l,
-      );
-      const edge = N4.some(([dx, dy]) => at(px, x + dx, y + dy) === empty);
-      const pick =
-        (edge && above.find(([nx, ny]) => isOutline(px[ny * w + nx] as number))) || above[0];
-      if (pick)
-        strays.push([
-          i,
-          px[pick[1] * w + pick[0]] as number,
-          owner[pick[1] * w + pick[0]] as number,
-        ]);
+      if (!N8.some(([dx, dy]) => at(layers[l] as ArrayLike<number>, x + dx, y + dy) === c))
+        continue;
+      stray[i] = 1;
     }
   }
-  for (const [i, c, l] of strays) {
+  const taken: (readonly [number, number])[] = [];
+  for (let i = 0; i < w * h; i++) {
+    if (!stray[i]) continue;
+    const x = i % w;
+    const y = Math.floor(i / w);
+    const l = owner[i] as number;
+    const above = N8.map(([dx, dy]) => [x + dx, y + dy] as const)
+      .filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < w && ny < h)
+      .map(([nx, ny]) => ny * w + nx)
+      .filter((j) => (owner[j] as number) > l);
+    const settled = above.filter((j) => !stray[j]);
+    const choices = settled.length > 0 ? settled : above;
+    const edge = N4.some(([dx, dy]) => at(px, x + dx, y + dy) === empty);
+    const pick = (edge ? choices.find((j) => isOutline(px[j] as number)) : undefined) ?? choices[0];
+    if (pick !== undefined) taken.push([i, pick]);
+  }
+  const colors = taken.map(([, j]) => [px[j] as number, owner[j] as number] as const);
+  taken.forEach(([i, j], k) => {
+    const [c, l] = colors[k] as readonly [number, number];
     px[i] = c;
     owner[i] = l;
-  }
-  return { px, owner };
+    source[i] = j;
+  });
+  return { px, owner, source };
 }
 
 /** Packs RGBA pixels into `0xRRGGBB` integers, `-1` where clear. */
