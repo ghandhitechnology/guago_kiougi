@@ -11,7 +11,7 @@ import { place } from "./props.ts";
  * anywhere. The school stays in the courtyard around the clock and lets nobody walk a diagonal.
  * The sun is just up out of the sea to the east and everything throws its shadow west across the
  * squares. A monochord waits on its table; the brothers have fenced the bean patch so no one has
- * to walk through it, and the only way in is the boat drawn up on the beach.
+ * to walk through it. The road in runs along the shore from the olive grove, past the boat.
  */
 
 const T = 16;
@@ -25,6 +25,8 @@ const CELL = 2;
 const SCHOOL = { x: 14, bays: 16, steps: 13 };
 const LANDING: Vec = [50, 39];
 const ALTAR: Vec = [49, 15];
+/** The shore road east to the olive grove. */
+const ROAD_Y = 41;
 
 function paintPlan(): string {
   const g = new PlanGrid(W, H, ",");
@@ -70,6 +72,16 @@ function paintPlan(): string {
     3,
     "_",
     { seed: 8 },
+  );
+  g.path(
+    [
+      [LANDING[0] - 2, LANDING[1] + 1],
+      [54, ROAD_Y],
+      [W, ROAD_Y],
+    ],
+    3,
+    "_",
+    { seed: 12, ragged: 0.3 },
   );
   g.patches(",", "_", { scale: 4, threshold: 0.7, seed: 9 });
   // The courtyard: paving all round the counting floor, and the apron in front of the school.
@@ -186,7 +198,7 @@ const placed = merge(
       place("beans", 3, 18),
       place("monochord", 6, 28),
       place("statue", 9, 22),
-      place("bench-stone", 4, 32),
+      place("marble-bench", 4, 32),
       // The headland: the altar for the sun, a herm, amphorae of the morning's water.
       place("altar", ALTAR[0], ALTAR[1]),
       {
@@ -206,7 +218,6 @@ const placed = merge(
       // The landing: the boat drawn up, nets drying, a rope to the stake.
       place("boat", LANDING[0] - 1, LANDING[1] - 2),
       place("nets", 45, 41),
-      place("boulder", 55, 41),
       place("boulder-big", 56, 34),
     ],
     overhead: [
@@ -297,18 +308,18 @@ const map: MapSource = {
     },
   ],
   spawns: {
-    main: { tile: [LANDING[0], LANDING[1] + 2], facing: "up" },
-    "p1-colonnade": { tile: [LANDING[0], LANDING[1] + 2], facing: "up" },
+    main: { tile: [W - 3, ROAD_Y], facing: "left" },
+    "p1-olive-road": { tile: [W - 3, ROAD_Y], facing: "left" },
   },
   landmark: { name: "셈의 마당", tile: [GRID.x + GRID.cols, GRID.y + GRID.rows] },
   blocks: [{ x: SCHOOL.x - 1, y: SCHOOL.steps - 4, w: SCHOOL.bays * 2 + 2, h: 4 }],
   portals: [
-    // Back by boat to the colonnade's beach. Its arrival spawn there is still to be added.
+    // The road east along the shore to the olive grove.
     {
-      id: "boat",
-      rect: { x: LANDING[0] + 3, y: LANDING[1] + 1, w: 2, h: 2 },
-      to: "p1-colonnade",
-      spawn: "main",
+      id: "olive-road",
+      rect: { x: W - 1, y: ROAD_Y - 1, w: 1, h: 3 },
+      to: "p1-olive-road",
+      spawn: "p1-croton-school",
     },
   ],
   interactables: [
@@ -322,7 +333,11 @@ const map: MapSource = {
     },
   ],
   zones: [
-    { id: "landing", kind: "safe", rect: { x: LANDING[0] - 4, y: LANDING[1], w: 8, h: 5 } },
+    {
+      id: "landing",
+      kind: "safe",
+      rect: { x: LANDING[0] - 4, y: LANDING[1], w: W - LANDING[0] + 4, h: 5 },
+    },
     {
       id: "steps",
       kind: "gather",

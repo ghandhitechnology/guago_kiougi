@@ -622,7 +622,7 @@ export default [
     { origin: [0, STOA_H - 1], outline: false },
   ),
   greek(
-    "stall",
+    "market-stall",
     {
       olives: stall("olives"),
       figs: stall("figs"),
@@ -643,13 +643,21 @@ export default [
     },
   ),
   greek("heroes", { still: heroes() }, { shadow: ovalShadow(84, 46, 43, 44, 42, 3), lone: "Ir!q" }),
-  greek("horos", { still: Pic.of(HOROS) }, { shadow: ovalShadow(8, 11, 4.5, 10, 4.5, 1.4) }),
+  greek(
+    "boundary-stone",
+    { still: Pic.of(HOROS) },
+    { shadow: ovalShadow(8, 11, 4.5, 10, 4.5, 1.4) },
+  ),
   greek(
     "pithos",
     { still: finish(Pic.of(PITHOS)) },
     { shadow: ovalShadow(12, 12, 6.5, 11, 6, 1.4) },
   ),
-  greek("cart", { still: finish(Pic.of(CART)) }, { shadow: ovalShadow(32, 11, 16, 10, 15, 1.6) }),
+  greek(
+    "handcart",
+    { still: finish(Pic.of(CART)) },
+    { shadow: ovalShadow(32, 11, 16, 10, 15, 1.6) },
+  ),
   greek(
     "pebble",
     Object.fromEntries(PEBBLES.map((g, i) => [`p${i}`, Pic.blank(5, 4).put(g, 0, 0)])),
@@ -657,7 +665,7 @@ export default [
   ),
   greek("attica", { still: attica() }, { origin: [0, 45], outline: false, lone: "kw" }),
   greek(
-    "bench-stone",
+    "marble-bench",
     { still: finish(Pic.of(BENCH)) },
     { shadow: ovalShadow(30, 10, 16, 9, 15, 1.6) },
   ),

@@ -120,9 +120,11 @@ function chamber(): Partial<Placed> {
           ["man", 35],
           ["horse", 38],
         ] as const
-      ).map(([frame, x]): Prop => ({ prop: "cutout", frame, at: [x * T + 8, 14 * T + 10] })),
+      ).map(
+        ([frame, x]): Prop => ({ prop: "carried-cutout", frame, at: [x * T + 8, 14 * T + 10] }),
+      ),
       // The fire.
-      place("bonfire", FIRE[0], FIRE[1], { anim: "burn", play: true }),
+      place("cave-fire", FIRE[0], FIRE[1], { anim: "burn", play: true }),
     ],
   };
 }
@@ -222,7 +224,7 @@ const placed = merge(chamber(), {
     ...STALAGMITES.map(([frame, x, y]) => place("stalagmite", x, y, { frame })),
     ...TORCHES.map(
       ([x, y], i): Prop => ({
-        prop: "torch",
+        prop: "wall-torch",
         anim: "burn",
         play: true,
         index: i % 3,

@@ -5,6 +5,7 @@ import campusNight from "./campus-night.ts";
 import combat from "./combat.ts";
 import greekHorde from "./greek-horde.ts";
 import makerRoom from "./maker-room.ts";
+import morningAssembly from "./morning-assembly.ts";
 import p1Croton from "./p1-croton.ts";
 import p1Elea from "./p1-elea.ts";
 import p1Lyceum from "./p1-lyceum.ts";
@@ -22,4 +23,5 @@ export const SCENES: readonly SceneDef[] = [
   p1Croton,
   p1Elea,
   p1Lyceum,
+  morningAssembly,
 ];

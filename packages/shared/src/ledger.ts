@@ -4,7 +4,15 @@
  * entries); the server runs it inside one transaction under the request's operation id and books
  * each entry under its `key`. A positive amount is a faucet, a negative one a sink.
  */
-export type Currency = "pinecone" | "merit" | "token" | "ink" | "binding" | `sheet:${string}`;
+export type Currency =
+  | "pinecone"
+  | "merit"
+  | "token"
+  | "ink"
+  | "binding"
+  | `sheet:${string}`
+  /** Consumables held in the bag (자판기 goods), counted like materials. */
+  | `snack:${string}`;
 
 /** What one character holds of each currency. Missing means zero. */
 export type Purse = Readonly<Partial<Record<Currency, number>>>;

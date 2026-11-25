@@ -1,399 +1,567 @@
-import { clean, finish, hline, ovalShadow, rect, vline } from "../../interior.ts";
-import { greek, hash } from "../../page1.ts";
-import { Pic } from "../../paint.ts";
+import { type Legend, sprite } from "../../format.ts";
+import { lobes, Pic, seal, smooth, tidy } from "../../paint.ts";
 
 /**
- * 그림자 동굴: the cave from the story, kept by the city. Prisoners' bench chained facing the
- * back wall; behind them a low wall where the carriers walk their cutouts; behind that the fire.
- * On the back wall the cutouts pass as shadows, the only things the bench has ever seen. Torches
- * for the guards, stalagmites to hide behind.
+ * 동굴 입구: the slope under the cliff where the 그림자 동굴 opens. A fire burns before the mouth;
+ * between it and the rock a low wall where someone carried cut-out shapes on sticks, and their
+ * shadows, ten times life size, still move on the cliff. Benches face the wall in rows, their
+ * chains broken. The guards keep a post beside the mouth. Lit from the top left; fire is drawn
+ * raw because it is light.
  */
+const palette: Legend = {
+  ".": null,
+  // limestone
+  d: "stone.deep",
+  S: "stone.dark",
+  M: "stone.mid",
+  v: "stone.vein",
+  K: "stone.light",
+  k: "stone.pale",
+  w: "stone.bright",
+  // the dark inside
+  j: "ink.deep",
+  J: "ink.dark",
+  i: "ink.mid",
+  // wood
+  B: "wood.deep",
+  b: "wood.dark",
+  u: "wood.mid",
+  U: "wood.light",
+  e: "wood.pale",
+  // fire
+  Y: "gold.pale",
+  y: "gold.light",
+  g: "gold.mid",
+  r: "clay.light",
+  R: "clay.mid",
+  h: "red.mid",
+  H: "red.light",
+  X: "red.deep",
+  // bronze and the crest
+  G: "gold.deep",
+  q: "gold.dark",
+  // cloth
+  c: "stone.pale",
+  C: "stone.light",
+  // scrub
+  o: "olive.mid",
+  O: "olive.dark",
+  x: null,
+};
 
-// Fire ------------------------------------------------------------------------------------------
+const one = (
+  name: string,
+  size: [number, number],
+  grid: string,
+  extra: Partial<Parameters<typeof sprite>[0]> = {},
+) =>
+  sprite({
+    name,
+    size,
+    palette,
+    frames: { still: grid },
+    anim: { idle: { frames: ["still"], fps: 1 } },
+    ...extra,
+  });
 
-/** Flame colours from the heart out. */
-const FLAME = ["Y", "y", "o", "R", "q"];
+function finish(pic: Pic, outline: string, fill: string, keep = ""): string {
+  return tidy(tidy(seal(pic, outline), fill, outline + keep), fill, outline + keep).toString();
+}
+
+function oval(w: number, h: number, cx: number, cy: number, rx: number, ry: number): string {
+  const pic = Pic.blank(w, h);
+  const isIn = lobes([{ x: cx, y: cy, rx, ry }]);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (isIn(x, y)) pic.set(x, y, "d");
+  return pic.toString();
+}
+
+function hash(x: number, y: number, s: number): number {
+  let v = (x * 374761393 + y * 668265263 + s * 2147483647) >>> 0;
+  v = Math.imul(v ^ (v >>> 13), 1274126177) >>> 0;
+  return ((v ^ (v >>> 16)) >>> 0) / 2 ** 32;
+}
+
+// The cliff ------------------------------------------------------------------------------------
+
+const CL_W = 64;
+const CL_H = 112;
 
 /**
- * Flames over a base: tongues as lobes that sway and stretch by frame, each pixel coloured by how
- * deep inside the fire it is.
+ * A 64-pixel run of cliff: a broken top against the sky, strata stepping down the face, joints
+ * running down them, ledges with scrub, scree at the foot. Every variant meets its neighbours at
+ * the same height on both sides, so runs tile in any order.
  */
-function flames(p: Pic, cx: number, base: number, size: number, frame: number): void {
-  // Tongues: each narrows to a point as it rises and bends with the draught, by frame.
-  const tongues = [
-    { dx: 0, h: 1, w: 0.36 },
-    { dx: -0.3, h: 0.66, w: 0.26 },
-    { dx: 0.3, h: 0.72, w: 0.26 },
-    { dx: -0.14, h: 0.86, w: 0.22 },
-    { dx: 0.16, h: 0.8, w: 0.22 },
-  ];
-  const inside = (x: number, y: number): boolean =>
-    tongues.some((t, i) => {
-      const h = size * t.h * (1 + Math.sin(frame * 2.3 + i * 1.7) * 0.14);
-      const k = (base - y) / h;
-      if (k < 0 || k > 1) return false;
-      const bend = Math.sin(frame * 1.7 + i * 2.1) * size * 0.1 * k * k;
-      const half = size * t.w * (1 - k) ** 0.75 * (k < 0.15 ? 0.7 + k * 2 : 1);
-      return Math.abs(x + 0.5 - (cx + t.dx * size + bend)) <= half;
-    });
-  const depth = (x: number, y: number): number => {
-    for (let r = 1; r <= 4; r++)
-      if (!inside(x - r, y) || !inside(x + r, y) || !inside(x, y - r * 2) || !inside(x, y + r))
-        return r - 1;
-    return 4;
+function cliff(v: number): string {
+  const pic = Pic.blank(CL_W, CL_H);
+  const top = (x: number): number => {
+    const edge = Math.min(x, CL_W - 1 - x);
+    const bump = Math.sin((x + v * 17) * 0.19) * 7 + Math.sin((x + v * 5) * 0.53) * 3;
+    return Math.round(14 + (edge < 6 ? 0 : bump * Math.min(1, (edge - 6) / 8)));
   };
-  for (let y = 0; y < p.h; y++)
-    for (let x = 0; x < p.w; x++)
-      if (inside(x, y)) p.set(x, y, FLAME[Math.max(0, 4 - depth(x, y))] as string);
-}
-
-function bonfire(frame: number): Pic {
-  const W = 44;
-  const H = 46;
-  const p = Pic.blank(W, H);
-  // Ring of stones and the logs crossed in it.
-  for (let x = 6; x < W - 6; x += 5) {
-    const y = H - 6 + (x % 2);
-    p.put(".dd.\ndKMd\ndMSd\n.dd.", x, y - 2);
+  for (let x = 0; x < CL_W; x++) {
+    const t = top(x);
+    for (let y = t; y < CL_H; y++) {
+      const depth = y - t;
+      // Strata that wander and pinch: bands of uneven thickness, each lit along its top and
+      // shaded under its overhang, their lines tilting with the bedding.
+      // Periodic over the run's width, so the beds meet the next run's at both edges.
+      const turn = (2 * Math.PI * x) / CL_W;
+      const bed = y + Math.sin(turn) * 3 + Math.sin(turn * 3) * (0.8 + v * 0.5);
+      const band = ((bed % 15) + 15) % 15;
+      const blockSeam = Math.floor(bed / 15) * 7 + v * 5 + 3;
+      let ch = band < 1 ? "k" : band < 2.2 ? "K" : band > 12.5 ? "S" : band > 9 ? "M" : "v";
+      // Joints: cracks down part of a band, never the whole face.
+      const joint = (x * 3 + blockSeam * 11) % 29;
+      if (joint === 0 && band > 2 && band < 12) ch = "S";
+      if (joint === 1 && band > 2 && band < 9) ch = "M";
+      // Weathering: darker pits and pale flakes.
+      const n = hash(x, y, v + 40);
+      if (ch === "v" && n < 0.05) ch = "M";
+      else if (ch === "M" && n > 0.96) ch = "v";
+      if (depth < 2) ch = depth === 0 ? "w" : "k";
+      if (y > CL_H - 10) ch = (x * 7 + y * 3) % 5 === 0 ? "M" : "S";
+      pic.set(x, y, ch);
+    }
   }
-  for (let k = 0; k < 18; k++) {
-    p.set(12 + k, H - 10 + Math.round(k * 0.25), "b").set(
-      12 + k,
-      H - 9 + Math.round(k * 0.25),
-      "U",
-    );
-    p.set(31 - k, H - 10 + Math.round(k * 0.25), "b").set(
-      31 - k,
-      H - 9 + Math.round(k * 0.25),
-      "u",
-    );
-  }
-  flames(p, W / 2, H - 9, 30, frame);
-  clean(p);
-  // Sparks going up.
-  for (let k = 0; k < 4; k++) {
-    const x = Math.round(W / 2 + Math.sin(frame * 1.3 + k * 1.9) * 12);
-    const y = Math.round(6 + ((frame * 5 + k * 7) % 16));
-    if (p.at(x, y) === ".") p.set(x, y, "Y");
-  }
-  return p;
+  // Scrub on the ledges.
+  for (let y = 18; y < CL_H - 12; y++)
+    for (let x = 2; x < CL_W - 3; x++)
+      if (pic.at(x, y) === "k" && hash(x, y, v) < 0.06)
+        pic.put(
+          `
+            .oo.
+            oOOo
+          `,
+          x - 1,
+          y - 2,
+          { onto: "kKv" },
+        );
+  // Outline the skyline and the foot, but not the sides, where the next run continues.
+  const smoothed = smooth(pic);
+  const sealed = seal(smoothed, "d");
+  for (let y = 0; y < CL_H; y++)
+    for (const x of [0, CL_W - 1]) {
+      const was = smoothed.at(x, y) as string;
+      const above = smoothed.at(x, y - 1);
+      if (was !== "." && above !== "." && y < CL_H - 1) sealed.set(x, y, was);
+    }
+  return tidy(tidy(sealed, "v", "doO"), "v", "doO").toString();
 }
-
-const TORCH_HANDLE = `
-  .II.
-  IiiI
-  .IbI
-  .IbI
-  ..b.
-  ..b.
-  ..b.
-  .II.
-`;
-
-function torch(frame: number): Pic {
-  const p = Pic.blank(10, 22);
-  flames(p, 5, 13, 11, frame * 2);
-  p.put(TORCH_HANDLE, 3, 13);
-  return p;
-}
-
-// The back wall ---------------------------------------------------------------------------------
-
-/** Silhouettes the carriers hold up, as the wall receives them: soft-edged, dark on lit stone. */
-const SHAPES: readonly string[] = [
-  // A horse, walking.
-  `
-    ........##..
-    .......####.
-    #.....####..
-    ##########..
-    .#########..
-    .##.....##..
-    .#.#....#.#.
-    .#.#....#.#.
-  `,
-  // A man carrying a jar on his shoulder.
-  `
-    ....##.
-    ...####
-    ..##.##
-    ..###..
-    .####..
-    #####..
-    .###...
-    .###...
-    .#.#...
-    .#.#...
-  `,
-  // A bird on a stick.
-  `
-    ##....##
-    .##..##.
-    ..####..
-    ...##...
-    ...#....
-    ...#....
-  `,
-  // A tree on a pole.
-  `
-    ..####..
-    .######.
-    ########
-    .######.
-    ...##...
-    ...#....
-    ...#....
-  `,
-];
 
 /**
- * The back wall in firelight: rough stone, brightest where the fire faces it, the carriers'
- * cutouts going by as shadows from right to left, and along the foot the round shadows of the
- * prisoners' heads, which never move.
+ * The mouth of the cave: an arch of rock, its rim lit, the inside going from the rock's own
+ * shadow to black, the floor sloping down into it, teeth of rock hanging from the roof.
  */
-function shadowWall(frame: number): Pic {
-  const W = 208;
-  const H = 52;
-  const p = Pic.blank(W, H);
+function caveMouth(): string {
+  const W = 80;
+  const H = 68;
+  const pic = Pic.blank(W, H);
+  const arch = (x: number, y: number) => {
+    const u = (x - 40) / 31;
+    return Math.abs(u) < 1 && y > 66 - 58 * Math.sqrt(1 - u * u) ** 0.9;
+  };
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const d = Math.abs(x - W / 2) / (W / 2);
-      const n = hash(x >> 1, y >> 1, 3);
-      const j = d + (hash(x, y, 5) - 0.5) * 0.18;
-      let ch = j < 0.35 ? "L" : j < 0.7 ? "K" : "V";
-      if (n > 0.86) ch = d < 0.5 ? "K" : "V";
-      if (n < 0.06) ch = "M";
-      if (y < 4 + Math.round(hash(x >> 2, 0, 9) * 3)) ch = "S";
-      p.set(x, y, ch);
+      if (!arch(x, y)) continue;
+      const inner = arch(x - 3, y) && arch(x + 3, y) && arch(x, y - 3);
+      const deep = arch(x - 8, y) && arch(x + 8, y) && arch(x, y - 9);
+      pic.set(x, y, deep ? "j" : inner ? "J" : "i");
     }
-  // Cracks.
-  for (const [x0, y0, len] of [
-    [30, 10, 14],
-    [150, 14, 18],
-    [96, 34, 10],
-  ] as const)
-    for (let k = 0; k < len; k++) p.set(x0 + k, y0 + Math.round(Math.sin(k / 2) * 1.5), "M");
-  // The procession, moving left one step per frame.
-  const shapes = [0, 1, 3, 1, 2, 0];
-  shapes.forEach((s, i) => {
-    const pic = Pic.of(SHAPES[s] as string);
-    const x = ((i * 38 + 220 - frame * 6) % 240) - 20;
-    const y = 30 - pic.h;
-    for (let yy = 0; yy < pic.h; yy++)
-      for (let xx = 0; xx < pic.w; xx++) {
-        if (pic.at(xx, yy) !== "#") continue;
-        for (const [dx, dy, ch] of [
-          [-1, 0, "M"],
-          [1, 0, "M"],
-          [0, -1, "M"],
-          [0, 0, "S"],
-        ] as const) {
-          const X = x + xx * 2 + dx;
-          const Y = y + yy * 2 + dy;
-          if (X < 0 || X >= W) continue;
-          for (const [ax, ay] of [
-            [0, 0],
-            [1, 0],
-            [0, 1],
-            [1, 1],
-          ] as const)
-            if (ch === "S" || p.at(X + ax, Y + ay) !== "S") p.set(X + ax, Y + ay, ch);
-        }
-      }
-  });
-  // The prisoners' heads, in a row along the foot of the wall.
-  for (let k = 0; k < 7; k++) {
-    const cx = 44 + k * 20;
-    for (let y = 38; y < H; y++)
-      for (let x = cx - 6; x <= cx + 6; x++) {
-        const r = Math.hypot((x - cx) / 6, (y - 44) / 6);
-        if (r < 1 || y > 46) p.set(x, y, r < 0.8 || y > 47 ? "S" : "M");
-      }
-  }
-  hline(p, 0, H - 1, W, "d");
-  return clean(p);
-}
-
-// The low wall and what goes along it ---------------------------------------------------------------
-
-/** A dry-stone wall, a course of capstones on top, stones in two courses below. */
-function parapet(kind: "mid" | "w" | "e"): Pic {
-  const W = 32;
-  const H = 18;
-  const p = Pic.blank(W, H);
-  rect(p, 0, 0, W, 4, "k");
-  hline(p, 0, 0, W, "w");
-  hline(p, 0, 3, W, "M");
-  for (let x = 0; x < W; x += 8) vline(p, x, 0, 4, "V");
-  for (let y = 4; y < H - 1; y++)
+  // The rim of the arch, lit on the west.
+  const rim = Pic.blank(W, H);
+  for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const course = y < 10 ? 0 : 1;
-      const off = course ? 5 : 0;
-      const joint = (x + off) % 10 === 0 || y === 9;
-      p.set(x, y, joint ? "S" : y < 6 || (y > 9 && y < 12) ? "K" : "M");
+      if (arch(x, y)) continue;
+      const near =
+        arch(x + 1, y) ||
+        arch(x - 1, y) ||
+        arch(x, y + 1) ||
+        arch(x + 2, y) ||
+        arch(x - 2, y) ||
+        arch(x, y + 2);
+      if (near) rim.set(x, y, x < 40 ? "k" : "M");
     }
-  hline(p, 0, H - 1, W, "d");
-  if (kind !== "mid") {
-    const side = kind === "w" ? 0 : W - 1;
-    for (let y = 0; y < H; y++) {
-      p.set(side, y, "d");
-      const inner = kind === "w" ? 1 : W - 2;
-      if (y > 0 && y < H - 1) p.set(inner, y, kind === "w" ? "k" : "S");
+  pic.put(rim, 0, 0);
+  // Teeth from the roof.
+  for (const [tx, len] of [
+    [26, 6],
+    [33, 9],
+    [41, 5],
+    [48, 8],
+    [54, 4],
+  ] as const) {
+    for (let k = 0; k < len; k++) {
+      const y = 66 - Math.round(58 * Math.sqrt(1 - ((tx - 40) / 31) ** 2) ** 0.9) + k;
+      const half = len - k > 3 ? 1 : 0;
+      for (let dx = -half; dx <= half; dx++) pic.set(tx + dx, y, dx < 0 ? "M" : "S");
     }
-    p.set(side, 0, ".").set(side, H - 1, ".");
   }
-  hline(p, 0, 0, W, "d");
-  return clean(p, "dwkKMSV");
+  // The floor, worn pale where the guards walk in.
+  for (let x = 22; x < 58; x++)
+    for (let y = 62; y < H; y++) if (arch(x, y)) pic.set(x, y, y > 64 ? "S" : "i");
+  return tidy(pic, "J", "jJikMS").toString();
 }
 
-/** The carriers' cutouts, painted wood on poles, propped in a stand behind the wall. */
-const CUTOUTS: Readonly<Record<string, string>> = {
+// The shadow play --------------------------------------------------------------------------------
+
+/**
+ * Shadows on the cliff, ten times the size of the shapes that cast them: a horse, a man with a
+ * jar on his shoulder, a bird. The fire flickers, so they swell and lean between frames. Raw ink.
+ */
+function wallShadows(frame: number): string {
+  const W = 120;
+  const H = 64;
+  const pic = Pic.blank(W, H);
+  const lean = [0, 1, -1][frame] ?? 0;
+  const grow = [0, 1, 0][frame] ?? 0;
+  const horse = lobes([
+    { x: 26 + lean, y: 34, rx: 15 + grow, ry: 8 },
+    { x: 42 + lean, y: 22, rx: 5, ry: 9 },
+    { x: 47 + lean * 2, y: 15, rx: 6, ry: 4 },
+    { x: 14 + lean, y: 47, rx: 2, ry: 11 },
+    { x: 20 + lean, y: 48, rx: 2, ry: 10 },
+    { x: 33 + lean, y: 48, rx: 2, ry: 10 },
+    { x: 38 + lean, y: 47, rx: 2, ry: 11 },
+    { x: 10 + lean, y: 32, rx: 5, ry: 2 },
+  ]);
+  const man = lobes([
+    { x: 78 + lean, y: 14, rx: 4, ry: 4 },
+    { x: 78 + lean, y: 30, rx: 6 + grow, ry: 12 },
+    { x: 75 + lean, y: 50, rx: 2.5, ry: 11 },
+    { x: 81 + lean, y: 50, rx: 2.5, ry: 11 },
+    { x: 86 + lean, y: 8, rx: 5, ry: 7 },
+    { x: 85 + lean, y: 15, rx: 2, ry: 6 },
+  ]);
+  const bird = lobes([
+    { x: 106 + lean * 2, y: 12 - frame, rx: 7, ry: 2 },
+    { x: 106 + lean * 2, y: 14 - frame, rx: 2.5, ry: 2.5 },
+  ]);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) if (horse(x, y) || man(x, y) || bird(x, y)) pic.set(x, y, "J");
+  return pic.toString();
+}
+
+/** The fire before the mouth: a ring of stones, logs crossed, flames in four flickers. Raw. */
+function bonfire(frame: number): string {
+  const W = 32;
+  const H = 40;
+  const pic = Pic.blank(W, H);
+  // Flames: three tongues whose heights trade off frame to frame.
+  const step = (list: readonly number[]) => list[frame % list.length] ?? 0;
+  const tongues: readonly [number, number, number][] = [
+    [11, 18 + step([0, 3, 5, 2]), 5],
+    [16, 26 - step([0, 4, 1, 3]), 6],
+    [21, 17 + step([4, 0, 2, 5]), 5],
+  ];
+  for (const [cx, height, half] of tongues) {
+    for (let k = 0; k < height; k++) {
+      const y = 33 - k;
+      const w = Math.max(0, Math.round(half * (1 - (k / height) ** 1.6)));
+      const sway = Math.round(Math.sin(k * 0.5 + frame * 1.7 + cx) * (k / height) * 2);
+      for (let dx = -w; dx <= w; dx++) {
+        const edge = Math.abs(dx) === w;
+        const core = Math.abs(dx) < w - 2 && k < height * 0.55;
+        const ch = core
+          ? k < height * 0.3
+            ? "Y"
+            : "y"
+          : edge
+            ? k > height * 0.6
+              ? "h"
+              : "r"
+            : "y";
+        if (pic.at(cx + dx + sway, y) === "Y") continue;
+        pic.set(cx + dx + sway, y, ch);
+      }
+    }
+  }
+  // Logs and the stone ring.
+  pic.put(
+    `
+      ..bbBB......BBbb..
+      .buUUbBB..BBbUUub.
+      bUueebbBBBBbbeeUub
+      .bbbbBBRRrBBbbbbb.
+    `,
+    7,
+    31,
+  );
+  pic.put(
+    `
+      ..dKd..dKd...dKd...dKd..
+      .dKMd.dKMSd.dKMd..dKMMd.
+      .ddd..dddd...ddd...dddd.
+    `,
+    4,
+    37,
+  );
+  // Sparks above.
+  const sparks: readonly [number, number][] = [
+    [9, 6 + frame * 2],
+    [20, 3 + ((frame * 3) % 7)],
+    [14, 10 - frame],
+    [24, 9 + frame],
+  ];
+  for (const [x, y] of sparks) if (y >= 0 && y < 18) pic.set(x, y, "y");
+  return smooth(pic, "Yyrh").toString();
+}
+
+/** A torch on a pole, three flickers. Raw. */
+function torch(frame: number): string {
+  const pic = Pic.blank(10, 34);
+  const hgt = [9, 11, 8][frame] ?? 9;
+  for (let k = 0; k < hgt; k++) {
+    const y = 10 - k;
+    const w = Math.max(0, Math.round(2.6 * (1 - k / hgt)));
+    const sway = Math.round(Math.sin(k * 0.8 + frame * 2) * (k / hgt) * 1.5);
+    for (let dx = -w; dx <= w; dx++)
+      pic.set(5 + dx + sway, y, Math.abs(dx) === w ? (k > hgt / 2 ? "h" : "r") : k < 3 ? "Y" : "y");
+  }
+  pic.put("BBBB\nBrrB\nBBBB", 3, 11);
+  for (let y = 14; y < 33; y++) pic.set(4, y, "u").set(5, y, "b");
+  pic.put("BBBB", 3, 33);
+  return pic.toString();
+}
+
+/**
+ * The low wall the shapes were carried along: stacked stone, and above it on sticks the
+ * cut-outs themselves, a horse, a man with a jar, a bird, propped where they were left.
+ */
+const PUPPET_WALL = `
+  ...........bb..................bb...........bb......
+  ......bbbbbuu.................bUUb.........bUUb.....
+  .....bUUUUUub..............bbbUUUbbb.....bbbbbbbb...
+  ....bUuuuuuub.................bUUb..........bb......
+  ...bUuuuuuub..................buub..........bb......
+  ...bbub..bub..................bb.bb.........bb......
+  ....bb....bb.................bb...bb........bb......
+  ......bb...........bb.........bb..............bb....
+  ......bb...........bb.........bb..............bb....
+  dddddddddddddddddddddddddddddddddddddddddddddddddddd
+  dwwkwwkkwwwkwwkkwwwkwwkkwwwkwwkkwwwkwwkkwwwkwwkkwwkd
+  dKKMKKKMKKKKMKKKMKKKKMKKKMKKKKMKKKMKKKKMKKKMKKKKMKMd
+  dKkKKMKKkKKMKKkKKKMKKkKKMKKkKKKMKKkKKMKKkKKKMKKkKKMd
+  dMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMSd
+  dKKKMkKKKKMKkKKKMkKKKKMKkKKKMkKKKKMKkKKKMkKKKKMKkKMd
+  dMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSMMMSd
+  dddddddddddddddddddddddddddddddddddddddddddddddddddd
+`;
+
+/**
+ * The guards' post by the mouth: a linen awning on two poles, a stool with a crested helmet on
+ * it, a round shield and two spears leaning on the pole, and the roster on its little table.
+ */
+const GUARD_POST = `
+  ..BB..........................BB....
+  .BUUBBBBBBBBBBBBBBBBBBBBBBBBBBUUB...
+  .BUcccccccccccccccccccccccccccbUB...
+  .BUcccCcccCcccCcccCcccCcccCccCbUB...
+  .BUcCCCcCCCcCCCcCCCcCCCcCCCcCCCUB...
+  .BUCCCCCCCCCCCCCCCCCCCCCCCCCCCCUB...
+  .BUbBBBBBBBBBBBBBBBBBBBBBBBBBBbUB...
+  .BUb..........................bUB...
+  .BUb.....XX...................bUB.uB
+  .BUb....XhhX..................bUBuUB
+  .BUb...XhhhhX.................bUBuUB
+  .BUb...GqyyyqG..........BBBB..bUBuUB
+  .BUb..GqyYYyyqG.......BBcccCBBbUBuUB
+  .BUb..GqyyGGyqG.......BcCcCcCBbUBuUB
+  .BUb...GqGjjGG........BBBBBBBBbUBuUB
+  .BUb..BBBBBBBBBB.......Bu..uB.bUBuUB
+  .BUb...Bu....uB...GGGG.Bu..uB.bUBuUB
+  .BUb...Bu....uB..GqyyqGBu..uB.bUBuUB
+  .BUb...Bu....uB.GqyhhyqGu..uB.bUBuUB
+  .BUb...Bu....uB.GqyhhyqGBBBBB.bUBuUB
+  .BUb...BB....BB..GqyyqG.......bUBuUB
+  .BBB..............GGGG........BBBBBB
+`;
+
+/** A stone bench where the prisoners sat facing the wall, its chain broken and lying open. */
+const BENCH = `
+  dddddddddddddddddddddddddddddddddddddddddddddd
+  dwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwkd
+  dkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkKd
+  dKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKMd
+  dddddddddddddddddddddddddddddddddddddddddddddd
+  .dMMd..SS..SS..SS................dMMd.........
+  .dMSd....SS..SS..SS..SS..........dMSd.........
+  .dddd................SS..SS......dddd.........
+`;
+
+/** A dead tree on the slope: leafless, twisted, its branches reaching away from the cave. */
+function deadTree(): string {
+  const W = 44;
+  const H = 56;
+  const pic = Pic.blank(W, H);
+  const branch = (x0: number, y0: number, a: number, len: number, w: number, depth: number) => {
+    let x = x0;
+    let y = y0;
+    for (let k = 0; k < len; k++) {
+      x += Math.cos(a) * 1;
+      y += Math.sin(a) * 1;
+      const ww = Math.max(0, Math.round(w * (1 - k / len)));
+      for (let dx = -ww; dx <= ww; dx++) {
+        const px = Math.round(x) + dx;
+        const py = Math.round(y);
+        if (px < 0 || py < 0 || px >= W || py >= H) continue;
+        pic.set(px, py, dx < 0 ? "U" : dx > 0 ? "b" : "u");
+      }
+      a += Math.sin(k * 0.7 + depth) * 0.08;
+    }
+    if (depth < 3) {
+      branch(x, y, a - 0.55, len * 0.62, w * 0.6, depth + 1);
+      branch(x, y, a + 0.5, len * 0.55, w * 0.55, depth + 1);
+    }
+  };
+  branch(22, 55, -Math.PI / 2, 24, 3, 0);
+  return finish(pic, "B", "u");
+}
+
+/** Shadow crawling out of the cave over the ground: a smear with reaching fingers. Raw, flat. */
+function crawl(frame: number): string {
+  const W = 72;
+  const H = 26;
+  const pic = Pic.blank(W, H);
+  const body = lobes([
+    { x: 16, y: 12, rx: 15, ry: 8 },
+    { x: 30, y: 13, rx: 10, ry: 6 },
+  ]);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (body(x, y)) pic.set(x, y, body(x, y - 2) && body(x, y + 2) ? "j" : "J");
+  for (const [y0, len] of [
+    [8, 26],
+    [12, 34],
+    [17, 24],
+  ] as const) {
+    for (let k = 0; k < len + frame * 2; k++) {
+      const x = 36 + k;
+      const y = Math.round(y0 + Math.sin(k * 0.3 + y0 + frame) * 2);
+      if (x < W) pic.set(x, y, "J").set(x, y + 1, k < len * 0.6 ? "J" : ".");
+    }
+  }
+  return tidy(pic, "J", "j").toString();
+}
+
+/**
+ * A cut-out dropped on the slope where its carrier ran: a flat wooden horse, man or jar on its
+ * stick, lying on the ground.
+ */
+const CUTOUTS = {
   horse: `
-    .........uu..
-    ........uWuu.
-    U......uuuU..
-    UUuuuuuuuuU..
-    .UuuuuuuuuU..
-    .UU.....UU...
-    .U.U....U.U..
-    .....b.......
-    .....b.......
-    .....b.......
-    .....b.......
-    .....b.......
-  `,
-  jar: `
-    ....uuu....
-    ...uWWWu...
-    ...UuuuU...
-    ..uWuuuuU..
-    .uWuuuuuuU.
-    .uuuuuuuuU.
-    ..UuuuuuU..
-    ...UUUUU...
-    .....b.....
-    .....b.....
-    .....b.....
-    .....b.....
+    ......BB......
+    .....BUUB.....
+    BBBBBUuuB.....
+    BUUUUuuB......
+    .BuuuuuB......
+    .BuBBBuB......
+    .BB...BB......
+    ..........BBBB
+    ...BBBBBBBUUuu
+    ..........BBBB
   `,
   man: `
-    ...uu....
-    ..uWuu...
-    ..uuuU...
-    .uuuuuU..
-    uWuuuuuU.
-    uuuuuuuU.
-    .uuuuuU..
-    .uU.uU...
-    .uU.uU...
-    ....b....
-    ....b....
-    ....b....
+    ...BB.........
+    ..BUUB........
+    ..BuuB........
+    .BUuuuB.......
+    .BUuuuB.......
+    ..BuuB........
+    ..BuBuB.......
+    ..BB.BB.......
+    ......BBBBBBBB
+    ......BUUUUuuu
+    ......BBBBBBBB
+  `,
+  jar: `
+    ...BBB........
+    ..BUuuB.......
+    .BUuuuuB......
+    .BUuuuuB......
+    ..BuuuB.......
+    ...BBB........
+    ....BBBBBBBBBB
+    ....BUUUUUUuuu
+    ....BBBBBBBBBB
   `,
 };
 
-function cutout(kind: string): Pic {
-  const p = Pic.blank(16, 40);
-  const grid = Pic.of(CUTOUTS[kind] ?? (CUTOUTS.man as string));
-  const x = Math.floor((16 - grid.w) / 2);
-  p.put(grid, x, 0);
-  // The pole runs on down to a stand, long enough to hold the figure over the wall.
-  const pole = x + (grid.rows[grid.h - 1]?.indexOf("b") ?? 0);
-  for (let y = grid.h; y < 37; y++) p.set(pole, y, "b");
-  p.put(".SS.\nSKMS\n.dd.", 6, 37);
-  return finish(p);
-}
-
-/** The bench the prisoners sit on, shackles still locked to it, the chains run to rings in the floor. */
-function bench(): Pic {
-  const W = 52;
-  const H = 18;
-  const p = Pic.blank(W, H);
-  rect(p, 1, 3, W - 2, 3, "k");
-  hline(p, 1, 3, W - 2, "w");
-  rect(p, 1, 6, W - 2, 7, "M");
-  hline(p, 1, 6, W - 2, "K");
-  for (let x = 6; x < W - 4; x += 8) {
-    p.put(".II.\nI..I\n.II.", x, 0);
-    for (let y = 7; y < 15; y++) p.set(x + 1 + (y % 2), y, y % 2 ? "i" : "I");
-    p.put("III", x, 15);
-  }
-  return finish(p, "iI");
-}
-
-// Rock ---------------------------------------------------------------------------------------------
-
-/** A stalagmite: a lumpy cone, wet on its lit side. */
-function stalagmite(w: number, h: number, seed: number): Pic {
-  const out = Pic.blank(18, 30);
-  const p = Pic.blank(w, h);
-  const half = (y: number) => {
-    const t = y / (h - 1);
-    return Math.max(0.6, (w / 2 - 1) * t ** 0.8 + Math.sin(y * 0.9 + seed) * 0.7);
-  };
-  const cx = w / 2;
-  const isIn = (x: number, y: number) => y >= 1 && y < h - 1 && Math.abs(x + 0.5 - cx) <= half(y);
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      if (!isIn(x, y)) continue;
-      const rel = (x + 0.5 - cx) / Math.max(1, half(y));
-      let ch = rel < -0.35 ? "K" : rel < 0.35 ? "M" : "S";
-      if (rel < -0.1 && rel > -0.5 && (y + seed) % 6 < 2) ch = "k";
-      if ((y + seed) % 5 === 0 && rel > -0.6) ch = rel > 0.3 ? "S" : "V";
-      p.set(x, y, ch);
-    }
-  return out.put(finish(p), Math.floor((18 - w) / 2), 30 - h);
-}
-
 export default [
-  greek(
-    "bonfire",
-    { burn0: bonfire(0), burn1: bonfire(1), burn2: bonfire(2), burn3: bonfire(3) },
-    {
-      anim: { burn: { frames: ["burn0", "burn1", "burn2", "burn3"], fps: 8 } },
-      outline: false,
-      lone: "Yyo",
-      shadow: ovalShadow(44, 46, 22, 42, 18, 3),
-    },
-  ),
-  greek(
-    "torch",
-    { burn0: torch(0), burn1: torch(1), burn2: torch(2) },
-    {
-      anim: { burn: { frames: ["burn0", "burn1", "burn2"], fps: 8 } },
-      outline: false,
-      lone: "Yyo",
-    },
-  ),
-  greek(
-    "shadow-wall",
-    { pass0: shadowWall(0), pass1: shadowWall(1), pass2: shadowWall(2), pass3: shadowWall(3) },
-    {
-      anim: { pass: { frames: ["pass0", "pass1", "pass2", "pass3"], fps: 2 } },
-      origin: [104, 51],
-      outline: false,
-    },
-  ),
-  greek(
-    "low-wall",
-    { mid: parapet("mid"), w: parapet("w"), e: parapet("e") },
-    { origin: [0, 17], outline: false },
-  ),
-  greek(
-    "cutout",
-    { horse: cutout("horse"), jar: cutout("jar"), man: cutout("man") },
-    {
-      shadow: ovalShadow(16, 40, 8, 39, 4, 1.2),
-    },
-  ),
-  greek(
-    "shackle-bench",
-    { still: bench() },
-    { lone: "iI", shadow: ovalShadow(52, 18, 27, 16, 25, 2) },
-  ),
-  greek(
-    "stalagmite",
-    { a: stalagmite(14, 30, 1), b: stalagmite(12, 20, 4), c: stalagmite(18, 24, 7) },
-    { shadow: ovalShadow(18, 30, 9, 29, 8, 1.6) },
-  ),
+  sprite({
+    name: "cliff-face",
+    size: [CL_W, CL_H],
+    origin: [0, CL_H - 1],
+    palette,
+    outline: false,
+    frames: { a: cliff(0), b: cliff(1), c: cliff(2) },
+    anim: { idle: { frames: ["a"], fps: 1 } },
+  }),
+  one("cave", [80, 68], caveMouth(), { outline: false, origin: [40, 67] }),
+  sprite({
+    name: "wall-shadows",
+    size: [120, 64],
+    origin: [60, 63],
+    palette,
+    outline: false,
+    frames: { flick0: wallShadows(0), flick1: wallShadows(1), flick2: wallShadows(2) },
+    anim: { flicker: { frames: ["flick0", "flick1", "flick2"], fps: 5 } },
+  }),
+  sprite({
+    name: "bonfire",
+    size: [32, 40],
+    origin: [16, 38],
+    palette,
+    lone: "Yyrh",
+    outline: false,
+    frames: Object.fromEntries([0, 1, 2, 3].map((f) => [`burn${f}`, bonfire(f)])),
+    anim: { burn: { frames: ["burn0", "burn1", "burn2", "burn3"], fps: 8, jump: 0.5 } },
+  }),
+  sprite({
+    name: "torch",
+    size: [10, 34],
+    origin: [5, 33],
+    palette,
+    lone: "Yyrh",
+    outline: false,
+    frames: { burn0: torch(0), burn1: torch(1), burn2: torch(2) },
+    anim: { burn: { frames: ["burn0", "burn1", "burn2"], fps: 7 } },
+  }),
+  one("puppet-wall", [52, 17], finish(Pic.of(PUPPET_WALL), "d", "K", "U"), {
+    outline: false,
+    shadow: oval(52, 17, 26, 16, 25, 1.6),
+  }),
+  one("guard-post", [36, 22], finish(Pic.of(GUARD_POST), "B", "U", "cyYjXhq"), {
+    outline: false,
+    shadow: oval(36, 22, 18, 21, 17, 2),
+  }),
+  one("bench-stone", [46, 8], finish(Pic.of(BENCH), "d", "k", "S"), {
+    outline: false,
+    lone: "S",
+    shadow: oval(46, 8, 18, 7, 17, 1.4),
+  }),
+  one("dead-tree", [44, 56], deadTree(), { shadow: oval(44, 56, 22, 55, 8, 1.6) }),
+  sprite({
+    name: "cutout",
+    size: [14, 11],
+    palette,
+    outline: false,
+    frames: Object.fromEntries(
+      Object.entries(CUTOUTS).map(([k, g]) => [
+        k,
+        Pic.blank(14, 11)
+          .put(g, 0, 11 - Pic.of(g).h)
+          .toString(),
+      ]),
+    ),
+    anim: { idle: { frames: ["horse"], fps: 1 } },
+  }),
+  sprite({
+    name: "shadow-crawl",
+    size: [72, 26],
+    origin: [16, 12],
+    palette,
+    outline: false,
+    frames: { a: crawl(0), b: crawl(1) },
+    anim: { reach: { frames: ["a", "b"], fps: 1.5 } },
+  }),
 ];

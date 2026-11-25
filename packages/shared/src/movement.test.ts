@@ -36,13 +36,15 @@ describe("player movement", () => {
     expect(diagonal.x).toBe(diagonal.y);
   });
 
-  it("slides along a wall of many tiles at an even pace, snagging on no seam", () => {
+  it("slides along a wall of many tiles at full speed, snagging on no seam", () => {
     const row = Array.from({ length: 16 }, (_, i) => [i + 2, 8] as [number, number]);
     const map = walls(row);
     // Pressed diagonally up into the wall's underside.
     const path = walk(map, at(40, 9 * TILE_SIZE + PLAYER_RADIUS + 2), M, -M, 60);
     const steps = path.slice(3).map((b, i) => b.x - (path[i + 2] as Body).x);
     expect(Math.max(...steps) - Math.min(...steps)).toBeLessThanOrEqual(0.25);
+    // Kiting a horde along a wall loses no speed to the wall.
+    for (const s of steps) expect(s).toBeGreaterThanOrEqual(STEP - 0.125);
     for (const b of path) expect(b.y).toBeGreaterThanOrEqual(9 * TILE_SIZE + PLAYER_RADIUS - 0.125);
   });
 

@@ -192,7 +192,7 @@ const placed = merge(
       place("tower", TOWER[0] - 1, TOWER[1]),
       // The plane in its ring of benches.
       place("plane", PLANE[0], PLANE[1]),
-      ...BENCHES.map(([x, y, flip]) => place("bench-stone", x, y, { flip })),
+      ...BENCHES.map(([x, y, flip]) => place("marble-bench", x, y, { flip })),
       // Scroll racks either side of the library's middle door, out in the light to be read.
       place("scroll-rack", LIBRARY.x + 7, LIBRARY.steps + 2),
       place("scroll-rack", LIBRARY.x + 13, LIBRARY.steps + 2),
@@ -213,7 +213,7 @@ const placed = merge(
       place("olive", 70, 6),
       place("olive", 37, 6),
       place("pithos", 4, 47),
-      place("cart", 22, 50),
+      place("handcart", 22, 50),
     ],
     overhead: [
       { prop: "tower-top", at: place("tower", TOWER[0] - 1, TOWER[1]).at },
@@ -304,7 +304,7 @@ const map: MapSource = {
   ],
   spawns: {
     main: { tile: [GATE.x + GATE.w / 2, H - 4], facing: "up" },
-    "p1-agora": { tile: [GATE.x + GATE.w / 2, H - 4], facing: "up" },
+    "p1-agora-edge": { tile: [GATE.x + GATE.w / 2, H - 4], facing: "up" },
     // Students knocked out in the fight come back here, at the gate.
     respawn: { tile: [GATE.x + GATE.w / 2, H - 6], facing: "up" },
   },
@@ -317,7 +317,7 @@ const map: MapSource = {
     {
       id: "gate",
       rect: { x: GATE.x, y: H - 1, w: GATE.w, h: 1 },
-      to: "p1-agora",
+      to: "p1-agora-edge",
       spawn: "p1-lyceum",
     },
   ],

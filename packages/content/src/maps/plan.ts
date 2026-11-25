@@ -2,6 +2,16 @@ import type { Rect, Vec } from "./layers.ts";
 import { fractal } from "./noise.ts";
 
 /**
+ * Value noise sampled on a turned, warped lattice: its contours wander at every angle instead of
+ * running along the tile grid the way plain lattice noise does at large scales.
+ */
+function organic(x: number, y: number, scale: number, seed: number): number {
+  const wx = x + (fractal(x, y, scale * 0.7, seed + 501) - 0.5) * scale * 0.9;
+  const wy = y + (fractal(x, y, scale * 0.7, seed + 502) - 0.5) * scale * 0.9;
+  return fractal(wx * 0.82 - wy * 0.57, wx * 0.57 + wy * 0.82, scale, seed);
+}
+
+/**
  * A terrain plan painted with shapes instead of typed by hand, for maps too large to type: one
  * legend character per tile, edited with rectangles, ragged ellipses and thick paths, then
  * printed as the `plan` string. Pure and seeded, so the same calls always paint the same plan.
@@ -96,7 +106,7 @@ export class PlanGrid {
     const r = opt.inside ?? { x: 0, y: 0, w: this.w, h: this.h };
     for (let y = r.y; y < r.y + r.h; y++)
       for (let x = r.x; x < r.x + r.w; x++)
-        if (fractal(x, y, opt.scale, opt.seed) >= opt.threshold) this.set(x, y, to, on);
+        if (organic(x, y, opt.scale, opt.seed) >= opt.threshold) this.set(x, y, to, on);
     return this;
   }
 

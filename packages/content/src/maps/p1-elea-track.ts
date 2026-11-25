@@ -162,15 +162,15 @@ const map: MapSource = {
   ],
   spawns: {
     main: { tile: [3, 17], facing: "right" },
-    "p1-olive-road": { tile: [3, 17], facing: "right" },
+    "p1-agora-edge": { tile: [3, 17], facing: "right" },
   },
   landmark: { name: "끝나지 않는 주로", tile: [at(0.75), 17] },
   blocks: [{ x: 0, y: 4, w: W, h: 5 }],
   portals: [
     {
-      id: "olive-road",
+      id: "agora-edge",
       rect: { x: 0, y: 15, w: 1, h: 5 },
-      to: "p1-olive-road",
+      to: "p1-agora-edge",
       spawn: "p1-elea-track",
     },
   ],

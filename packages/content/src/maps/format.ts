@@ -40,6 +40,11 @@ export interface Ambient {
   readonly color: string;
   /** 0 is black, 1 is the art as drawn. */
   readonly intensity: number;
+  /**
+   * The theme the game draws the art in before this light falls on it, when the map's `theme`
+   * already paints the light in for the contact sheet (a night theme). Defaults to `theme`.
+   */
+  readonly unlit?: string;
 }
 
 /**

@@ -3,6 +3,7 @@ import cafeteria from "./cafeteria.ts";
 import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, checkScenes, type MapRegistry } from "./check.ts";
+import ecoPark from "./eco-park.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 // 가설관 and 증명관 interiors.
 import gaseol1f from "./gaseol-1f.ts";
@@ -15,11 +16,14 @@ import jeungmyeong from "./jeungmyeong.ts";
 import lounge from "./lounge.ts";
 // Page 1 town, 위험 구역 and boss maps.
 import p1Agora from "./p1-agora.ts";
-// Page 1 hunting fields and the 생태공원.
+// Page 1 hunting fields.
+import p1AgoraEdge from "./p1-agora-edge.ts";
+import p1CaveMouth from "./p1-cave-mouth.ts";
 import p1Colonnade from "./p1-colonnade.ts";
 import p1CrotonSchool from "./p1-croton-school.ts";
 import p1EleaTrack from "./p1-elea-track.ts";
 import p1Lyceum from "./p1-lyceum.ts";
+import p1OliveRoad from "./p1-olive-road.ts";
 import p1ShadowCave from "./p1-shadow-cave.ts";
 import saebyeok from "./saebyeok.ts";
 import silheom from "./silheom.ts";
@@ -54,6 +58,10 @@ export const MAP_SOURCES: readonly MapSource[] = [
   home,
   // Page 1 hunting fields and the 생태공원.
   p1Colonnade,
+  p1OliveRoad,
+  p1CaveMouth,
+  p1AgoraEdge,
+  ecoPark,
   // Page 1 town, 위험 구역 and boss maps.
   p1Agora,
   p1ShadowCave,
@@ -71,7 +79,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "gaseol-2f",
   "gaseol-4f",
   "jeungmyeong",
-  "eco-park",
   // 가설관 and 증명관 interiors: rooms and places their doors lead to before they exist.
   "gaseol-roof",
   "gaseol-b1",
@@ -87,10 +94,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "p1-croton-school",
   "p1-elea-track",
   "p1-lyceum",
-  "p1-olive-road",
-  // Page 1 fields the town and the lairs open onto before they are built.
-  "p1-cave-mouth",
-  "p1-agora-edge",
 ]);
 
 /** Builds every map. */

@@ -66,28 +66,12 @@ function paintPlan(): string {
   g.blob(32, 24, 17, 10, "_", { seed: 22, ragged: 0.15, onto: "," });
   g.rect(STOA.x - 1, STOA.steps, STOA.bays * 2 + 4, 3, "_");
   g.rect(49, 12, 18, 16, "_", ",");
-  // Roads out: to the colonnade (east), the Lyceum (north-east), the olive road (south), the cave
-  // mouth (north-west) and the town's edge (south-west).
+  // Roads out: east to the colonnade, south-west to the town's edge.
   const roads: readonly (readonly Vec[])[] = [
     [
       [44, 27],
       [58, 28],
       [72, 28],
-    ],
-    [
-      [56, 18],
-      [64, 12],
-      [72, 11],
-    ],
-    [
-      [36, 36],
-      [35, 46],
-      [35, 56],
-    ],
-    [
-      [14, 18],
-      [6, 12],
-      [-1, 11],
     ],
     [
       [18, 36],
@@ -169,14 +153,14 @@ const STALLS: readonly [string, number, number][] = [
 function market(): Partial<Placed> {
   return {
     objects: [
-      ...STALLS.map(([frame, tx, ty]) => place("stall", tx, ty, { frame })),
+      ...STALLS.map(([frame, tx, ty]) => place("market-stall", tx, ty, { frame })),
       // Stock waiting behind and between the stalls.
       place("pithos", 65, 14),
       place("pithos", 63, 20),
       { prop: "amphora", at: [px(65, 16)[0], px(65, 16)[1] + 4] },
       { prop: "amphora-tipped", at: [px(64, 22)[0], px(64, 22)[1] + 5] },
-      place("cart", 47, 18, { flip: true }),
-      place("cart", 64, 25),
+      place("handcart", 47, 18, { flip: true }),
+      place("handcart", 64, 25),
       { prop: "amphora", at: [px(48, 23)[0], px(48, 23)[1] + 6] },
     ],
   };
@@ -273,12 +257,9 @@ const placed = merge(stoa(), market(), trees("olive", OLIVES, 2), trees("cypress
         [19, 37],
         [56, 17],
       ] as const
-    ).map(([x, y]): Prop => ({ prop: "horos", at: [x * T + 8, y * T + 12] })),
+    ).map(([x, y]): Prop => ({ prop: "boundary-stone", at: [x * T + 8, y * T + 12] })),
     place("herm", 69, 25),
-    place("herm", 37, 51),
-    place("herm", 3, 13),
     place("herm", 3, 41),
-    place("herm", 68, 9),
     // Jars by the fountain, waiting to be filled; one already full and leaking.
     place("pithos", 50, 36),
     { prop: "amphora", at: [px(43, 37)[0], px(43, 37)[1] + 4] },
@@ -428,9 +409,6 @@ const map: MapSource = {
     main: { tile: [WOUND[0] + 8, WOUND[1]], facing: "right" },
     "campus-field": { tile: [WOUND[0] + 8, WOUND[1]], facing: "right" },
     "p1-colonnade": { tile: [69, 28], facing: "left" },
-    "p1-lyceum": { tile: [69, 11], facing: "left" },
-    "p1-olive-road": { tile: [35, 52], facing: "up" },
-    "p1-cave-mouth": { tile: [2, 11], facing: "right" },
     "p1-agora-edge": { tile: [2, 45], facing: "right" },
   },
   landmark: { name: "채색 주랑", tile: [STOA.x + STOA.bays, STOA.steps - 2] },
@@ -443,15 +421,7 @@ const map: MapSource = {
       spawn: "p1-agora",
     },
     { id: "colonnade", rect: { x: 71, y: 26, w: 1, h: 4 }, to: "p1-colonnade", spawn: "p1-agora" },
-    { id: "lyceum", rect: { x: 71, y: 9, w: 1, h: 4 }, to: "p1-lyceum", spawn: "p1-agora" },
-    {
-      id: "olive-road",
-      rect: { x: 33, y: 55, w: 4, h: 1 },
-      to: "p1-olive-road",
-      spawn: "p1-agora",
-    },
-    { id: "cave-mouth", rect: { x: 0, y: 9, w: 1, h: 4 }, to: "p1-cave-mouth", spawn: "p1-agora" },
-    { id: "agora-edge", rect: { x: 0, y: 42, w: 1, h: 4 }, to: "p1-agora-edge", spawn: "p1-agora" },
+    { id: "agora-edge", rect: { x: 0, y: 43, w: 1, h: 3 }, to: "p1-agora-edge", spawn: "p1-agora" },
   ],
   interactables: [
     { id: "heroes", kind: "quests", rect: { x: MONUMENT[0], y: MONUMENT[1], w: 5, h: 1 } },
@@ -491,7 +461,7 @@ const map: MapSource = {
     { speaker: "zeno", tile: [57, 18], facing: "left" },
     { speaker: "pythagoreans", tile: [41, 37], facing: "down" },
     { speaker: "aristarchus", tile: [GNOMON[0] - 1, GNOMON[1] + 1], facing: "right" },
-    { speaker: "guard", tile: [5, 13], facing: "right" },
+    { speaker: "guard", tile: [6, 41], facing: "right" },
   ],
 };
 
