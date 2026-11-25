@@ -32,7 +32,7 @@ export const HOLIDAY_PHYSICS = book<ProjectileAttack>({
     { at: 35, add: { knock: 40 } },
     { at: 60, add: { count: 1, impactRadius: 4 } },
   ],
-  cues: { body: "fx-book", hit: "fx-thud" },
+  cues: { body: "fx-tome", hit: "fx-tome-impact", area: "fx-tome-crater" },
   evolution: {
     id: "principia",
     attack: {
@@ -78,7 +78,7 @@ export const MECHANICS_KIT = book<OrbitAttack>({
     { at: 50, add: { count: 1 } },
     { at: 85, add: { orbitRadius: 8 } },
   ],
-  cues: { body: "atk-pendulum", hit: "fx-thud" },
+  cues: { body: "atk-pendulum", hit: "fx-hit-heavy" },
   evolution: {
     id: "foucault",
     attack: {
@@ -118,7 +118,7 @@ export const EM_LAB = book<ChainAttack>({
     { at: 40, add: { jumps: 1, jumpRange: 8 } },
     { at: 75, add: { jumps: 1 } },
   ],
-  cues: { body: "atk-lightning", hit: "fx-zap" },
+  cues: { body: "fx-bolt", hit: "fx-bolt-node" },
   evolution: {
     id: "maxwell",
     attack: {
@@ -157,7 +157,7 @@ export const OPTICS = book<BeamAttack>({
     { at: 50, add: { width: 2, damage: 0.3 } },
     { at: 80, add: { reflect: 1 } },
   ],
-  cues: { body: "atk-laser", hit: "fx-spark" },
+  cues: { body: "atk-laser", hit: "fx-hit-light" },
   evolution: {
     id: "spectrum",
     attack: {
@@ -199,7 +199,7 @@ export const MOMENTUM_BOOK = book<DashAttack>({
     { at: 55, add: { distance: 16 } },
     { at: 85, add: { damage: 0.5 } },
   ],
-  cues: { body: "atk-dash", hit: "fx-thud" },
+  cues: { body: "atk-dash", hit: "fx-hit-heavy" },
   evolution: {
     id: "elastic",
     attack: {
@@ -238,7 +238,7 @@ export const GRAVITY_REPORT = book<ZoneAttack>({
     { at: 30, add: { radius: 8 } },
     { at: 70, add: { duration: 1 } },
   ],
-  cues: { body: "atk-well", hit: "fx-spark", area: "fx-well" },
+  cues: { body: "atk-well", hit: "fx-hit-light", area: "fx-well" },
   evolution: {
     id: "universal-gravitation",
     attack: {

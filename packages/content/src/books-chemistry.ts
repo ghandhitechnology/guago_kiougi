@@ -30,7 +30,7 @@ export const ZOOMIN_CHEM = book<ProjectileAttack>({
     { at: 50, add: { poolRadius: 4, poolDuration: 1 } },
     { at: 80, add: { count: 1 } },
   ],
-  cues: { body: "atk-flask", hit: "fx-splash", area: "fx-acid-pool" },
+  cues: { body: "fx-flask", hit: "fx-flask-shatter", area: "fx-acid" },
   evolution: {
     id: "aqua-regia",
     attack: {
@@ -89,7 +89,7 @@ export const PERIODIC_TABLE = book<ProjectileAttack>({
     { at: 30, add: { impactRadius: 6 } },
     { at: 70, add: { count: 1 } },
   ],
-  cues: { body: "atk-element", hit: "fx-splash" },
+  cues: { body: "atk-element", hit: "fx-flask-shatter" },
   evolution: {
     id: "mendeleev",
     attack: {
@@ -139,7 +139,7 @@ export const ORGANIC = book<ConeAttack>({
     { at: 25, add: { angle: 5 } },
     { at: 60, add: { damage: 0.3 } },
   ],
-  cues: { body: "atk-carbon-chain", hit: "fx-slash" },
+  cues: { body: "atk-carbon-chain", hit: "fx-hit-light" },
   evolution: {
     id: "polymer",
     attack: {
@@ -179,7 +179,7 @@ export const LAB_REPORT = book<ConeAttack>({
     { at: 50, add: { range: 12 } },
     { at: 75, add: { damage: 0.2 } },
   ],
-  cues: { body: "atk-ethanol", hit: "fx-ignite", area: "fx-flame" },
+  cues: { body: "fx-label", hit: "fx-flame", area: "fx-combust" },
   evolution: {
     id: "thermite",
     attack: {
@@ -230,7 +230,7 @@ export const MOLE = book<ConeAttack>({
     { at: 45, add: { angle: 10 } },
     { at: 75, add: { hits: 4 } },
   ],
-  cues: { body: "atk-particles", hit: "fx-spark" },
+  cues: { body: "atk-particles", hit: "fx-hit-light" },
   evolution: {
     id: "avogadro",
     attack: {
@@ -276,7 +276,7 @@ export const TITRATION = book<ProjectileAttack>({
     { at: 30, add: { pierce: 1 } },
     { at: 70, add: { count: 1, spread: 10 } },
   ],
-  cues: { body: "atk-drop", hit: "fx-splash" },
+  cues: { body: "atk-drop", hit: "fx-flask-shatter" },
   evolution: {
     id: "buffer",
     attack: {

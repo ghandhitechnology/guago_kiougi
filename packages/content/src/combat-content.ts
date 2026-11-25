@@ -1,5 +1,5 @@
 import { BOOKS, TOOLS } from "./books.ts";
-import { REACTIONS } from "./classes.ts";
+import { PROOF_CUES, REACTIONS } from "./classes.ts";
 import { DROPS } from "./drops.ts";
 import { FIELD_PACING, PAGE1_FIELDS } from "./fields.ts";
 import { MODES } from "./modes.ts";
@@ -25,6 +25,7 @@ export function combatCues(): { art: string[]; sounds: string[] } {
   add(ODAP_GOLEM.sprite, ...Object.values(ODAP_GOLEM.cues), ELITE.aura, ELITE.spawnCue);
   for (const s of Object.values(STATUSES)) add(s.icon);
   for (const r of REACTIONS) add(r.cue.vfx, r.cue.sfx);
+  add(...Object.values(PROOF_CUES));
   for (const m of MODES) add(m.icon);
   add(DROPS.coinSprite, DROPS.pageSprite, ...Object.values(DROPS.pickupCue));
   add(FIELD_PACING.bellCue, FIELD_PACING.surgeCue);

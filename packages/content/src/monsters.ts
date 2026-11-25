@@ -272,7 +272,7 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 1.2,
     coin: 1.2,
     ...PLAIN,
-    cues: cues("element-earth", "fx-rubble"),
+    cues: cues("element-earth", "fx-shard"),
   },
   {
     id: "element-earth-pebble",
@@ -356,7 +356,7 @@ export const ELITE = {
   massMult: 3,
   speedMult: 1.15,
   armor: 0.2,
-  aura: "fx-elite",
+  aura: "fx-elite-aura",
   spawnCue: "sfx.monster.elite.spawn",
   /** Never promoted. */
   exclude: ["tortoise", "element-earth-pebble"],
@@ -422,7 +422,7 @@ export const ODAP_GOLEM: BossDef = {
   enrage: { below: 0.5, delay: 0.6, radiusMult: 1.4 },
   summon: { every: 10, monster: "odap", count: 3, cap: 9 },
   cues: {
-    telegraph: "fx-telegraph-circle",
+    telegraph: "tele-circle",
     shockwave: "fx-shockwave",
     slam: "sfx.boss.odap-golem.slam",
     roar: "sfx.boss.odap-golem.roar",

@@ -71,12 +71,19 @@ type BookInput<A extends Attack> = Omit<
   };
 };
 
+/** Books whose icon frame in the `book` sprite has a shorter name than the book id. */
+const ICON_FRAMES: Readonly<Record<string, string>> = {
+  "graph-note": "graph",
+  "proof-note": "proof",
+};
+
 /** Fills in text keys, the base damage, Page 1 and the cue ids that follow from the id. */
 export function book<A extends Attack>(input: BookInput<A>): BookDef<A> {
   const text = studyText(`book:${input.id}`);
+  const icon = `book/${ICON_FRAMES[input.id] ?? input.id}`;
   const evolved = studyText(`evolved:${input.evolution.id}`);
   const cues: BookCues = {
-    icon: `book/${input.id}`,
+    icon,
     cast: `sfx.book.${input.id}.cast`,
     impact: `sfx.book.${input.id}.hit`,
     ...input.cues,

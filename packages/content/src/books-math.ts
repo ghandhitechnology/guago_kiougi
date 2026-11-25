@@ -31,7 +31,7 @@ export const WANGDO = book<OrbitAttack>({
     { at: 70, add: { count: 1, orbitRadius: 4 } },
     { at: 100, add: { count: 1, duration: 1 } },
   ],
-  cues: { body: "atk-polygon", hit: "fx-spark" },
+  cues: { body: "fx-wangdo", hit: "fx-wangdo-hit" },
   evolution: {
     id: "elements",
     attack: {
@@ -46,7 +46,7 @@ export const WANGDO = book<OrbitAttack>({
       pull: 0,
     } satisfies WaveAttack,
     levels: [],
-    cues: { body: "atk-ring" },
+    cues: { body: "fx-wangdo" },
   },
 });
 
@@ -71,7 +71,7 @@ export const GRAPH_NOTE = book<BeamAttack>({
     { at: 40, add: { width: 4, amplitude: 4 } },
     { at: 70, add: { damage: 0.4 } },
   ],
-  cues: { body: "atk-sine", hit: "fx-spark" },
+  cues: { body: "fx-graph-beam", hit: "fx-hit-light" },
   evolution: {
     id: "fourier",
     attack: {
@@ -89,7 +89,7 @@ export const GRAPH_NOTE = book<BeamAttack>({
       spread: 0,
     } satisfies BeamAttack,
     levels: [],
-    cues: { body: "atk-sine-stack" },
+    cues: { body: "fx-graph-beam" },
   },
 });
 
@@ -119,7 +119,7 @@ export const SEQUENCE = book<ProjectileAttack>({
     { at: 50, add: { damage: 0.1 } },
     { at: 80, add: { pierce: 1 } },
   ],
-  cues: { body: "atk-digit", hit: "fx-spark" },
+  cues: { body: "atk-digit", hit: "fx-hit-light" },
   evolution: {
     id: "divergent",
     attack: {
@@ -169,7 +169,7 @@ export const PROBABILITY = book<ProjectileAttack>({
     { at: 60, add: { impactRadius: 4 } },
     { at: 90, add: { count: 1 } },
   ],
-  cues: { body: "atk-die", hit: "fx-thud" },
+  cues: { body: "atk-die", hit: "fx-hit-heavy" },
   evolution: {
     id: "expectation",
     attack: {
@@ -214,7 +214,7 @@ export const COORDINATE = book<DashAttack>({
     { at: 30, add: { distance: 16 } },
     { at: 65, add: { damage: 0.4 } },
   ],
-  cues: { body: "atk-axes", hit: "fx-spark", area: "fx-axes" },
+  cues: { body: "atk-axes", hit: "fx-hit-light", area: "fx-axes" },
   evolution: {
     id: "linear-map",
     attack: {

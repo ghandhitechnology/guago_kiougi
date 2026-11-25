@@ -31,6 +31,13 @@ export function signatureStrength(cls: ClassId, major: ClassId, minor?: ClassId)
  */
 export const PROOF = { maxStacks: 10, window: 2, qed: 5 } as const;
 
+/** The stack counter over a target (frames `n1` to `n10`) and the burst. */
+export const PROOF_CUES = {
+  counter: "fx-proof",
+  burst: "fx-qed",
+  sound: "sfx.signature.qed",
+} as const;
+
 /** Stacks after one more hit, and whether that hit proves it. */
 export function proofHit(stacks: number): { stacks: number; qed: boolean } {
   const next = stacks + 1;
@@ -104,7 +111,7 @@ export const REACTIONS: readonly Reaction[] = [
       knock: 40,
       status: { id: "burn", stacks: 1, chance: 1 },
     },
-    cue: { vfx: "fx-combustion", sfx: "sfx.reaction.combustion" },
+    cue: { vfx: "fx-combust", sfx: "sfx.reaction.combustion" },
   },
   {
     id: "corrosion",

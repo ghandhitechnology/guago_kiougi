@@ -30,7 +30,7 @@ export const CAMPING_BIO = book<SummonAttack>({
     { at: 60, add: { cap: 2 } },
     { at: 90, add: { perCast: 1 } },
   ],
-  cues: { body: "minion-cell", hit: "fx-spark", impact: "sfx.book.camping-bio.divide" },
+  cues: { body: "fx-cell", hit: "fx-hit-light", impact: "sfx.book.camping-bio.divide" },
   evolution: {
     id: "stem-cell",
     attack: {
@@ -121,7 +121,7 @@ export const DISSECTION = book<ConeAttack>({
     { at: 45, add: { angle: 10 } },
     { at: 80, add: { hits: 2 } },
   ],
-  cues: { body: "fx-slash", hit: "fx-spark", cast: "sfx.book.dissection.swish" },
+  cues: { body: "fx-scalpel", hit: "fx-bleed", cast: "sfx.book.dissection.swish" },
   evolution: {
     id: "precise-anatomy",
     attack: {
@@ -166,7 +166,7 @@ export const ECOSYSTEM = book<ZoneAttack>({
     { at: 30, add: { duration: 1 } },
     { at: 70, add: { radius: 8 } },
   ],
-  cues: { body: "atk-roots", hit: "fx-spark", area: "fx-roots" },
+  cues: { body: "atk-roots", hit: "fx-hit-light", area: "fx-roots" },
   evolution: {
     id: "climax-forest",
     attack: {
@@ -256,7 +256,7 @@ export const IMMUNE = book<OrbitAttack>({
     { at: 55, add: { count: 1 } },
     { at: 85, add: { orbitRadius: 6 } },
   ],
-  cues: { body: "atk-antibody", hit: "fx-spark" },
+  cues: { body: "atk-antibody", hit: "fx-hit-light" },
   evolution: {
     id: "herd-immunity",
     attack: {
