@@ -2,6 +2,7 @@ import * as Phaser from "phaser";
 import { artMeta, createSpriteAnims, loadArt } from "./art.ts";
 import { backend } from "./backend/index.ts";
 import { FRONT_SCENE, UI_SCENE, WORLD_SCENE, type WorldEntry } from "./entry.ts";
+import { startAudio } from "./sound/audio.ts";
 import { setUiArt } from "./ui/theme.ts";
 
 /** Atlases the front end draws from; the world loads its tiles itself. */
@@ -36,6 +37,7 @@ export class BootScene extends Phaser.Scene {
   async create(): Promise<void> {
     const meta = artMeta(this);
     setUiArt(meta);
+    startAudio();
     createSpriteAnims(this, meta);
     this.scene.launch(UI_SCENE);
 

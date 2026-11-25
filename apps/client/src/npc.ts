@@ -1,16 +1,13 @@
 /**
  * The cast standing in the world (PLAN §3): drawn by speaker id from whatever the art build has,
  * breathing in their idle, now and then playing the one move that is theirs, turning the way
- * the server says, with a nameplate under their feet. A speaker with no art yet is skipped.
+ * the server says. Their nameplate is the world overlays'. A speaker with no art yet is skipped.
  */
 import type { ArtMetadata } from "@guago/art";
 import { CAST_ART, narrative } from "@guago/content";
 import { Facing } from "@guago/shared";
 import type * as Phaser from "phaser";
 import { composeLook, lookAnim, lookTexture, spriteAnim } from "./art.ts";
-import { NAME_DEPTH } from "./depths.ts";
-import { Label } from "./ui/text.ts";
-import { sliceOf } from "./ui/theme.ts";
 
 export type NpcArt =
   | {
@@ -66,7 +63,6 @@ const LOOP_SIGNATURE_MS = 6000;
 /** A cast member's body; the map view it is added to sorts, lights and shadows it. */
 export class NpcActor {
   readonly body: Phaser.GameObjects.Sprite;
-  private readonly plate: Phaser.GameObjects.Container | undefined;
   private readonly art: NpcArt;
   private facing: number;
   private busy = false;
@@ -78,7 +74,6 @@ export class NpcActor {
     scene: Phaser.Scene,
     meta: ArtMetadata,
     art: NpcArt,
-    speaker: string,
     x: number,
     y: number,
     facing: number,
@@ -99,9 +94,6 @@ export class NpcActor {
     });
     this.idle();
     this.body.anims.setProgress(Math.random());
-
-    const name = speakerName(speaker);
-    if (name) this.plate = nameplate(scene, name, this.x, this.y + 3);
   }
 
   private dir(): string {
@@ -155,18 +147,5 @@ export class NpcActor {
 
   destroy(): void {
     this.body.destroy();
-    this.plate?.destroy();
   }
-}
-
-/** A name under the feet on the kit's nameplate, centred on x. */
-function nameplate(scene: Phaser.Scene, text: string, x: number, y: number) {
-  const label = new Label(scene, 0, 0, text, { font: "galmuri9", color: "stone.bright" });
-  const w = label.width + 6;
-  const [l, r, t, b] = sliceOf("nameplate");
-  const plate = scene.add.nineslice(0, 0, "ui", "nameplate/idle", w, 13, l, r, t, b).setOrigin(0);
-  label.at(3, 2);
-  const box = scene.add.container(Math.round(x - w / 2), Math.round(y), [plate, label.obj]);
-  box.setDepth(NAME_DEPTH);
-  return box;
 }

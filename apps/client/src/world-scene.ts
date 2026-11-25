@@ -28,23 +28,32 @@ import {
 import * as Phaser from "phaser";
 import { MonsterActor, PlayerActor } from "./actors.ts";
 import { artMeta, composeLook, createSpriteAnims, defaultLook, loadArt } from "./art.ts";
-import { Bubbles } from "./bubbles.ts";
 import { CameraRig } from "./camera.ts";
+import { sampleMove } from "./controls/move.ts";
 import { MARK_DEPTH } from "./depths.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
+import { playEmote } from "./emotes.ts";
 import type { WorldEntry } from "./entry.ts";
 import { Curtain } from "./fade.ts";
+import { hud } from "./hud/store.ts";
+import { t, tMaybe } from "./i18n/index.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { ensureMap, enteredMap, mapReady, wallsOf } from "./map-data.ts";
 import { type MapSeat, stayConnected } from "./net.ts";
-import { NpcActor, npcArt } from "./npc.ts";
+import { NpcActor, npcArt, speakerName } from "./npc.ts";
 import { Patrols } from "./patrols.ts";
-import { PlaceCard } from "./place-card.ts";
-import { Prompt } from "./prompt.ts";
 import { MapView, onQualityTier } from "./render/index.ts";
 import { SelfMover } from "./self.ts";
+import { enterSoundscape, preloadFor, soundscapeFor } from "./sound/audio.ts";
+import { StepSounds } from "./sound/steps.ts";
+import { worldUi } from "./ui/world-ui.ts";
+import { builtView } from "./world/map-view.ts";
+import { WorldOverlays } from "./world/overlays.ts";
+import { session } from "./world/session.ts";
+import { worldView } from "./world/view.ts";
 import { emitWorld, onWorld } from "./world-events.ts";
+import type { WorldLink } from "./world-link.ts";
 import { playWorld } from "./world-sound.ts";
 
 const PLAYER_RIG = "student";
@@ -82,7 +91,9 @@ interface Transition {
 
 interface Remote<A> {
   readonly track: Track;
-  readonly actor: A;
+  actor: A;
+  /** The look the actor wears, for players. */
+  look?: string;
 }
 
 /** The map the player stands on, and everything drawn for it. */
@@ -99,7 +110,12 @@ interface Here {
   closed: ReadonlySet<string>;
   readonly patrols: Patrols | undefined;
   /** What the prompt can point at: the server's own list, by the same rule. */
-  readonly usable: (Usable & { readonly top: number; readonly cx: number })[];
+  readonly usable: (Usable & {
+    readonly top: number;
+    readonly cx: number;
+    /** A notice or a lore object: the prompt shows reading, not using. */
+    readonly reads: boolean;
+  })[];
 }
 
 /**
@@ -127,9 +143,10 @@ export class WorldScene extends Phaser.Scene {
   private selfLook: string | undefined;
 
   private curtain!: Curtain;
-  private card!: PlaceCard;
-  private bubbles!: Bubbles;
-  private prompt!: Prompt;
+  private overlays!: WorldOverlays;
+  private steps: StepSounds | undefined;
+  /** An interact went out and its answer has not come back: a line it draws needs no bubble. */
+  private asking = false;
   /** The room patches are read from; a room superseded by a door is ignored. */
   private room: Room<unknown, MapState> | undefined;
   private here: Here | undefined;
@@ -182,20 +199,18 @@ export class WorldScene extends Phaser.Scene {
       this.selfLook = dollLook(look);
     }
     this.curtain = new Curtain(this, true);
-    this.card = new PlaceCard(this);
-    this.bubbles = new Bubbles(this);
-    this.prompt = new Prompt(this, () => this.interact());
+    this.overlays = new WorldOverlays(this);
+    worldView.overlays = this.overlays;
+    // The E key and the phone's context button, through the UI layer while nothing else has focus.
+    worldView.interact = () => this.interact();
+    if (this.entry) session.start(this.entry);
+    const unwatch = session.watch((s) => this.listenSocial(s.link));
     this.keys = new KeyboardMove();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "KeyE" || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      this.interact();
-    };
-    window.addEventListener("keydown", onKey);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.keys.dispose();
-      window.removeEventListener("keydown", onKey);
+      unwatch();
+      this.unsocial?.();
+      worldView.leave();
       this.stop?.();
     });
 
@@ -277,6 +292,13 @@ export class WorldScene extends Phaser.Scene {
     this.clearMap();
     const view = MapView.create(this, map.id);
     this.mark("view");
+    // The HUD's minimap, footsteps and soundscape follow the map; `enter` clears who is on it.
+    const shown = builtView(map);
+    worldView.enter(shown);
+    worldView.selfSid = room.sessionId;
+    this.steps = new StepSounds(shown.surfaceAt);
+    preloadFor(map.id);
+    enterSoundscape(soundscapeFor(map.id, map.time));
     const untier = onQualityTier((t) => view.setTier(t));
     enteredMap(this, map.id);
     const npcs = new Map<string, NpcActor>();
@@ -287,13 +309,14 @@ export class WorldScene extends Phaser.Scene {
         this,
         this.meta,
         art,
-        n.speaker,
+
         n.x / POS_SCALE,
         n.y / POS_SCALE,
         n.facing,
       );
       view.addEntity(npc.body);
       npcs.set(key, npc);
+      worldUi.npc(n.speaker, speakerName(n.speaker), npc.x, npc.y);
     }
     const T = TILE_SIZE;
     const usable: Here["usable"] = [
@@ -306,6 +329,7 @@ export class WorldScene extends Phaser.Scene {
           y: n.y / POS_SCALE,
           cx: n.x / POS_SCALE,
           top: npcs.get(key)?.headY ?? n.y / POS_SCALE - 28,
+          reads: false,
         })),
       ...map.interactables.map((t) => ({
         kind: "thing" as const,
@@ -313,6 +337,7 @@ export class WorldScene extends Phaser.Scene {
         rect: t.rect,
         cx: (t.rect.x + t.rect.w / 2) * T,
         top: t.rect.y * T - 2,
+        reads: t.kind === "notice" || t.kind === "lore",
       })),
     ];
     const closed = new Set(room.state.closed);
@@ -347,9 +372,11 @@ export class WorldScene extends Phaser.Scene {
     this.onPatch(room.state);
 
     if (map.id !== before) {
-      this.card.show(map.name, seating.channel);
+      const channel = seating.channel > 1 ? ` ${t("world.channel", { n: seating.channel })}` : "";
+      worldUi.placeBanner(`${map.name}${channel}`);
       emitWorld({ t: "place", map: map.id, name: map.name, channel: seating.channel });
     }
+    this.showPlace();
     if (seat.via) playWorld("door.close", { volume: 0.5 });
     this.holding = false;
     await this.curtain.open();
@@ -400,15 +427,20 @@ export class WorldScene extends Phaser.Scene {
   private clearMap(): void {
     const here = this.here;
     this.here = undefined;
-    for (const n of here?.npcs.values() ?? []) n.destroy();
+    for (const [key, n] of here?.npcs ?? []) {
+      n.destroy();
+      const speaker = here?.room.state.npcs.get(key)?.speaker;
+      if (speaker) worldUi.npcGone(speaker);
+    }
+    for (const sid of this.players.keys()) this.overlays.remove(sid);
+    if (this.selfId) this.overlays.remove(this.selfId);
     for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
     this.monsters.clear();
     this.players.clear();
     this.selfActor?.destroy();
     this.selfActor = undefined;
     this.self = undefined;
-    this.bubbles.clearAll();
-    this.prompt.show(undefined);
+    this.aim(undefined);
     here?.patrols?.destroy();
     here?.untier();
     here?.view.destroy();
@@ -502,15 +534,46 @@ export class WorldScene extends Phaser.Scene {
         continue;
       }
       seated.add(p.sid);
+      // Everyone wears their own look; a body whose look has not synced yet wears the default
+      // until it arrives, then is dressed again.
+      // Schema fields are accessors, so a spread would drop them: read each one.
+      const l = p.look;
+      const look = l?.body
+        ? normalizeLook(this.meta, {
+            body: l.body,
+            hair: l.hair,
+            hairColor: l.hairColor,
+            face: l.face,
+            uniform: l.uniform,
+            accessories: [...l.accessories],
+          })
+        : undefined;
+      const lookId = look ? dollLook(look) : this.look;
       let r = this.players.get(p.sid);
       if (!r) {
-        r = { track: new Track(), actor: this.playerActor() };
+        if (look) composeDoll(this, this.meta, look);
+        r = { track: new Track(), actor: this.playerActor(lookId), look: lookId };
         this.here.view.addEntity(r.actor.body);
         this.players.set(p.sid, r);
+        this.overlays.plate(p.sid, p.name, "player");
+        worldView.others.set(p.sid, { kind: "player", x: 0, y: 0, name: p.name });
+      } else if (r.look !== lookId) {
+        if (look) composeDoll(this, this.meta, look);
+        this.here.view.removeEntity(r.actor.body);
+        r.actor.destroy();
+        r.actor = this.playerActor(lookId);
+        r.look = lookId;
+        this.here.view.addEntity(r.actor.body);
+        this.overlays.plate(p.sid, p.name, "player");
       }
       r.track.push(state.tick, p.x / POS_SCALE, p.y / POS_SCALE, p.facing);
     }
     this.prune(this.monsters, state.monsters);
+    for (const sid of this.players.keys()) {
+      if (seated.has(sid)) continue;
+      this.overlays.remove(sid);
+      worldView.others.delete(sid);
+    }
     this.prune(this.players, seated);
     for (const [key, n] of state.npcs) this.here.npcs.get(key)?.face(n.facing);
     if ([...state.closed].join() !== [...this.here.closed].join()) {
@@ -540,32 +603,42 @@ export class WorldScene extends Phaser.Scene {
     const room = map.zones.find((z) => z.kind === "room" && zones.includes(z.id));
     if (room?.id === this.roomZone) return;
     this.roomZone = room?.id;
+    this.showPlace();
     // Arriving shows the map's name; walking into a room inside it shows the room's.
-    if (room && room.kind === "room" && room.name !== map.name) this.card.show(room.name);
+    if (room && room.kind === "room" && room.name !== map.name) worldUi.placeBanner(room.name);
   }
 
+  /** Where the HUD says the player is: the map, and the room inside it. */
+  private showPlace(): void {
+    const map = this.here?.map;
+    if (!map) return;
+    const room = map.zones.find((z) => z.kind === "room" && z.id === this.roomZone);
+    const name = room?.kind === "room" && room.name !== map.name ? room.name : undefined;
+    hud.set({ place: { map: map.id, name: map.name, ...(name ? { room: name } : {}) } });
+  }
+
+  /** A cast member speaks: a bubble for everyone near, unless it answers our own interact. */
   private onNpcLine(m: NpcLine): void {
-    const npc = this.here?.npcs.get(m.npc);
+    const speaker = this.here?.room.state.npcs.get(m.npc)?.speaker;
     const text = KO[m.text];
-    if (!npc || !text) return;
-    this.bubbles.say(`npc:${m.npc}`, npc.x, npc.headY, text);
+    if (!speaker || !text) return;
+    if (m.kind === "talk" && this.asking) return;
+    worldUi.bark(speaker, text);
   }
 
   private onInteraction(m: Interaction): void {
     const here = this.here;
     if (!here) return;
+    this.asking = false;
     if (m.t === "say") {
       const speaker = here.room.state.npcs.get(m.npc)?.speaker ?? "";
+      const text = KO[m.text];
+      if (text) void worldUi.say([{ speaker, text }]);
       emitWorld({ t: "talk", speaker, text: m.text });
     } else if (m.t === "read") {
-      const thing = here.usable.find((u) => u.kind === "thing" && u.id === m.id);
+      // A thing has no voice: its name goes on the tab, and no portrait.
       const text = KO[m.desc];
-      if (thing && text) {
-        this.bubbles.say(`thing:${m.id}`, thing.cx, thing.top, text, {
-          title: KO[m.name] ?? "",
-          stayNear: true,
-        });
-      }
+      if (text) void worldUi.say([{ speaker: KO[m.name] ?? "", text }]);
       emitWorld({ t: "read", id: m.id, name: m.name, desc: m.desc });
     } else if (m.t === "open") {
       emitWorld({ t: "open", id: m.id, kind: m.kind });
@@ -576,12 +649,30 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  private unsocial: (() => void) | undefined;
+
+  /** Emotes come over the world link: the body that made one plays it with a word over its head. */
+  private listenSocial(link: WorldLink | undefined): void {
+    this.unsocial?.();
+    this.unsocial = link?.on((e) => {
+      if (e.type === "social" && e.event.t === "emote") this.emote(e.event.sid, e.event.e);
+    });
+  }
+
+  /** Plays an emote on the body of the player in session `sid` of this map room. */
+  private emote(sid: string, id: string): void {
+    const body = sid === this.selfId ? this.selfActor?.body : this.players.get(sid)?.actor.body;
+    if (!body) return;
+    const word = tMaybe(`emote.${id}`);
+    if (word) this.overlays.say(sid, word);
+    playEmote(body, id);
+  }
+
   /** A guard saw the player: a quick dip to ink, and back at the entrance when it lifts. */
   private onCaught(m: Caught): void {
     this.holding = true;
     this.caughtAt = { x: m.x, y: m.y };
     void this.curtain.close(120);
-    playWorld("sagam.whistle", { volume: 0.5 });
     emitWorld({ t: "caught", patrol: m.patrol });
   }
 
@@ -589,7 +680,7 @@ export class WorldScene extends Phaser.Scene {
   private interact(): void {
     const room = this.room;
     if (!room || !this.here || this.holding || !this.live) return;
-    this.prompt.press();
+    this.asking = true;
     room.send(MAP_MESSAGES.interact, [++this.interactN]);
   }
 
@@ -628,8 +719,10 @@ export class WorldScene extends Phaser.Scene {
 
   // Frames --------------------------------------------------------------------------------
 
-  private playerActor(look = this.look): PlayerActor {
-    return new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
+  private playerActor(look = this.look, self = false): PlayerActor {
+    const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
+    actor.onStep = (x, y) => this.steps?.step(x, y, worldView.self, self);
+    return actor;
   }
 
   override update(time: number): void {
@@ -638,7 +731,7 @@ export class WorldScene extends Phaser.Scene {
     const here = this.here;
 
     const move = (): [number, number] => {
-      this.lastMove = this.holding ? [0, 0] : this.keys.sample();
+      this.lastMove = this.holding ? [0, 0] : sampleMove(this.keys);
       return this.lastMove;
     };
     // Held keys go quiet at a door, but the inputs that bring the server's body up to the drawn
@@ -646,13 +739,18 @@ export class WorldScene extends Phaser.Scene {
     const drawn = this.self?.frame(dt, move, this.live);
     if (drawn && here && this.camera) {
       if (!this.selfActor) {
-        this.selfActor = this.playerActor(this.selfLook);
+        this.selfActor = this.playerActor(this.selfLook, true);
         here.view.addEntity(this.selfActor.body, { focus: true });
         this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
+        if (this.entry && this.selfId) {
+          this.overlays.plate(this.selfId, this.entry.character.name, "self");
+        }
       }
       const moved = Math.hypot(drawn.x - this.selfActor.body.x, drawn.y - this.selfActor.body.y);
       this.selfActor.update(drawn.x, drawn.y, drawn.facing, dt);
       this.camera.follow(drawn.x, drawn.y - CHEST_PX, drawn.facing, dt);
+      worldView.self = { x: drawn.x, y: drawn.y };
+      if (this.selfId) this.overlays.move(this.selfId, drawn.x, drawn.y);
       this.watchDoors(here.map, drawn.x, drawn.y, drawn.facing, moved, dt);
       this.aimPrompt(here, drawn.x, drawn.y);
     }
@@ -664,16 +762,18 @@ export class WorldScene extends Phaser.Scene {
       const at = track.at(t);
       actor.update(at.x, at.y, at.facing as Facing, dt);
     }
-    for (const { track, actor } of this.players.values()) {
+    for (const [sid, { track, actor }] of this.players) {
       const at = track.at(t);
       if (!at.fresh) this.clock.starved++;
       actor.update(at.x, at.y, at.facing as Facing, dt);
+      this.overlays.move(sid, at.x, at.y);
+      const seen = worldView.others.get(sid);
+      if (seen) {
+        seen.x = at.x;
+        seen.y = at.y;
+      }
     }
     for (const npc of here?.npcs.values() ?? []) npc.update(dt);
-    this.bubbles.update(
-      this.selfActor ? { x: this.selfActor.body.x, y: this.selfActor.body.y } : undefined,
-    );
-    this.prompt.update(time);
   }
 
   /** Doors as the prediction meets them: the curtain starts on the step in. */
@@ -712,21 +812,32 @@ export class WorldScene extends Phaser.Scene {
     this.rattle(door.id, "portal", true);
   }
 
-  /** Puts the prompt over what the server would pick from where the player stands. */
+  /**
+   * Puts the prompt over what the server would pick from where the player stands, and lights the
+   * HUD's E key and the phone's context button with its kind.
+   */
   private aimPrompt(here: Here, x: number, y: number): void {
-    if (this.holding) {
-      this.prompt.show(undefined);
-      return;
-    }
-    const target = nearestUsable(here.usable, x, y);
-    // A bubble over the thing says enough while it is up.
+    const target = this.holding ? undefined : nearestUsable(here.usable, x, y);
     const key = target && `${target.kind}:${target.id}`;
     const hushed = key === this.quiet.key && performance.now() < this.quiet.until;
-    if (!target || !key || hushed || this.bubbles.has(key)) {
-      this.prompt.show(undefined);
-      return;
-    }
-    this.prompt.show(key, target.cx, target.top);
+    this.aim(target && !hushed ? target : undefined);
+  }
+
+  private aimed: string | undefined;
+
+  private aim(target: Here["usable"][number] | undefined): void {
+    const kind = !target
+      ? undefined
+      : target.kind === "npc"
+        ? "talk"
+        : target.reads
+          ? "read"
+          : "use";
+    const key = target && `${target.kind}:${target.id}:${kind}`;
+    if (key === this.aimed) return;
+    this.aimed = key;
+    worldUi.prompt(target && kind ? { x: target.cx, y: target.top, kind } : undefined);
+    hud.set({ interact: kind ? { kind } : undefined });
   }
 
   /** Notes how long into a map change a stage was reached, for the development numbers. */
