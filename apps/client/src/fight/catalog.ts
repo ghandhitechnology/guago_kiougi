@@ -90,9 +90,22 @@ export interface BookArt {
   /** Class colour (light) and its deep tone, from the palette. */
   readonly color: number;
   readonly deep: number;
-  /** Rotates with its heading (bolts, beams) or spins (rocks, tomes, flasks). */
+  /** Rotates with its heading (beams); everything drawn in aims or round never does. */
   readonly turns: boolean;
+  /** The content names no moving part: the attack is drawn only where it lands (실험 보고서). */
+  readonly bare: boolean;
+  /**
+   * An evolution's own drawing that adds to the base body instead of replacing it: 푸코 진자's
+   * bob and dial, 고분자's rings, 아보가드로's clusters.
+   */
+  readonly extra: string | null;
 }
+
+/**
+ * Evolved sprites drawn as additions to the base book's body, never as a body of their own
+ * (the effects artist's evolution table): the base body keeps drawing and these join it.
+ */
+const EXTRAS: ReadonlySet<string> = new Set(["evo-foucault", "evo-polymer", "evo-avogadro"]);
 
 export const CLASS_RAMP: Readonly<Record<HitClass, [string, string]>> = {
   math: ["stone.bright", "navy.deep"],
@@ -236,10 +249,15 @@ export class Catalog {
     const cues = evolved ? def?.evolution.cues : base;
     const real = (name: string | undefined) => (name && meta.sprites[name] ? name : null);
     let body = real(cues?.body);
-    if (evolved && def && cues?.body === base?.body) {
+    let extra: string | null = null;
+    if (evolved && def && cues?.body && cues.body === base?.body) {
+      // The evolution's own drawing stands in for the body unless the content already names it
+      // in another slot (an area, a hit) or it is drawn to join the base body.
       const own = `evo-${def.evolution.id}`;
-      if (meta.sprites[own]) {
-        body = own;
+      const named = cues.hit === own || cues.area === own;
+      if (meta.sprites[own] && !named) {
+        if (EXTRAS.has(own)) extra = own;
+        else body = own;
         this.unnamed.push(own);
       }
     }
@@ -260,7 +278,9 @@ export class Catalog {
       impact: cues?.impact ?? `sfx.book.${id}.hit`,
       color: this.color(light),
       deep: this.color(deep),
-      turns: body === "fx-graph-beam" || body === "evo-fourier" || body === "fx-scalpel",
+      turns: body === "fx-graph-beam" || body === "evo-fourier",
+      bare: cues?.body === "",
+      extra,
     };
   }
 

@@ -61,6 +61,7 @@ import { DamageNumbers } from "./numbers.ts";
 import { Overlays } from "./overlays.ts";
 import { Bit, Particles } from "./particles.ts";
 import { Pickups } from "./pickups.ts";
+import { Layer } from "./pieces.ts";
 import { FightSound } from "./sound.ts";
 import { emptyState, type FightActions, type FightState } from "./state.ts";
 import { Trauma } from "./trauma.ts";
@@ -249,6 +250,7 @@ export class FightView {
       maxHp: () => this.own?.maxHp ?? 1,
       moment: (kind) => this.moment(kind),
       elite: (b, x, y) => this.eliteArrived(b, x, y),
+      wears: (bookId) => this.ownBooks.includes(this.cat.rules.books.indexOf(bookId)),
     });
     this.own = undefined;
 
@@ -628,7 +630,7 @@ export class FightView {
       case Priv.LevelUp:
         this.counters.levelUps++;
         this.ctx.trauma.add(TRAUMA.levelUp);
-        this.ctx.lights.flash(x, y - 10, cat.color("gold.light"), 70, 1.4, 600);
+        this.ctx.lights.strike(x, y - 10, cat.color("gold.light"), 32, 0.9, 500);
         if (self) {
           self.flash = 3;
           self.flashMode = 0;
@@ -645,14 +647,14 @@ export class FightView {
       case Priv.Revive:
         this.counters.revives++;
         this.ctx.sound.self("combat.revive");
-        this.ctx.lights.flash(x, y - 10, cat.color("gold.pale"), 60, 1.3, 500);
-        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1);
+        this.ctx.lights.strike(x, y - 10, cat.color("gold.pale"), 32, 0.9, 450);
+        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, false, 1000);
         this.ctx.particles.burst(Bit.Mote, x, y - 10, 14, cat.color("gold.pale"), 50, 0);
         this.ctx.trauma.add(0.15);
         break;
       case Priv.Wake:
         this.ctx.sound.self("combat.revive");
-        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1);
+        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, false, 1000);
         break;
     }
   }
@@ -668,12 +670,19 @@ export class FightView {
     if (near) {
       this.ctx.sound.self("sfx.monster.elite.spawn");
       this.ctx.trauma.add(TRAUMA.elite);
-      this.ctx.lights.flash(x, y - 12, cat.color("plum.light"), 80, 1.5, 700);
+      this.ctx.lights.strike(
+        this.ctx.selfX,
+        this.ctx.selfY - 12,
+        cat.color("plum.light"),
+        32,
+        0.9,
+        500,
+      );
     } else {
       this.ctx.sound.cue("sfx.monster.elite.spawn", x, y, false);
       this.ctx.trauma.add(TRAUMA.elite * 0.2);
     }
-    this.effects.oneShot("tele-circle", "tele-circle/fire", x, y, 0.9, 1, undefined, 2.2, true);
+    this.effects.oneShot("tele-circle", "tele-circle/fire", x, y, 0.9, Layer.Ground, 2, true);
     this.ctx.particles.burst(Bit.Debris, x, y, near ? 12 : 6, cat.color("clay.light"), 90, 2);
     if (b) {
       b.arriveAt = this.ctx.now;
@@ -975,7 +984,7 @@ export class FightView {
     const color = cat.book(Math.max(0, i), true).color;
     this.ctx.sound.self("jingle.jeonjik");
     this.ctx.trauma.add(0.35);
-    this.ctx.lights.flash(x, y - 12, color, 90, 1.6, 900);
+    this.ctx.lights.strike(x, y - 12, color, 32, 0.9, 700);
     this.effects.oneShot("fx-levelup", "fx-levelup/burst", x, y, 1);
     this.effects.oneShot("fx-qed-big", "fx-qed-big/burst", x, y - 18, 0.8);
     this.ctx.particles.burst(Bit.Mote, x, y - 12, 28, color, 70, 0);

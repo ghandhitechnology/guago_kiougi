@@ -82,7 +82,7 @@ export class Pickups {
     body.s.anims.setProgress(Math.random());
     let glint: Piece | null = null;
     if (d.kind === PickupKind.Tool || d.kind === PickupKind.Binding) {
-      glint = this.pieces.take(Layer.Glow, true);
+      glint = this.pieces.take(Layer.Glow);
       const g = d.kind === PickupKind.Tool ? "drop-glint-purple" : "drop-glint-blue";
       show(glint, COMBAT, cat.frame(g), `${g}/shine`);
     }
@@ -179,7 +179,7 @@ export class Pickups {
 
   private twinkle(x: number, y: number): void {
     const cat = this.ctx.cat;
-    const t = this.pieces.take(Layer.Glow, true);
+    const t = this.pieces.take(Layer.Glow);
     const s = show(t, COMBAT, cat.frame("fx-pickup"), "fx-pickup/twinkle");
     s.setPosition(Math.round(x), Math.round(y));
     s.once("animationcomplete", () => this.pieces.give(t));
