@@ -1,16 +1,20 @@
 import { type Legend, sprite } from "../../format.ts";
 import {
+  type Axis,
   aimedFrames,
+  capFrames,
   clean,
   ell,
   framesOf,
   line,
+  lineFrames,
   names,
   Pic,
   paintAt,
   path,
   put,
   rng,
+  wrap,
 } from "../../fx.ts";
 
 /**
@@ -41,25 +45,29 @@ export const stripe = (x: number, y: number): string =>
 
 /**
  * A circular area that fills from the centre: the dashed rim, then stripes growing outward in
- * four steps with a bright front, then the flash.
+ * four steps with a bright front, then the flash. Drawn once per radius, so the dashes stay
+ * about four pixels long and the stripes three wide at every size.
  */
-function circle(k: number): Pic {
-  const w = 48;
-  const h = 26;
-  const cx = 24;
-  const cy = 13;
-  const rx = 22;
-  const ry = 11;
+function circle(r: number, k: number): Pic {
+  const w = r * 2 + 4;
+  const h = r + 4;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = r;
+  const ry = r / 2;
+  const rimW = r >= 48 ? 2.2 : 1.4;
   const fill = [0, 0.3, 0.55, 0.8, 1, 1][k] as number;
   return clean(
     paintAt(w, h, (x, y, px, py) => {
       const e = ell(x, y, cx, cy, rx, ry);
       if (e > 1) return null;
-      const rim = e > 1 - 1.4 / ry;
+      const rim = e > 1 - rimW / ry;
       if (k === 5) return rim ? "W" : e > 0.75 ? "p" : "l";
       if (rim) {
-        if (k === 0)
-          return Math.floor((Math.atan2(y - cy, (x - cx) * 0.5) + 4) * 4) % 2 ? "m" : null;
+        if (k === 0) {
+          const a = Math.atan2(y - cy, (x - cx) * 0.5) + 4;
+          return Math.floor((a * r) / 5) % 2 ? "m" : null;
+        }
         return k === 4 ? "l" : "m";
       }
       if (e < fill) return Math.abs(e - fill) < 1.6 / ry && fill < 1 ? "m" : stripe(px, py);
@@ -68,76 +76,108 @@ function circle(k: number): Pic {
   );
 }
 
+/** Every radius a monster or boss draws: 32 the bomber, 56 the golem, 80 its enraged 78. */
+export const CIRCLE_R = [16, 24, 32, 48, 56, 64, 80] as const;
+
 const teleCircle = sprite({
   ...fx,
   name: "tele-circle",
-  size: [48, 26],
-  origin: [24, 13],
-  frames: framesOf("t", [0, 1, 2, 3, 4, 5].map(circle)),
-  anim: {
-    // The client paces `fill` over the attack's wind-up, then plays `fire`.
-    fill: { frames: names("t", 5), fps: 4, loop: false, jump: 1 },
-    fire: { frames: ["t5", "t4", "t5"], fps: 15, loop: false, jump: 1 },
-  },
+  size: [164, 84],
+  origin: [82, 42],
+  frames: Object.fromEntries(
+    CIRCLE_R.flatMap((r) =>
+      [0, 1, 2, 3, 4, 5].map((k) => [
+        `r${r}-${k}`,
+        put(
+          Pic.blank(164, 84),
+          circle(r, k),
+          82 - (r + 2),
+          42 - Math.floor((r + 4) / 2),
+        ).toString(),
+      ]),
+    ),
+  ),
+  anim: Object.fromEntries(
+    CIRCLE_R.flatMap((r) => [
+      // The client paces `fill` over the attack's wind-up, then plays `fire`.
+      [`fill${r}`, { frames: names(`r${r}-`, 5), fps: 4, loop: false, jump: 1 }],
+      [`fire${r}`, { frames: [`r${r}-5`, `r${r}-4`, `r${r}-5`], fps: 15, loop: false, jump: 1 }],
+      ...(r === 24
+        ? [
+            ["fill", { frames: names("r24-", 5), fps: 4, loop: false, jump: 1 }],
+            ["fire", { frames: ["r24-5", "r24-4", "r24-5"], fps: 15, loop: false, jump: 1 }],
+          ]
+        : []),
+    ]),
+  ),
 });
 
+/** A charge lane's half width: the charger's radius and two, as the server tests it. */
+const LANE_HW = 8;
+const LANE_LENGTH = 12;
+
 /**
- * A charge lane, tiled along the charge: dashed edges and chevrons marching in the charge's
- * direction (+x), then a solid flash.
+ * A charge lane, laid tile by tile along the charge at the nearest of sixteen aims: dashed
+ * edges, hazard stripes and chevrons marching the way the monster will come, then a solid
+ * flash. Stripes and chevrons are drawn across the lane's own axis, so they meet from tile to
+ * tile at any angle.
  */
-function lane(k: number): Pic {
-  const w = 32;
-  const h = 13;
-  const pic = Pic.blank(w, h);
+function lane(ax: Axis, k: number): Pic {
   const fire = k === 4;
-  for (let x = 0; x < w; x++) {
-    const dash = (x + k * 2) % 6 < 4;
-    if (fire || dash) {
-      pic.set(x, 0, fire ? "W" : "m");
-      pic.set(x, h - 1, fire ? "W" : "m");
-    }
-  }
-  if (fire) {
-    for (let y = 1; y < h - 1; y++)
-      for (let x = 0; x < w; x++) pic.set(x, y, y === 1 || y === h - 2 ? "p" : "l");
-  } else {
-    for (let y = 1; y < h - 1; y++) for (let x = 0; x < w; x++) pic.set(x, y, stripe(x - k * 2, y));
-  }
-  for (let c = 0; c < w; c += 8) {
-    const x = (c + k * 2) % w;
-    const ch = fire ? "W" : "m";
-    path(
-      pic,
-      [
-        [x, 2],
-        [x + 4, 6],
-        [x, 10],
-      ],
-      ch,
-    );
-    path(
-      pic,
-      [
-        [x + 1, 2],
-        [x + 5, 6],
-        [x + 1, 10],
-      ],
-      ch,
-    );
-  }
-  return clean(pic);
+  const pic = paintAt(ax.size, ax.size, (_x, _y, px, py) => {
+    const { t, n } = ax.of(px, py);
+    const an = Math.abs(n);
+    if (an >= LANE_HW) return null;
+    if (an > LANE_HW - 1.2) return fire ? "W" : wrap(t - k * 1.5, 6) < 4 ? "m" : "o";
+    if (wrap(t + an * 0.8 - k * 3, 12) < 2 && an < LANE_HW - 2.5) return fire ? "W" : "m";
+    if (fire) return an > LANE_HW - 2.5 ? "p" : "l";
+    return wrap(t - n - k * 1.5, 6) < 3 ? "d" : "o";
+  });
+  return clean(pic, DANGER_LONE);
 }
+
+const LANE_ANIMS = {
+  charge: { stages: [0, 1, 2, 3], fps: 10 },
+  fire: { stages: [4, 0, 4], fps: 15, loop: false },
+} as const;
 
 const teleLine = sprite({
   ...fx,
   name: "tele-line",
-  size: [32, 13],
-  origin: [0, 6],
-  frames: framesOf("t", [0, 1, 2, 3, 4].map(lane)),
-  anim: {
-    charge: { frames: names("t", 4), fps: 10, jump: 1 },
-    fire: { frames: ["t4", "t0", "t4"], fps: 15, loop: false, jump: 1 },
-  },
+  size: [44, 44],
+  origin: [22, 22],
+  ...lineFrames(
+    { length: LANE_LENGTH, canvas: 44, lone: DANGER_LONE, draw: (ax, k) => lane(ax, k) },
+    LANE_ANIMS,
+  ),
+});
+
+/**
+ * Where the charge stops: a bar across the lane a pixel wider than it, and brackets reaching
+ * back along both edges. It blinks while the lane charges.
+ */
+function laneEnd(ax: Axis, k: number): Pic {
+  const fire = k === 4;
+  return clean(
+    paintAt(ax.size, ax.size, (_x, _y, px, py) => {
+      const { t, n } = ax.of(px, py);
+      const an = Math.abs(n);
+      if (an >= LANE_HW + 1) return null;
+      if (t >= -0.5 && t < 1.5) return fire ? "W" : k % 2 ? "l" : "m";
+      if (t >= -1.5 && t < -0.5) return fire ? "p" : "d";
+      if (t >= -5 && t < -1.5 && an > LANE_HW - 1.5) return fire ? "W" : "m";
+      return null;
+    }),
+    DANGER_LONE,
+  );
+}
+
+const teleLineEnd = sprite({
+  ...fx,
+  name: "tele-line-end",
+  size: [24, 24],
+  origin: [12, 12],
+  ...capFrames(24, laneEnd, LANE_ANIMS, DANGER_LONE),
 });
 
 /**
@@ -294,4 +334,4 @@ const bossMarkSprite = sprite({
   },
 });
 
-export default [teleCircle, teleLine, teleCone, eliteAura, bossMarkSprite];
+export default [teleCircle, teleLine, teleLineEnd, teleCone, eliteAura, bossMarkSprite];
