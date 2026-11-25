@@ -9,6 +9,7 @@ import greekHorde from "./greek-horde.ts";
 import makerRoom from "./maker-room.ts";
 import morningAssembly from "./morning-assembly.ts";
 import p1AgoraPeople from "./p1-agora-people.ts";
+import p1CastLineup from "./p1-cast-lineup.ts";
 import p1CaveGuards from "./p1-cave-guards.ts";
 import p1Croton from "./p1-croton.ts";
 import p1Elea from "./p1-elea.ts";
@@ -29,6 +30,7 @@ export const SCENES: readonly SceneDef[] = [
   p1Croton,
   p1AgoraPeople,
   p1CaveGuards,
+  p1CastLineup,
   p1Elea,
   p1Lyceum,
   morningAssembly,
