@@ -17,6 +17,7 @@ import {
   MAP_MESSAGES,
   MAP_ROOM,
   MapState,
+  MODE_MESSAGE,
   MOVE_MAX,
   NULL_SINK,
   POS_SCALE,
@@ -33,13 +34,14 @@ import { type AuthService, createAuthService } from "./auth/service.ts";
 import { channels } from "./channels.ts";
 import { createDb, type Db } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
+import { dbModes } from "./fight/carry.ts";
 import { invariants } from "./invariants.ts";
 import { LiveClock } from "./live/clock.ts";
 import { provideLive } from "./live/current.ts";
 import { createLive, type Live } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { studentLooks } from "./looks.ts";
-import { checkMapRooms, type MapRoom } from "./map-room.ts";
+import { checkMapRooms, type MapRoom, provideFightServices } from "./map-room.ts";
 import { places } from "./places.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
@@ -232,6 +234,8 @@ beforeAll(async () => {
       },
     },
   });
+  // Control modes stored with the character, as the server's entry point provides them.
+  provideFightServices({ modes: dbModes(db) });
   const port = await freePort();
   await server.listen(port);
   base = `http://127.0.0.1:${port}`;
@@ -540,6 +544,59 @@ describe("two pages of one account", () => {
     // The second page keeps its seat.
     expect(await whereIs(id)).toEqual(["campus-yard"]);
     expect(b.connection.isOpen).toBe(true);
+    await b.leave();
+  });
+});
+
+describe("a page that reloads", () => {
+  const own = (r: Room<unknown, MapState>) =>
+    [...r.state.players.values()].find((p) => p.sid === r.sessionId);
+
+  it("is back in the world at once while its old socket waits out its reconnection", async () => {
+    const { jar, id } = await player("reloader");
+    const first = (await enter(base, jar)).seating as Entry;
+    const a = await sdk(base, jar).consumeSeatReservation(first.seat, MapState);
+    a.onMessage("*", () => {});
+    a.reconnection.enabled = false;
+    await waitFor(() => own(a) !== undefined);
+    // The page reloads: its socket is gone without a word, and the room holds it 30 seconds.
+    const yard = matchMaker.getLocalRoomById(a.roomId) as MapRoom;
+    (yard.clients[0]?.ref as { terminate(): void } | undefined)?.terminate();
+    await waitFor(() => yard.clients.length === 0);
+    // The fresh page enters once and is seated in a new session straight away.
+    const started = Date.now();
+    const again = await enter(base, jar);
+    expect(again.status).toBe(200);
+    const seating = again.seating as Entry;
+    expect(seating.seat.sessionId).not.toBe(first.seat.sessionId);
+    const b = await sdk(base, jar).consumeSeatReservation(seating.seat, MapState);
+    b.onMessage("*", () => {});
+    await waitFor(() => own(b) !== undefined);
+    expect(Date.now() - started).toBeLessThan(2000);
+    // One body, the new page's: the held one was let go, not waited out.
+    await waitFor(() => yard.characterIds.length === 1);
+    expect(await whereIs(id)).toEqual(["campus-yard"]);
+    await b.leave();
+  });
+
+  it("comes back in the character's own control mode, not the 완전 자동 the dropped body played in", async () => {
+    const { jar } = await player("ownmode");
+    const first = (await enter(base, jar)).seating as Entry;
+    const a = await sdk(base, jar).consumeSeatReservation(first.seat, MapState);
+    a.onMessage("*", () => {});
+    a.reconnection.enabled = false;
+    await waitFor(() => own(a) !== undefined);
+    // 완전 수동, chosen and stored with the character.
+    a.send(MODE_MESSAGE, [3]);
+    await waitFor(() => own(a)?.mode === 3);
+    const yard = matchMaker.getLocalRoomById(a.roomId) as MapRoom;
+    (yard.clients[0]?.ref as { terminate(): void } | undefined)?.terminate();
+    await waitFor(() => yard.clients.length === 0);
+    const second = (await enter(base, jar)).seating as Entry;
+    const b = await sdk(base, jar).consumeSeatReservation(second.seat, MapState);
+    b.onMessage("*", () => {});
+    await waitFor(() => own(b) !== undefined);
+    expect(own(b)?.mode).toBe(3);
     await b.leave();
   });
 });

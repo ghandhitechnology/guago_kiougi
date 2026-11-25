@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type Collidable, gridOf } from "./collision.ts";
 import { TILE_SIZE } from "./constants.ts";
 import { MOVE_MAX, type MoveInput } from "./movement.ts";
-import { type Doorway, stepDoors } from "./navigation.ts";
+import { type Arrival, type Doorway, stepDoors } from "./navigation.ts";
 import { addPlayer, createWorld, type SimWorld, step } from "./sim.ts";
 
 /**
@@ -29,8 +29,16 @@ const right = (seq: number): MoveInput => ({ seq, mx: MOVE_MAX, my: 0 });
 type Script = Record<string, (tick: number) => ((seq: number) => MoveInput) | undefined>;
 
 /** Steps the world and the doorways together, recording each entry as `tick:id:portal`. */
-function run(world: SimWorld, map: Collidable, portals: Doorway[], ticks: number, script: Script) {
+function run(
+  world: SimWorld,
+  map: Collidable,
+  portals: Doorway[],
+  ticks: number,
+  script: Script,
+  arrived: ReadonlyMap<string, Arrival> = new Map(),
+) {
   let inside = new Map<string, number>();
+  let arrivals = arrived;
   const seqs = new Map<string, number>();
   const log: string[] = [];
   for (let t = 1; t <= ticks; t++) {
@@ -43,8 +51,13 @@ function run(world: SimWorld, map: Collidable, portals: Doorway[], ticks: number
       inputs.set(id, [make(seq)]);
     }
     world = step(world, map, inputs);
-    const doors = stepDoors(inside, world.players, portals);
+    const bodies = world.players.map((p) => {
+      const input = inputs.get(p.id)?.[0];
+      return { ...p, pressing: !!input && (input.mx !== 0 || input.my !== 0) };
+    });
+    const doors = stepDoors(inside, bodies, portals, arrivals);
     inside = new Map(doors.inside);
+    arrivals = doors.arrivals;
     for (const e of doors.entered) log.push(`${t}:${e.id}:${e.portal}`);
   }
   return { log, world, inside };
@@ -69,6 +82,35 @@ describe("doorways in the simulation step", () => {
     const { log } = run(world, map, portals, 20, script);
     // Down 18 px leaves the door at tick 2; up again re-enters it on the way back.
     expect(log).toEqual(["11:b:1"]);
+  });
+
+  it("walks a player through a door once, however long the key from the last door is held", () => {
+    const { map, portals } = corridor();
+    // Put down by the far side of a door a tile under it, still holding the key toward it.
+    const at = { x: 4 * T + 8, y: 2 * T + 8 };
+    let world = createWorld(map, [], 1);
+    world = addPlayer(world, "d", at.x, at.y);
+    const arrived = new Map([["d", at]]);
+    // Three seconds of the held key (60 ticks), then let go for two, then up again.
+    const held = run(world, map, portals, 60, { d: () => up }, arrived);
+    expect(held.log).toEqual([]);
+    const again: Script = { d: (t) => (t <= 60 ? up : t <= 62 ? undefined : t <= 70 ? down : up) };
+    const { log } = run(world, map, portals, 90, again, arrived);
+    // Released at tick 61; it steps out of the door it stood in, and only walking back fires.
+    expect(log.length).toBe(1);
+    expect(log[0]?.endsWith(":d:0")).toBe(true);
+  });
+
+  it("lets go of an arrival once the player walks clear of where it was put down", () => {
+    const { map, portals } = corridor();
+    const at = { x: 1 * T + 8, y: 2 * T + 8 };
+    let world = createWorld(map, [], 1);
+    world = addPlayer(world, "e", at.x, at.y);
+    // Holding right the whole way: past the arrival's reach, the door at tile 4 is no door it
+    // came out of, but the wall keeps it from entering, so nothing fires until it turns up.
+    const script: Script = { e: (t) => (t <= 20 ? right : up) };
+    const { log } = run(world, map, portals, 40, script, new Map([["e", at]]));
+    expect(log.length).toBe(1);
   });
 
   it("ignores walking along a wall past both doors without entering", () => {

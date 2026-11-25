@@ -2,6 +2,8 @@ import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
 import { type BuiltMap, narrative, snapshotReaderForMap } from "@guago/content";
 import {
+  type Arrival,
+  arrivalHolds,
   type Caught,
   type DoorRattle,
   distanceToArea,
@@ -166,6 +168,8 @@ export class WorldScene extends Phaser.Scene {
   /** The predicted body stepped into a built door at this time and waits for the server. */
   private doorAt: number | undefined;
   private selfInside = -1;
+  /** Where the player was put down, until its doors may open (`arrivalHolds`, as the server). */
+  private arrival: Arrival | undefined;
   /** Where a patrol's catch put the player; the curtain lifts once the server's body is there. */
   private caughtAt: { x: number; y: number } | undefined;
   /** Where the server last put the player's own body, in pixels. */
@@ -204,6 +208,8 @@ export class WorldScene extends Phaser.Scene {
     this.meta = artMeta(this);
     createSpriteAnims(this, this.meta);
     this.curtain = new Curtain(this, true);
+    // Until the first map is up, the closed curtain waits with its own motion.
+    this.curtain.wait();
     this.overlays = new WorldOverlays(this);
     worldView.overlays = this.overlays;
     // The E key and the phone's context button, through the UI layer while nothing else has focus.
@@ -282,11 +288,15 @@ export class WorldScene extends Phaser.Scene {
       if (this.room === room) this.here?.patrols?.halt(m.patrol);
     });
     room.onDrop(() => {
-      if (this.room === room) this.live = false;
+      if (this.room !== room) return;
+      this.live = false;
+      // The world is out of reach until the connection comes back or the link enters again.
+      this.curtain.wait();
     });
     room.onReconnect(() => {
       if (this.room !== room) return;
       this.live = true;
+      void this.curtain.open();
       this.self?.resync();
       this.clock.reset();
       this.reader?.reset();
@@ -414,6 +424,7 @@ export class WorldScene extends Phaser.Scene {
       unbindHud,
     };
     this.selfInside = portalAt(map.portals, x, y);
+    this.arrival = { x, y };
     this.doorAt = undefined;
     this.roomZone = map.zones.find((z) => z.kind === "room" && this.zones.includes(z.id))?.id;
     this.clock.reset();
@@ -678,6 +689,7 @@ export class WorldScene extends Phaser.Scene {
   private onCaught(m: Caught): void {
     this.holding = true;
     this.caughtAt = { x: m.x, y: m.y };
+    this.arrival = { x: m.x, y: m.y };
     void this.curtain.close(120);
     emitWorld({ t: "caught", patrol: m.patrol });
   }
@@ -846,9 +858,15 @@ export class WorldScene extends Phaser.Scene {
     const at = portalAt(map.portals, x, y);
     const was = this.selfInside;
     this.selfInside = at;
+    // Just put down: the doors stay shut until the keys let go or the player walks clear.
+    const pressing = this.lastMove[0] !== 0 || this.lastMove[1] !== 0;
+    if (this.arrival && !arrivalHolds(this.arrival, x, y, pressing, at >= 0)) {
+      this.arrival = undefined;
+    }
     const closed = this.here?.closed ?? new Set<string>();
     const entered = map.portals[at];
-    if (!this.holding && at >= 0 && at !== was && entered?.built && !closed.has(entered.id)) {
+    const open = entered?.built && !closed.has(entered.id);
+    if (!this.holding && !this.arrival && at >= 0 && at !== was && open) {
       this.predictDoor();
       return;
     }

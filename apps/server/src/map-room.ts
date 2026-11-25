@@ -24,6 +24,7 @@ import {
 } from "@guago/content";
 import {
   AIM_MESSAGE,
+  type Arrival,
   aimMessage,
   applyBetween,
   type Between,
@@ -363,6 +364,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private seats!: RoomSeats;
   /** The portal each player stands in, for the doorway step. */
   private inside = new Map<string, number>();
+  /** Bodies just put down (a door, a login, a teleport), whose doors stay shut a moment. */
+  private arrivals = new Map<string, Arrival>();
+  /** Whether each body's last input held a direction, for its arrival. */
+  private readonly pressing = new Map<string, boolean>();
   private people: Person[] = [];
   private usable: Thing[] = [];
   private retireTimer: Delayed | undefined;
@@ -911,6 +916,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       throw error;
     }
     player.facing = facing;
+    // Put down here: a key still held from the last door does not carry it straight back out.
+    this.arrivals.set(id, { x: player.x, y: player.y });
     player.mode = mode;
     player.exp = loadout.exp;
     // Back within a quarter of an hour: as hurt and as busy as it left (fight/carry.ts).
@@ -1082,6 +1089,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.net.viewers.delete(pawn.net);
     }
     this.inside.delete(id);
+    this.arrivals.delete(id);
+    this.pressing.delete(id);
     this.world.removePlayer(id);
     this.metrics.forget(id);
   }
@@ -1215,13 +1224,25 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
    * a dropped client) or one knocked out never leaves the fight that way.
    */
   private afterStep(inputs: ReadonlyMap<string, readonly FightInput[]>): void {
-    const walkers: Player[] = [];
+    for (const [id, list] of inputs) {
+      const last = list[list.length - 1];
+      if (last) this.pressing.set(id, last.mx !== 0 || last.my !== 0);
+    }
+    const walkers: { id: string; x: number; y: number; pressing: boolean }[] = [];
     for (const p of this.world.players) {
       if (!p.joined || p.down || p.away || MODE_AUTO[p.mode].move) continue;
-      if (this.pawns.get(p.id)?.leaving === false) walkers.push(p);
+      if (this.pawns.get(p.id)?.leaving !== false) continue;
+      walkers.push({ id: p.id, x: p.x, y: p.y, pressing: this.pressing.get(p.id) ?? false });
     }
-    const doors = stepDoors(this.inside, walkers, this.def.portals);
+    const doors = stepDoors(this.inside, walkers, this.def.portals, this.arrivals);
     this.inside = new Map(doors.inside);
+    // Arrivals of bodies the step did not see (walked by their mode, knocked out) wait for them.
+    const stepped = new Set(walkers.map((w) => w.id));
+    const arrivals = new Map(doors.arrivals);
+    for (const [id, a] of this.arrivals) {
+      if (!stepped.has(id) && this.pawns.has(id)) arrivals.set(id, a);
+    }
+    this.arrivals = arrivals;
     const now = Date.now();
     for (const { id, portal } of doors.entered) {
       const pawn = this.pawns.get(id);
@@ -1584,6 +1605,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     p.forceTicks = 0;
     pawn.queue.clear();
     this.inside.delete(pawn.client.sessionId);
+    this.arrivals.set(pawn.client.sessionId, { x: p.x, y: p.y });
     return true;
   }
 
@@ -1751,6 +1773,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     p.rollLeft = 0;
     p.forceTicks = 0;
     this.inside.delete(id);
+    this.arrivals.set(id, { x: p.x, y: p.y });
     this.broadcast(MAP_MESSAGES.halt, { patrol: patrol.id } satisfies Halt);
     pawn.client.send(MAP_MESSAGES.caught, {
       patrol: patrol.id,

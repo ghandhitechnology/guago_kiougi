@@ -118,6 +118,34 @@ export interface DoorStep {
   readonly inside: ReadonlyMap<string, number>;
   /** Bodies that stepped into a portal this tick, in body order. */
   readonly entered: readonly { readonly id: string; readonly portal: number }[];
+  /** Arrivals still holding their doors shut. Feed it back in next tick. */
+  readonly arrivals: ReadonlyMap<string, Arrival>;
+}
+
+/** Where a body was put down: the far side of a door, a login, a reload. */
+export interface Arrival {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** An arrival lets doors open again once the body is this far from where it was put down. */
+export const ARRIVAL_CLEAR_PX = 24;
+
+/**
+ * Whether an arrival still keeps the doors shut for its body: a door is walked through once, so
+ * the key still held from the last door cannot carry the player straight back through the one
+ * they came out of. It lets go when the keys let go, or once the body has walked clear of where
+ * it was put down while standing in no doorway; then a doorway fires when it is stepped into.
+ */
+export function arrivalHolds(
+  a: Arrival,
+  x: number,
+  y: number,
+  pressing: boolean,
+  inDoor: boolean,
+): boolean {
+  if (!pressing) return false;
+  return inDoor || Math.hypot(x - a.x, y - a.y) <= ARRIVAL_CLEAR_PX;
 }
 
 /**
@@ -128,18 +156,31 @@ export interface DoorStep {
  */
 export function stepDoors(
   before: ReadonlyMap<string, number>,
-  bodies: readonly { readonly id: string; readonly x: number; readonly y: number }[],
+  bodies: readonly {
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+    /** A direction is held this tick (`arrivalHolds`); bodies with no arrival may leave it out. */
+    readonly pressing?: boolean;
+  }[],
   portals: readonly Doorway[],
+  arrivals: ReadonlyMap<string, Arrival> = new Map(),
 ): DoorStep {
   const inside = new Map<string, number>();
   const entered: { id: string; portal: number }[] = [];
+  const held = new Map<string, Arrival>();
   for (const b of bodies) {
     const at = portalAt(portals, b.x, b.y);
     const was = before.get(b.id) ?? at;
     inside.set(b.id, at);
+    const arrival = arrivals.get(b.id);
+    if (arrival && arrivalHolds(arrival, b.x, b.y, b.pressing ?? false, at >= 0)) {
+      held.set(b.id, arrival);
+      continue;
+    }
     if (at >= 0 && at !== was) entered.push({ id: b.id, portal: at });
   }
-  return { inside, entered };
+  return { inside, entered, arrivals: held };
 }
 
 // Zones --------------------------------------------------------------------------------------

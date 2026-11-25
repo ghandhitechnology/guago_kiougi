@@ -26,10 +26,24 @@ function makeTextures(scene: Phaser.Scene): void {
   }
 }
 
+/** Steps the waiting curtain breathes between, and the pace of a breath. */
+const BREATH_FROM = 13;
+const BREATH_MS = 900;
+/** The page caret shows only when a wait lasts longer than a door. */
+const CARET_AFTER_MS = 450;
+
 export class Curtain {
   private readonly sheet: Phaser.GameObjects.TileSprite;
   private level = 0;
   private tween: Phaser.Tweens.Tween | undefined;
+  /** While the world is out of reach: the breath and the caret. */
+  private waiting:
+    | {
+        breath: Phaser.Tweens.Tween;
+        caret: Phaser.GameObjects.Image | undefined;
+        timer: Phaser.Time.TimerEvent;
+      }
+    | undefined;
 
   constructor(scene: Phaser.Scene, closed: boolean) {
     makeTextures(scene);
@@ -42,7 +56,60 @@ export class Curtain {
   }
 
   get closed(): boolean {
-    return this.level === STEPS;
+    return this.level === STEPS || this.waiting !== undefined;
+  }
+
+  /**
+   * The world is out of reach for a while (entering, a dropped connection coming back): the
+   * curtain closes and breathes in its own dither, and the dialogue's page caret bobs in the
+   * corner, as on a page that has more to come. No words. `open` ends it.
+   */
+  wait(): void {
+    if (this.waiting) return;
+    const scene = this.sheet.scene;
+    void this.close().then(() => {
+      if (this.waiting || this.level !== STEPS) return;
+      const state = { v: STEPS };
+      const breath = scene.tweens.add({
+        targets: state,
+        v: BREATH_FROM,
+        duration: BREATH_MS,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.InOut",
+        onUpdate: () => this.set(Math.round(state.v)),
+      });
+      let caret: Phaser.GameObjects.Image | undefined;
+      const timer = scene.time.delayedCall(CARET_AFTER_MS, () => {
+        if (!scene.textures.get("ui").has("caret/down")) return;
+        caret = scene.add
+          .image(W - 14, H - 10, "ui", "caret/down")
+          .setScrollFactor(0)
+          .setDepth(FADE_DEPTH + 1)
+          .setAlpha(0);
+        scene.tweens.add({ targets: caret, alpha: 1, duration: 200 });
+        scene.tweens.add({
+          targets: caret,
+          y: H - 12,
+          duration: 420,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.InOut",
+        });
+        if (this.waiting) this.waiting.caret = caret;
+      });
+      this.waiting = { breath, caret, timer };
+    });
+  }
+
+  private stopWaiting(): void {
+    const w = this.waiting;
+    if (!w) return;
+    this.waiting = undefined;
+    w.breath.stop();
+    w.timer.remove();
+    w.caret?.destroy();
+    this.set(STEPS);
   }
 
   private set(level: number): void {
@@ -58,6 +125,7 @@ export class Curtain {
 
   /** Dissolves back to the world over `ms`. */
   open(ms = 220): Promise<void> {
+    this.stopWaiting();
     return this.to(0, ms);
   }
 
@@ -84,6 +152,7 @@ export class Curtain {
   }
 
   destroy(): void {
+    this.stopWaiting();
     this.tween?.stop();
     this.sheet.destroy();
   }

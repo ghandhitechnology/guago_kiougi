@@ -134,9 +134,11 @@ export function stayConnected(
       try {
         room = await transport.consume(seating.seat);
       } catch {
-        // The seat lapsed or the server restarted: the far side is saved, so entering lands there.
+        // The seat lapsed or the server restarted: the far side is saved, so entering lands there,
+        // at the same easing pace as a refused entry so a run of these never meets the entry limit.
         letGo();
-        await sleep(300);
+        await sleep(via ? 300 : wait);
+        if (!via) wait = Math.min(wait * 2, 8000);
         continue;
       }
       letGo();
