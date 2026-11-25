@@ -169,6 +169,7 @@ function anyNear(w: FightWorld, p: Player, range: number): boolean {
 export function stepWeapons(w: FightWorld): void {
   for (const p of w.players) {
     if (!p.joined) continue;
+    w.actAs(p.index);
     const weapons = p.kit.weapons;
     if (p.down) {
       p.casts = 0;
@@ -1042,6 +1043,7 @@ export function stepEffects(w: FightWorld): void {
       w.endFx(e);
       continue;
     }
+    w.actAs(e.owner);
     switch (e.kind) {
       case FxKind.Orbit: {
         const anchor = w.players[e.source];
@@ -1575,6 +1577,7 @@ export function stepMinions(w: FightWorld): void {
       w.killMinion(n);
       continue;
     }
+    w.actAs(n.owner);
     // Hunt the nearest monster within the leash, else heel.
     let target: Monster | null = null;
     let best = Number.POSITIVE_INFINITY;
