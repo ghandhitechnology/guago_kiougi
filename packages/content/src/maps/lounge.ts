@@ -11,7 +11,6 @@ import { place } from "./props.ts";
  * what everybody else thinks, and the vending corner hums.
  */
 
-const T = 16;
 const WALL = 0;
 /** A lamp's warm pool, for the engine and painted for the sheet. */
 const pool = (x: number, y: number, rx: number, ry: number, intensity = 0.5): LightSource => ({
