@@ -14,11 +14,17 @@ import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
 import home from "./home.ts";
 import jeungmyeong from "./jeungmyeong.ts";
 import lounge from "./lounge.ts";
+// Page 1 town, 위험 구역 and boss maps.
+import p1Agora from "./p1-agora.ts";
 // Page 1 hunting fields.
 import p1AgoraEdge from "./p1-agora-edge.ts";
 import p1CaveMouth from "./p1-cave-mouth.ts";
 import p1Colonnade from "./p1-colonnade.ts";
+import p1CrotonSchool from "./p1-croton-school.ts";
+import p1EleaTrack from "./p1-elea-track.ts";
+import p1Lyceum from "./p1-lyceum.ts";
 import p1OliveRoad from "./p1-olive-road.ts";
+import p1ShadowCave from "./p1-shadow-cave.ts";
 import saebyeok from "./saebyeok.ts";
 import silheom from "./silheom.ts";
 
@@ -30,6 +36,7 @@ export * from "./interior.ts";
 export * from "./lawn.ts";
 export * from "./lawn-props.ts";
 export * from "./layers.ts";
+export * from "./patrols.ts";
 export * from "./props.ts";
 export * from "./stamp.ts";
 
@@ -55,6 +62,12 @@ export const MAP_SOURCES: readonly MapSource[] = [
   p1CaveMouth,
   p1AgoraEdge,
   ecoPark,
+  // Page 1 town, 위험 구역 and boss maps.
+  p1Agora,
+  p1ShadowCave,
+  p1CrotonSchool,
+  p1EleaTrack,
+  p1Lyceum,
 ];
 
 /**
