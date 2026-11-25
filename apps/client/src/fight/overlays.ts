@@ -15,6 +15,8 @@ const LAG_HOLD_MS = 260;
 const LAG_RATE = 1.2;
 const MAX_BARS = 24;
 const MAX_BADGES = 24;
+/** Hurt common monsters show a bar only for the local player's most recent targets. */
+const OWN_BARS = 5;
 const PROOF_FRAMES = Array.from({ length: 11 }, (_, i) => `fx-proof/n${Math.max(1, i)}`);
 const FILLS: Readonly<Record<string, string>> = {
   hp: "fill-tiny/hp",
@@ -137,12 +139,26 @@ export class Overlays {
       .setVisible(lw > fw);
   }
 
+  private readonly recent = new Float64Array(OWN_BARS);
+
   /** Draws what each body needs this frame. */
   update(bodies: Iterable<Body>, dtMs: number, selfHp: number, selfBar: boolean): void {
     for (const b of this.bars) b.seen = false;
     this.usedBadges = 0;
     this.usedProofs = 0;
     const now = this.ctx.now;
+    // The few most recently hit targets: the cut-off is the smallest of the top `OWN_BARS`.
+    const top = this.recent;
+    top.fill(0);
+    for (const b of bodies) {
+      if (b.dying || b.mineUntil < now || b.ownHp >= 255 || b.ownHp <= 0 || b.hp < 255) continue;
+      let k = 0;
+      for (let i = 1; i < OWN_BARS; i++) if ((top[i] as number) < (top[k] as number)) k = i;
+      if (b.mineUntil > (top[k] as number)) top[k] = b.mineUntil;
+    }
+    let cut = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < OWN_BARS; i++)
+      if ((top[i] as number) > 0) cut = Math.min(cut, top[i] as number);
     for (const b of bodies) {
       if (b.dying) continue;
       if (b.cat === Cat.Player) {
@@ -157,7 +173,7 @@ export class Overlays {
       if (b.cat !== Cat.Monster) continue;
       // Elites and bosses carry their health; any other monster shows a bar while the local
       // player is hurting it, from the health its last hit left.
-      const own = b.mineUntil >= now && b.ownHp < 255 && b.ownHp > 0;
+      const own = b.mineUntil >= now && b.mineUntil >= cut && b.ownHp < 255 && b.ownHp > 0;
       if (b.hp < 255 || own) {
         const share = (b.hp < 255 ? b.hp : b.ownHp) / 255;
         const bar = this.bar(b.id);

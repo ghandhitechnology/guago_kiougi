@@ -84,7 +84,7 @@ export interface FightOptions {
 }
 
 /** Atlases the fight draws from, besides the map's. */
-const ATLASES = ["core", "effects", "combat", "ui"];
+const ATLASES = ["core", "effects", "combat", "combat-evolved", "ui"];
 const DEPTH_RETICLE = 30;
 const DEPTH_SCREEN = 28;
 /** Most new looks composed per frame, so a crowd arriving does not hitch. */

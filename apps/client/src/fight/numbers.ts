@@ -3,6 +3,11 @@ import type * as Phaser from "phaser";
 
 /** PLAN §6: at most 40 damage numbers on screen. */
 export const MAX_NUMBERS = 40;
+/**
+ * New numbers a frame may add. Past it, only crits and hits well above the recent average still
+ * get one: a sweep through thirty monsters shows its biggest hits, not thirty labels.
+ */
+const NEW_PER_FRAME = 3;
 /** A number that has taken this many hits moves up to the big font. */
 const BIG_AFTER = 3;
 /** A hit on the same target within this keeps growing the same number. */
@@ -64,6 +69,8 @@ export class DamageNumbers {
   private side = 1;
   /** Hits on screen right now. */
   visible = 0;
+  private added = 0;
+  private average = 0;
   /** Extra scale and rise for small screens are not needed: the game is drawn at 480×270. */
   constructor(scene: Phaser.Scene) {
     for (let i = 0; i < MAX_NUMBERS; i++) {
@@ -120,6 +127,12 @@ export class DamageNumbers {
       n.text.setText(formatKorean(n.amount));
       return;
     }
+    // A plain hit over the frame's budget only shows when it stands out.
+    const standout =
+      style === NumberStyle.Crit || style === NumberStyle.Hurt || amount > this.average * 2;
+    this.average = this.average === 0 ? amount : this.average * 0.95 + amount * 0.05;
+    if (this.added >= NEW_PER_FRAME && !standout) return;
+    this.added++;
     n = this.free();
     n.alive = true;
     n.target = target;
@@ -150,6 +163,7 @@ export class DamageNumbers {
   }
 
   update(dtMs: number): void {
+    this.added = 0;
     let visible = 0;
     for (const n of this.pool) {
       if (!n.alive) continue;
