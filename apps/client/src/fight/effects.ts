@@ -17,6 +17,7 @@
  * holds.
  */
 import type { ArtMetadata } from "@guago/art";
+import { BOOKS } from "@guago/content";
 import { BurstKind, FxKind, type WireFx } from "@guago/shared";
 import * as Phaser from "phaser";
 import type { TelegraphOptions } from "../render/index.ts";
@@ -618,6 +619,142 @@ export class Effects {
       this.bodies.kick(self, -0.7);
       self.kickX += Math.cos(a.angle) * 1.5;
       self.kickY += Math.sin(a.angle) * 0.9;
+    }
+  }
+
+  /**
+   * A book's evolved attack fired once from (x, y) at full size, as the salute of its evolution:
+   * shots thrown out all round, beams and sprays to the four sides, an orbit spun up, a wave run
+   * out; anything else is its own landing art laid at the player's feet. Drawn on the client
+   * only: the server's casts go on as they were.
+   */
+  salute(book: number, x: number, y: number, facing: number): void {
+    const art = this.ctx.cat.book(book, true);
+    const shape = this.ctx.cat.shape(book);
+    const base = [Math.PI / 2, -Math.PI / 2, Math.PI, 0][facing] ?? 0;
+    const add = (kind: number, angle: number, setup: (a: Active) => void) => {
+      const a = this.take();
+      a.art = art;
+      a.fx = -1;
+      a.kind = kind;
+      a.owner = this.ctx.selfId;
+      a.def = book;
+      a.cast = 0;
+      a.start = this.ctx.ownTick;
+      a.x = x;
+      a.y = y;
+      a.angle = angle;
+      a.radius = 6;
+      a.length = 96;
+      a.width = 10;
+      a.count = 1;
+      a.duration = 8;
+      a.speed = 7;
+      a.tx = x + Math.cos(angle) * 96;
+      a.ty = y + Math.sin(angle) * 96;
+      a.a = 0;
+      a.b = 0;
+      a.c = 0;
+      a.anchor = 0;
+      a.period = 16;
+      a.sweep = 0;
+      a.spin = 0;
+      a.flags = 0;
+      a.own = true;
+      a.mine = true;
+      a.enemy = false;
+      a.alpha = 1;
+      setup(a);
+      this.live.push(a);
+    };
+    switch (art.kind) {
+      case "projectile":
+        for (let i = 0; i < 8; i++)
+          add(FxKind.Shot, base + (i * Math.PI) / 4, (a) => {
+            a.speed = Math.max(6, shape.speed);
+          });
+        break;
+      case "beam":
+        for (let i = 0; i < 4; i++)
+          add(FxKind.Beam, base + (i * Math.PI) / 2, (a) => {
+            a.length = Math.max(96, shape.length);
+            a.a = shape.a;
+            a.b = shape.b;
+          });
+        break;
+      case "cone":
+        for (let i = 0; i < 4; i++)
+          add(FxKind.Cone, base + (i * Math.PI) / 2, (a) => {
+            a.length = Math.max(56, shape.length);
+            a.width = shape.width;
+            a.duration = 4;
+          });
+        break;
+      case "orbit":
+        add(FxKind.Orbit, base, (a) => {
+          a.anchor = this.ctx.selfId;
+          a.count = 6;
+          a.radius = 30;
+          a.duration = 34;
+        });
+        break;
+      case "wave":
+        add(FxKind.Wave, base, (a) => {
+          a.radius = 96;
+          a.speed = 8;
+          a.duration = 2;
+        });
+        break;
+      case "telegraph": {
+        // Its 예보 laid round the student, landing together: four faults cracking out, or a
+        // ring of strikes.
+        const def = BOOKS.find((b) => b.id === art.id);
+        const attack = def?.evolution.attack ?? def?.attack;
+        const line = attack?.kind === "telegraph" && attack.shape === "line";
+        for (let i = 0; i < 4; i++) {
+          const ang = base + Math.PI / 4 + (i * Math.PI) / 2;
+          add(FxKind.Mark, ang, (a) => {
+            a.a = 8;
+            a.count = 0;
+            a.period = 1;
+            a.flags = line ? 1 : 0;
+            a.length = 88;
+            a.radius = 32;
+            if (!line) {
+              a.x = x + Math.cos(ang) * 40;
+              a.y = y + Math.sin(ang) * 26;
+            } else {
+              a.x = x + Math.cos(ang) * 8;
+              a.y = y + Math.sin(ang) * 5;
+            }
+          });
+        }
+        break;
+      }
+      case "zone":
+        add(FxKind.Zone, base, (a) => {
+          a.anchor = this.ctx.selfId;
+          a.radius = 48;
+          a.duration = 40;
+        });
+        break;
+      case "dash":
+        add(FxKind.Dash, base, (a) => {
+          a.duration = 6;
+          a.tx = x + Math.cos(base) * 72;
+          a.ty = y + Math.sin(base) * 72;
+        });
+        break;
+      default: {
+        // Its own ground and landing art, once, at the player and round them.
+        const area = art.area ?? art.body;
+        if (area) this.cue(area, x, y, 1, null, Layer.Ground);
+        const hit = art.hit ?? "fx-hit-heavy";
+        for (let i = 0; i < 6; i++) {
+          const ang = base + (i * Math.PI) / 3;
+          this.cue(hit, x + Math.cos(ang) * 34, y - 6 + Math.sin(ang) * 20, 1);
+        }
+      }
     }
   }
 
@@ -2035,6 +2172,8 @@ export class Effects {
       anim = "fx-hit-heavy/hit";
     }
     if (a.mine) {
+      // On a dark map the landing lights the ground it lands on.
+      this.ctx.lights.glow(x, y - 4, art.color, 28, 0.5, 200);
       // What landed lingers a beat as an after-image, and the blast moves what stands there.
       const body = a.pieces[0];
       if (body?.s.visible) this.afterImage(body);

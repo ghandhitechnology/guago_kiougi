@@ -18,7 +18,7 @@
  * controls, and keeps `state` for the HUD with `actions` for its buttons.
  */
 import type { Room } from "@colyseus/sdk";
-import { BOOKS, FIELD_PACING } from "@guago/content";
+import { BOOKS, FIELD_PACING, narrative } from "@guago/content";
 import {
   AIM_MESSAGE,
   CONTROL_MODES,
@@ -54,6 +54,7 @@ import { TickClock } from "./clock.ts";
 import { type FightContext, RESTRAINT } from "./context.ts";
 import { type ControlSink, FightKeys, MouseAim, nextMode } from "./controls.ts";
 import { Effects } from "./effects.ts";
+import { EvolutionMoment } from "./evolution.ts";
 import { Feedback, TRAUMA } from "./feedback.ts";
 import { HudFeed } from "./hud-source.ts";
 import { FightLights } from "./lights.ts";
@@ -867,6 +868,7 @@ export class FightView {
     ctx.lights.update(dt);
     ctx.sound.update(now);
     this.screenFrame(now, dt);
+    if (this.evo && !this.evo.update(now)) this.evo = null;
     ctx.trauma.apply(this.scene.cameras.main, dt);
     this.refreshState(now);
     this.hud.update(now);
@@ -1103,32 +1105,29 @@ export class FightView {
   }
 
   /**
-   * One of the local player's books just evolved (its `evolve` operation succeeded): the moment
-   * is marked on the player, a pillar of light and the 전직 fanfare, and its casts take the
-   * evolved form from now on.
+   * One of the local player's books just evolved (its `evolve` operation succeeded). This is the
+   * fight's chest moment, and it happens on the player while the field fights on around them: the
+   * book rises out of the student, shivers, and its cover turns into the evolved cover with a
+   * flash that lights the ground; a ring runs out and pushes the monsters near back; the evolved
+   * attack fires once at full size as a salute; the new name hangs over the head for two seconds.
+   * From then on the book's casts take the evolved form.
    */
   evolve(bookId: string): void {
     const i = this.cat.rules.books.indexOf(bookId);
     if (i >= 0 && !this.evolvedBooks.includes(i)) this.evolvedBooks.push(i);
-    this.effects.setEvolved(this.evolvedBooks);
-    const cat = this.cat;
-    const x = this.ctx.selfX;
-    const y = this.ctx.selfY;
-    const color = cat.book(Math.max(0, i), true).color;
-    this.ctx.sound.self("jingle.jeonjik");
-    this.ctx.trauma.add(0.35);
-    this.ctx.lights.strike(x, y - 12, color, 32, 0.9, 700);
-    this.effects.oneShot("fx-levelup", "fx-levelup/burst", x, y, 1);
-    this.effects.oneShot("fx-qed-big", "fx-qed-big/burst", x, y - 18, 0.8);
-    this.ctx.particles.burst(Bit.Mote, x, y - 12, 28, color, 70, 0);
-    this.ctx.particles.burst(Bit.Spark, x, y - 12, 16, cat.color("stone.bright"), 160, 0);
-    const self = this.bodies.self;
-    if (self) {
-      self.flash = 4;
-      self.flashMode = 0;
-      this.bodies.kick(self, -1.6);
-    }
+    if (i < 0) return;
+    const def = BOOKS.find((b) => b.id === bookId);
+    this.evo?.done();
+    this.evo = new EvolutionMoment(this.scene, this.ctx, this.bodies, this.effects, {
+      book: i,
+      from: def?.cues.icon ?? `book/${bookId}`,
+      to: def?.evolution.cues.icon ?? `book/${def?.evolution.id ?? bookId}`,
+      name: def ? (narrative.NARRATIVE.ko[def.evolution.name] ?? "") : "",
+      evolved: () => this.effects.setEvolved(this.evolvedBooks),
+    });
   }
+
+  private evo: EvolutionMoment | null = null;
 
   /** Changes the quality tier: particle caps, other players' restraint, the lights kept. */
   setTier(tier: Tier): void {
@@ -1189,6 +1188,7 @@ export class FightView {
     this.ctx.lights.destroy();
     this.ctx.sound.stop();
     for (const g of this.ghosts) g.destroy();
+    this.evo?.done();
     this.bubble?.destroy();
     for (const a of this.arrows) a.destroy();
     this.dim.destroy();

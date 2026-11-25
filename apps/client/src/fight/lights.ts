@@ -4,47 +4,42 @@ import type { MapView, Tier } from "../render/index.ts";
 const BUDGET: Readonly<Record<Tier, number>> = { low: 4, medium: 10, high: 24 };
 
 /**
- * Largest flash a hit or a moment may throw, by light. In daylight a bigger or brighter disc
- * fogs the monsters it lands on, and a horde of them turns into haze; in the dark a little more
- * reads as the strike lighting the ground.
+ * Largest flash a hit or a moment may throw in full daylight. A bigger or brighter disc fogs the
+ * monsters it lands on, and a horde of them turns into haze; the darker the map, the further past
+ * this its light may reach (see `darkness`).
  */
-const CAP = {
-  day: { radius: 24, intensity: 0.6 },
-  dark: { radius: 32, intensity: 0.9 },
-} as const;
+const DAY = { radius: 24, intensity: 0.6 } as const;
+/** What full darkness adds to the caps: a cast at night lights the ground around it. */
+const NIGHT = { radius: 40, intensity: 1.0 } as const;
 
-/** Below this ambient a map is dark enough for casts to light the ground around them. */
-const DARK_AMBIENT = 0.7;
+/** Ambient at or above this is daylight; it is full dark this far below it. */
+const DAYLIGHT = 0.9;
+const DARK_SPAN = 0.6;
 
-/**
- * The fight's light, through the lighting pass's flashes (`MapView.flash`). It decides once per
- * map whether the map is lit by day or dark (dusk, night, or a room lit below this), so callers
- * only say what kind of light they want:
- *
- * - `strike`, the local player's own crits and Q.E.D. (never light hits), and the player's own
- *   big moments (level up, revive, an elite, an evolution), capped small on every map.
- * - `cast`, a cast lighting the ground at the caster's hands, and `carry`, a shot carrying its
- *   glow across the field: only in the dark, where they light the horde around them.
- *
- * A budget per frame keeps a crowd's fireworks from flooding the light map; the local player's
- * own light goes first because it is asked for first in a frame (impacts come from the hit
- * records, before effects update).
- */
 export class FightLights {
   private readonly view: MapView;
   private budget: number;
   private used = 0;
-  /** Dusk, night or a dim room: casts light the ground. */
+  /**
+   * How dark the map is, 0 in daylight to 1 at night or in a cave, from its ambient: every
+   * flash and cast light is scaled up by it, so a fight at dusk lights the ground it happens on.
+   */
+  readonly darkness: number;
+  /** Dark enough for casts and shots in flight to light the ground. */
   readonly dark: boolean;
+  private readonly capRadius: number;
+  private readonly capIntensity: number;
 
   constructor(view: MapView, tier: Tier) {
     this.view = view;
     this.budget = BUDGET[tier];
     const map = view.map;
-    this.dark =
-      map.time.phase === "dusk" ||
-      map.time.phase === "night" ||
-      map.ambient.intensity < DARK_AMBIENT;
+    const dusk = map.time.phase === "dusk" || map.time.phase === "night";
+    const d = Math.max(0, Math.min(1, (DAYLIGHT - map.ambient.intensity) / DARK_SPAN));
+    this.darkness = dusk ? Math.max(0.35, d) : d;
+    this.dark = this.darkness > 0.15;
+    this.capRadius = DAY.radius + NIGHT.radius * this.darkness;
+    this.capIntensity = DAY.intensity + NIGHT.intensity * this.darkness;
   }
 
   setTier(tier: Tier): void {
@@ -61,14 +56,37 @@ export class FightLights {
    * the map's cap however big it is asked for.
    */
   strike(x: number, y: number, color: number, radius: number, intensity: number, ms: number): void {
-    const cap = this.dark ? CAP.dark : CAP.day;
-    this.flash(x, y, color, Math.min(cap.radius, radius), Math.min(cap.intensity, intensity), ms);
+    const k = this.darkness;
+    this.flash(
+      x,
+      y,
+      color,
+      Math.min(this.capRadius, radius * (1 + 0.9 * k)),
+      Math.min(this.capIntensity, intensity * (1 + 1.2 * k)),
+      ms * (1 + 0.5 * k),
+    );
+  }
+
+  /**
+   * A light past every cap and budget, for a moment that happens once (an evolution): the art's
+   * caps keep ordinary hits from fogging the field, and this is the exception.
+   */
+  burst(x: number, y: number, color: number, radius: number, intensity: number, ms: number): void {
+    this.view.flash(x, y, { radius, color, intensity, ms });
   }
 
   /** A cast or a carried glow: lights the ground only on a dark map. */
   glow(x: number, y: number, color: number, radius: number, intensity: number, ms: number): void {
     if (!this.dark) return;
-    this.flash(x, y, color, Math.min(CAP.dark.radius, radius), Math.min(0.5, intensity), ms);
+    const k = this.darkness;
+    this.flash(
+      x,
+      y,
+      color,
+      Math.min(this.capRadius, radius * (1 + 0.8 * k)),
+      Math.min(this.capIntensity, intensity * (1 + 2 * k)),
+      ms * (1 + 0.5 * k),
+    );
   }
 
   private flash(
