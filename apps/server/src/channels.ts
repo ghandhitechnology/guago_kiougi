@@ -27,6 +27,12 @@ export interface MapRoomOptions {
   readonly grace: number;
   /** Wandering monsters to fill it with: load tests only, through the development map option. */
   readonly monsters?: number;
+  /** A private copy of the map for this character alone (the opening, the 집, a replay). */
+  readonly owner?: string;
+  /** No field monsters: a private copy for a scene. */
+  readonly calm?: boolean;
+  /** 복습: the boss this private copy fights, alone, at the owner's level (PLAN §10). */
+  readonly boss?: string;
 }
 
 /** What a seat is reserved with: decided by the server, read by the room on join. */
@@ -65,6 +71,8 @@ class Channels {
   private readonly latest = new Map<string, Ticket>();
   /** The seat each account was given last by entering, handed again while it can be taken. */
   private readonly entries = new Map<string, Ticket>();
+  /** Private copies of maps, by character and map. */
+  private readonly instances = new Map<string, { roomId: string; cache: IRoomCache }>();
 
   /**
    * Reserves a seat for `auth`'s character on `map`: in the lowest channel with room, or a new
@@ -136,8 +144,50 @@ class Channels {
     });
   }
 
+  /**
+   * A seat in the private copy of `map` made for `auth`'s character (the opening, the 집, a
+   * 복습 replay), made on demand; one per character and map, closed once empty. `room` adds to
+   * what the copy is made with (`boss` for a 복습).
+   */
+  instance(
+    map: string,
+    auth: RoomAuth,
+    options: SeatOptions = {},
+    room: Pick<MapRoomOptions, "boss"> = {},
+  ): Promise<Seating> {
+    const key = `${auth.characterId}:${map}`;
+    return this.locked(`instance:${key}`, async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let made = this.instances.get(key);
+        if (!made || !matchMaker.getLocalRoomById(made.roomId)) {
+          const created: MapRoomOptions = {
+            map,
+            channel: 0,
+            seats: 1,
+            grace: this.graceSeconds,
+            owner: auth.characterId,
+            calm: true,
+            ...room,
+          };
+          const cache = await matchMaker.createRoom(MAP_ROOM, created);
+          made = { roomId: cache.roomId, cache };
+          this.instances.set(key, made);
+        }
+        try {
+          const seat = await matchMaker.reserveSeatFor(made.cache, options, auth);
+          return { map, channel: 0, seat: ticket(seat) };
+        } catch {
+          this.instances.delete(key);
+        }
+      }
+      throw new Error(`no private copy of ${map} would seat a player`);
+    });
+  }
+
   /** Called by a map room when it closes. */
   forget(roomId: string): void {
+    for (const [key, made] of this.instances)
+      if (made.roomId === roomId) this.instances.delete(key);
     for (const tickets of [this.latest, this.entries]) {
       for (const [account, t] of tickets) if (t.roomId === roomId) tickets.delete(account);
     }

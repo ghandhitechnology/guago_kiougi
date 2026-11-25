@@ -94,6 +94,8 @@ import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } fro
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
+import type { Encounter, EncounterHost } from "./encounter.ts";
+import { encounterFor } from "./encounters.ts";
 import { carryIn, carryOut, DEFAULT_MODE, type ModeStore, memoryModes } from "./fight/carry.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
 import { invariants } from "./invariants.ts";
@@ -368,6 +370,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private readonly between: Between[] = [];
   /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
   private readonly devActions: (() => void)[] = [];
+  /** The character a private copy of the map was made for (the opening, the 집, a replay). */
+  owner: string | undefined;
+  /** A boss arena's raid, a 복습 or an opening fight this room runs (`encounters.ts`). */
+  private encounter: Encounter | undefined;
 
   /**
    * Map rooms are never matchmade by a client: every seat is reserved by the server for a
@@ -381,8 +387,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const def = builtMap(options.map);
     if (!def) throw new Error(`no built map ${options.map}`);
     this.def = def;
+    this.owner = options.owner;
+    const kind = encounterFor(def, options);
     // Its own walls: closed doors change them as the Page clock opens maps.
-    this.map = { ...fightMapOf(def), collision: roomCollision(def).collision };
+    const base = { ...fightMapOf(def), collision: roomCollision(def).collision };
+    this.map = { ...(kind?.map?.(base, options) ?? base) };
     this.patrols = def.patrols;
     this.graceMs = options.grace * 1000;
     const { w, h } = def.collision;
@@ -390,9 +399,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       throw new Error(`map ${def.id} is larger than positions can address (${MAX_MAP_PX} px)`);
     }
     const seed = (Math.random() * 2 ** 32) >>> 0;
-    const field = fieldOf(def.id, process.env.GUAGO_FIELD);
+    // A private copy for a scene is calm: its fights are the scene's to bring.
+    const field = options.calm ? null : fieldOf(def.id, process.env.GUAGO_FIELD);
     this.world = createFight(this.map, simRules(), field, seed);
     this.net = new FightNet(this.world);
+    this.encounter = kind?.create(this.encounterHost(options));
     // A map with no field gets wandering 오답 only when a load test asks (`monsters`).
     if (!field && options.monsters) this.scatter(options.monsters);
     this.metrics = new RoomMetrics(this.roomId, def.id);
@@ -557,9 +568,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
           break;
         }
         case Ev.Wake: {
-          // Woke at the arrival point without being got up: the 기절 counts.
+          // Woke at the arrival point without being got up: the 기절 counts, but not in an arena.
           const pawn = of(e.a);
-          if (pawn) void l.events.knockout(pawn.character.id);
+          if (pawn && !this.encounter?.noDemerit) void l.events.knockout(pawn.character.id);
           break;
         }
         case Ev.Revive: {
@@ -874,7 +885,24 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.viewChanges += 2;
     }
     this.tellMode(pawn);
+    this.encounter?.joined?.(player, character.id);
     return pawn;
+  }
+
+  /** What this room's encounter may ask of it. */
+  private encounterHost(options: MapRoomOptions): EncounterHost {
+    const pawnOf = (p: Player) => {
+      const pawn = this.pawns.get(p.id);
+      return pawn?.player === p ? pawn : undefined;
+    };
+    return {
+      world: this.world,
+      def: this.def,
+      options,
+      characterOf: (p) => pawnOf(p)?.character.id,
+      nameOf: (p) => pawnOf(p)?.character.name,
+      relocate: (characterId, to, spawn, via) => this.relocate(characterId, to, spawn, via),
+    };
   }
 
   /** Tells the living world the character is in these places (도감 school entries, notices). */
@@ -925,6 +953,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   }
 
   override onDispose(): void {
+    this.encounter?.dispose();
     ROOMS.delete(this);
     channels.forget(this.roomId);
     this.unlistenClubs?.();
@@ -943,9 +972,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.handOverExp(pawn);
       const p = pawn.player;
       if (p.joined && p.id === id) {
-        // Leaving knocked out is waking at the 보건실: the 기절 counts.
-        if (p.down) background("knockout", live()?.events.knockout(pawn.character.id));
+        // Leaving knocked out is waking at the 보건실: the 기절 counts, but not in an arena.
+        if (p.down && !this.encounter?.noDemerit)
+          background("knockout", live()?.events.knockout(pawn.character.id));
         carryOut(pawn.character.id, p, this.world.tick);
+        this.encounter?.leaving?.(p, pawn.character.id);
       }
       if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
       for (const other of this.pawns.values()) {
@@ -1011,6 +1042,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.applyQueued();
       stepFight(this.world, inputs);
       if (this.devActions.length > 0) for (const act of this.devActions.splice(0)) act();
+      this.encounter?.afterStep();
       // What combat earned goes to each character's pending grant; nothing touches the database.
       const sink = grants();
       for (const g of this.world.grants) {

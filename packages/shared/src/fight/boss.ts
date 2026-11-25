@@ -7,10 +7,11 @@
  * corrects it.
  *
  * On a server the pool is shared by every channel of the arena: the room sets `external`, reads
- * `dealt` after each tick and hands the shared numbers back (`sync`). A 복습 or a test runs the
- * whole fight inside the step.
+ * `dealt`, `dealtBy` and `strips` after each tick, and hands the shared numbers back (`sync`,
+ * `setPhase`, `free`). A 복습 or a test runs the whole fight inside the step.
  */
 
+import { TICK_RATE_HZ } from "../constants.ts";
 import { RAID, type RaidRank, raidDamage } from "../raid.ts";
 import { monsterHit } from "./damage.ts";
 import { spawnMonster } from "./monsters.ts";
@@ -150,6 +151,11 @@ export class Boss implements BossHooks {
   readonly dealtBy = new Float64Array(BOSS_PLAYERS);
   /** Shield strips since the room last read them. */
   strips = 0;
+  /** The player whose hit emptied the pool, or -1: the final hit when it was the last 논제. */
+  emptiedBy = -1;
+  /** Shield regrown a tick when the pool is this world's own (복습, tests); the raid's regrows on
+   * the Page clock. */
+  regrow = RAID.shieldRegrowPerHour / ((3_600_000 / 1000) * TICK_RATE_HZ);
   /** The brain's numbers. */
   readonly n = new Float64Array(64);
   /** Per-player numbers for the brain: four a player. */
@@ -167,6 +173,9 @@ export class Boss implements BossHooks {
   private halfCued = false;
   private quarterCued = false;
   private lastDebate = false;
+  /** Per player: 1 once greeted (`enter`), 2 while knocked out (`knockout` said once a fall). */
+  private readonly seen = new Uint8Array(BOSS_PLAYERS);
+  private nextKnockoutCue = 0;
 
   constructor(rule: BossRule, brain: BossBrain, level: number) {
     this.rule = rule;
@@ -259,7 +268,7 @@ export class Boss implements BossHooks {
     e.width = width;
     e.fireAt = fireAt;
     e.until = fireAt;
-    e.damage = monsterHit(this.core, this.rule.tellDamage) * share * (this.debate ? 1.25 : 1);
+    e.damage = monsterHit(this.core, this.rule.tellDamage) * share;
     e.knock = knock;
     e.count = BOSS_TELL + kind;
     e.slot = this.core.entity;
@@ -291,7 +300,19 @@ export class Boss implements BossHooks {
     if (this.freed) return;
     if (this.debate && !this.lastDebate) this.cue(w, "debate-hour", -1, this.core.x, this.core.y);
     this.lastDebate = this.debate;
+    this.watchPlayers(w);
+    // The bar's thresholds, read from the pool each tick: a shared pool moves between ticks too.
+    if (!this.halfCued && this.hp <= this.max * 0.5) {
+      this.halfCued = true;
+      this.cue(w, "hp-50", -1, this.core.x, this.core.y);
+    }
+    if (!this.quarterCued && this.hp <= this.max * 0.25) {
+      this.quarterCued = true;
+      this.cue(w, "hp-25", -1, this.core.x, this.core.y);
+    }
     if (!this.emptied) {
+      if (!this.external && this.rule.rank === "era")
+        this.shield = Math.min(1, this.shield + this.regrow);
       this.brain.step(this, w);
       this.summon(w);
     }
@@ -299,6 +320,35 @@ export class Boss implements BossHooks {
     for (const m of this.parts) {
       if (m.alive) m.hp = m.maxHp;
     }
+  }
+
+  /** Greets a player the first time the fight sees them, and mocks one who falls (rarely). */
+  private watchPlayers(w: FightWorld): void {
+    for (const p of w.players) {
+      if (!p.joined || p.index >= BOSS_PLAYERS) continue;
+      const was = this.seen[p.index] as number;
+      if (was === 0) {
+        this.seen[p.index] = 1;
+        this.cue(w, "enter", p.index, p.x, p.y);
+      }
+      if (p.down && was !== 2) {
+        this.seen[p.index] = 2;
+        if (w.tick >= this.nextKnockoutCue) {
+          this.nextKnockoutCue = w.tick + 200;
+          this.cue(w, "knockout", p.index, p.x, p.y);
+        }
+      } else if (!p.down && was === 2) this.seen[p.index] = 1;
+    }
+  }
+
+  /** A body left the world: nothing here names its index after this (`FightWorld.removePlayer`). */
+  leave(index: number): void {
+    if (index >= BOSS_PLAYERS) return;
+    this.open[index] = 0;
+    this.seen[index] = 0;
+    this.dealtBy[index] = 0;
+    this.pn.fill(0, index * 4, index * 4 + 4);
+    if (this.emptiedBy === index) this.emptiedBy = -1;
   }
 
   take(w: FightWorld, p: Player | null, part: Monster, amount: number): number {
@@ -311,17 +361,10 @@ export class Boss implements BossHooks {
     this.dealt += dmg;
     if (p && p.index < BOSS_PLAYERS)
       this.dealtBy[p.index] = (this.dealtBy[p.index] as number) + dmg;
-    if (!this.halfCued && this.hp <= this.max * 0.5) {
-      this.halfCued = true;
-      this.cue(w, "hp-50", p ? p.index : -1, part.x, part.y);
-    }
-    if (!this.quarterCued && this.hp <= this.max * 0.25) {
-      this.quarterCued = true;
-      this.cue(w, "hp-25", p ? p.index : -1, part.x, part.y);
-    }
     if (this.hp <= 1e-9) {
       this.hp = 0;
       this.emptied = true;
+      this.emptiedBy = p ? p.index : -1;
       if (!this.external) this.next(w);
     }
     return dmg;
@@ -370,6 +413,7 @@ export class Boss implements BossHooks {
     this.hp = max;
     this.shield = shield;
     this.emptied = false;
+    this.emptiedBy = -1;
     this.beginPhase(w);
   }
 
@@ -383,10 +427,11 @@ export class Boss implements BossHooks {
   }
 
   /** Hands the shared numbers back after each tick: the pool as every channel left it. */
-  sync(hp: number, max: number, shield: number): void {
+  sync(hp: number, max: number, shield: number, emptied: boolean): void {
     this.max = max;
-    this.hp = Math.min(max, hp);
+    this.hp = Math.min(max, Math.max(0, hp));
     this.shield = shield;
+    this.emptied = emptied;
   }
 
   /** The boss is freed: its body and adds leave the fight. */
@@ -400,6 +445,10 @@ export class Boss implements BossHooks {
       if (!m.alive || m.dying) continue;
       if (m.part || m.owner === this.core.index || m.kind.behavior === Behavior.Object)
         m.gone = true;
+    }
+    // Its tells go with it: an arrow left hanging would otherwise wait out its hour.
+    for (const e of w.effects) {
+      if (e.alive && e.kind === FxKind.Danger && e.source === this.core.index) w.endFx(e);
     }
   }
 

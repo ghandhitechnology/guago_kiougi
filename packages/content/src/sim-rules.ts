@@ -763,7 +763,8 @@ function bodyKind(i: number, id: string, b: RaidBossBody): MonsterKind {
     aimPriority: 2,
     promotable: false,
     rank: BOSS_BODY_RANK,
-    level: 1,
+    // The boss's level comes from the fight that starts it (the raid's, or the player's in 복습).
+    level: 0,
   };
 }
 
@@ -788,7 +789,7 @@ function objectKind(i: number, id: string, o: RaidObjectDef): MonsterKind {
     aimPriority: 1,
     promotable: false,
     rank: 1,
-    level: 1,
+    level: 0,
   };
 }
 

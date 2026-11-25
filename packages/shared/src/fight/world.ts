@@ -53,6 +53,8 @@ export interface BossHooks {
   objective(w: FightWorld, m: Monster, by: Player | null): void;
   /** The boss record's numbers as `viewer` sees them (`Priv.Boss`), in a shared scratch object. */
   view(viewer: Player): BossView;
+  /** A body left between ticks: its per-player numbers are cleared for the next one. */
+  leave(index: number): void;
 }
 
 /** One boss record: the bar, the phase, the shield, and what the gimmick shows this viewer. */
@@ -915,6 +917,7 @@ export class FightWorld {
       if (m.launchBy === i) m.launchBy = -1;
       if (m.target === i) m.target = -1;
     }
+    this.boss?.leave(i);
     resetPlayer(p);
   }
 

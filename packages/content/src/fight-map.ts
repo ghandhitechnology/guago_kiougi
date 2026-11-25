@@ -8,6 +8,7 @@ import {
 import { FIELDS, type FieldDef } from "./fields.ts";
 import { type BuiltMap, buildAllMaps } from "./maps/index.ts";
 import { LAWN, type MapDef } from "./maps/lawn.ts";
+import { raidBossOn } from "./raid-bosses.ts";
 import { fieldRule } from "./sim-rules.ts";
 
 /**
@@ -18,6 +19,8 @@ export function fightMapOf(map: BuiltMap | MapDef): FightMap {
   if ("zones" in map) {
     const zones = map.zones as readonly { kind: string; rect: TileRect }[];
     const main = map.spawns.main ?? Object.values(map.spawns)[0];
+    // A boss arena wakes its knocked-out players at its entrance (PLAN §10 raid).
+    const entrance = map.spawns[raidBossOn(map.id)?.entrance ?? "respawn"];
     return {
       id: map.id,
       collision: map.collision,
@@ -28,7 +31,7 @@ export function fightMapOf(map: BuiltMap | MapDef): FightMap {
       ),
       eliteZones: zones.filter((z) => z.kind === "elite").map((z) => z.rect),
       marks: map.marks,
-      ...(map.spawns.respawn ? { wake: { x: map.spawns.respawn.x, y: map.spawns.respawn.y } } : {}),
+      ...(entrance ? { wake: { x: entrance.x, y: entrance.y } } : {}),
     };
   }
   return {

@@ -225,5 +225,5 @@ function watchSteps(b: Boss, w: FightWorld): void {
 }
 
 function clamp(v: number, lo: number, hi: number): number {
-  return v < lo ? lo : v > hi ? hi : v;
+  return Math.min(hi, Math.max(lo, v));
 }
