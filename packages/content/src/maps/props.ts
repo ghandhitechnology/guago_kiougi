@@ -58,6 +58,7 @@ export const PROPS = {
   temple: { foot: [8, 3] },
   ostraka: { foot: [3, 1] },
   bouleuterion: { foot: [6, 2] },
+  "drop-tower": { foot: [3, 1] },
 
   // The interior kit: furniture that blocks, by the floor it stands on. Chairs, stools, bags,
   // books and small things on the floor are walked around by eye, not blocked.

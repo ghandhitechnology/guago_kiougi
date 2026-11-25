@@ -17,7 +17,7 @@ import { Pic } from "../../paint.ts";
  * slope in rows of cover tiles running down to an eave of antefixes. `x0..x1` at the eave,
  * drawn in from both ends toward the ridge so the hips read.
  */
-function roof(p: Pic, x0: number, x1: number, top: number, eave: number, hip = 4): void {
+export function roof(p: Pic, x0: number, x1: number, top: number, eave: number, hip = 4): void {
   for (let y = top; y <= eave; y++) {
     const inset = Math.max(0, Math.round(((eave - y) / (eave - top)) * hip));
     for (let x = x0 + inset; x <= x1 - inset; x++) {
@@ -34,7 +34,7 @@ function roof(p: Pic, x0: number, x1: number, top: number, eave: number, hip = 4
 }
 
 /** Plaster, with patches where it fell off and the mud brick shows, and a stone socle. */
-function wall(
+export function wall(
   p: Pic,
   x0: number,
   x1: number,
@@ -73,7 +73,7 @@ function wall(
   hline(p, x0, y1 - 3, x1 - x0 + 1, "K");
 }
 
-function door(p: Pic, x: number, y1: number, paint: string): void {
+export function door(p: Pic, x: number, y1: number, paint: string): void {
   rect(p, x - 1, y1 - 19, 12, 20, "b");
   rect(p, x, y1 - 18, 10, 18, paint);
   vline(p, x + 4, y1 - 18, 18, "J");
@@ -82,7 +82,7 @@ function door(p: Pic, x: number, y1: number, paint: string): void {
   rect(p, x - 2, y1 - 21, 14, 2, "U");
 }
 
-function window(p: Pic, x: number, y: number): void {
+export function window(p: Pic, x: number, y: number): void {
   rect(p, x - 1, y - 1, 9, 8, "b");
   rect(p, x, y, 7, 6, "J");
   vline(p, x + 3, y, 6, "U");
