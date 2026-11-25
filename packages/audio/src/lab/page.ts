@@ -149,12 +149,13 @@ const patternSection = el("section", {}, el("h2", { textContent: "패턴" }), wh
 let shownKey = "";
 let table: HTMLTableElement | null = null;
 
-function cellText(cell: Cell | null | undefined, flats: boolean): string {
+/** One cell as text, with the frame's transposition applied to its notes. */
+function cellText(cell: Cell | null | undefined, flats: boolean, shift = 0): string {
   if (!cell) return "·";
   let head: string;
   switch (cell.kind) {
     case "note":
-      head = (cell.notes ?? []).map((n) => noteName(n, flats)).join(",");
+      head = (cell.notes ?? []).map((n) => noteName(n + shift, flats)).join(",");
       break;
     case "drum":
       head = (cell.drums ?? []).join(",");
@@ -191,7 +192,9 @@ function showFrame(id: SongId, frame: number): void {
       { cls: r % c.rowsPerBar === 0 ? "bar" : "" },
       el("td", { cls: "n", textContent: r.toString(16).padStart(2, "0") }),
       ...c.channels.map((_, i) =>
-        el("td", { textContent: f.phrases[i] ? cellText(f.phrases[i]?.[r], flats) : "" }),
+        el("td", {
+          textContent: f.phrases[i] ? cellText(f.phrases[i]?.[r], flats, f.transpose[i] ?? 0) : "",
+        }),
       ),
     );
     rows.push(tr);
