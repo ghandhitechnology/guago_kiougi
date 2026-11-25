@@ -125,3 +125,103 @@ export const varsity = garment(
   },
   false,
 );
+
+/**
+ * 체육복: the teal track kit nobody changes out of after PE, zipped to the collar, a stripe across
+ * the chest in the wearer's cohort colour, white trainers.
+ */
+export const gym = garment(
+  {
+    "1": "sea.deep",
+    "2": "sea.light",
+    "3": "sea.mid",
+    "4": "sea.deep",
+    "5": "sea.light",
+    "6": "sea.mid",
+    B: "sea.deep",
+    d: "sea.mid",
+    e: "sea.deep",
+    I: "sea.light",
+    i: "sea.mid",
+    z: "sea.dark",
+    "#": "cohort.mid",
+    "+": "cohort.light",
+  },
+  {
+    down: `
+      BBBBwBBB
+      BlllwddB
+      B+++w##B
+      BlllwddB
+      BlllwddB
+      BbbbbbbB
+      BBBBBBBB
+    `,
+    up: `
+      BBBBBBBB
+      BllllddB
+      B++++##B
+      BllllddB
+      BllldddB
+      BbbbbbbB
+      BBBBBBBB
+    `,
+    side: `
+      BBBBwB
+      BlldwB
+      BlldwB
+      BlldwB
+      BlldwB
+      BdddwB
+      BBBBBB
+    `,
+  },
+  true,
+);
+
+/** 생활복: a camel cardigan over the shirt and tie, sleeves pulled over the hands in winter. */
+export const cardigan = garment(
+  {
+    "1": "wood.deep",
+    "2": "wood.pale",
+    "3": "wood.light",
+    "4": "wood.deep",
+    "5": "wood.pale",
+    "6": "wood.light",
+    W: "wood.deep",
+    "*": "wood.deep",
+    P: "wood.pale",
+    Q: "wood.light",
+    o: "wood.mid",
+  },
+  {
+    down: `
+      WWwmmwWW
+      WPwmrwQW
+      WPPmrQQW
+      WPPP*QQW
+      WPPPPQoW
+      WQQQQooW
+      WWWWWWWW
+    `,
+    up: `
+      WWWWWWWW
+      WPPPPQQW
+      WPPPPQQW
+      WPPPQQoW
+      WPPPQQoW
+      WQQQQooW
+      WWWWWWWW
+    `,
+    side: `
+      WWwwmW
+      WPQwmW
+      WPQQmW
+      WPQQWW
+      WPQQoW
+      WQQQoW
+      WWWWWW
+    `,
+  },
+  true,
+);

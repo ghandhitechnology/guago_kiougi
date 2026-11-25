@@ -219,6 +219,34 @@ const SLOT_OPTIONS = {
     violet: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
     mustard: ["wood.dark", "gold.dark", "gold.mid", "gold.light"],
     ash: ["ink.dark", "ink.mid", "ink.light", "stone.light"],
+    teal: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    orange: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+  },
+  /**
+   * A club's second colour, for its emblem on the 과잠's back panel and in the club panel: ivory
+   * or any jacket colour.
+   */
+  emblem: {
+    ivory: ["stone.dark", "stone.light", "stone.pale", "stone.bright"],
+    navy: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
+    crimson: ["red.deep", "red.dark", "red.mid", "red.light"],
+    forest: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
+    violet: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
+    mustard: ["wood.dark", "gold.dark", "gold.mid", "gold.light"],
+    ash: ["ink.dark", "ink.mid", "ink.light", "stone.light"],
+    teal: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    orange: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+  },
+  /** A cohort's colour, worn as the stripe across the 체육복: one per Page a 기수 signed up in. */
+  cohort: {
+    gold: ["gold.deep", "gold.mid", "gold.light", "gold.pale"],
+    crimson: ["red.deep", "red.mid", "red.light", "red.pale"],
+    green: ["grass.deep", "grass.mid", "grass.light", "grass.pale"],
+    rose: ["rose.deep", "rose.mid", "rose.light", "rose.pale"],
+    violet: ["plum.deep", "plum.mid", "plum.light", "plum.pale"],
+    white: ["stone.dark", "stone.pale", "stone.bright", "stone.bright"],
   },
 } as const satisfies Record<string, Record<string, Four>>;
 

@@ -10,7 +10,7 @@ import {
 import { frame, shadow, skin, walkArms, withKo } from "../../student/base.ts";
 import { textbook } from "../../student/book.ts";
 import { bright, cool, goofy, sharp, shy, sleepy } from "../../student/faces.ts";
-import { blazer, shirt, varsity } from "../../student/garments.ts";
+import { blazer, cardigan, gym, shirt, varsity } from "../../student/garments.ts";
 import {
   bob,
   braids,
@@ -66,7 +66,7 @@ export default rig({
   parts: {
     shadow: { blob: shadow },
     body: { base: withKo(skin) },
-    uniform: { blazer, shirt },
+    uniform: { blazer, shirt, gym, cardigan },
     jacket: { varsity },
     face: { bright, sleepy, sharp, goofy, shy, cool },
     hair: { crop, spiky, bob, long, ponytail, curly, buzz, twintails, bun, braids, shag, undercut },
