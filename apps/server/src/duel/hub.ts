@@ -503,6 +503,10 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
     const floorRoom = rooms.room(floorRoomId(floor));
     const view = sidesOf(match);
     const marks = duelMarks(floor.arena, mode);
+    // Everyone is checked before anyone is placed: an arrival can start the match, and a fighter
+    // looked at after that would already be armed.
+    const here: string[] = [];
+    const away: { x: string; from: MapRoom; mark: { x: number; y: number } | undefined }[] = [];
     sides.forEach((list, i) => {
       list.forEach((x, k) => {
         const team = i + 1;
@@ -524,21 +528,21 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
           return;
         }
         match.origins.set(x, { map: place.mapId, roomId: place.roomId, x: at.x, y: at.y });
-        if (from === floorRoom) {
-          floor.seatedHere(x);
-          return;
-        }
-        const mark = marks.filter((mk) => mk.team === team)[k] ?? marks[0];
-        const sent = from.sendTo(x, {
-          map: ARENA_MAP,
-          x: mark?.x ?? 0,
-          y: mark?.y ?? 0,
-          roomId: floorRoomId(floor),
-          via: "duel",
-        });
-        if (!sent) floor.forfeit(x);
+        if (from === floorRoom) here.push(x);
+        else away.push({ x, from, mark: marks.filter((mk) => mk.team === team)[k] ?? marks[0] });
       });
     });
+    for (const { x, from, mark } of away) {
+      const sent = from.sendTo(x, {
+        map: ARENA_MAP,
+        x: mark?.x ?? 0,
+        y: mark?.y ?? 0,
+        roomId: floorRoomId(floor),
+        via: "duel",
+      });
+      if (!sent) floor.forfeit(x);
+    }
+    for (const x of here) floor.seatedHere(x);
   }
 
   function floorRoomId(f: FloorHost): string {

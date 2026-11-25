@@ -452,6 +452,10 @@ async function forfeitByDisconnect(): Promise<void> {
   say("— a forfeit by disconnect, mid-round");
   const a = await bot("saebyeok");
   const b = await bot("saebyeok");
+  const before = (await a.request("duel.record", { id: b.id })).body as {
+    played: number;
+    won: number;
+  };
   const sent = await a.request("duel.challenge", { id: b.id });
   const got = await b.push("challenged");
   await b.request("duel.accept", { id: got?.id ?? 0 });
@@ -467,9 +471,14 @@ async function forfeitByDisconnect(): Promise<void> {
   const quitter = r?.fighters.find((f) => f.id === b.id);
   check(r?.winner === r?.fighters.find((f) => f.id === a.id)?.team, "the one who stayed won");
   check(quitter?.forfeited === true, "the one who dropped forfeited");
-  const rec = await a.request("duel.record", { id: b.id });
-  say(`dropped player's record ${JSON.stringify(rec.body)}`);
-  check((rec.body as { won: number }).won === 0, "a drop is played, never won");
+  // The record is written once the match is decided, off the tick.
+  await a.push("record", 5000);
+  const rec = (await a.request("duel.record", { id: b.id })).body as {
+    played: number;
+    won: number;
+  };
+  say(`dropped player's record ${JSON.stringify(before)} → ${JSON.stringify(rec)}`);
+  check(rec.played === before.played + 1 && rec.won === before.won, "a drop is played, never won");
   a.goal = null;
   await sleep(7000);
   await a.close();
