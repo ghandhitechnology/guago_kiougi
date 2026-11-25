@@ -344,6 +344,8 @@ export function createTrades({
   async function commit(w: Window, last: string): Promise<void> {
     const far = apart(w.from, w.to);
     if (far) return close(w, "far");
+    // A block made while the window was open ends it the way a block ends a request: quietly.
+    if (isBlocked(w.from, w.to) || isBlocked(w.to, w.from)) return close(w, "cancelled");
     w.state = "committing";
     const parties = [w.from, w.to].sort() as [string, string];
     const offers: Record<string, CommitOffer> = {};

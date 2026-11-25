@@ -300,6 +300,7 @@ function notices(loaded: Loaded, p: Plan): Pick<ChangeNotice, "items" | "exp"> {
   const exp: Record<string, number> = {};
   const items = [...p.inserts, ...p.received.map((r) => r.row)];
   for (const row of p.updates) {
+    if (row.listing !== null) continue;
     const before = loaded.items.get(row.id) as ItemRow;
     if (onlyExp(before, row)) exp[row.id] = row.exp;
     else items.push(row);
@@ -346,14 +347,28 @@ async function lookup(q: Queryable, records: readonly { characterId: string; opI
   return rows as { character_id: string; request_hash: string; result: ExecResult }[];
 }
 
-async function lockListings(q: Queryable, ids: readonly string[]) {
-  if (ids.length === 0) return new Map<string, ListingRow>();
-  const { rows } = await q.execute(sql`
+/**
+ * The listings an operation names. Those whose seller is a party are locked, under the seller's
+ * character lock like every other row of theirs; any other is only read, and cannot be written
+ * (a closed listing never changes again; someone else's live one is not this operation's).
+ */
+async function lockListings(q: Queryable, ids: readonly string[], parties: readonly string[]) {
+  const locked = new Map<string, ListingRow>();
+  const seen = new Map<string, ListingRow>();
+  if (ids.length === 0) return { locked, seen };
+  const mine = await q.execute(sql`
     select ${sql.raw(LISTING_COLUMNS)} from listings
-    where id = any(${sql.param([...ids])}::uuid[])
+    where id = any(${sql.param([...ids])}::uuid[]) and seller_id = any(${sql.param([...parties])}::uuid[])
     order by id
     for update`);
-  return new Map(rows.map((r) => [r.id as string, listingFromDb(r)]));
+  for (const r of mine.rows) locked.set(r.id as string, listingFromDb(r));
+  const rest = ids.filter((id) => !locked.has(id));
+  if (rest.length > 0) {
+    const { rows } = await q.execute(sql`
+      select ${sql.raw(LISTING_COLUMNS)} from listings where id = any(${sql.param(rest)}::uuid[])`);
+    for (const r of rows) seen.set(r.id as string, listingFromDb(r));
+  }
+  return { locked, seen };
 }
 
 /** Bag and worn items by id (and every worn one when asked); listed items only by `listed`. */
@@ -788,7 +803,8 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         return id;
       },
     };
-    const listings = await lockListings(q, [...(def.listings?.(request) ?? [])].sort());
+    const named = await lockListings(q, [...(def.listings?.(request) ?? [])].sort(), parties);
+    const listings = new Map([...named.seen, ...named.locked]);
     const locked: Locked = { initiator, characters, listings };
     const loaded = new Map<string, Loaded>();
     const touchedBy = new Map<string, Set<string>>();
@@ -850,7 +866,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         );
       }
       // Listings first: a listed item points at its listing.
-      await writeListings(q, answer.listings ?? [], listings, made, new Set(parties));
+      await writeListings(q, answer.listings ?? [], named.locked, made, new Set(parties));
       for (const [i, id] of parties.entries()) {
         const l = loaded.get(id) as Loaded;
         const applied = answer.parties.get(id) ?? {};
@@ -863,7 +879,9 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
           (records[i] as { opId: string }).opId,
           op.name === "grant",
         );
-        const gone = [...p.removes, ...p.gives.map((g) => g.id)];
+        // A listed item leaves the bag as far as the client knows, as it does for the snapshot.
+        const listed = p.updates.filter((r) => r.listing !== null).map((r) => r.id);
+        const gone = [...p.removes, ...p.gives.map((g) => g.id), ...listed];
         results.set(id, {
           id: op.opId,
           op: op.name,

@@ -316,9 +316,14 @@ const create: PartyOpDef<Requests["listing.create"]> = {
   },
 };
 
-/** The seller, read before the locks: a listing's seller never changes. */
+/**
+ * The seller of a live listing, read before the locks: a listing's seller never changes, and a
+ * closed one never opens again, so a buy of a closed listing need not wait on its seller.
+ */
 async function sellerOf(q: Parameters<PartyOpDef<unknown>["others"]>[0], listing: string) {
-  const { rows } = await q.execute(sql`select seller_id from listings where id = ${listing}`);
+  const { rows } = await q.execute(
+    sql`select seller_id from listings where id = ${listing} and state = 'live'`,
+  );
   return rows.length > 0 ? [rows[0]?.seller_id as string] : [];
 }
 
@@ -353,7 +358,8 @@ const buy: PartyOpDef<Requests["listing.buy"]> = {
     if (listing.expired) return refuse("listing_expired");
     const buyer = world.parties.get(me) as Loaded;
     const seller = world.parties.get(listing.sellerId);
-    if (!seller) return refuse("listing_missing");
+    // Live when read, but its seller was not locked: it closed after the first look.
+    if (!seller) return refuse("listing_closed");
     if (buyer.character.level < TRADE.level) return refuse("trade_level");
     if (BigInt(req.unitPrice) !== listing.unitPrice) return refuse("listing_price");
     if (req.qty > listing.qty) return refuse("listing_qty");

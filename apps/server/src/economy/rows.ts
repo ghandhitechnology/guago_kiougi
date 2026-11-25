@@ -340,13 +340,16 @@ export interface ListingRow {
   createdAt: Date;
   expiresAt: Date;
   closedAt: Date | null;
-  /** Past `expires_at` by the database's clock when the row was locked. Read only. */
+  /**
+   * Past `expires_at` by the database's clock when the row was read (the clock, not the
+   * transaction's start: a buy that waited on a lock past the hour sees it expired). Read only.
+   */
   expired: boolean;
 }
 
 export const LISTING_COLUMNS = `id, seller_id, state, category, def_id, grade, item_id, item, qty,
   listed_qty, unit_price::text as unit_price, fee::text as fee, created_at, expires_at, closed_at,
-  expires_at <= now() as expired`;
+  expires_at <= clock_timestamp() as expired`;
 
 export function listingFromDb(r: Record<string, unknown>): ListingRow {
   return {

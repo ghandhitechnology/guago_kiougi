@@ -584,6 +584,28 @@ describe("매점 게시판 under racing requests", () => {
     expectConserved(before, await census(), true);
   });
 
+  it("a seller the buyer blocked is off the board for them: not shown, not buyable", async () => {
+    const eco = economy();
+    const [seller, buyer, other] = [await student(eco), await student(eco), await student(eco)];
+    await fund(eco, seller, { ink: 5, pinecone: 100 });
+    await fund(eco, buyer, { pinecone: 100 });
+    const listing = await listed(eco, seller, { stack: "ink", qty: 5, unitPrice: "3" });
+    await db.pool.query("insert into blocks (character_id, other_id) values ($1, $2)", [
+      buyer,
+      seller,
+    ]);
+    const { browseListings } = await import("./board.ts");
+    expect((await browseListings(db, { def: "ink", sort: "price" }, buyer)).listings).toEqual([]);
+    expect((await browseListings(db, { def: "ink", sort: "price" }, other)).listings).toHaveLength(
+      1,
+    );
+    expect(await buy(eco, buyer, listing, "3", 1)).toMatchObject({ error: "listing_missing" });
+    expect(await stack(seller, "ink")).toBe(0);
+    // Someone else's listing cannot be cancelled, and is not even locked by the attempt.
+    const cancel = await eco.executor.execute(other, randomUUID(), "listing.cancel", { listing });
+    expect(cancel).toMatchObject({ error: "listing_missing" });
+  });
+
   it("browsing pages by price without repeats, and price history sums the sales", async () => {
     const eco = economy();
     const sellers = [await student(eco), await student(eco), await student(eco)];
