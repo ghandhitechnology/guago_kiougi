@@ -4,7 +4,6 @@ import {
   capFrames,
   clean,
   ell,
-  framesOf,
   line,
   lineFrames,
   names,
@@ -120,7 +119,13 @@ const forecastSprite = sprite({
   size: [48, 48],
   origin: [24, 24],
   ...lineFrames(
-    { length: FL, canvas: 48, variants: 2, lone: EARTH_LONE, draw: (ax, k, v) => forecast(ax, k, v) },
+    {
+      length: FL,
+      canvas: 48,
+      variants: 2,
+      lone: EARTH_LONE,
+      draw: (ax, k, v) => forecast(ax, k, v),
+    },
     FORECAST_ANIMS,
   ),
 });

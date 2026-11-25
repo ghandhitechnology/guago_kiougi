@@ -200,7 +200,8 @@ function thunder(k: number): Pic {
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         if (src.at(x, y) !== ".") continue;
-        if ((src.at(x - 1, y) ?? ".") !== "." || (src.at(x + 1, y) ?? ".") !== ".") out.set(x, y, ch);
+        if ((src.at(x - 1, y) ?? ".") !== "." || (src.at(x + 1, y) ?? ".") !== ".")
+          out.set(x, y, ch);
       }
     return out;
   };
@@ -266,7 +267,14 @@ function forecastRing(r: number, k: number): Pic {
     const ey = cy + dy * ry;
     const ch = k === 4 ? "W" : k >= 2 ? "l" : "d";
     line(pic, ex - dx * tick, ey - dy * Math.ceil(tick / 2), ex + dx, ey + dy, ch);
-    line(pic, ex - dx * tick + dy, ey - dy * Math.ceil(tick / 2) + dx, ex + dx + dy, ey + dy + dx, ch);
+    line(
+      pic,
+      ex - dx * tick + dy,
+      ey - dy * Math.ceil(tick / 2) + dx,
+      ex + dx + dy,
+      ey + dy + dx,
+      ch,
+    );
   }
   const cross = k >= 3 ? "l" : "m";
   line(pic, cx - 4, cy, cx + 3, cy, cross);

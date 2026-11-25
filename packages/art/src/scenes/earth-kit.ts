@@ -13,7 +13,6 @@ import { crowd, fx, laid, mob, student } from "./fight.ts";
 const BASE: [number, number] = [74, 150];
 const EVOLVED: [number, number] = [336, 146];
 
-
 export default scene({
   name: "earth-kit",
   seed: 73,

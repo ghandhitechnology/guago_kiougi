@@ -48,7 +48,11 @@ function ribbon(a: number, k: number): Pic {
   for (let y = 0; y < s; y++)
     for (let x = 0; x < s; x++) {
       if (pic.at(x, y) !== ".") continue;
-      if ([pic.at(x - 1, y), pic.at(x + 1, y), pic.at(x, y - 1), pic.at(x, y + 1)].some((ch) => ch && ch !== "."))
+      if (
+        [pic.at(x - 1, y), pic.at(x + 1, y), pic.at(x, y - 1), pic.at(x, y + 1)].some(
+          (ch) => ch && ch !== ".",
+        )
+      )
         out.set(x, y, "o");
     }
   return out;

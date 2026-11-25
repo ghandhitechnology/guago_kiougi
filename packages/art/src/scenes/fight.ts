@@ -138,7 +138,8 @@ export function laid(
   }
   const look = { index: more.index ?? 0, play: more.play ?? false };
   const out: Prop[] = [];
-  if (more.start) out.push(fx(`${prop}-end`, ...at(0), { anim: `${anim}${(a + 8) & 15}`, ...look }));
+  if (more.start)
+    out.push(fx(`${prop}-end`, ...at(0), { anim: `${anim}${(a + 8) & 15}`, ...look }));
   for (let i = 0; i < n; i++) {
     const v = more.variants && i % more.variants ? `v${i % more.variants}` : "";
     out.push(fx(prop, ...at(i * tile), { anim: `${anim}${a}${v}`, ...look }));

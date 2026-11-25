@@ -257,7 +257,15 @@ function fuel(a: number, k: number, reach: number, half: number): Pic {
       const ux = Math.cos(a + off);
       const uy = Math.sin(a + off);
       line(pic, c + ux * 5, c + uy * 5, c + ux * reach * 0.28, c + uy * reach * 0.28, "l");
-      line(pic, c + ux * 5, c + uy * 5 + 1, c + ux * reach * 0.28, c + uy * reach * 0.28 + 1, "d", ".");
+      line(
+        pic,
+        c + ux * 5,
+        c + uy * 5 + 1,
+        c + ux * reach * 0.28,
+        c + uy * reach * 0.28 + 1,
+        "d",
+        ".",
+      );
     }
   }
   const count = Math.round(reach * 0.7);

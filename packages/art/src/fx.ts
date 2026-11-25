@@ -284,7 +284,10 @@ export function aimed(n: number, draw: (angle: number) => Pic): Pic[] {
 // Lines laid at any angle ---------------------------------------------------------------------
 
 /** The sixteen aims in radians: aim `a` is `a × 22.5°` clockwise from right, with y down. */
-export const AIM16: readonly number[] = Array.from({ length: 16 }, (_, a) => (a / 16) * Math.PI * 2);
+export const AIM16: readonly number[] = Array.from(
+  { length: 16 },
+  (_, a) => (a / 16) * Math.PI * 2,
+);
 
 /**
  * A square canvas whose centre is a point on a line's axis, the line running at `angle`. `t` is

@@ -1,6 +1,6 @@
 import type { Prop, SceneDef } from "../scene.ts";
 import { scene } from "../scene.ts";
-import { fx, laid, mob, student } from "./fight.ts";
+import { laid, mob, student } from "./fight.ts";
 
 /**
  * telegraph-aims: every line telegraph laid the way the client lays it, at angles on the sixteen

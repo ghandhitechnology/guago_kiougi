@@ -88,7 +88,12 @@ const teleCircle = sprite({
     CIRCLE_R.flatMap((r) =>
       [0, 1, 2, 3, 4, 5].map((k) => [
         `r${r}-${k}`,
-        put(Pic.blank(164, 84), circle(r, k), 82 - (r + 2), 42 - Math.floor((r + 4) / 2)).toString(),
+        put(
+          Pic.blank(164, 84),
+          circle(r, k),
+          82 - (r + 2),
+          42 - Math.floor((r + 4) / 2),
+        ).toString(),
       ]),
     ),
   ),

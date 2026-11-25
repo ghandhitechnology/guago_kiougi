@@ -303,4 +303,9 @@ const stormCloud = sprite({
 export default [
   plateTectonics,
   plateTectonicsEnd,
-  rockCycle, typhoonSprite, springTide, stratovolcano, stormCloud];
+  rockCycle,
+  typhoonSprite,
+  springTide,
+  stratovolcano,
+  stormCloud,
+];
