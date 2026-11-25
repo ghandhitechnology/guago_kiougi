@@ -221,18 +221,18 @@ export class PlayerCard {
     buttons.forEach((btn, i) => {
       const bx = 6 + (i % 2) * (bw + 4);
       const by = BAND + info + Math.floor(i / 2) * 21;
-      root.add(
-        new Button(ctx, bx, by, {
-          label: btn.label,
-          w: bw,
-          h: 19,
-          font: "galmuri9",
-          onPress: () => {
-            btn.run();
-            if (btn.closes) this.close();
-          },
-        }),
-      );
+      const key = new Button(ctx, bx, by, {
+        label: btn.label,
+        w: bw,
+        h: 19,
+        font: "galmuri9",
+        onPress: () => {
+          btn.run();
+          if (btn.closes) this.close();
+        },
+      });
+      if (btn.off) key.setEnabled(false);
+      root.add(key);
     });
 
     // Beside the player on screen, or where it was, kept on screen.
@@ -282,7 +282,7 @@ export class PlayerCard {
   private buttons(who: ReturnType<PlayerCard["resolve"]>) {
     const link = this.link;
     const s = link.social;
-    const out: { label: string; run: () => void; closes: boolean }[] = [];
+    const out: { label: string; run: () => void; closes: boolean; off?: boolean }[] = [];
     const id = who.id;
     const name = who.name;
     const blocked = id !== undefined && link.isBlocked(id);
@@ -357,6 +357,10 @@ export class PlayerCard {
       (who.level ?? 0) >= TRADE.level
     ) {
       out.push({ label: t("social.trade"), run: () => trade({ id, name }), closes: true });
+    }
+    // 결투 waits for the arena's challenge messages: the key is there, and does nothing yet.
+    if (id && !blocked && who.online) {
+      out.push({ label: t("social.duel"), run: () => {}, closes: false, off: true });
     }
     if (id) {
       out.push(
