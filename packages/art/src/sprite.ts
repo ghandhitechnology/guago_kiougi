@@ -15,6 +15,7 @@ export interface CompiledSprite {
   readonly frames: ReadonlyMap<string, Indexed>;
   readonly anim: Readonly<Record<string, Anim>>;
   readonly slice?: Slice;
+  readonly blend?: "add";
 }
 
 export function defaultOrigin([w, h]: Vec): Vec {
@@ -101,5 +102,6 @@ export function compileSprite(def: SpriteDef, name: string, where: string): Comp
     frames: out,
     anim: def.anim,
     ...(def.slice ? { slice: def.slice } : {}),
+    ...(def.blend ? { blend: def.blend } : {}),
   };
 }

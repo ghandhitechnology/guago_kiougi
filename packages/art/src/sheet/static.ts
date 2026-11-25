@@ -18,7 +18,7 @@ import {
   THEMES,
   type Theme,
 } from "../palette.ts";
-import { type Indexed, type Lut, Rgba, remap } from "../raster.ts";
+import { crop, type Indexed, type Lut, Rgba, remap } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
@@ -54,8 +54,8 @@ export function loadFonts(): Fonts {
 class Sheet {
   readonly c: Rgba;
   bottom = 0;
-  constructor(w: number) {
-    this.c = new Rgba(w, 12000);
+  constructor(w: number, h = 12000) {
+    this.c = new Rgba(w, h);
     this.c.rect(0, 0, w, this.c.h, UI.bg);
   }
   mark(y: number): void {
@@ -357,4 +357,80 @@ export function sceneScreens(meta: SceneMeta, atlases: readonly Atlas[]): Map<st
     out.set(def.name, one);
   }
   return out;
+}
+
+/** The two grounds every combat effect must read on: the field at night and Greek dirt. */
+export function combatGrounds(art: readonly Compiled[]): { name: string; patch: Indexed }[] {
+  const terrain = (name: string) =>
+    art.find((a): a is CompiledTerrain => a.kind === "terrain" && a.name === name);
+  const theme = (name: string) => THEMES.find((t) => t.name === name) as Theme;
+  const lower = { w: 30, h: 12, cells: new Array(30 * 12).fill(0) };
+  const out: { name: string; patch: Indexed }[] = [];
+  const field = terrain("lawn-field");
+  const greek = terrain("marble-dust");
+  if (field)
+    out.push({ name: "field-night", patch: renderPatch(field, theme("field-night"), lower) });
+  if (greek) out.push({ name: "greece", patch: renderPatch(greek, theme("greece"), lower) });
+  return out;
+}
+
+/**
+ * Every combat effect (the `combat` atlas), each animation's frames at ×1 and ×3 on the dark
+ * field and on Greek ground. Light meant for additive blending is marked `add`.
+ */
+export function combatSheet(f: Fonts, art: readonly Compiled[]): Rgba {
+  const grounds = combatGrounds(art);
+  const s = new Sheet(1600, 40000);
+  let y = 20;
+  const gap = 6;
+  let gx = 0;
+  const ground = (g: Indexed, x: number, y0: number, w: number, h: number, scale: number) => {
+    gx = (gx + 37) % Math.max(1, g.w - w);
+    s.c.draw(crop(g, gx, (gx * 7) % Math.max(1, g.h - h), w, h), x, y0, INDEX_RGB, scale);
+  };
+  for (const a of art) {
+    if (a.kind !== "sprite" || a.group !== "combat") continue;
+    drawText(s.c, f.head, a.blend ? `${a.name}  add` : a.name, 20, y, UI.head);
+    y += 26;
+    const [w, h] = a.size;
+    for (const [name, anim] of Object.entries(a.anim)) {
+      drawText(
+        s.c,
+        f.label,
+        `${name}  ${anim.fps} fps${anim.loop === false ? "" : "  loop"}`,
+        20,
+        y,
+        UI.text,
+      );
+      y += 16;
+      const imgs = anim.frames.map((fr) => a.frames.get(fr) as Indexed);
+      let x = 20;
+      for (const g of grounds) {
+        for (const img of imgs) {
+          ground(g.patch, x, y, w, h, 1);
+          s.c.draw(img, x, y, INDEX_RGB, 1);
+          x += w + 2;
+        }
+        x += 16;
+      }
+      y += h + 8;
+      for (const g of grounds) {
+        x = 20;
+        for (const img of imgs) {
+          if (x + w * 3 > s.c.w - 20) {
+            x = 20;
+            y += h * 3 + gap;
+          }
+          ground(g.patch, x, y, w, h, 3);
+          s.c.draw(img, x, y, INDEX_RGB, 3);
+          x += w * 3 + gap;
+        }
+        y += h * 3 + gap;
+      }
+      y += 8;
+    }
+    y += 12;
+    s.mark(y);
+  }
+  return s.done();
 }
