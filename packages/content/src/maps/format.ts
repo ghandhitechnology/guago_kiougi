@@ -20,6 +20,7 @@ import type {
   ShadowShape,
   Vec,
 } from "./layers.ts";
+import type { Patrol, PatrolSource } from "./patrols.ts";
 
 // Time and light --------------------------------------------------------------------------------
 
@@ -260,6 +261,8 @@ export interface MapSource extends Layers {
     readonly tile: Vec;
     readonly facing?: Spawn["facing"];
   }[];
+  /** Guard routes in a 위험 구역, see `patrols.ts`. */
+  readonly patrols?: readonly PatrolSource[];
 }
 
 // Built ----------------------------------------------------------------------------------------
@@ -286,6 +289,8 @@ export interface BuiltMap {
   readonly marks: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
   /** Cast stand points: speaker id, feet in world pixels, facing. */
   readonly npcs: readonly NpcSpot[];
+  /** Guard routes in world pixels. */
+  readonly patrols: readonly Patrol[];
 }
 
 export interface NpcSpot {
