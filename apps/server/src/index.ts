@@ -20,6 +20,7 @@ import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
 import { fightLoadoutChanged, provideFightServices } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
+import { installProcessGuard } from "./process-guard.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
@@ -111,6 +112,16 @@ const server = createGameServer(
 provideFightServices({ modes: dbModes(db) });
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
+// Signals and exceptions nobody caught: keep serving through a one-off fault, saving what can be
+// saved; shut down the graceful way only when the same fault keeps coming back.
+installProcessGuard({
+  shutdown: (error) => server.gracefullyShutdown(true, error),
+  flush: async () => {
+    await economy.grants.flush();
+    await live.progress.flush();
+    await chatLog.flush();
+  },
+});
 onShutdown("grants", () => economy.grants.flush());
 onShutdown("quest progress", () => live.stop());
 onShutdown("chat log", () => chatLog.flush());
