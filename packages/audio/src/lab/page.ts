@@ -13,7 +13,7 @@ import {
   type SongId,
 } from "../index.ts";
 import { type CompiledSong, compileSong } from "../tracker/compile.ts";
-import { type Cell, noteName } from "../tracker/parse.ts";
+import { type Cell, flatKey, noteName } from "../tracker/parse.ts";
 import { songShape } from "../tracker/schedule.ts";
 
 audio.unlock();
@@ -144,12 +144,12 @@ const patternSection = el("section", {}, el("h2", { textContent: "패턴" }), wh
 let shownKey = "";
 let table: HTMLTableElement | null = null;
 
-function cellText(cell: Cell | null | undefined): string {
+function cellText(cell: Cell | null | undefined, flats: boolean): string {
   if (!cell) return "·";
   let head: string;
   switch (cell.kind) {
     case "note":
-      head = (cell.notes ?? []).map(noteName).join(",");
+      head = (cell.notes ?? []).map((n) => noteName(n, flats)).join(",");
       break;
     case "drum":
       head = (cell.drums ?? []).join(",");
@@ -172,6 +172,7 @@ function showFrame(id: SongId, frame: number): void {
   const c = song(id);
   const f = c.frames[frame];
   if (!f) return;
+  const flats = flatKey(SONGS[id].key);
   const header = el(
     "tr",
     {},
@@ -185,7 +186,7 @@ function showFrame(id: SongId, frame: number): void {
       { cls: r % c.rowsPerBar === 0 ? "bar" : "" },
       el("td", { cls: "n", textContent: r.toString(16).padStart(2, "0") }),
       ...c.channels.map((_, i) =>
-        el("td", { textContent: f.phrases[i] ? cellText(f.phrases[i]?.[r]) : "" }),
+        el("td", { textContent: f.phrases[i] ? cellText(f.phrases[i]?.[r], flats) : "" }),
       ),
     );
     rows.push(tr);

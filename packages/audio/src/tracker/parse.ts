@@ -40,9 +40,16 @@ export function noteNumber(name: string): number | null {
   return 12 * (Number(octave) + 1) + base + shift;
 }
 
-const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-export function noteName(midi: number): string {
-  return `${NAMES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
+const SHARPS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const FLATS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+/** `60` is `C4`. Spelled with flats when `flats` is set, as in F major or F minor. */
+export function noteName(midi: number, flats = false): string {
+  return `${(flats ? FLATS : SHARPS)[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
+}
+
+/** Whether a key like "F major" or "F minor" is written with flats. */
+export function flatKey(key: string): boolean {
+  return /^(F|Bb|Eb|Ab|Db|Gb)\b/.test(key) || /^(C|G|D) minor/.test(key);
 }
 
 function parseHead(token: string, at: string): { cell: Omit<Cell, "fx" | "vol">; rest: string } {

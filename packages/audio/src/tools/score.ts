@@ -6,7 +6,7 @@
 
 import { SONGS } from "../content/index.ts";
 import { type CompiledSong, compileSong } from "../tracker/compile.ts";
-import { noteName } from "../tracker/parse.ts";
+import { flatKey, noteName } from "../tracker/parse.ts";
 import { songShape } from "../tracker/schedule.ts";
 
 interface Sounding {
@@ -65,7 +65,9 @@ export function hanging(song: CompiledSong): string[] {
         const sustains =
           c.instrument.kind === "osc" || (c.instrument.kind === "fm" && c.instrument.env.s > 0);
         if (h && sustains && step > 0)
-          out.push(`frame ${f}: ${c.source.name} still holds ${h.map(noteName).join(",")}`);
+          out.push(
+            `frame ${f}: ${c.source.name} still holds ${h.map((n) => noteName(n, flatKey(song.source.key))).join(",")}`,
+          );
         return;
       }
       for (const cell of phrase) {
@@ -92,6 +94,7 @@ export function clashes(song: CompiledSong, minRows = 2): Clash[] {
   const { rows, where } = sounding(song);
   const out: Clash[] = [];
   const names = song.channels.map((c) => c.source.name);
+  const flats = flatKey(song.source.key);
   const total = where.length;
   const open = new Map<string, { start: number; notes: string }>();
   const sectionOf = (frame: number) => {
@@ -133,7 +136,7 @@ export function clashes(song: CompiledSong, minRows = 2): Clash[] {
               const key = `${names[i]}/${names[j]}`;
               now.add(key);
               if (!open.has(key))
-                open.set(key, { start: t, notes: `${noteName(p)}–${noteName(q)}` });
+                open.set(key, { start: t, notes: `${noteName(p, flats)}–${noteName(q, flats)}` });
             }
           }
       }
@@ -171,7 +174,7 @@ function summary(id: string, song: CompiledSong): string {
       for (const cell of f.phrases[i] ?? []) if (cell?.kind === "note") notes++;
     const resting = (rows[i] ?? []).filter((r) => !r).length / (rows[i]?.length || 1);
     lines.push(
-      `| ${c.source.name} | ${noteName(Math.min(...all))}–${noteName(Math.max(...all))} | ${notes} | ${(resting * 100).toFixed(0)}% |`,
+      `| ${c.source.name} | ${noteName(Math.min(...all), flatKey(s.key))}–${noteName(Math.max(...all), flatKey(s.key))} | ${notes} | ${(resting * 100).toFixed(0)}% |`,
     );
   });
   for (const h of hanging(song)) lines.push("", `Hanging note: ${h}`);
