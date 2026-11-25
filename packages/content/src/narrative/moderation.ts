@@ -28,13 +28,6 @@ const MODERATION: readonly SystemMessage[] = [
     "운영진이 채팅을 막았습니다. {time}에 풀립니다. 사유: {reason}",
     ["time", "reason"],
   ),
-  line(
-    "moderation.muted-permanent",
-    "office",
-    "dialogue",
-    "운영진이 채팅을 막았습니다. 운영진이 풀 때까지입니다. 사유: {reason}",
-    ["reason"],
-  ),
   line("moderation.kicked", "office", "dialogue", "운영진이 접속을 끊었습니다. 사유: {reason}", [
     "reason",
   ]),
@@ -53,6 +46,13 @@ const MODERATION: readonly SystemMessage[] = [
     ["reason"],
   ),
   line("moderation.strike", "office", "toast", "신고된 채팅이 규정 위반으로 확인되었습니다."),
+  line(
+    "moderation.muted-permanent",
+    "office",
+    "dialogue",
+    "운영진이 채팅을 막았습니다. 운영진이 풀 때까지입니다. 사유: {reason}",
+    ["reason"],
+  ),
 ];
 
 export const MODERATION_COPY: CopyPart = { system: MODERATION, ko: w.ko };

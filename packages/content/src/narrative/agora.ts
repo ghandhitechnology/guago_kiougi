@@ -58,7 +58,7 @@ const TOWN = barks("town", "p1.open", undefined, [
   ["agora-sleeper", "…자고 일어나도 세 시 십 분이다. 좋은 동네야."],
   ["agora-sleeper", "…미래에서도 낮잠 자냐. 그럼 됐다."],
   ["agora-sleeper", "…저 찢어진 데서 밤 냄새가 나. 잠이 잘 온다."],
-  ["agora-sophist", "미래에서 오셨군요. 거기 수업료는 얼마입니까? 참고하려고요."],
+  ["agora-sophist", "미래에서 오셨군요. 거기 수업료는 얼마입니까? 참고하겠습니다."],
   ["agora-sophist", "균열이 좋다는 쪽 변론, 지금 반값입니다."],
   [
     "agora-sophist",

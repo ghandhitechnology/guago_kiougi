@@ -87,7 +87,6 @@ const DUEL: Readonly<Record<DuelErrorCode, Line>> = {
 
 const WORLD: Readonly<Record<RefusalCode, Line>> = {
   ...TRADE,
-  ...DUEL,
   // Chat.
   empty: ["narrator", "아무 말도 쓰지 않았다."],
   too_long: ["narrator", "너무 길다. 조금 줄여야 한다."],
@@ -142,6 +141,7 @@ const WORLD: Readonly<Record<RefusalCode, Line>> = {
   no_post: ["narrator", "그 글은 이미 떨어졌다."],
   not_allowed: ["sagam", "고정 공지는 층장만 붙일 수 있습니다."],
   unknown_emote: ["narrator", "모르는 동작이다."],
+  ...DUEL,
 };
 
 const OP: Readonly<Record<OpError, Line>> = {
