@@ -1,5 +1,8 @@
 import { INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
 import * as Phaser from "phaser";
+import { BootScene } from "./boot-scene.ts";
+import { FrontScene } from "./front/front-scene.ts";
+import { UiScene } from "./ui/ui-scene.ts";
 import { WorldScene } from "./world-scene.ts";
 
 const game = new Phaser.Game({
@@ -11,7 +14,8 @@ const game = new Phaser.Game({
   banner: false,
   render: { pixelArt: true },
   scale: { mode: Phaser.Scale.NONE },
-  scene: [WorldScene],
+  // Back to front; the UI scene stays on top of the world.
+  scene: [BootScene, FrontScene, WorldScene, UiScene],
 });
 
 /**

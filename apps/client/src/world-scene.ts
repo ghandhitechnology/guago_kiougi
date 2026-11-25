@@ -14,6 +14,8 @@ import {
   SHADOW_FRAME,
   spriteAnim,
 } from "./art.ts";
+import { composeDoll, Doll, normalizeLook } from "./doll.ts";
+import type { WorldEntry } from "./entry.ts";
 import { drawGround } from "./ground.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { stayConnected } from "./net.ts";
@@ -41,9 +43,16 @@ export class WorldScene extends Phaser.Scene {
   private readonly monsters = new Map<string, View>();
   private readonly players = new Map<string, View>();
   private selfId: string | undefined;
+  /** Who is playing, handed over by the front end; absent when the scene runs on its own. */
+  private entry: WorldEntry | undefined;
+  private selfLook: string | undefined;
 
   constructor() {
     super("world");
+  }
+
+  init(data: Partial<WorldEntry>): void {
+    this.entry = data.account && data.character ? (data as WorldEntry) : undefined;
   }
 
   preload(): void {
@@ -54,6 +63,13 @@ export class WorldScene extends Phaser.Scene {
     this.meta = artMeta(this);
     createSpriteAnims(this, this.meta);
     this.look = composeLook(this, this.meta, PLAYER_RIG, defaultLook(this.meta, PLAYER_RIG)).look;
+    if (this.entry) {
+      this.selfLook = composeDoll(
+        this,
+        this.meta,
+        normalizeLook(this.meta, this.entry.character.look),
+      );
+    }
     drawGround(this, this.meta, LAWN);
 
     const { w, h } = mapSize(LAWN);
@@ -92,7 +108,7 @@ export class WorldScene extends Phaser.Scene {
     for (const [id, p] of state.players) {
       let view = this.players.get(id);
       if (!view) {
-        view = this.playerView();
+        view = this.playerView(id === this.selfId);
         this.players.set(id, view);
         if (id === this.selfId) this.cameras.main.startFollow(view.body, true);
       }
@@ -124,7 +140,13 @@ export class WorldScene extends Phaser.Scene {
     return { track: new Track(), body, shadow, sprite: kind, movedAt: 0 };
   }
 
-  private playerView(): View {
+  private playerView(self: boolean): View {
+    if (self && this.selfLook) {
+      const body = new Doll(this, this.meta, -100, -100, this.selfLook);
+      const shadow = this.add.image(0, 0, this.selfLook, SHADOW_FRAME);
+      shadow.setAlpha(SHADOW_ALPHA).setDepth(SHADOW_DEPTH);
+      return { track: new Track(), body, shadow, sprite: undefined, movedAt: 0 };
+    }
     const rig = this.meta.rigs[PLAYER_RIG];
     const dir = rig?.directions[0] ?? "down";
     const body = this.add
