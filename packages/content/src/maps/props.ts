@@ -63,6 +63,9 @@ export const PROPS = {
   stalagmite: { foot: [1, 1] },
   beans: { foot: [4, 2] },
   monochord: { foot: [3, 1] },
+  tower: { foot: [3, 1] },
+  plane: { foot: [2, 1] },
+  "scroll-rack": { foot: [2, 1] },
 
   // The interior kit: furniture that blocks, by the floor it stands on. Chairs, stools, bags,
   // books and small things on the floor are walked around by eye, not blocked.
