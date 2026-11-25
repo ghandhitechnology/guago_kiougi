@@ -519,19 +519,19 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
       };
     },
 
+    /** The club as members see it. One connection at a time, so a read never takes three. */
     async view(clubId: number): Promise<ClubView | null> {
-      const [club, members, notices] = await Promise.all([
-        db.execute(sql`select * from clubs where id = ${clubId} and disbanded_at is null`),
-        db.execute(sql`
-          select c.id, c.name, c.major, c.level, m.rank, m.joined_at from club_members m
-          join characters c on c.id = m.character_id
-          where m.club_id = ${clubId} order by m.joined_at, c.id`),
-        db.execute(sql`
-          select n.id, n.body, n.created_at, c.id as author_id, c.name as author_name
-          from club_notices n join characters c on c.id = n.author_id
-          where n.club_id = ${clubId} order by n.created_at desc, n.id desc`),
-      ]);
+      const club = await db.execute(sql`
+        select * from clubs where id = ${clubId} and disbanded_at is null`);
       if (!club.rows[0]) return null;
+      const members = await db.execute(sql`
+        select c.id, c.name, c.major, c.level, m.rank, m.joined_at from club_members m
+        join characters c on c.id = m.character_id
+        where m.club_id = ${clubId} order by m.joined_at, c.id`);
+      const notices = await db.execute(sql`
+        select n.id, n.body, n.created_at, c.id as author_id, c.name as author_name
+        from club_notices n join characters c on c.id = n.author_id
+        where n.club_id = ${clubId} order by n.created_at desc, n.id desc`);
       const row = clubRow(club.rows[0]);
       return {
         id: row.id,

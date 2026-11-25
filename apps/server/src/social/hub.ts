@@ -1,11 +1,22 @@
 /**
  * The social side of the WorldRoom (PLAN §12, §19, §21). Runs every social request, keeps what
- * each online player needs in memory (their blocks, friends and club), and tells the people a
- * change concerns with the smallest event that carries it.
+ * each online player needs in memory, and tells the people a change concerns with the smallest
+ * event that carries it.
  *
  * What lives where: friendships, requests, blocks, clubs and everything about them, 대자보 posts
  * and reports are rows, so they survive a restart; parties (`parties.ts`) and who is online live
  * in memory and end with the process.
+ *
+ * One rule keeps memory in step with the database. Everything the hub holds about an online
+ * player (its model: blocks, friends, requests, club and rank, invites, applications and
+ * applicants, plus its club index entry and map-room tag) and every social event sent to that
+ * player belong to the player's lane. A lane runs one task at a time, in the order they were
+ * queued; a task changes the model only from a database read it makes itself, after the write it
+ * follows has committed, and sends only what the model then says. A read older than a landed
+ * write therefore can never be applied after it. A club's views are read in the club's lane and
+ * handed to each member's lane, whose own fresh read of the member's club decides whether that
+ * view applies. Login reads the model inside the lane too, so a change during it queues behind,
+ * and a reconnect sends the live model instead of reading a new one.
  *
  * Every request gets exactly one answer: `done` once its events are out, or `refused` with a
  * code. Nothing answers differently because someone blocked the sender: a whisper, friend
@@ -13,6 +24,9 @@
  */
 import { emoteAllowed } from "@guago/content";
 import {
+  type Applicant,
+  type ClubApplication,
+  type ClubInvite,
   type ClubRank,
   type ClubView,
   CONTROL_MODES,
@@ -21,6 +35,8 @@ import {
   EMOTE_TILES,
   encodeEmblem,
   type FriendEntry,
+  type FriendRequest,
+  type Person,
   type PresenceEntry,
   REPORT_NOTE_LENGTH,
   type Refusal,
@@ -60,17 +76,19 @@ export interface SocialRoom<P extends Peer> {
   limit(peer: P, type: SocialType): number;
 }
 
-/** Per online player: what delivery and notices read on every message. */
-interface Online {
-  blocks: Set<string>;
-  friends: Set<string>;
-  club: { id: number; rank: ClubRank } | undefined;
+/** What the hub holds about one online player. Changed only in the player's lane. */
+export interface Model {
+  blocks: Map<string, Person>;
+  friends: Map<string, Omit<FriendEntry, "room">>;
+  requests: { in: FriendRequest[]; out: FriendRequest[] };
+  club: ClubView | null;
+  rank: ClubRank | undefined;
+  clubInvites: ClubInvite[];
+  applications: ClubApplication[];
+  applicants: Applicant[];
 }
 
-export interface Loaded {
-  online: Online;
-  snapshot: Omit<SocialSnapshot, "party" | "partyInvites">;
-}
+type Part = "friends" | "requests" | "blocks" | "clubInvites" | "applications" | "applicants";
 
 type Answer = { data?: unknown } | Refuse;
 type Handler<P extends Peer, K extends SocialType> = (
@@ -90,12 +108,52 @@ const person = (e: PresenceEntry): PartyPerson => ({
   level: e.level,
 });
 
+const emptyModel = (): Model => ({
+  blocks: new Map(),
+  friends: new Map(),
+  requests: { in: [], out: [] },
+  club: null,
+  rank: undefined,
+  clubInvites: [],
+  applications: [],
+  applicants: [],
+});
+
+const isOfficer = (m: Model) => m.club !== null && m.rank !== undefined && m.rank !== "member";
+
+/** One promise chain per key: a task starts after every task queued before it for that key. */
+class Lanes {
+  private readonly tails = new Map<string, Promise<void>>();
+
+  run<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const before = this.tails.get(key) ?? Promise.resolve();
+    // An earlier task failing never holds up the ones behind it.
+    const mine = before.then(task, task);
+    const tail = mine.then(
+      () => {},
+      () => {},
+    );
+    this.tails.set(key, tail);
+    void tail.then(() => {
+      if (this.tails.get(key) === tail) this.tails.delete(key);
+    });
+    return mine;
+  }
+
+  async drained(): Promise<void> {
+    while (this.tails.size > 0) await Promise.all(this.tails.values());
+  }
+}
+
 export class SocialHub<P extends Peer> {
   private readonly social: Social;
   private readonly room: SocialRoom<P>;
-  private readonly state = new Map<string, Online>();
-  /** Online members by club id. */
+  private readonly state = new Map<string, Model>();
+  /** Online members by club id; an entry changes only in its member's lane. */
   private readonly clubOnline = new Map<number, Set<string>>();
+  /** Lanes for what the hub holds about each player, and for reading each club's views. */
+  private readonly people = new Lanes();
+  private readonly clubs = new Lanes();
   private readonly timers: NodeJS.Timeout[] = [];
   private ticks = 0;
   private readonly unlisten: () => void;
@@ -109,11 +167,7 @@ export class SocialHub<P extends Peer> {
     this.timers.push(setInterval(() => void this.creditClubs(), CLUB_EXP_MS));
     for (const t of this.timers) t.unref();
     // Changes made outside a request (moderation removing a character) reach members too.
-    this.unlisten = social.onClubChange((change) => {
-      this.clubChanged(change).catch((error: unknown) => {
-        console.error(`club change notice failed: ${describeError(error)}`);
-      });
-    });
+    this.unlisten = social.onClubChange((change) => void this.clubChanged(change));
   }
 
   dispose(): void {
@@ -121,80 +175,76 @@ export class SocialHub<P extends Peer> {
     this.unlisten();
   }
 
+  /** Resolves once every queued request and lane task has run. */
+  async drained(): Promise<void> {
+    await Promise.all([this.clubs.drained(), this.people.drained()]);
+    await this.people.drained();
+  }
+
   // Lifecycle ------------------------------------------------------------------------------
 
-  /** Everything the player's panels need, read before the seat is announced. */
-  async load(characterId: string): Promise<Loaded> {
-    const { friends, clubs } = this.social;
-    const [list, requests, blocks, membership, clubInvites, applications] = await Promise.all([
-      friends.friendsOf(characterId),
-      friends.requestsOf(characterId),
-      friends.blocksOf(characterId),
-      clubs.membership(this.social.db, characterId),
-      clubs.invitesOf(characterId),
-      clubs.applicationsOf(characterId),
-    ]);
-    const [club, applicants] = membership
-      ? await Promise.all([
-          clubs.view(membership.club),
-          membership.rank === "member" ? [] : clubs.applicantsOf(membership.club),
-        ])
-      : [null, []];
-    return {
-      online: {
-        blocks: new Set(blocks.map((b) => b.id)),
-        friends: new Set(list.map((f) => f.id)),
-        club: membership && club ? { id: membership.club, rank: membership.rank } : undefined,
-      },
-      snapshot: {
-        friends: list.map((f) => ({ ...f, room: "" })),
-        requests,
-        blocks,
-        club,
-        clubInvites,
-        applications,
-        applicants,
-      },
-    };
-  }
-
-  /** The seat is in: hold its state, mark it online in its party and send the snapshot. */
-  join(peer: P, loaded: Loaded): void {
-    const id = peer.characterId;
-    this.state.set(id, loaded.online);
-    const club = loaded.online.club;
-    if (club) this.indexClub(id, club.id);
-    this.setTag(id, loaded.snapshot.club);
-    parties.online(person(peer.entry));
-    this.sendSnapshot(peer, loaded);
-    this.flushParties();
-  }
-
-  /** After a reconnect nothing sent meanwhile arrived: the snapshot goes again. */
-  async resend(peer: P): Promise<void> {
+  /**
+   * Reads the player's model, before the seat is announced. The model is registered first, so a
+   * change committed while it is read queues its update behind this read.
+   */
+  async load(characterId: string): Promise<Model> {
+    const model = emptyModel();
+    this.state.set(characterId, model);
     try {
-      const loaded = await this.load(peer.characterId);
-      if (this.room.online(peer.characterId) !== peer) return;
-      this.state.set(peer.characterId, loaded.online);
-      this.sendSnapshot(peer, loaded);
+      await this.people.run(characterId, async () => {
+        if (this.state.get(characterId) !== model) return;
+        await this.read(characterId, model);
+      });
     } catch (error) {
-      console.error(`social snapshot failed: ${describeError(error)}`);
+      if (this.state.get(characterId) === model) this.state.delete(characterId);
+      throw error;
     }
+    return model;
+  }
+
+  /** The seat is in: mark it online in its party and send the model as it stands. */
+  join(peer: P, model: Model): void {
+    parties.online(person(peer.entry));
+    this.flushParties();
+    void this.people.run(peer.characterId, async () => {
+      if (this.state.get(peer.characterId) === model) this.sendSnapshot(peer, model);
+    });
+  }
+
+  /** After a reconnect nothing sent meanwhile arrived: the live model goes again, unread. */
+  resend(peer: P): Promise<void> {
+    return this.people.run(peer.characterId, async () => {
+      const model = this.state.get(peer.characterId);
+      if (model && this.room.online(peer.characterId) === peer) this.sendSnapshot(peer, model);
+    });
   }
 
   /** The seat is gone for good (logout, or the reconnect window ran out). */
   leave(characterId: string): void {
-    const club = this.state.get(characterId)?.club;
-    if (club) this.clubOnline.get(club.id)?.delete(characterId);
-    this.state.delete(characterId);
     parties.offline(characterId, this.social.now());
     this.flushParties();
+    const model = this.state.get(characterId);
+    void this.people.run(characterId, async () => {
+      // A newer seat of the same character may have loaded its own model since.
+      if (!model || this.state.get(characterId) !== model) return;
+      this.index(characterId, undefined);
+      clubTags.set(characterId, undefined);
+      this.state.delete(characterId);
+    });
   }
 
   /** The character entered, left or changed a map room. */
   moved(characterId: string): void {
-    if (!this.state.has(characterId)) return;
-    this.tellFriends(characterId);
+    const model = this.state.get(characterId);
+    if (!model) return;
+    for (const friend of model.friends.keys()) {
+      void this.inLane(friend, async (theirs) => {
+        if (!theirs.friends.has(characterId)) return;
+        const entry = this.friendEntry(characterId);
+        const peer = this.room.online(friend);
+        if (entry && peer) this.event(peer, { t: "friend", f: entry });
+      });
+    }
     for (const id of parties.membersOf(characterId)) this.pushParty(id);
   }
 
@@ -241,6 +291,10 @@ export class SocialHub<P extends Peer> {
       });
       return;
     }
+    await this.serve(peer, type, req);
+  }
+
+  private async serve<K extends SocialType>(peer: P, type: K, req: SocialRequest<K>) {
     let answer: Answer;
     try {
       answer = await (this.handlers[type] as Handler<P, K>)(peer, req);
@@ -276,49 +330,48 @@ export class SocialHub<P extends Peer> {
       return OK;
     };
     const byName = async (name: string) => characterByName(db, name);
+    /** Both players' parts again, each in its own lane. */
+    const both = async (a: string, b: string, parts: Part[]) => {
+      await Promise.all([this.refresh(a, parts), this.refresh(b, parts)]);
+    };
 
     return {
       "friend.request": async (me, { name }) => {
         const other = await byName(name);
         if (!other) return new Refuse("no_player");
-        return after(await friends.request(me.characterId, other.id), async (r) => {
-          if (r === "friends") await this.befriended(me.characterId, other.id);
-          await this.pushRequests(me.characterId, other.id);
-        });
+        return after(await friends.request(me.characterId, other.id), (r) =>
+          both(me.characterId, other.id, r === "friends" ? ["requests", "friends"] : ["requests"]),
+        );
       },
       "friend.accept": async (me, { id }) =>
-        after(await friends.accept(me.characterId, id), async () => {
-          await this.befriended(me.characterId, id);
-          await this.pushRequests(me.characterId, id);
-        }),
+        after(await friends.accept(me.characterId, id), () =>
+          both(me.characterId, id, ["friends", "requests"]),
+        ),
       "friend.decline": async (me, { id }) =>
         after(await friends.decline(me.characterId, id), () =>
-          this.pushRequests(me.characterId, id),
+          both(me.characterId, id, ["requests"]),
         ),
       "friend.cancel": async (me, { id }) =>
         after(await friends.cancel(me.characterId, id), () =>
-          this.pushRequests(me.characterId, id),
+          both(me.characterId, id, ["requests"]),
         ),
       "friend.remove": async (me, { id }) =>
-        after(await friends.remove(me.characterId, id), () => this.unfriended(me.characterId, id)),
+        after(await friends.remove(me.characterId, id), () =>
+          both(me.characterId, id, ["friends"]),
+        ),
 
       "block.add": async (me, req) => {
         const other = "id" in req ? await characterById(db, req.id) : await byName(req.name);
         if (!other) return new Refuse("no_player");
-        return after(await friends.block(me.characterId, other.id), async (r) => {
-          this.state.get(me.characterId)?.blocks.add(other.id);
-          if (r.wereFriends) this.unfriended(me.characterId, other.id);
-          await this.pushRequests(me.characterId, other.id);
-          await this.pushBlocks(me.characterId);
-          await this.pushClubInvites(me.characterId);
+        return after(await friends.block(me.characterId, other.id), async () => {
+          await this.refresh(me.characterId, ["blocks", "friends", "requests", "clubInvites"]);
+          await this.refresh(other.id, ["friends", "requests"]);
         });
       },
       "block.remove": async (me, { id }) =>
         after(await friends.unblock(me.characterId, id), async () => {
-          this.state.get(me.characterId)?.blocks.delete(id);
-          await this.pushRequests(me.characterId);
-          await this.pushBlocks(me.characterId);
-          await this.pushClubInvites(me.characterId);
+          await this.refresh(me.characterId, ["blocks", "requests", "clubInvites"]);
+          await this.refresh(id, ["requests"]);
         }),
 
       "party.invite": async (me, { name }) => {
@@ -339,8 +392,7 @@ export class SocialHub<P extends Peer> {
         const made = await clubs.found(me.characterId, me.entry.level, found);
         if (made instanceof Refuse) return made;
         await this.clubChanged(made);
-        await this.pushClubInvites(me.characterId);
-        await this.pushApplications(me.characterId);
+        await this.refresh(me.characterId, ["clubInvites", "applications"]);
         return { data: { club: made.club } };
       },
       "club.join": async (me, { id }) => {
@@ -348,13 +400,12 @@ export class SocialHub<P extends Peer> {
         if (r instanceof Refuse) return r;
         if (r.joined) await this.clubChanged(r);
         else await this.pushApplicants(id);
-        await this.pushApplications(me.characterId);
-        await this.pushClubInvites(me.characterId);
+        await this.refresh(me.characterId, ["applications", "clubInvites"]);
         return { data: { joined: r.joined } };
       },
       "club.withdraw": async (me, { id }) =>
         after(await clubs.withdraw(me.characterId, id), async () => {
-          await this.pushApplications(me.characterId);
+          await this.refresh(me.characterId, ["applications"]);
           await this.pushApplicants(id);
         }),
       "club.invite": async (me, { name }) => {
@@ -363,22 +414,23 @@ export class SocialHub<P extends Peer> {
         if (this.hasBlocked(me.characterId, other.id)) return new Refuse("blocked");
         const silent = await this.blockedBy(other.id, me.characterId);
         return after(await clubs.invite(me.characterId, other.id, silent), async () => {
-          if (!silent) await this.pushClubInvites(other.id);
+          if (!silent) await this.refresh(other.id, ["clubInvites"]);
         });
       },
       "club.accept": async (me, { id }) =>
         after(await clubs.accept(me.characterId, id), async (r) => {
           await this.clubChanged(r);
-          await this.pushClubInvites(me.characterId);
-          await this.pushApplications(me.characterId);
+          await this.refresh(me.characterId, ["clubInvites", "applications"]);
         }),
       "club.decline": async (me, { id }) =>
-        after(await clubs.decline(me.characterId, id), () => this.pushClubInvites(me.characterId)),
+        after(await clubs.decline(me.characterId, id), () =>
+          this.refresh(me.characterId, ["clubInvites"]),
+        ),
       "club.review": async (me, { id, accept }) =>
         after(await clubs.review(me.characterId, id, accept), async (r) => {
-          await this.clubChanged(r);
-          await this.pushApplicants(r.club);
-          await this.pushApplications(id);
+          if (accept) await this.clubChanged(r);
+          else await this.pushApplicants(r.club);
+          await this.refresh(id, ["applications"]);
         }),
       "club.leave": async (me) =>
         after(await clubs.leave(me.characterId), (r) => this.clubChanged(r)),
@@ -442,6 +494,92 @@ export class SocialHub<P extends Peer> {
     };
   }
 
+  // Lanes ------------------------------------------------------------------------------------
+
+  /**
+   * Runs `task` in the player's lane on its current model; nothing when the player is offline.
+   * A failed read is logged and the model left as it was, to be put right by the next change.
+   */
+  private inLane(id: string, task: (model: Model) => Promise<void>): Promise<void> {
+    return this.people.run(id, async () => {
+      const model = this.state.get(id);
+      if (!model) return;
+      try {
+        await task(model);
+      } catch (error) {
+        console.error(`social state of ${id} failed: ${describeError(error)}`);
+      }
+    });
+  }
+
+  /** Reads the given parts of the player's model again and sends each. */
+  private refresh(id: string, parts: readonly Part[]): Promise<void> {
+    return this.inLane(id, async (model) => {
+      for (const part of parts) await this.reload(id, model, part);
+    });
+  }
+
+  /** One part from the database into the model and out to the player. Lane only. */
+  private async reload(id: string, model: Model, part: Part): Promise<void> {
+    const { friends, clubs } = this.social;
+    const peer = this.room.online(id);
+    switch (part) {
+      case "friends": {
+        const list = await friends.friendsOf(id);
+        const next = new Map(list.map((f) => [f.id, f]));
+        for (const old of model.friends.keys()) {
+          if (!next.has(old) && peer) this.event(peer, { t: "unfriend", id: old });
+        }
+        for (const f of list) {
+          if (!model.friends.has(f.id) && peer) {
+            this.event(peer, { t: "friend", f: { ...f, room: this.roomOf(f.id) } });
+          }
+        }
+        model.friends = next;
+        return;
+      }
+      case "requests": {
+        model.requests = await friends.requestsOf(id);
+        if (peer) this.event(peer, { t: "requests", ...model.requests });
+        return;
+      }
+      case "blocks": {
+        const list = await friends.blocksOf(id);
+        model.blocks = new Map(list.map((b) => [b.id, b]));
+        if (peer) this.event(peer, { t: "blocks", list });
+        return;
+      }
+      case "clubInvites": {
+        model.clubInvites = await clubs.invitesOf(id);
+        if (peer) this.event(peer, { t: "clubInvites", list: model.clubInvites });
+        return;
+      }
+      case "applications": {
+        model.applications = await clubs.applicationsOf(id);
+        if (peer) this.event(peer, { t: "applications", list: model.applications });
+        return;
+      }
+      case "applicants": {
+        const had = model.applicants.length > 0;
+        const club = isOfficer(model) ? model.club : null;
+        model.applicants = club ? await clubs.applicantsOf(club.id) : [];
+        if (peer && (had || club)) this.event(peer, { t: "applicants", list: model.applicants });
+        return;
+      }
+    }
+  }
+
+  /** The whole model, read at login inside the lane, one query at a time. */
+  private async read(id: string, model: Model): Promise<void> {
+    for (const part of ["friends", "requests", "blocks", "clubInvites", "applications"] as const) {
+      await this.reload(id, model, part);
+    }
+    const membership = await this.social.clubs.membership(this.social.db, id);
+    const view = membership ? await this.social.clubs.view(membership.club) : null;
+    const me = view?.members.find((m) => m.id === id);
+    if (view && me) await this.setClub(id, model, view, me.rank);
+  }
+
   // Friends --------------------------------------------------------------------------------
 
   private friendEntry(id: string): FriendEntry | undefined {
@@ -451,64 +589,8 @@ export class SocialHub<P extends Peer> {
     return { id, name, major, level, room: this.roomOf(id) };
   }
 
-  /**
-   * Each online friend gets the character's entry again: its channel changed. Going offline
-   * needs nothing here; presence says so, and an offline friend's channel means nothing.
-   */
-  private tellFriends(id: string): void {
-    const entry = this.friendEntry(id);
-    if (!entry) return;
-    for (const other of this.state.get(id)?.friends ?? []) {
-      const peer = this.room.online(other);
-      if (peer) this.event(peer, { t: "friend", f: entry });
-    }
-  }
-
-  private async befriended(a: string, b: string): Promise<void> {
-    const [ca, cb] = await Promise.all([
-      characterById(this.social.db, a),
-      characterById(this.social.db, b),
-    ]);
-    for (const [me, other] of [
-      [a, cb],
-      [b, ca],
-    ] as const) {
-      if (!other) continue;
-      this.state.get(me)?.friends.add(other.id);
-      const peer = this.room.online(me);
-      if (peer) this.event(peer, { t: "friend", f: { ...other, room: this.roomOf(other.id) } });
-    }
-  }
-
-  private unfriended(a: string, b: string): void {
-    for (const [me, other] of [
-      [a, b],
-      [b, a],
-    ] as const) {
-      this.state.get(me)?.friends.delete(other);
-      const peer = this.room.online(me);
-      if (peer) this.event(peer, { t: "unfriend", id: other });
-    }
-  }
-
-  private async pushRequests(...ids: string[]): Promise<void> {
-    for (const id of ids) {
-      const peer = this.room.online(id);
-      if (!peer) continue;
-      const lists = await this.social.friends.requestsOf(id);
-      this.event(peer, { t: "requests", in: lists.in, out: lists.out });
-    }
-  }
-
-  private async pushBlocks(id: string): Promise<void> {
-    const peer = this.room.online(id);
-    if (peer) this.event(peer, { t: "blocks", list: await this.social.friends.blocksOf(id) });
-  }
-
-  /** Whether `owner` blocked `other`, online or not. */
+  /** Whether `owner` blocked `other`, from the database. */
   private async blockedBy(owner: string, other: string): Promise<boolean> {
-    const online = this.state.get(owner);
-    if (online) return online.blocks.has(other);
     const { rows } = await this.social.db.execute(sql`
       select 1 from blocks where character_id = ${owner} and other_id = ${other}`);
     return rows.length > 0;
@@ -566,87 +648,90 @@ export class SocialHub<P extends Peer> {
 
   // Clubs ------------------------------------------------------------------------------------
 
-  private indexClub(id: string, club: number | undefined): void {
+  /** Moves the player's club index entry. Lane only. */
+  private index(id: string, club: number | undefined): void {
     for (const [clubId, set] of this.clubOnline) {
       if (clubId !== club && set.delete(id) && set.size === 0) this.clubOnline.delete(clubId);
     }
-    if (club === undefined || !this.state.has(id)) return;
+    if (club === undefined) return;
     const set = this.clubOnline.get(club) ?? new Set<string>();
     set.add(id);
     this.clubOnline.set(club, set);
   }
 
-  private setTag(id: string, club: ClubView | null): void {
+  /** The player's club (or none) into the model, the index, the map tag and the client. */
+  private async setClub(
+    id: string,
+    model: Model,
+    view: ClubView | null,
+    rank: ClubRank | undefined,
+  ): Promise<void> {
+    model.club = view;
+    model.rank = view ? rank : undefined;
+    this.index(id, view?.id);
     clubTags.set(
       id,
-      club
-        ? { id: club.id, name: club.name, jacket: club.jacket, emblem: encodeEmblem(club.emblem) }
+      view
+        ? { id: view.id, name: view.name, jacket: view.jacket, emblem: encodeEmblem(view.emblem) }
         : undefined,
     );
+    const peer = this.room.online(id);
+    if (peer) this.event(peer, { t: "club", club: view });
+    await this.reload(id, model, "applicants");
   }
 
   /**
-   * After any club change: members who joined or left get their new club (or none), every
-   * current member the club as it now stands, officers the applicant list, and map rooms the
-   * tags.
+   * In the player's lane: applies a view of `clubId` when the player's own fresh read says it
+   * still belongs there and the view already holds it, clears the club when it belongs nowhere,
+   * and otherwise leaves the model to the task of the club it now belongs to.
    */
-  private async clubChanged(change: ClubChange): Promise<void> {
-    const view = change.gone ? null : await this.social.clubs.view(change.club);
-    const inClub = new Set(view?.members.map((m) => m.id) ?? []);
-    for (const id of change.moved ?? []) {
-      if (inClub.has(id)) continue;
-      const online = this.state.get(id);
-      if (online) online.club = undefined;
-      this.indexClub(id, undefined);
-      this.setTag(id, null);
-      const peer = this.room.online(id);
-      if (peer) {
-        this.event(peer, { t: "club", club: null });
-        this.event(peer, { t: "applicants", list: [] });
+  private async applyClub(
+    id: string,
+    model: Model,
+    clubId: number,
+    view: ClubView | null,
+  ): Promise<void> {
+    const membership = await this.social.clubs.membership(this.social.db, id);
+    if (!membership) {
+      if (model.club) await this.setClub(id, model, null, undefined);
+      return;
+    }
+    if (membership.club !== clubId) return;
+    const me = view?.members.find((m) => m.id === id);
+    if (view && me) await this.setClub(id, model, view, me.rank);
+  }
+
+  /**
+   * After any club change, in the club's lane: one read of the club as it now stands, handed to
+   * the lane of everyone it may concern: who moved, who is in it, and who the index still lists.
+   */
+  private clubChanged(change: ClubChange): Promise<void> {
+    return this.clubs.run(String(change.club), async () => {
+      try {
+        const view = change.gone ? null : await this.social.clubs.view(change.club);
+        const concerned = new Set([
+          ...(change.moved ?? []),
+          ...(view?.members.map((m) => m.id) ?? []),
+          ...(this.clubOnline.get(change.club) ?? []),
+        ]);
+        for (const id of concerned) {
+          if (this.state.has(id)) {
+            await this.inLane(id, (model) => this.applyClub(id, model, change.club, view));
+          }
+        }
+      } catch (error) {
+        console.error(`club ${change.club} notice failed: ${describeError(error)}`);
       }
-    }
-    if (!view) return;
-    const applicants = view.members.some((m) => m.rank !== "member" && this.room.online(m.id))
-      ? await this.social.clubs.applicantsOf(view.id)
-      : [];
-    for (const m of view.members) {
-      this.setTag(m.id, view);
-      const online = this.state.get(m.id);
-      if (!online) continue;
-      const was = online.club?.rank;
-      online.club = { id: view.id, rank: m.rank };
-      this.indexClub(m.id, view.id);
-      const peer = this.room.online(m.id);
-      if (!peer) continue;
-      this.event(peer, { t: "club", club: view });
-      if (m.rank !== "member") this.event(peer, { t: "applicants", list: applicants });
-      else if (was !== undefined && was !== "member")
-        this.event(peer, { t: "applicants", list: [] });
-    }
+    });
   }
 
+  /** Officers of the club read its applicants again. */
   private async pushApplicants(clubId: number): Promise<void> {
-    const officers = [...(this.clubOnline.get(clubId) ?? [])].filter(
-      (id) => this.state.get(id)?.club?.rank !== "member",
-    );
-    if (officers.length === 0) return;
-    const list = await this.social.clubs.applicantsOf(clubId);
-    for (const id of officers) {
-      const peer = this.room.online(id);
-      if (peer) this.event(peer, { t: "applicants", list });
+    for (const id of [...(this.clubOnline.get(clubId) ?? [])]) {
+      await this.inLane(id, async (model) => {
+        if (model.club?.id === clubId) await this.reload(id, model, "applicants");
+      });
     }
-  }
-
-  private async pushApplications(id: string): Promise<void> {
-    const peer = this.room.online(id);
-    if (peer) {
-      this.event(peer, { t: "applications", list: await this.social.clubs.applicationsOf(id) });
-    }
-  }
-
-  private async pushClubInvites(id: string): Promise<void> {
-    const peer = this.room.online(id);
-    if (peer) this.event(peer, { t: "clubInvites", list: await this.social.clubs.invitesOf(id) });
   }
 
   /** Credits a minute of member activity to each club and tells its online members. */
@@ -661,16 +746,22 @@ export class SocialHub<P extends Peer> {
       if (club !== undefined) byClub.set(club, (byClub.get(club) ?? 0) + exp);
     }
     for (const [club, exp] of byClub) {
-      try {
-        const now = await this.social.clubs.addExp(club, exp);
-        if (!now) continue;
-        for (const id of this.clubOnline.get(club) ?? []) {
-          const peer = this.room.online(id);
-          if (peer) this.event(peer, { t: "clubExp", level: now.level, exp: now.exp });
+      await this.clubs.run(String(club), async () => {
+        try {
+          const total = await this.social.clubs.addExp(club, exp);
+          if (!total) return;
+          for (const id of [...(this.clubOnline.get(club) ?? [])]) {
+            await this.inLane(id, async (model) => {
+              if (model.club?.id !== club) return;
+              model.club = { ...model.club, level: total.level, exp: total.exp };
+              const peer = this.room.online(id);
+              if (peer) this.event(peer, { t: "clubExp", level: total.level, exp: total.exp });
+            });
+          }
+        } catch (error) {
+          console.error(`club exp failed: ${describeError(error)}`);
         }
-      } catch (error) {
-        console.error(`club exp failed: ${describeError(error)}`);
-      }
+      });
     }
   }
 
@@ -685,13 +776,18 @@ export class SocialHub<P extends Peer> {
     return this.room.online(id) ? (places.get(id)?.roomId ?? "") : "";
   }
 
-  private sendSnapshot(peer: P, loaded: Loaded): void {
+  private sendSnapshot(peer: P, model: Model): void {
     const id = peer.characterId;
     const s: SocialSnapshot = {
-      ...loaded.snapshot,
-      friends: loaded.snapshot.friends.map((f) => ({ ...f, room: this.roomOf(f.id) })),
+      friends: [...model.friends.values()].map((f) => ({ ...f, room: this.roomOf(f.id) })),
+      requests: model.requests,
+      blocks: [...model.blocks.values()],
       party: parties.view(id),
       partyInvites: parties.invitesOf(id, this.social.now()),
+      club: model.club,
+      clubInvites: model.clubInvites,
+      applications: model.applications,
+      applicants: model.applicants,
     };
     this.event(peer, { t: "all", s });
   }
