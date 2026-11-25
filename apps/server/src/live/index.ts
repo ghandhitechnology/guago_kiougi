@@ -620,7 +620,9 @@ export function createLive(db: Db, o: LiveOptions) {
       if (club) clubActivity.add(characterId, club);
       if (kind === "daily" && dailyIds(Number(day)).includes(quest)) {
         background("streak", async () => {
-          const r = await run(characterId, `board-day:${day}`, "live.boardDay", {
+          // One id per claim: the board is full only at the last one, and the operation is
+          // idempotent by state (`board_streak_day`), so the others change nothing.
+          const r = await run(characterId, `board-day:${quest}`, "live.boardDay", {
             day: Number(day),
           });
           notify(characterId, r);

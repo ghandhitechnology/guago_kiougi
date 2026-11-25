@@ -418,3 +418,32 @@ describe("admin route", () => {
     expect((await call(off, { cmd: "state" }, { headers: bearer })).status).toBe(404);
   });
 });
+
+describe("개근상", () => {
+  it("a full daily board, claimed one notice at a time, counts toward the streak", async () => {
+    const w = await world();
+    const c = await character(w);
+    const day0 = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    for (const [n, day] of [day0, day0 + 1].entries()) {
+      await w.live.board.ensure(c.id);
+      for (let i = 0; i < 5; i++) {
+        const quest = `daily:${day}:${i}`;
+        await complete(w, c.id, quest);
+        const r = await w.economy.executor.execute(c.id, randomUUID(), "quest.claim", { quest });
+        expect(r.ok).toBe(true);
+      }
+      await until(async () => (await row(c.id)).board_streak === n + 1);
+      expect((await row(c.id)).board_streak_day).toBe(day);
+      w.clock.step(DAY_MS);
+    }
+  });
+});
+
+/** Waits for background work to land (the streak runs after the claim commits). */
+async function until(check: () => Promise<boolean>, ms = 3000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
