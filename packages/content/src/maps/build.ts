@@ -300,6 +300,18 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
       portals,
       interactables,
       zones,
+      marks: Object.fromEntries(
+        Object.entries(src.marks ?? {}).map(([name, [tx, ty]]) => [
+          name,
+          { x: tx * TILE_SIZE + TILE_SIZE / 2, y: ty * TILE_SIZE + TILE_SIZE / 2 },
+        ]),
+      ),
+      npcs: (src.npcs ?? []).map((n) => ({
+        speaker: n.speaker,
+        x: n.tile[0] * TILE_SIZE + TILE_SIZE / 2,
+        y: n.tile[1] * TILE_SIZE + TILE_SIZE - 4,
+        facing: n.facing ?? "down",
+      })),
     },
     footprints,
   };
