@@ -1548,7 +1548,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       let nearest: { x: number; y: number; d: number } | undefined;
       let near = false;
       for (const p of this.world.players) {
-        if (!p.joined || this.pawns.get(p.id)?.leaving) continue;
+        // Only players: a body the server runs (an opening senior) has no pawn here.
+        const pawn = this.pawns.get(p.id);
+        if (!p.joined || !pawn || pawn.leaving) continue;
         const d = Math.hypot(p.x - npc.x, p.y - npc.y);
         if (d <= BARK_PX) near = true;
         if (d <= NOTICE_PX && (!nearest || d < nearest.d)) nearest = { x: p.x, y: p.y, d };
