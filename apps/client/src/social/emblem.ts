@@ -104,6 +104,20 @@ export function emblemTexture(scene: Phaser.Scene, emblem: Emblem, size: EmblemS
   return key;
 }
 
+/** One large symbol alone in a colour, for the editor's symbol squares. */
+export function symbolTexture(scene: Phaser.Scene, symbol: string, color: string): string {
+  const key = `emblem-symbol:${symbol}.${color}`;
+  if (scene.textures.exists(key)) return key;
+  const s = SIZES.l;
+  const canvas = document.createElement("canvas");
+  canvas.width = s.sym;
+  canvas.height = s.sym;
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+  paintFrame(scene, ctx, `${s.symbol}/${symbol}`, 0, 0, rampSwap(color));
+  scene.textures.addCanvas(key, canvas);
+  return key;
+}
+
 /** The hanging 과잠 in a jacket colour (a `jacket` slot option). */
 export function jacketTexture(scene: Phaser.Scene, jacket: string): string {
   const key = `jacket-hang:${jacket}`;

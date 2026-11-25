@@ -247,6 +247,7 @@ export const ko = {
   "club.applicants": "신청서",
   "club.invite": "초대",
   "club.back": "목록",
+  "club.design": "꾸미기",
 
   "jacket.color": "과잠 색",
   "jacket.shape": "모양",

@@ -9,6 +9,7 @@ import { worldView } from "../world/view.ts";
 import type { WorldLink } from "../world-link.ts";
 import { ask } from "./act.ts";
 import { type CardTarget, PlayerCard } from "./card.ts";
+import { clubTab } from "./club.ts";
 import { friendsTab } from "./friends.ts";
 import { PartyFrames } from "./party-frames.ts";
 import { openReport } from "./report.ts";
@@ -109,12 +110,11 @@ let registered = false;
 function registerSocialTabs(): void {
   if (registered) return;
   registered = true;
+  const card = (target: { id: string; name: string }) => current?.card.open(target);
   registerMenuTab(
-    friendsTab(() => current?.link, {
-      whisper: (name) => current?.whisper(name),
-      card: (target) => current?.card.open(target),
-    }),
+    friendsTab(() => current?.link, { whisper: (name) => current?.whisper(name), card }),
   );
+  registerMenuTab(clubTab(() => current?.link, { card }));
 }
 
 /**
