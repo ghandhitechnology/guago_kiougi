@@ -177,7 +177,7 @@ export function indexedPng(
     }
   }
   const keys = [...seen.keys()].sort((a, b) => (a & 255) - (b & 255) || a - b);
-  keys.forEach((k, n) => seen.set(k, n));
+  for (const [n, k] of keys.entries()) seen.set(k, n);
   const depth = keys.length <= 2 ? 1 : keys.length <= 4 ? 2 : keys.length <= 16 ? 4 : 8;
   const perByte = 8 / depth;
   const stride = Math.ceil(w / perByte);
