@@ -1,9 +1,15 @@
-import { TICK_MS } from "./constants.ts";
+import { type CollisionMap, isSolidTile, pushOut } from "./collision.ts";
+import { TICK_MS, TILE_SIZE } from "./constants.ts";
+import {
+  type Body,
+  Facing,
+  type MoveInput,
+  moveBody,
+  PLAYER_SPEED,
+  slide,
+  snap,
+} from "./movement.ts";
 import { nextRandom } from "./rng.ts";
-
-/** Which way an entity looks. Sprites authored facing right flip for `Left`. */
-export const Facing = { Down: 0, Up: 1, Left: 2, Right: 3 } as const;
-export type Facing = (typeof Facing)[keyof typeof Facing];
 
 /** Collider radius of a small monster, in pixels. */
 export const MONSTER_RADIUS = 6;
@@ -23,13 +29,24 @@ export interface SimMonster {
   readonly timer: number;
 }
 
+export interface SimPlayer extends Body {
+  /** Session id. */
+  readonly id: string;
+  /** Sequence number of the last input applied. */
+  readonly seq: number;
+  /** Walking speed in pixels per second. */
+  readonly speed: number;
+}
+
 export interface SimWorld {
   readonly tick: number;
   readonly rng: number;
-  /** Walkable area in world pixels. */
+  /** Map size in world pixels. */
   readonly width: number;
   readonly height: number;
   readonly monsters: readonly SimMonster[];
+  /** In join order, which is also the order they step in. */
+  readonly players: readonly SimPlayer[];
 }
 
 export interface SpawnGroup {
@@ -37,28 +54,60 @@ export interface SpawnGroup {
   readonly count: number;
 }
 
+/** Inputs each player spends this tick, by player id, oldest first. */
+export type TickInputs = ReadonlyMap<string, readonly MoveInput[]>;
+
 const EDGE = 16;
 
+function roller(seed: number): { roll: () => number; state: () => number } {
+  let rng = seed >>> 0;
+  return {
+    roll: () => {
+      const [v, n] = nextRandom(rng);
+      rng = n;
+      return v;
+    },
+    state: () => rng,
+  };
+}
+
+function solidAt(map: CollisionMap, x: number, y: number, r: number): boolean {
+  const T = TILE_SIZE;
+  for (const [dx, dy] of [
+    [0, 0],
+    [-r, 0],
+    [r, 0],
+    [0, -r],
+    [0, r],
+  ] as const) {
+    if (isSolidTile(map, Math.floor((x + dx) / T), Math.floor((y + dy) / T))) return true;
+  }
+  return false;
+}
+
 export function createWorld(
-  width: number,
-  height: number,
+  map: CollisionMap,
   spawns: readonly SpawnGroup[],
   seed: number,
 ): SimWorld {
-  let rng = seed >>> 0;
-  const roll = (): number => {
-    const [v, n] = nextRandom(rng);
-    rng = n;
-    return v;
-  };
+  const width = map.width * TILE_SIZE;
+  const height = map.height * TILE_SIZE;
+  const { roll, state } = roller(seed);
   const monsters: SimMonster[] = [];
   for (const group of spawns) {
     for (let i = 0; i < group.count; i++) {
+      let x = 0;
+      let y = 0;
+      for (let tries = 0; tries < 32; tries++) {
+        x = EDGE + roll() * (width - 2 * EDGE);
+        y = EDGE + roll() * (height - 2 * EDGE);
+        if (!solidAt(map, x, y, MONSTER_RADIUS)) break;
+      }
       monsters.push({
         id: monsters.length + 1,
         kind: group.kind,
-        x: EDGE + roll() * (width - 2 * EDGE),
-        y: EDGE + roll() * (height - 2 * EDGE),
+        x,
+        y,
         facing: roll() < 0.5 ? Facing.Left : Facing.Right,
         moving: false,
         heading: 0,
@@ -66,19 +115,44 @@ export function createWorld(
       });
     }
   }
-  return { tick: 0, rng, width, height, monsters };
+  return { tick: 0, rng: state(), width, height, monsters, players: [] };
 }
 
-/** Advances the world one fixed tick. Pure: the input is left untouched. */
-export function step(world: SimWorld): SimWorld {
-  let rng = world.rng;
-  const roll = (): number => {
-    const [v, n] = nextRandom(rng);
-    rng = n;
-    return v;
+/** Adds a player standing at (x, y), facing the camera. */
+export function addPlayer(world: SimWorld, id: string, x: number, y: number): SimWorld {
+  const player: SimPlayer = {
+    id,
+    x: snap(x),
+    y: snap(y),
+    facing: Facing.Down,
+    seq: 0,
+    speed: PLAYER_SPEED,
   };
-  const dist = (WANDER_SPEED * TICK_MS) / 1000;
+  return { ...world, players: [...world.players.filter((p) => p.id !== id), player] };
+}
 
+export function removePlayer(world: SimWorld, id: string): SimWorld {
+  return { ...world, players: world.players.filter((p) => p.id !== id) };
+}
+
+/** Applies one player's inputs for this tick, one movement step per input. */
+export function stepPlayer(
+  map: CollisionMap,
+  player: SimPlayer,
+  inputs: readonly MoveInput[],
+): SimPlayer {
+  let body: Body = player;
+  let seq = player.seq;
+  for (const input of inputs) {
+    body = moveBody(map, body, input.mx, input.my, player.speed);
+    seq = input.seq;
+  }
+  if (body === player && seq === player.seq) return player;
+  return { ...player, x: body.x, y: body.y, facing: body.facing, seq };
+}
+
+function stepMonsters(map: CollisionMap, world: SimWorld, roll: () => number): SimMonster[] {
+  const dist = (WANDER_SPEED * TICK_MS) / 1000;
   const moved = world.monsters.map((m) => {
     let { x, y, facing, moving, heading, timer } = m;
     if (--timer <= 0) {
@@ -94,8 +168,9 @@ export function step(world: SimWorld): SimWorld {
     }
     if (moving) {
       const dx = Math.cos(heading);
-      x += dx * dist;
-      y += Math.sin(heading) * dist;
+      const p = slide(map, x, y, dx * dist, Math.sin(heading) * dist, MONSTER_RADIUS);
+      x = p.x;
+      y = p.y;
       if (dx > 0.2) facing = Facing.Right;
       else if (dx < -0.2) facing = Facing.Left;
     }
@@ -110,7 +185,7 @@ export function step(world: SimWorld): SimWorld {
       const b = moved[j] as SimMonster;
       let dx = b.x - a.x;
       let dy = b.y - a.y;
-      const d = Math.hypot(dx, dy);
+      const d = Math.sqrt(dx * dx + dy * dy);
       if (d >= min) continue;
       if (d === 0) {
         dx = 1;
@@ -125,10 +200,20 @@ export function step(world: SimWorld): SimWorld {
     }
   }
 
-  const monsters = moved.map((m) => ({
-    ...m,
-    x: Math.min(world.width - EDGE, Math.max(EDGE, m.x)),
-    y: Math.min(world.height - EDGE, Math.max(EDGE, m.y)),
-  }));
-  return { ...world, tick: world.tick + 1, rng, monsters };
+  // Separation can shove a monster into a wall; walls win.
+  return moved.map((m) => {
+    const p = pushOut(map, m.x, m.y, MONSTER_RADIUS);
+    return p.hit ? { ...m, x: p.x, y: p.y } : m;
+  });
+}
+
+/**
+ * Advances the world one fixed tick: every player spends this tick's inputs in join order, then
+ * the monsters wander. Pure: the world given is left untouched.
+ */
+export function step(world: SimWorld, map: CollisionMap, inputs?: TickInputs): SimWorld {
+  const { roll, state } = roller(world.rng);
+  const players = world.players.map((p) => stepPlayer(map, p, inputs?.get(p.id) ?? []));
+  const monsters = stepMonsters(map, world, roll);
+  return { ...world, tick: world.tick + 1, rng: state(), monsters, players };
 }
