@@ -264,9 +264,7 @@ function zones(b: Boss, w: FightWorld): void {
   const need = Math.min(6, Math.max(1, Math.ceil(joined * 0.1)));
   b.n[HELD] = inside >= need ? (b.n[HELD] as number) + 1 : Math.max(0, (b.n[HELD] as number) - 2);
   if ((b.n[HELD] as number) < HOLD_TICKS) return;
-  for (const p of w.players) {
-    if (p.joined && !p.down && inZone(p, c.x, c.y)) b.complete(w, ObjectiveKind.Hold, p);
-  }
+  b.completeHeld(w, ObjectiveKind.Hold, (p) => inZone(p, c.x, c.y));
   b.n[NEXT_ZONE] = tick;
 }
 

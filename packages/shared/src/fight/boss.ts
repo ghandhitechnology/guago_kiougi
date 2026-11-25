@@ -286,12 +286,32 @@ export class Boss implements BossHooks {
 
   /** An objective done: the shield loses a fixed share, the same whoever did it. */
   complete(w: FightWorld, kind: number, by: Player | null, entity = 0): void {
+    this.credit(w, kind, by, entity);
+    this.strips++;
+    if (!this.external) this.shield = Math.max(0, this.shield - RAID.shieldPerObjective);
+  }
+
+  /**
+   * A held objective done (a zone held, a circle filled): one completion, one strip, and a credit
+   * to every player standing in it, so a crowd strips no more than one player would.
+   */
+  completeHeld(w: FightWorld, kind: number, inside: (p: Player) => boolean): void {
+    let first = true;
+    for (const p of w.players) {
+      if (!p.joined || p.down || !inside(p)) continue;
+      if (first) this.complete(w, kind, p);
+      else this.credit(w, kind, p);
+      first = false;
+    }
+    if (first) this.complete(w, kind, null);
+  }
+
+  /** A player took part in an objective already completed: the credit, no strip. */
+  credit(w: FightWorld, kind: number, by: Player | null, entity = 0): void {
     const ev = w.event(Ev.Objective);
     ev.a = by ? by.index : -1;
     ev.c = entity;
     ev.d = kind;
-    this.strips++;
-    if (!this.external) this.shield = Math.max(0, this.shield - RAID.shieldPerObjective);
   }
 
   // The step's hooks --------------------------------------------------------------------------

@@ -195,9 +195,7 @@ function fillRing(b: Boss, w: FightWorld, filled: number, cx: number, cy: number
   b.n[FILL] = 0;
   b.n[RINGS_FILLED] = filled + 1;
   b.cue(w, "ring-filled", -1, cx, cy);
-  for (const p of w.players) {
-    if (p.joined && !p.down && inRing(p, cx, cy, r)) b.complete(w, ObjectiveKind.Hold, p);
-  }
+  b.completeHeld(w, ObjectiveKind.Hold, (p) => inRing(p, cx, cy, r));
   if (filled + 1 >= RINGS.length) {
     b.n[LIMIT_UNTIL] = w.tick + LIMIT_TICKS;
     act(b, w, MState.Recover, LIMIT_TICKS);
