@@ -6,8 +6,13 @@
  * per match, off the tick.
  *
  * Requests follow the social shape: one `done` or one `refused` each, changes pushed on `duel`.
- * A block either way keeps two players apart: a blocked player's challenge is held silently and
- * lapses, and the queue never puts them in one match.
+ * A block either way keeps two players apart: a blocked player's challenge is answered like any
+ * other and lapses, never stored against the target, and the queue never puts them in one match.
+ *
+ * A match is a closed bracket (`bracket.ts`): each fighter's state is taken once when the match
+ * is made, in the room it stands in, and put back once through `exit`, whichever way it leaves:
+ * a result, a concession, a drop, a logout, a door, a closing room or a deadline. The origin is
+ * also kept in the database while the match lasts (`origins.ts`) so a crash cannot strand anyone.
  */
 
 import { matchMaker } from "@colyseus/core";
@@ -17,6 +22,7 @@ import {
   DUEL_CHALLENGES_IN_CAP,
   DUEL_FLOORS_MAX,
   DUEL_FORFEIT_WIN_SECONDS,
+  DUEL_PAIR_WINS_DAILY,
   DUEL_QUEUE_LOCK_SECONDS,
   duelMarks,
 } from "@guago/content";
@@ -38,13 +44,14 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
-import { guarded } from "../background.ts";
+import { background, guarded } from "../background.ts";
 import { Buckets } from "../economy/buckets.ts";
-import type { MapRoom } from "../map-room.ts";
 import { parties } from "../parties.ts";
 import { places } from "../places.ts";
 import { HOME_MAP } from "../world-maps.ts";
-import type { FloorEvents, FloorHost, FloorMatch } from "./floor.ts";
+import type { Before } from "./bracket.ts";
+import type { FloorEvents, FloorHost, FloorMatch, Leaving } from "./floor.ts";
+import { type DuelOrigins, memoryOrigins } from "./origins.ts";
 import type { DuelRecords } from "./records.ts";
 
 /** What the WorldRoom lends, as it does to trading. */
@@ -59,11 +66,33 @@ export interface DuelHost {
   blocked(owner: string, other: string): boolean;
 }
 
+/** Why a character may not be pulled into a duel from where it stands, or `ok`. */
+export type DuelReadiness = "ok" | "duel_not_here" | "duel_in_combat";
+
+/** What the hub asks of a map room (`MapRoom` lends it; tests lend their own). */
+export interface DuelRoom {
+  readonly roomId: string;
+  readonly mapId: string;
+  readonly channel: number;
+  duelReady(characterId: string): DuelReadiness;
+  /** Whether `n` fighters on their way still fit. */
+  seatsFor(n: number): boolean;
+  /** The character's state as the bracket keeps it, if it stands here. */
+  snapshot(characterId: string): Before | undefined;
+  /** Its own kit, level, mode and party, then `before`'s numbers, on its body here. */
+  restoreFromDuel(characterId: string, before: Before): boolean;
+  sendTo(
+    characterId: string,
+    to: { map: string; x: number; y: number; roomId?: string; via: string },
+  ): boolean;
+  teleport(characterId: string, x: number, y: number): boolean;
+}
+
 /** How the hub reaches map rooms: the floors register here, fighters are moved through rooms. */
 export interface DuelRooms {
   /** A new channel of `map` for a floor when every floor is busy; resolves once it registered. */
   openChannel(map: string): Promise<void>;
-  room(roomId: string): MapRoom | undefined;
+  room(roomId: string): DuelRoom | undefined;
 }
 
 type Answer = { type: string; body: unknown };
@@ -81,7 +110,10 @@ interface Challenge {
   readonly from: string;
   readonly to: string;
   readonly expiresAt: number;
-  /** The target blocked the challenger: never shown to the target, it simply lapses. */
+  /**
+   * The target blocked the challenger: the challenger sees an ordinary challenge that lapses;
+   * it is never stored against the target, never counted in its inbox, never shown to it.
+   */
   readonly silent: boolean;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -102,19 +134,15 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-interface Origin {
-  readonly map: string;
-  readonly roomId: string;
-  readonly x: number;
-  readonly y: number;
-}
-
 interface Match extends FloorMatch {
   readonly sides: [string[], string[]];
   floor: FloorHost | null;
-  readonly origins: Map<string, Origin>;
-  /** Sent home already (conceded): not sent again at the end. */
-  readonly home: Set<string>;
+  /** Each fighter as it was the instant before the match. */
+  readonly before: Map<string, Before>;
+  /** Fighters that have left the match: put back already, never again. */
+  readonly exited: Set<string>;
+  /** The queue entries it was made from, to put back at the front if no floor takes it. */
+  readonly entries: readonly Entry[];
 }
 
 /** The map every floor is on. */
@@ -123,11 +151,26 @@ export const ARENA_MAP = "saebyeok";
 export interface DuelingOptions {
   records: DuelRecords;
   rooms: DuelRooms;
+  /** Where fighters stood, kept while their match lasts; in memory without a database. */
+  origins?: DuelOrigins;
   /** Matchmaking runs this often. */
   everyMs?: number;
+  /** Checks the hub's invariants on every sweep and logs any break (local development). */
+  strict?: boolean;
+  now?: () => number;
 }
 
-export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions) {
+/** Characters put back from a match but not yet home are remembered this long. */
+const PENDING_MS = 15 * 60_000;
+
+export function createDueling({
+  records,
+  rooms,
+  origins = memoryOrigins(),
+  everyMs = 1000,
+  strict = false,
+  now = Date.now,
+}: DuelingOptions) {
   let host: DuelHost | undefined;
   let nextId = 1;
   const buckets = new Buckets();
@@ -141,6 +184,10 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
   const matches = new Map<number, Match>();
   const inMatch = new Map<string, Match>();
   const locks = new Map<string, number>();
+  /** Put back from a match while away from the room it came from: made good where it next sits. */
+  const pending = new Map<string, { before: Before; at: number }>();
+  /** Wins counted today by lineup (winners, then losers, sorted), for the per-pair cap. */
+  const pairWins = new Map<string, number>();
   let sweep: ReturnType<typeof setInterval> | undefined;
   let opening: Promise<void> | null = null;
 
@@ -150,19 +197,18 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
   const blockedEither = (a: string, b: string) =>
     (host?.blocked(a, b) ?? false) || (host?.blocked(b, a) ?? false);
 
-  /** The map room a character stands in, if any. */
-  function roomOf(id: string): MapRoom | undefined {
+  /**
+   * Whether a character may be pulled into a duel from where it stands right now: seated, on its
+   * feet, out of a fight, and not on a hunting field's open ground, in a 위험 구역, on a boss
+   * floor or in the 집 (`MapRoom.duelReady`).
+   */
+  function readiness(id: string): DuelReadiness {
     const place = places.get(id);
-    return place ? rooms.room(place.roomId) : undefined;
-  }
-
-  /** Whether a character may be pulled into a duel from where it stands right now. */
-  function canDuelHere(id: string): boolean {
-    const place = places.get(id);
-    if (!place || place.mapId === HOME_MAP) return false;
+    if (!place || place.mapId === HOME_MAP) return "duel_not_here";
     const room = rooms.room(place.roomId);
-    return room !== undefined && room.duelReady(id);
+    return room ? room.duelReady(id) : "duel_not_here";
   }
+  const canDuelHere = (id: string) => readiness(id) === "ok";
 
   function busy(id: string): boolean {
     return outgoing.has(id) || queued.has(id) || inPending.has(id) || inMatch.has(id);
@@ -182,33 +228,40 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
     if (!c.silent) push(c.to, { t: "challengeEnded", id: c.id, why });
   }
 
+  /** Challenges waiting on a player: hidden ones from players it blocked are not among them. */
   function incomingTo(id: string): Challenge[] {
-    return [...challenges.values()].filter((c) => c.to === id);
+    return [...challenges.values()].filter((c) => c.to === id && !c.silent);
   }
 
   function challenge(me: string, m: DuelRequest<"duel.challenge">): Answer {
     const type = "duel.challenge";
     const target = m.id;
     if (target === me) return refused(type, m.n, "target_self");
-    if (!online(target)) return refused(type, m.n, "target_offline");
     if (busy(me)) return refused(type, m.n, "duel_busy");
-    if (host?.blocked(me, target)) return refused(type, m.n, "blocked");
-    if (!canDuelHere(me)) return refused(type, m.n, "duel_not_here");
-    if (
-      inPending.has(target) ||
-      inMatch.has(target) ||
-      incomingTo(target).length >= DUEL_CHALLENGES_IN_CAP
-    ) {
-      return refused(type, m.n, "duel_target_busy");
+    const here = readiness(me);
+    if (here !== "ok") return refused(type, m.n, here);
+    // A target that blocked the challenger tells it nothing, not even whether it is online or
+    // busy: the challenge is answered and lapses like any unanswered one.
+    const silent = online(target) && (host?.blocked(target, me) ?? false);
+    if (!silent) {
+      if (!online(target)) return refused(type, m.n, "target_offline");
+      if (host?.blocked(me, target)) return refused(type, m.n, "blocked");
+      if (
+        inPending.has(target) ||
+        inMatch.has(target) ||
+        incomingTo(target).length >= DUEL_CHALLENGES_IN_CAP
+      ) {
+        return refused(type, m.n, "duel_target_busy");
+      }
     }
     const id = nextId++;
-    const expiresAt = Date.now() + DUEL_CHALLENGE_SECONDS * 1000;
+    const expiresAt = now() + DUEL_CHALLENGE_SECONDS * 1000;
     const c: Challenge = {
       id,
       from: me,
       to: target,
       expiresAt,
-      silent: host?.blocked(target, me) ?? false,
+      silent,
       timer: setTimeout(
         guarded("duel challenge expiry", () => endChallenge(c, "expired")),
         DUEL_CHALLENGE_SECONDS * 1000,
@@ -236,10 +289,13 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       endChallenge(c, "expired");
       return refused(type, m.n, "duel_no_challenge");
     }
-    if (!canDuelHere(me) || !canDuelHere(c.from)) return refused(type, m.n, "duel_not_here");
-    leaveQueue(me, "found");
+    const mine = readiness(me);
+    if (mine !== "ok") return refused(type, m.n, mine);
+    if (!canDuelHere(c.from)) return refused(type, m.n, "duel_not_here");
+    // Accepting takes the player out of the queue, and its party's entry with it.
+    leaveQueue(me, "left");
     endChallenge(c, "accepted");
-    void startMatch("1v1", [[c.from], [me]]);
+    background("duel start", startMatch("1v1", [[c.from], [me]], []));
     return done(type, m.n);
   }
 
@@ -274,7 +330,7 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
   function queue(me: string, m: DuelRequest<"duel.queue">): Answer {
     const type = "duel.queue";
     if (busy(me)) return refused(type, m.n, "duel_busy");
-    const lockedFor = (locks.get(me) ?? 0) - Date.now();
+    const lockedFor = (locks.get(me) ?? 0) - now();
     if (lockedFor > 0) return refused(type, m.n, "duel_queue_locked", lockedFor);
     let members = [me];
     const party = parties.of(me);
@@ -284,10 +340,11 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       members = [...party.members];
     }
     for (const id of members) {
-      if (id !== me && (!online(id) || busy(id) || (locks.get(id) ?? 0) > Date.now())) {
+      if (id !== me && (!online(id) || busy(id) || (locks.get(id) ?? 0) > now())) {
         return refused(type, m.n, "duel_target_busy");
       }
-      if (!canDuelHere(id)) return refused(type, m.n, "duel_not_here");
+      const here = readiness(id);
+      if (here !== "ok") return refused(type, m.n, id === me ? here : "duel_target_busy");
     }
     for (let i = 0; i < members.length; i++) {
       for (let j = i + 1; j < members.length; j++) {
@@ -295,7 +352,7 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
           return refused(type, m.n, "blocked");
       }
     }
-    enqueue({ mode: m.mode, members, since: Date.now() });
+    enqueue({ mode: m.mode, members, since: now() });
     matchmake();
     return done(type, m.n);
   }
@@ -371,7 +428,7 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
 
   function found(mode: DuelMode, a: Entry[], b: Entry[]): void {
     const id = nextId++;
-    const expiresAt = Date.now() + DUEL_ACCEPT_SECONDS * 1000;
+    const expiresAt = now() + DUEL_ACCEPT_SECONDS * 1000;
     const p: Pending = {
       id,
       mode,
@@ -396,8 +453,10 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
   }
 
   /**
-   * A ready check that will not be played. Whoever refused or let it lapse may not queue for a
-   * while; every entry whose members all accepted goes back to the front of the queue.
+   * A ready check that will not be played. Only whoever caused it may not queue for a while: the
+   * one who refused, the one who left, those who cannot duel from where they stand, or, when the
+   * window ran out, those who never answered. Every entry whose members are all still good goes
+   * back to the front of the queue.
    */
   function cancelPending(
     p: Pending,
@@ -412,11 +471,15 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       inPending.delete(id);
       push(id, { t: "cancelled", id: p.id, why });
     }
-    const until = Date.now() + DUEL_QUEUE_LOCK_SECONDS * 1000;
-    const blame = why === "refused" ? (by ? [by] : []) : all.filter((id) => !p.accepted.has(id));
+    const until = now() + DUEL_QUEUE_LOCK_SECONDS * 1000;
+    const blame = new Set<string>(by ? [by] : []);
+    if (why === "lapsed") for (const id of all) if (!p.accepted.has(id)) blame.add(id);
+    if (why === "offline") for (const id of all) if (!online(id) || !canDuelHere(id)) blame.add(id);
     for (const id of blame) locks.set(id, until);
     for (const e of [...p.entries].reverse()) {
-      if (e.members.every((id) => p.accepted.has(id) && online(id))) enqueue(e, true);
+      const good = e.members.every((id) => !blame.has(id) && online(id));
+      const answered = why !== "lapsed" || e.members.every((id) => p.accepted.has(id));
+      if (good && answered) enqueue(e, true);
     }
     matchmake();
   }
@@ -435,7 +498,7 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       clearTimeout(p.timer);
       pendings.delete(p.id);
       for (const id of all) inPending.delete(id);
-      void startMatch(p.mode, p.sides);
+      background("duel start", startMatch(p.mode, p.sides, p.entries));
     }
     return done("duel.ready", m.n);
   }
@@ -484,7 +547,11 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
     return f;
   }
 
-  async function startMatch(mode: DuelMode, sides: [string[], string[]]): Promise<void> {
+  async function startMatch(
+    mode: DuelMode,
+    sides: [string[], string[]],
+    entries: readonly Entry[],
+  ): Promise<void> {
     const all = [...sides[0], ...sides[1]];
     const id = nextId++;
     const match: Match = {
@@ -493,8 +560,9 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       sides,
       names: new Map(all.map((x) => [x, host?.member(x)?.name ?? ""])),
       floor: null,
-      origins: new Map(),
-      home: new Set(),
+      before: new Map(),
+      exited: new Set(),
+      entries,
     };
     matches.set(id, match);
     for (const x of all) inMatch.set(x, match);
@@ -505,16 +573,21 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
         inMatch.delete(x);
         push(x, { t: "cancelled", id, why: "no_floor" });
       }
+      // A queued match nobody could host goes back to the front of the queue, whole.
+      for (const e of [...entries].reverse()) {
+        if (e.members.every((x) => online(x) && !busy(x))) enqueue(e, true);
+      }
       return;
     }
     match.floor = floor;
-    const floorRoom = rooms.room(floorRoomId(floor));
+    const floorId = floorRoomId(floor);
+    const floorRoom = rooms.room(floorId);
     const view = sidesOf(match);
     const marks = duelMarks(floor.arena, mode);
-    // Everyone is checked before anyone is placed: an arrival can start the match, and a fighter
-    // looked at after that would already be armed.
+    // Everyone is checked and taken before anyone is placed: an arrival can start the match, and
+    // a fighter looked at after that would already be armed.
     const here: string[] = [];
-    const away: { x: string; from: MapRoom; mark: { x: number; y: number } | undefined }[] = [];
+    const away: { x: string; from: DuelRoom; mark: { x: number; y: number } | undefined }[] = [];
     sides.forEach((list, i) => {
       list.forEach((x, k) => {
         const team = i + 1;
@@ -528,29 +601,44 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
           sides: view,
         });
         const place = places.get(x);
-        const at = place?.at();
         const from = place ? rooms.room(place.roomId) : undefined;
-        // Knocked out, sent home or between maps since accepting: out, never carried off.
-        if (!place || !at || !from || place.mapId === HOME_MAP || !from.duelReady(x)) {
-          floor.forfeit(x);
+        // Knocked out, in a fight, sent home or between maps since accepting: never carried off.
+        const before = from && readiness(x) === "ok" ? from.snapshot(x) : undefined;
+        if (!from || !before) {
+          exit(match, x, "absent");
           return;
         }
-        match.origins.set(x, { map: place.mapId, roomId: place.roomId, x: at.x, y: at.y });
+        pending.delete(x);
+        match.before.set(x, before);
         if (from === floorRoom) here.push(x);
         else away.push({ x, from, mark: marks.filter((mk) => mk.team === team)[k] ?? marks[0] });
       });
     });
+    // The trip to the floor saves the floor as the character's place: keep the way back first.
+    try {
+      await origins.save(
+        away.map(({ x }) => {
+          const b = match.before.get(x) as Before;
+          return { characterId: x, map: b.map, x: b.x, y: b.y };
+        }),
+      );
+    } catch (error) {
+      console.error(`saving duel origins failed: ${String(error)}`);
+      for (const { x } of away) exit(match, x, "absent");
+      away.length = 0;
+    }
     for (const { x, from, mark } of away) {
+      if (match.exited.has(x)) continue;
       const sent = from.sendTo(x, {
         map: ARENA_MAP,
         x: mark?.x ?? 0,
         y: mark?.y ?? 0,
-        roomId: floorRoomId(floor),
+        roomId: floorId,
         via: "duel",
       });
-      if (!sent) floor.forfeit(x);
+      if (!sent) exit(match, x, "absent");
     }
-    for (const x of here) floor.seatedHere(x);
+    for (const x of here) if (!match.exited.has(x)) floor.seatedHere(x);
   }
 
   function floorRoomId(f: FloorHost): string {
@@ -558,25 +646,69 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
     return "";
   }
 
-  /** Puts a fighter back where it stood before the match, if it is still on the floor's room. */
-  function sendHome(match: Match, id: string): void {
-    if (match.home.has(id)) return;
-    match.home.add(id);
-    const origin = match.origins.get(id);
+  /**
+   * The one way out of a match. The fighter leaves the simulation, then is put back exactly as
+   * it was the instant before the match: its own kit, level, mode and party, health, shield,
+   * every cooldown, the dodge and an ally's buffs, and the spot it stood on. A body that is not
+   * standing anywhere is put back where it next sits down, and its place is written back now.
+   */
+  function exit(match: Match, id: string, how: Leaving | "concede" | "end"): void {
+    if (match.exited.has(id)) return;
+    match.exited.add(id);
+    if (inMatch.get(id) === match) inMatch.delete(id);
+    match.floor?.disarm(id);
+    const before = match.before.get(id);
+    if (before) bringBack(id, before, how);
+  }
+
+  function bringBack(id: string, before: Before, how: Leaving | "concede" | "end"): void {
     const place = places.get(id);
-    const floorId = match.floor ? floorRoomId(match.floor) : "";
-    if (!origin || !place || place.roomId !== floorId) return;
-    const room = rooms.room(place.roomId);
-    if (!room) return;
-    if (origin.roomId === place.roomId) room.teleport(id, origin.x, origin.y);
-    else
-      room.sendTo(id, {
-        map: origin.map,
-        x: origin.x,
-        y: origin.y,
-        roomId: origin.roomId,
-        via: "duel",
-      });
+    const room = place ? rooms.room(place.roomId) : undefined;
+    if (!place || !room || !room.restoreFromDuel(id, before)) {
+      // On the way to the floor, or gone: made good wherever it next sits, and its place now.
+      pending.set(id, { before, at: now() });
+      background("duel origin", origins.restore(id));
+      return;
+    }
+    if (how === "moving" || how === "gone") {
+      // A door or the school is taking it elsewhere, or its seat is going: the numbers are back
+      // on the body as it leaves; a logout's place is written back to where it stood.
+      if (how === "gone") {
+        pending.set(id, { before, at: now() });
+        background("duel origin", origins.restore(id));
+      } else background("duel origin", origins.forget(id));
+      return;
+    }
+    if (place.roomId === before.roomId) {
+      room.teleport(id, before.x, before.y);
+      background("duel origin", origins.forget(id));
+      return;
+    }
+    // Home is another room: the trip there finishes the restore when it sits down (`arrived`).
+    pending.set(id, { before, at: now() });
+    const sent = room.sendTo(id, {
+      map: before.map,
+      x: before.x,
+      y: before.y,
+      roomId: before.roomId,
+      via: "duel",
+    });
+    if (!sent) background("duel origin", origins.restore(id));
+  }
+
+  /** Whether a room is where a fighter came from: its channel, or its map when that is gone. */
+  function isHome(room: DuelRoom, before: Before): boolean {
+    return room.roomId === before.roomId || room.mapId === before.map;
+  }
+
+  /** Counts a win for the cap per lineup per day; false once the lineup has had its share. */
+  function countWin(winners: readonly string[], losers: readonly string[]): boolean {
+    const day = new Date(now() + 9 * 3_600_000).toISOString().slice(0, 10);
+    const key = `${day}|${[...winners].sort().join(",")}|${[...losers].sort().join(",")}`;
+    const n = pairWins.get(key) ?? 0;
+    if (n >= DUEL_PAIR_WINS_DAILY) return false;
+    pairWins.set(key, n + 1);
+    return true;
   }
 
   const floorEvents: FloorEvents = {
@@ -586,42 +718,79 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       const all = [...match.sides[0], ...match.sides[1]];
       for (const id of all) push(id, { t: "over", id: m.id, result });
       // Played by everyone in the match; won by the winning side's fighters who did not forfeit,
-      // and only when a round was fought out or the other side quit well into the fight: a
-      // concession before any real blow is no win to trade between friends.
+      // only when a round was fought out or the other side quit well into the fight, and only so
+      // many times a day against the same opponents, so the card's number means something.
       const fought =
         result.rounds.some((r) => r.end !== "forfeit") ||
         result.seconds >= DUEL_FORFEIT_WIN_SECONDS;
+      const winners = result.winner > 0 ? (match.sides[result.winner - 1] ?? []) : [];
+      const losers = result.winner > 0 ? (match.sides[2 - result.winner] ?? []) : [];
+      const counts = fought && winners.length > 0 && countWin(winners, losers);
       const rows = all.map((id) => {
         const f = result.fighters.find((x) => x.id === id);
-        const won = fought && result.winner > 0 && f?.team === result.winner && !f.forfeited;
+        const won = counts && f?.team === result.winner && !f.forfeited;
         return { characterId: id, won };
       });
-      void records
-        .add(rows)
-        .then(async () => {
-          for (const id of all)
+      background(
+        "duel records",
+        records.add(rows).then(async () => {
+          for (const id of all) {
             if (online(id)) push(id, { t: "record", record: await records.read(id) });
-        })
-        .catch((error) => console.error(`writing duel records failed: ${String(error)}`));
+          }
+        }),
+      );
     },
     released(m) {
       const match = matches.get(m.id);
       if (!match) return;
       matches.delete(m.id);
-      for (const id of [...match.sides[0], ...match.sides[1]]) {
-        if (inMatch.get(id) === match) inMatch.delete(id);
-        sendHome(match, id);
-      }
+      for (const id of [...match.sides[0], ...match.sides[1]]) exit(match, id, "end");
+    },
+    left(m, id, how) {
+      const match = matches.get(m.id);
+      if (match) exit(match, id, how);
     },
   };
 
   function forfeit(me: string, m: DuelRequest<"duel.forfeit">): Answer {
     const match = inMatch.get(me);
-    if (!match?.floor?.forfeit(me)) return refused("duel.forfeit", m.n, "duel_not_in");
-    // Conceded: home at once, while the others play on, and free to queue again.
-    sendHome(match, me);
-    inMatch.delete(me);
+    if (!match || match.exited.has(me)) return refused("duel.forfeit", m.n, "duel_not_in");
+    // Conceded, in any phase: back as before at once, while the others play on.
+    exit(match, me, "concede");
     return done("duel.forfeit", m.n);
+  }
+
+  /**
+   * Every character in a match has a live match, every live match a live floor holding it, and
+   * nobody waits in two places at once. Returns what is broken.
+   */
+  function check(): string[] {
+    const broken: string[] = [];
+    for (const [id, match] of inMatch) {
+      if (matches.get(match.id) !== match)
+        broken.push(`${id} is in match ${match.id}, which is gone`);
+      if (match.exited.has(id)) broken.push(`${id} left match ${match.id} but is still in it`);
+    }
+    for (const match of matches.values()) {
+      const f = match.floor;
+      if (!f) continue;
+      if (![...floors.values()].includes(f)) broken.push(`match ${match.id} is on a closed floor`);
+      else if (f.matchId !== match.id) broken.push(`match ${match.id}'s floor holds ${f.matchId}`);
+    }
+    for (const id of queued.keys()) {
+      if (inPending.has(id) || inMatch.has(id)) broken.push(`${id} is queued and matched at once`);
+    }
+    return broken;
+  }
+
+  function sweepAll(): void {
+    matchmake();
+    const t = now();
+    for (const [id, p] of pending) if (t - p.at > PENDING_MS) pending.delete(id);
+    if (strict) {
+      const broken = check();
+      if (broken.length > 0) console.error(`duel hub invariant broken: ${broken.join("; ")}`);
+    }
   }
 
   async function handle(me: string, type: DuelType, m: DuelRequest<DuelType>): Promise<Answer> {
@@ -673,13 +842,13 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
           handle(me, type, m),
         );
       }
-      sweep = setInterval(guarded("duel matchmaking", matchmake), everyMs);
+      sweep = setInterval(guarded("duel sweep", sweepAll), everyMs);
     },
     /** The character's WorldRoom seat dropped or left: out of the queue, ready checks and challenges. */
     left(characterId: string): void {
       leaveQueue(characterId, "offline");
       const p = inPending.get(characterId);
-      if (p) cancelPending(p, "offline");
+      if (p) cancelPending(p, "offline", characterId);
       const mine = outgoing.get(characterId);
       if (mine) endChallenge(mine, "withdrawn");
       for (const c of incomingTo(characterId)) endChallenge(c, "busy");
@@ -696,9 +865,46 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       floors.set(roomId, f);
       return f;
     },
+    /** The floor's room is closing: its match ends and everyone in it goes back. */
     removeFloor(roomId: string): void {
+      const f = floors.get(roomId);
+      f?.abandon();
       floors.delete(roomId);
+      for (const match of [...matches.values()]) {
+        if (match.floor !== f || !f) continue;
+        matches.delete(match.id);
+        for (const id of [...match.sides[0], ...match.sides[1]]) exit(match, id, "end");
+      }
     },
+    /**
+     * A character sat down in a room (`MapRoom` seat, after its re-entry restore). One that left a
+     * match while away from home is made good here: at home, as before; anywhere else (it was
+     * still on its way to the floor), as before and sent home.
+     */
+    arrived(characterId: string, room: DuelRoom): void {
+      const p = pending.get(characterId);
+      if (!p || inMatch.has(characterId)) return;
+      if (now() - p.at > PENDING_MS) {
+        pending.delete(characterId);
+        return;
+      }
+      room.restoreFromDuel(characterId, p.before);
+      if (isHome(room, p.before)) {
+        pending.delete(characterId);
+        if (room.roomId === p.before.roomId) room.teleport(characterId, p.before.x, p.before.y);
+        background("duel origin", origins.forget(characterId));
+        return;
+      }
+      const sent = room.sendTo(characterId, {
+        map: p.before.map,
+        x: p.before.x,
+        y: p.before.y,
+        roomId: p.before.roomId,
+        via: "duel",
+      });
+      if (!sent) background("duel origin", origins.restore(characterId));
+    },
+    check,
     /** For tools and the evidence script. */
     stats() {
       return {
@@ -728,6 +934,6 @@ export function dueling(): Dueling | undefined {
 export function localRooms(open: (map: string) => Promise<void>): DuelRooms {
   return {
     openChannel: open,
-    room: (roomId) => matchMaker.getLocalRoomById(roomId) as MapRoom | undefined,
+    room: (roomId) => matchMaker.getLocalRoomById(roomId) as unknown as DuelRoom | undefined,
   };
 }

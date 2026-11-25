@@ -10,6 +10,7 @@ import { StateView } from "@colyseus/schema";
 import {
   type BuiltMap,
   type Drop,
+  DUEL_COMBAT_SECONDS,
   DUEL_NORMS,
   fieldOf,
   fightMapOf,
@@ -85,6 +86,7 @@ import {
   stepDoors,
   stepFight,
   TICK_MS,
+  TICK_RATE_HZ,
   TILE_SIZE,
   type Transfer,
   type Usable,
@@ -97,8 +99,9 @@ import { background, guarded } from "./background.ts";
 import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
+import { applyBefore, type Before, takeBefore } from "./duel/bracket.ts";
 import { FloorHost, type FloorRoom } from "./duel/floor.ts";
-import { dueling } from "./duel/hub.ts";
+import { type DuelReadiness, dueling } from "./duel/hub.ts";
 import { grants } from "./economy/grants.ts";
 import { carryIn, carryOut, DEFAULT_MODE, type ModeStore, memoryModes } from "./fight/carry.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
@@ -752,6 +755,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private async retire(): Promise<void> {
     this.retireTimer = undefined;
     if (this.clients.length > 0) return;
+    // A floor holding a match stays open until the match lets go of it.
+    if (this.duel?.busy) return this.emptied();
     if (await channels.retire(this.def.id, this.roomId)) await this.disconnect();
     else if (this.clients.length === 0) this.emptied();
   }
@@ -831,6 +836,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     });
     this.visit(character.id, placesAt(this.def, p.x, p.y));
     this.duel?.seatedHere(character.id);
+    // One that left a duel while away from home is put back as it was (duel/hub.ts).
+    dueling()?.arrived(character.id, this);
   }
 
   /**
@@ -938,7 +945,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   override onDrop(client: Client): void {
     const pawn = this.pawns.get(client.sessionId);
     // A fighter who drops is out of its match at once (duel/floor.ts `leaving`).
-    if (pawn) this.duel?.leaving(pawn.character.id);
+    if (pawn) this.duel?.leaving(pawn.character.id, "drop");
     // The character stays and plays itself meanwhile (PLAN §19 reconnect); queued inputs are stale.
     if (pawn) {
       pawn.queue.clear();
@@ -994,7 +1001,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
    */
   private removeBody(id: string): void {
     const pawn = this.pawns.get(id);
-    if (pawn) this.duel?.leaving(pawn.character.id);
+    if (pawn) this.duel?.leaving(pawn.character.id, pawn.leaving ? "moving" : "gone");
     if (pawn) {
       this.handOverExp(pawn);
       const p = pawn.player;
@@ -1414,18 +1421,6 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
         const build = duelBuild(pawn.character.major, l.minor, l, DUEL_NORMS);
         return duelKit(this.world.rules, build, DUEL_NORMS, mode);
       },
-      unarm: (id) => {
-        const pawn = this.pawnOf(id);
-        if (!pawn) return;
-        const p = pawn.player;
-        p.party = partyOf(parties.of(id)?.id);
-        // A grant that landed during the match raised the recorded level.
-        if (pawn.loadout.level > p.level) p.level = pawn.loadout.level;
-        pawn.mods = live()?.modifiers(id) ?? pawn.mods;
-        p.expMult = pawn.mods.exp;
-        this.world.setKit(p, this.kitOf(pawn, p.level));
-        this.tellMode(pawn);
-      },
       modeChanged: (id) => {
         const pawn = this.pawnOf(id);
         if (pawn) this.tellMode(pawn);
@@ -1447,11 +1442,52 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     return at?.room === this && this.pawns.get(at.pawn.player.id) === at.pawn ? at.pawn : undefined;
   }
 
-  /** Whether a character here may be pulled into a duel now: seated, staying, on its feet. */
-  duelReady(characterId: string): boolean {
+  /**
+   * Whether a character here may be pulled into a duel now: seated, staying, on its feet, not
+   * in a fight, and not on a hunting field's open ground, in a 위험 구역 or on a boss floor.
+   */
+  duelReady(characterId: string): DuelReadiness {
     const pawn = this.pawnOf(characterId);
     const p = pawn?.player;
-    return !!pawn && !!p && !pawn.leaving && !p.down && !p.away && p.team === 0;
+    if (!pawn || !p || pawn.leaving || p.down || p.away || p.team !== 0) return "duel_not_here";
+    if (this.world.field && !this.world.inSafe(p.x, p.y)) return "duel_not_here";
+    if (this.def.patrols.length > 0) return "duel_not_here";
+    const tx = Math.floor(p.x / TILE_SIZE);
+    const ty = Math.floor(p.y / TILE_SIZE);
+    const onBossFloor = this.def.arenas.some(
+      ({ modes, rect: r }) =>
+        modes.length === 0 && tx >= r.x && tx < r.x + r.w && ty >= r.y && ty < r.y + r.h,
+    );
+    if (onBossFloor) return "duel_not_here";
+    const busyUntil = Math.max(p.lastHurt, p.lastHit) + DUEL_COMBAT_SECONDS * TICK_RATE_HZ;
+    return this.world.tick < busyUntil ? "duel_in_combat" : "ok";
+  }
+
+  /** The character's state as a duel's bracket keeps it (duel/bracket.ts). */
+  snapshot(characterId: string): Before | undefined {
+    const pawn = this.pawnOf(characterId);
+    if (!pawn || pawn.leaving) return undefined;
+    return takeBefore(pawn.player, this.world.tick, { map: this.def.id, roomId: this.roomId });
+  }
+
+  /**
+   * Puts a character back as it was before its duel: its own kit at its own level (raised if a
+   * grant landed meanwhile), its own mode, its party, then the bracket's numbers.
+   */
+  restoreFromDuel(characterId: string, before: Before): boolean {
+    const pawn = this.pawnOf(characterId);
+    if (!pawn) return false;
+    const p = pawn.player;
+    p.team = 0;
+    p.level = Math.max(before.level, pawn.loadout.level);
+    p.mode = before.mode;
+    p.party = partyOf(parties.of(characterId)?.id);
+    pawn.mods = live()?.modifiers(characterId) ?? pawn.mods;
+    p.expMult = pawn.mods.exp;
+    this.world.setKit(p, this.kitOf(pawn, p.level));
+    applyBefore(p, before, this.world.tick);
+    this.tellMode(pawn);
+    return true;
   }
 
   /** Whether `n` fighters on their way still fit: they may take seats past what newcomers may. */

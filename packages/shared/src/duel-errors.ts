@@ -5,8 +5,13 @@ export const DUEL_ERRORS = [
   "duel_busy",
   /** The other player is in a queue, a ready check or a match, or has five challenges waiting. */
   "duel_target_busy",
-  /** Neither of you may duel from where you stand (between maps, in the 집). */
+  /**
+   * You may not duel from where you stand: between maps, knocked out, in the 집, on a hunting
+   * field's open ground, in a 위험 구역 or on a boss floor.
+   */
   "duel_not_here",
+  /** You landed or took a hit a moment ago. */
+  "duel_in_combat",
   /** That challenge or ready check is gone (answered, withdrawn or lapsed). */
   "duel_no_challenge",
   "duel_no_match",
