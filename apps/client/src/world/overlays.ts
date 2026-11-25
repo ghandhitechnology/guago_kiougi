@@ -1,6 +1,6 @@
 import * as Phaser from "phaser";
 import { spriteAnim } from "../art.ts";
-import { emblemTexture } from "../social/emblem.ts";
+import { crestTexture } from "../social/emblem.ts";
 import { Label, measure, wrap } from "../ui/text.ts";
 import { paint, sliceOf } from "../ui/theme.ts";
 import { clubOf, worldPeople } from "./people.ts";
@@ -23,11 +23,32 @@ const BUBBLE_MAX_W = 104;
 const STACK = 2;
 /** A head as bubbles keep clear of it: the width of a student's hair, feet to crown. */
 const HEAD_W = 14;
+/** From the feet to the top of the nameplate. */
+const PLATE_Y = 2;
+const PLATE_H = 13;
+/** The club line's height: a strip round 9 px letters and the 6×6 crest. */
+const TAG_H = 11;
+/** Rows between two plates stacked in a crowd. */
+const PLATE_GAP = 1;
+/** Feet this close keep the stacking order they had, so a crowd's plates do not swap back and forth. */
+const ORDER_SLACK = 3;
+/** How far a plate may slide sideways to clear another instead of stepping down below it. */
+const PLATE_SLIDE = 28;
+/**
+ * A plate keeps last frame's spot while it is free and at most this much farther than the best,
+ * so feet that jitter a pixel at rest never flip it between two spots.
+ */
+const PLATE_STAY = 4;
 
-const overlaps = (
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number },
-) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const overlaps = (a: Box, b: Box) =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 interface Plate {
   readonly root: Phaser.GameObjects.Container;
@@ -35,10 +56,17 @@ interface Plate {
   readonly label: Label;
   /** Another player's body, for taps and long presses on it. */
   body?: Phaser.GameObjects.Zone;
-  /** The club line under the name: emblem and club name. */
+  /** The club line under the name: crest and club name. */
   tag?: Phaser.GameObjects.Container | undefined;
+  /** Half the block's width and its height, plate and club line together. */
+  half: number;
+  h: number;
   x: number;
   y: number;
+  /** Offset from the spot under the feet, so a crowd's plates do not cover each other. */
+  to: { x: number; y: number };
+  /** The offset drawn now, eased toward `to`. */
+  shown: { x: number; y: number };
 }
 
 interface Bubble {
@@ -56,6 +84,8 @@ interface Bubble {
 export class WorldOverlays {
   private readonly scene: Phaser.Scene;
   private readonly plates = new Map<string, Plate>();
+  /** Plates top to bottom as last stacked. */
+  private order: string[] = [];
   private readonly bubbles: Bubble[] = [];
   private prompt: Phaser.GameObjects.Image | undefined;
   private promptAt = { x: 0, y: 0 };
@@ -64,7 +94,8 @@ export class WorldOverlays {
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
-    scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
+    // After the scene has moved everyone, so plates and bubbles stack on this frame's feet.
+    scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.tick, this);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.destroy());
     this.unpeople = worldPeople.on((sid) => this.clubTag(sid));
   }
@@ -79,7 +110,17 @@ export class WorldOverlays {
       const color = kind === "npc" ? "gold.light" : "stone.bright";
       const label = new Label(this.scene, 3, 2, "", { font: "galmuri9", color });
       const root = this.scene.add.container(0, 0, [back, label.obj]).setDepth(DEPTH);
-      p = { root, back, label, x: 0, y: 0 };
+      p = {
+        root,
+        back,
+        label,
+        half: 0,
+        h: PLATE_H,
+        x: 0,
+        y: 0,
+        to: { x: 0, y: 0 },
+        shown: { x: 0, y: 0 },
+      };
       if (kind !== "self") {
         back.setInteractive({ useHandCursor: true });
         this.tappable(back, id, kind, "name");
@@ -106,7 +147,7 @@ export class WorldOverlays {
     if (!p) return;
     p.x = Math.round(x);
     p.y = Math.round(y);
-    p.root.setPosition(p.x, p.y + 2);
+    p.root.setPosition(p.x + Math.round(p.shown.x), p.y + PLATE_Y + Math.round(p.shown.y));
     p.body?.setPosition(p.x, p.y + 1);
   }
 
@@ -115,6 +156,7 @@ export class WorldOverlays {
     p?.root.destroy();
     p?.body?.destroy();
     this.plates.delete(id);
+    this.order = this.order.filter((o) => o !== id);
     for (const b of this.bubbles) if (b.owner === id) b.expires = 0;
   }
 
@@ -245,7 +287,10 @@ export class WorldOverlays {
     });
   }
 
-  /** Puts the club line under a player's nameplate, or takes it away. */
+  /**
+   * Puts the club line under a player's nameplate, or takes it away: the worn crest and the
+   * club's name in small letters on a thin strip of ink, so they hold on paving and grass alike.
+   */
   private clubTag(id: string): void {
     const p = this.plates.get(id);
     if (!p) return;
@@ -253,21 +298,23 @@ export class WorldOverlays {
     const club = body ? clubOf(body) : undefined;
     p.tag?.destroy();
     p.tag = undefined;
+    const plateW = p.back.width;
+    p.half = Math.ceil(plateW / 2);
+    p.h = PLATE_H;
     if (!club) return;
-    const label = new Label(this.scene, 15, 2, club.name, {
+    const label = new Label(this.scene, 10, 1, club.name, {
       font: "galmuri9",
-      color: "grass.pale",
+      color: "stone.pale",
     });
-    const w = label.width + 18;
-    const [l, r, t, b] = sliceOf("nameplate");
-    const back = this.scene.add.nineslice(0, 0, "ui", "nameplate/idle", w, 13, l, r, t, b);
-    back.setOrigin(0);
-    const emblem = this.scene.add
-      .image(2, 1, emblemTexture(this.scene, club.emblem, "s"))
-      .setOrigin(0);
-    const tag = this.scene.add.container(-Math.ceil(w / 2), 14, [back, emblem, label.obj]);
+    const w = 10 + label.width + 2;
+    const strip = this.scene.add.rectangle(0, 0, w, TAG_H, paint("ink.deep"), 0.6).setOrigin(0);
+    const crest = this.scene.add.image(2, 3, crestTexture(this.scene, club.emblem)).setOrigin(0);
+    const parts: Phaser.GameObjects.GameObject[] = [strip, crest, label.obj];
+    const tag = this.scene.add.container(-Math.ceil(w / 2), PLATE_H, parts);
     p.root.add(tag);
     p.tag = tag;
+    p.half = Math.max(p.half, Math.ceil(w / 2) + 1);
+    p.h = PLATE_H + TAG_H;
   }
 
   /** The prompt over the thing in reach, by kind (`talk`, `use`, `read`); `undefined` clears it. */
@@ -308,6 +355,97 @@ export class WorldOverlays {
   }
 
   /**
+   * Keeps nameplates from covering each other. Top to bottom by where the feet stand, each plate
+   * takes the free spot nearest its own: its own when there is room, else a short slide sideways
+   * or a step down below the plates in the way. Plates glide to their spots and keep the one they
+   * have while it stays free, so a crowd settles rather than flickers.
+   */
+  private placePlates(delta: number): void {
+    const feet = (id: string) => this.plates.get(id)?.y ?? 0;
+    const known = new Set(this.order);
+    const fresh = [...this.plates.keys()].filter((id) => !known.has(id));
+    fresh.sort((a, b) => feet(a) - feet(b) || (a < b ? -1 : 1));
+    this.order.push(...fresh);
+    // Insertion sort over last frame's order: two plates swap only once their feet are clearly
+    // apart, so feet a pixel or two from level never trade places frame to frame.
+    const order = this.order;
+    for (let i = 1; i < order.length; i++) {
+      const id = order[i] as string;
+      let j = i - 1;
+      while (j >= 0 && feet(order[j] as string) - feet(id) > ORDER_SLACK) {
+        order[j + 1] = order[j] as string;
+        j--;
+      }
+      order[j + 1] = id;
+    }
+    const placed: Box[] = [];
+    const glide = Math.min(1, delta / 80);
+    for (const id of order) {
+      const p = this.plates.get(id);
+      if (!p) continue;
+      const home: Box = { x: p.x - p.half, y: p.y + PLATE_Y, w: p.half * 2, h: p.h + PLATE_GAP };
+      const at = (dx: number, dy: number): Box => ({ ...home, x: home.x + dx, y: home.y + dy });
+      const free = (dx: number, dy: number) => !placed.some((r) => overlaps(at(dx, dy), r));
+      const cost = (dx: number, dy: number) => Math.abs(dx) + dy;
+      let best = { x: 0, y: 0 };
+      if (!free(0, 0)) {
+        // Edges of the plates in reach: sliding to one side of one, or stepping below one.
+        const near = placed.filter(
+          (r) =>
+            r.x < home.x + home.w + PLATE_SLIDE &&
+            home.x - PLATE_SLIDE < r.x + r.w &&
+            r.y + r.h > home.y,
+        );
+        const xs = [0];
+        for (const r of near) {
+          const left = r.x - home.w - home.x;
+          const right = r.x + r.w - home.x;
+          if (Math.abs(left) <= PLATE_SLIDE) xs.push(left);
+          if (Math.abs(right) <= PLATE_SLIDE) xs.push(right);
+        }
+        const ys = [0, ...near.map((r) => r.y + r.h - home.y)];
+        let bestCost = Number.POSITIVE_INFINITY;
+        for (const dy of ys) {
+          for (const dx of xs) {
+            const c = cost(dx, dy);
+            // Ties go down rather than sideways, then right rather than left.
+            const better =
+              c < bestCost || (c === bestCost && (dy < best.y || (dy === best.y && dx > best.x)));
+            if (better && free(dx, dy)) {
+              best = { x: dx, y: dy };
+              bestCost = c;
+            }
+          }
+        }
+        // Below everything in reach, should no spot among those be free.
+        if (bestCost === Number.POSITIVE_INFINITY) {
+          best = { x: 0, y: Math.max(0, ...near.map((r) => r.y + r.h - home.y)) };
+        }
+        const was = p.to;
+        if (free(was.x, was.y) && cost(was.x, was.y) <= cost(best.x, best.y) + PLATE_STAY) {
+          best = was;
+        }
+      }
+      placed.push(at(best.x, best.y));
+      p.to = best;
+      const ease = (from: number, to: number) =>
+        Math.abs(to - from) < 0.5 ? to : from + (to - from) * glide;
+      p.shown = { x: ease(p.shown.x, best.x), y: ease(p.shown.y, best.y) };
+      p.root.setPosition(p.x + Math.round(p.shown.x), home.y + Math.round(p.shown.y));
+    }
+  }
+
+  /** Where every plate is drawn now, for bubbles to keep clear of. */
+  private plateBoxes(): Box[] {
+    return [...this.plates.values()].map((p) => ({
+      x: p.root.x - p.half,
+      y: p.root.y,
+      w: p.half * 2,
+      h: p.h,
+    }));
+  }
+
+  /**
    * Puts every bubble over its speaker so that none covers another person's head or another
    * bubble: oldest first, each newer one steps up above whatever it would cover. It glides to
    * its new height rather than jumping, so a crowd's bubbles settle instead of flickering.
@@ -320,7 +458,7 @@ export class WorldOverlays {
       w: HEAD_W,
       h: HEAD - 2,
     }));
-    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const placed: Box[] = this.plateBoxes();
     const glide = Math.min(1, delta / 70);
     for (const b of this.bubbles) {
       if (b.leaving) continue;
@@ -349,6 +487,7 @@ export class WorldOverlays {
       const bob = Math.sin(this.clock / 260) > 0 ? 0 : 1;
       this.prompt.setPosition(this.promptAt.x, this.promptAt.y - bob);
     }
+    this.placePlates(delta);
     this.placeBubbles(delta);
     for (const b of [...this.bubbles]) {
       if (b.leaving || this.clock < b.expires) continue;
@@ -369,12 +508,13 @@ export class WorldOverlays {
 
   destroy(): void {
     this.unpeople();
-    this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
+    this.scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.tick, this);
     for (const p of this.plates.values()) {
       p.root.destroy();
       p.body?.destroy();
     }
     this.plates.clear();
+    this.order.length = 0;
     for (const b of this.bubbles) b.root.destroy();
     this.bubbles.length = 0;
     this.prompt?.destroy();

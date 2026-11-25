@@ -104,6 +104,51 @@ export function emblemTexture(scene: Phaser.Scene, emblem: Emblem, size: EmblemS
   return key;
 }
 
+/** A swap slot's key colours to one of its options' colours. */
+function slotSwap(slot: string, option: string): Map<number, number> {
+  const s = uiArt().slots[slot];
+  const colors = s?.options[option];
+  const swap = new Map<number, number>();
+  if (!s || !colors) return swap;
+  for (const [step, keyColor] of Object.entries(s.keys)) {
+    const to = colors[step];
+    if (to) swap.set(hex(keyColor), hex(to));
+  }
+  return swap;
+}
+
+/**
+ * The 6×6 crest a club wears on the 과잠's back, painted per emblem: the shape in the `emblem`
+ * slot, the symbol in `mark`.
+ */
+export function crestTexture(scene: Phaser.Scene, emblem: Emblem): string {
+  const key = `crest:${encodeEmblem(emblem)}`;
+  if (scene.textures.exists(key)) return key;
+  const canvas = document.createElement("canvas");
+  canvas.width = 6;
+  canvas.height = 6;
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+  ctx.imageSmoothingEnabled = false;
+  paintFrame(
+    scene,
+    ctx,
+    `crest/shape/${emblem.shape}`,
+    0,
+    0,
+    slotSwap("emblem", emblem.shapeColor),
+  );
+  // A symbol in the shape's own colour would vanish into it: it takes the colour's deep step.
+  const symbolSwap = slotSwap("mark", emblem.symbolColor);
+  if (emblem.symbolColor === emblem.shapeColor) {
+    const mid = uiArt().slots.mark?.keys.mid;
+    const deep = uiArt().slots.mark?.options[emblem.symbolColor]?.deep;
+    if (mid && deep) symbolSwap.set(hex(mid), hex(deep));
+  }
+  paintFrame(scene, ctx, `crest/symbol/${emblem.symbol}`, 0, 0, symbolSwap);
+  scene.textures.addCanvas(key, canvas);
+  return key;
+}
+
 /** One large symbol alone in a colour, for the editor's symbol squares. */
 export function symbolTexture(scene: Phaser.Scene, symbol: string, color: string): string {
   const key = `emblem-symbol:${symbol}.${color}`;
