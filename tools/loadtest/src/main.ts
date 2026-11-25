@@ -23,9 +23,9 @@ import { startNetsim } from "./netsim.ts";
  *   pnpm --filter @guago/loadtest start --bots 80 --seconds 60 --url ws://localhost:2601
  *   … --latency 150 --jitter 30 --loss 0.01   runs every bot through a simulated mobile link
  *
- * Bots sign in through the HTTP API as bot0001, bot0002 … and make their characters on first
- * use, so the server needs a database and a signup limit above the bot count
- * (SIGNUPS_PER_IP_PER_DAY).
+ * Bots sign in through the HTTP API as bot0001, bot0002 … (`--accounts` changes the prefix),
+ * make their characters on first use and keep their sessions in .local/ for the next run. The
+ * server needs a database and a signup limit above the bot count (SIGNUPS_PER_IP_PER_DAY).
  */
 
 const { values } = parseArgs({
@@ -37,6 +37,7 @@ const { values } = parseArgs({
     latency: { type: "string" },
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
+    accounts: { type: "string", default: "bot" },
   },
 });
 
@@ -86,6 +87,8 @@ class Bot {
   private until = 0;
   private seen = { x: -1, y: -1, seq: -1 };
   private readonly sentAt = new Map<number, number>();
+  /** The body slot this bot sits in. */
+  private slot: string | undefined;
   measuring = false;
   moving = 0;
   ticks = 0;
@@ -105,7 +108,15 @@ class Bot {
   }
 
   private onPatch(state: MapState): void {
-    const me = state.players.get(this.room.sessionId);
+    let me = this.slot === undefined ? undefined : state.players.get(this.slot);
+    if (me?.sid !== this.room.sessionId) {
+      me = undefined;
+      for (const [slot, p] of state.players) {
+        if (p.sid !== this.room.sessionId) continue;
+        this.slot = slot;
+        me = p;
+      }
+    }
     if (!me) return;
     const body = { x: me.x / POS_SCALE, y: me.y / POS_SCALE, facing: me.facing as 0 };
     if (!this.predictor) {
@@ -162,7 +173,7 @@ const fixed = (v: number, d = 1) => v.toFixed(d);
 console.log(`signing in and joining ${BOTS} bots at ${url}`);
 const bots: Bot[] = [];
 for (let i = 0; i < BOTS; i++) {
-  const cookie = await signIn(`http://${target.host}`, i + 1);
+  const cookie = await signIn(`http://${target.host}`, values.accounts, i + 1);
   // A join can lose a race with a keep-alive close on a slow link; a player would retry too.
   for (let attempt = 1; ; attempt++) {
     try {
@@ -195,6 +206,7 @@ interface Window {
   patchP95: number;
   bytesMean: number;
   bytesMax: number;
+  viewChanges: number;
   players: number;
   monsters: number;
 }
@@ -209,6 +221,7 @@ const poll = async () => {
       tickCpuMs: { p50: number; p95: number; max: number };
       patchMs: { p95: number };
       bytesPerClient: { mean: number; max: number };
+      viewChangesPerSecond: number;
     }[];
   };
   const room = body.rooms.sort((a, b) => b.players - a.players)[0];
@@ -222,6 +235,7 @@ const poll = async () => {
     patchP95: room.patchMs.p95,
     bytesMean: room.bytesPerClient.mean,
     bytesMax: room.bytesPerClient.max,
+    viewChanges: room.viewChangesPerSecond,
     players: room.players,
     monsters: room.monsters,
   });
@@ -300,6 +314,10 @@ const lines = [
     worstOf((w) => w.bytesMax),
     0,
   )} max   bots ${fixed(mean(perBot), 0)} mean, ${fixed(Math.max(0, ...perBot), 0)} max   budget < 8000`,
+  `view changes/s        ${fixed(
+    median((w) => w.viewChanges),
+    0,
+  )} (an entity entering or leaving one client's view)`,
   `input ack ms          p50 ${fixed(quantile(acks, 0.5), 0)}  p95 ${fixed(quantile(acks, 0.95), 0)}  max ${fixed(Math.max(0, ...acks), 0)}`,
   `reconciliation        ${reconciles} reconciles, ${corrections} corrected (${fixed((corrections / Math.max(1, reconciles)) * 100, 2)}%), error px mean ${fixed(mean(errors), 2)} p95 ${fixed(quantile(errors, 0.95), 2)} max ${fixed(Math.max(0, ...errors), 2)}`,
 ];

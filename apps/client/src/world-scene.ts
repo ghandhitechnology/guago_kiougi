@@ -125,20 +125,24 @@ export class WorldScene extends Phaser.Scene {
       }
       r.track.push(state.tick, m.x / POS_SCALE, m.y / POS_SCALE, m.facing);
     }
-    for (const [id, p] of state.players) {
-      if (id === this.selfId) {
+    // Bodies are pooled by slot; who is in one is its session id.
+    const seated = new Set<string>();
+    for (const p of state.players.values()) {
+      if (!p.sid) continue;
+      if (p.sid === this.selfId) {
         this.self?.onServer(p);
         continue;
       }
-      let r = this.players.get(id);
+      seated.add(p.sid);
+      let r = this.players.get(p.sid);
       if (!r) {
         r = { track: new Track(), actor: this.playerActor() };
-        this.players.set(id, r);
+        this.players.set(p.sid, r);
       }
       r.track.push(state.tick, p.x / POS_SCALE, p.y / POS_SCALE, p.facing);
     }
     prune(this.monsters, state.monsters);
-    prune(this.players, state.players);
+    prune(this.players, seated);
   }
 
   private playerActor(): PlayerActor {

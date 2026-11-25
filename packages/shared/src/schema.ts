@@ -33,8 +33,16 @@ export const LookState = schema(
 );
 export type LookState = SchemaType<typeof LookState>;
 
+/**
+ * A player body. Bodies are a fixed pool made with the room and handed from seat to seat, keyed
+ * by slot, never by session: a schema instance keeps its ref id for the room's lifetime, ids are
+ * never reused, and every patch spends 1 byte on an id under 128 but 3 on one past 255. Pooled
+ * bodies keep the moving players on 1-byte ids however many have come and gone.
+ */
 export const PlayerState = schema(
   {
+    /** Session id of the seat using this body; empty while the body is free. */
+    sid: t.string(),
     x: t.uint16(),
     y: t.uint16(),
     facing: t.uint8(),
@@ -63,7 +71,10 @@ export function dressPlayer(player: PlayerState, character: Character): void {
   player.look = synced;
 }
 
-/** Keys of `monsters` are monster ids, keys of `players` are session ids. */
+/** Player bodies a map room holds, which is also its seat count. */
+export const MAP_SEATS = 100;
+
+/** Keys of `monsters` are monster ids, keys of `players` are body slots ("0" to MAP_SEATS - 1). */
 export const MapState = schema(
   {
     tick: t.uint32(),

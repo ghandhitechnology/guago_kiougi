@@ -40,6 +40,8 @@ export interface RoomSnapshot {
   readonly bytesPerClient: { mean: number; max: number };
   /** Inputs refused (repeats, stale, overflow) since the room opened. */
   readonly inputsDropped: number;
+  /** Entities entering or leaving a client's view per second, over the last byte window. */
+  readonly viewChangesPerSecond: number;
 }
 
 /**
@@ -59,6 +61,10 @@ export class RoomMetrics {
   clients = 0;
   monsters = 0;
   inputsDropped = 0;
+  /** Running count of view adds and removes, kept by the room. */
+  viewChanges = 0;
+  private viewChangesAt = 0;
+  private lastViewRate = 0;
   readonly room: string;
   readonly map: string;
 
@@ -93,6 +99,8 @@ export class RoomMetrics {
       max: Math.round(Math.max(0, ...rates)),
     };
     this.bytes = new Map([...this.bytes.keys()].map((k) => [k, 0]));
+    this.lastViewRate = Math.round((this.viewChanges - this.viewChangesAt) / seconds);
+    this.viewChangesAt = this.viewChanges;
     this.windowStart = now;
   }
 
@@ -113,6 +121,7 @@ export class RoomMetrics {
       patchMs: this.patch.summary(),
       bytesPerClient: this.lastRate,
       inputsDropped: this.inputsDropped,
+      viewChangesPerSecond: this.lastViewRate,
     };
   }
 }

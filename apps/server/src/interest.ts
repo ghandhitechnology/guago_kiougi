@@ -25,6 +25,8 @@ export class InterestGrid {
   private readonly cellOf = new Map<Schema, number>();
   /** Viewers by the cell they stand in. */
   private readonly watchers = new Map<number, Set<Viewer>>();
+  /** Entities added to or removed from a view since the grid was made; each add resends the entity in full. */
+  changes = 0;
 
   constructor(widthPx: number, heightPx: number) {
     this.cols = Math.max(1, Math.ceil(widthPx / this.cellPx));
@@ -97,8 +99,13 @@ export class InterestGrid {
         const centre = viewer.cell as number;
         const was = from !== undefined && this.near(centre, from);
         const now = this.near(centre, to);
-        if (was && !now && viewer.view.has(entity)) viewer.view.remove(entity);
-        else if (now && !was && !viewer.view.has(entity)) viewer.view.add(entity);
+        if (was && !now && viewer.view.has(entity)) {
+          viewer.view.remove(entity);
+          this.changes++;
+        } else if (now && !was && !viewer.view.has(entity)) {
+          viewer.view.add(entity);
+          this.changes++;
+        }
       }
     }
     return to;
@@ -125,7 +132,11 @@ export class InterestGrid {
       this.watchers.get(from)?.delete(viewer);
       for (const c of this.around(from)) {
         if (cell !== undefined && this.near(cell, c)) continue;
-        for (const e of this.members.get(c) ?? []) if (viewer.view.has(e)) viewer.view.remove(e);
+        for (const e of this.members.get(c) ?? []) {
+          if (!viewer.view.has(e)) continue;
+          viewer.view.remove(e);
+          this.changes++;
+        }
       }
     }
     viewer.cell = cell;
@@ -138,7 +149,11 @@ export class InterestGrid {
     set.add(viewer);
     for (const c of this.around(cell)) {
       if (from !== undefined && this.near(from, c)) continue;
-      for (const e of this.members.get(c) ?? []) if (!viewer.view.has(e)) viewer.view.add(e);
+      for (const e of this.members.get(c) ?? []) {
+        if (viewer.view.has(e)) continue;
+        viewer.view.add(e);
+        this.changes++;
+      }
     }
   }
 

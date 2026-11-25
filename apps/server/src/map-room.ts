@@ -9,6 +9,7 @@ import {
   INPUT_MESSAGE,
   InputQueue,
   inputMessage,
+  MAP_SEATS,
   MapState,
   MonsterState,
   type MoveInput,
@@ -43,6 +44,7 @@ const POLL_MS = 5;
 
 /** A player's body in this room: what is synced, what its client sees, what it asked to do. */
 interface Pawn {
+  readonly slot: string;
   readonly state: InstanceType<typeof PlayerState>;
   readonly viewer: Viewer;
   readonly queue: InputQueue;
@@ -58,6 +60,7 @@ const wire = (px: number) => Math.round(px * POS_SCALE);
 export class MapRoom extends Room<{ state: MapState }> {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
+  override maxClients = MAP_SEATS;
 
   private def: MapDef = LAWN;
   private map!: CollisionMap;
@@ -65,6 +68,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   private grid!: InterestGrid;
   private metrics!: RoomMetrics;
   private readonly pawns = new Map<string, Pawn>();
+  /** Free body slots, longest free first, so a body is never handed on within one patch. */
+  private readonly free: string[] = [];
   private seats!: RoomSeats;
   private readonly monsters = new Map<number, InstanceType<typeof MonsterState>>();
   private acc = 0;
@@ -88,6 +93,12 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.grid = new InterestGrid(this.world.width, this.world.height);
     this.metrics = new RoomMetrics(this.roomId, this.def.id);
     this.seats = new RoomSeats(this.def.id, (id) => this.placeOf(id));
+    // Bodies before anything else, so their ref ids are the smallest the room will ever hand out.
+    for (let i = 0; i < MAP_SEATS; i++) {
+      const slot = String(i);
+      this.state.players.set(slot, new PlayerState());
+      this.free.push(slot);
+    }
     this.sync();
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: MoveInput) => {
@@ -104,6 +115,11 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+  }
+
+  /** Players seated in this room. */
+  get playerCount(): number {
+    return this.pawns.size;
   }
 
   /** Where a session's character stands, in whole pixels, for saving. */
@@ -128,22 +144,25 @@ export class MapRoom extends Room<{ state: MapState }> {
     const character = await this.seats.join(client);
     const id = client.sessionId;
     const start = this.startOf(character.mapId, character.x, character.y);
+    const slot = this.free.shift();
+    const state = slot === undefined ? undefined : this.state.players.get(slot);
+    if (slot === undefined || !state)
+      throw new Error("no free body; maxClients should have refused the join");
     this.world = addPlayer(this.world, id, start.x, start.y);
-    const state = new PlayerState();
     const player = this.world.players.at(-1);
     if (!player) throw new Error("player was not added");
+    state.sid = id;
     state.x = wire(player.x);
     state.y = wire(player.y);
     state.facing = player.facing;
     state.seq = 0;
     dressPlayer(state, character);
-    this.state.players.set(id, state);
 
     const view = new StateView();
     client.view = view;
     view.add(state, OWNER_TAG);
     const viewer: Viewer = { view, cell: undefined };
-    this.pawns.set(id, { state, viewer, queue: new InputQueue() });
+    this.pawns.set(id, { slot, state, viewer, queue: new InputQueue() });
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
@@ -169,10 +188,11 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (pawn) {
       this.grid.watch(pawn.viewer, undefined);
       this.grid.remove(pawn.state);
+      pawn.state.sid = "";
       this.pawns.delete(id);
+      this.free.push(pawn.slot);
     }
     this.world = removePlayer(this.world, id);
-    this.state.players.delete(id);
     client.view?.dispose();
     this.metrics.forget(id);
   }
@@ -217,6 +237,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.metrics.players = this.pawns.size;
     this.metrics.clients = this.clients.length;
     this.metrics.monsters = this.world.monsters.length;
+    this.metrics.viewChanges = this.grid.changes;
   }
 
   /** Mirrors the simulation into the synced state and moves entities between interest cells. */
