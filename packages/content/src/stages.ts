@@ -6,6 +6,7 @@
  * skipped, and where its cast stands before they first move. The interpreter says where a scene
  * resumes after its n-th `play`, what the stage looks like there, and how long it runs.
  */
+import { CAST_ART, type CastArt } from "./cast.ts";
 import type { BuiltMap } from "./maps/format.ts";
 import { NARRATIVE } from "./narrative/index.ts";
 import type {
@@ -110,6 +111,35 @@ const STAGING: Readonly<Record<string, Staging>> = {
   },
   "expel-home": personal({ instance: true, start: "door" }),
 };
+
+/**
+ * Art for actors a scene puts on stage who are not in the cast table (`CAST_ART`): the
+ * 오답 and the field's tortoise, the boss in his lecture, the ice block. A scene may draw a cast
+ * member its own way (`ACTOR_ART_IN`): in the opening the tall figure at the lectern is only a
+ * silhouette.
+ */
+export const ACTOR_ART: Readonly<Record<string, CastArt>> = {
+  tortoise: { kind: "sprite", art: "tortoise", signature: "idle" },
+  odap: { kind: "sprite", art: "odap", signature: "hop" },
+  "odap-golem": { kind: "sprite", art: "golem", signature: "slam" },
+  block: { kind: "sprite", art: "p1-block", signature: "slide" },
+  aristotle: { kind: "rig", art: "aristotle-campus", signature: "jot" },
+};
+
+export const ACTOR_ART_IN: Readonly<Record<string, Readonly<Record<string, CastArt>>>> = {
+  "opening-b5": { aristotle: { kind: "sprite", art: "boss-aristotle-drain", signature: "drain" } },
+  "opening-b6": { aristotle: { kind: "sprite", art: "boss-aristotle-drain", signature: "drain" } },
+};
+
+/** How an actor of a scene is drawn: the scene's own way, the cast table's, or the stage's. */
+export function actorArt(sceneId: string, actor: string): CastArt | undefined {
+  return ACTOR_ART_IN[sceneId]?.[actor] ?? CAST_ART[actor] ?? ACTOR_ART[actor];
+}
+
+/** The actor on stage for a speaker's voice (`aristotle-freed` speaks from `aristotle`). */
+export function actorOf(speaker: string): string {
+  return NARRATIVE.speakers.find((s) => s.id === speaker)?.actor ?? speaker;
+}
 
 /** Scenes whose cast lists `player` play with the player's own body; a beat's lines have none. */
 export function stagingOf(id: string): Staging {

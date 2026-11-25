@@ -283,6 +283,10 @@ export class MapView {
   private floodRamp: Ramp | null = null;
   private floodAt: [number, number] = [0, 0];
   private barRamp: Ramp = { from: 0, to: 0, ms: 0, age: 0 };
+  /** The map's own lights, with the strength their data gives them. */
+  private readonly mapLights: { light: Light; base: number }[] = [];
+  private lightsRamp: Ramp = { from: 1, to: 1, ms: 0, age: 0 };
+  private lightsLevel = 1;
   private time = 0;
   private readonly cones = new Set<Cone>();
   private coneCount = 0;
@@ -393,6 +397,7 @@ export class MapView {
       if (source.paint?.region || source.radius <= 0 || source.intensity <= 0) return;
       const light = this.field.addStatic(source, paletteColor(this.meta, source.color), i);
       light.follows = this.sputter(source.at);
+      this.mapLights.push({ light, base: light.spec.intensity });
     });
 
     // Filters: light on the ground and on sprites, the grade on the world, cutaways overhead.
@@ -579,6 +584,15 @@ export class MapView {
     this.floodAt = [x, y];
     const reach = Math.hypot(this.camera.width, this.camera.height) + 40;
     this.floodRamp = { from: 1, to: reach, ms, age: 0 };
+  }
+
+  /**
+   * The map's own lights (its `lights` data: lamps, signs, windows) at `level` of the strength
+   * they are drawn with, 0 to 1, eased over `ms`: a power cut, a lamp switched on. Carried lights,
+   * flashes and a rift's region are not among them.
+   */
+  setMapLights(level: number, ms = 0): void {
+    this.lightsRamp = { from: this.lightsLevel, to: Math.max(0, Math.min(1, level)), ms, age: 0 };
   }
 
   /** Black bars top and bottom, `size` pixels each, sliding in or out over `ms`. */
@@ -1364,6 +1378,12 @@ export class MapView {
     this.updateGlows();
     this.updateEntities();
     this.updateTelegraphs(t);
+    const lights = step(this.lightsRamp, deltaMs);
+    if (lights !== this.lightsLevel) {
+      this.lightsLevel = lights;
+      for (const m of this.mapLights)
+        m.light.spec = { ...m.light.spec, intensity: m.base * lights };
+    }
     this.field.update(t, deltaMs, this.tier.entityLights);
     this.updateRegion(t);
     this.updateCutaway();

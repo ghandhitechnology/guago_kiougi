@@ -29,6 +29,7 @@ import {
   SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
   SnapshotReader,
+  STORY_MESSAGES,
   shutDoorAhead,
   TILE_SIZE,
   type Transfer,
@@ -62,6 +63,9 @@ import { MapView, onQualityTier } from "./render/index.ts";
 import { SelfMover } from "./self.ts";
 import { enterSoundscape, preloadFor, soundscapeFor } from "./sound/audio.ts";
 import { StepSounds } from "./sound/steps.ts";
+import type { Dir } from "./story/actors.ts";
+import { StoryLink } from "./story/link.ts";
+import type { StageHost } from "./story/stage.ts";
 import { worldUi } from "./ui/world-ui.ts";
 import { builtView } from "./world/map-view.ts";
 import { WorldOverlays } from "./world/overlays.ts";
@@ -154,6 +158,12 @@ export class WorldScene extends Phaser.Scene {
   private selfSlot = -1;
   private mode = 1;
   private sketch: FightSketch | undefined;
+  /** The story's scenes on the map shown (`story/`): they hold the keys and the camera. */
+  private readonly story = new StoryLink(() => this.entry?.character.name ?? "");
+  private storyCamera = false;
+  private storyDriven = false;
+  private modeDriven = false;
+  private storyFacing: Facing | undefined;
   private fightKeys: FightKeys | undefined;
   private self: SelfMover | undefined;
   private selfActor: PlayerActor | undefined;
@@ -245,7 +255,24 @@ export class WorldScene extends Phaser.Scene {
         this.holding = true;
       },
     });
-    if (import.meta.env.DEV) exposeDevStats(this);
+    // A scene that may be cut short is, with Escape.
+    this.input.keyboard?.on("keydown-ESC", () => this.story.skip());
+    if (import.meta.env.DEV) {
+      exposeDevStats(this);
+      // Development: F9 tells the server the fight a scene waits on is over (until combat does).
+      this.input.keyboard?.on("keydown-F9", () => {
+        const until = this.story.waitingOn;
+        if (until) this.story.signal(until);
+      });
+      (window as unknown as { __guagoStory?: unknown }).__guagoStory = {
+        waitingOn: () => this.story.waitingOn,
+        signal: (until?: string) => {
+          const u = until ?? this.story.waitingOn;
+          if (u) this.story.signal(u);
+        },
+        replay: (scene: string) => this.story.replay(scene),
+      };
+    }
   }
 
   // Arriving and leaving ------------------------------------------------------------------
@@ -263,6 +290,7 @@ export class WorldScene extends Phaser.Scene {
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
       if (this.room === room) this.onSnapshot(room, bytes);
     });
+    const unstory = this.story.attach(room);
     if (import.meta.env.DEV) {
       // Development only: the server's dev commands (spawn beside me, clear), for recordings.
       (window as unknown as { __guagoDev?: (c: unknown[]) => void }).__guagoDev = (c) =>
@@ -299,6 +327,7 @@ export class WorldScene extends Phaser.Scene {
     });
     void this.enterMap(seat);
     return () => {
+      unstory();
       if (this.room === room) {
         this.room = undefined;
         this.live = false;
@@ -410,6 +439,8 @@ export class WorldScene extends Phaser.Scene {
     }
     // The HUD drops the place's name in as a banner and keeps it under the minimap.
     this.showPlace();
+    // A scene owed on this map plays on it once it is up.
+    this.story.onMap(this.stageHost(this.here));
     if (seat.via) playWorld("door.close", { volume: 0.5 });
     this.holding = false;
     await this.curtain.open();
@@ -454,11 +485,16 @@ export class WorldScene extends Phaser.Scene {
     if (import.meta.env.DEV) this.sketch = new FightSketch(this, walls, 9000);
     this.fightKeys = new FightKeys(
       {
-        dodge: () => this.self?.queue(InputFlag.Dodge),
-        cast: (slot) => {
-          if (this.mode === 3) this.self?.queue(castFlag(slot));
+        // A scene holding the keys holds these too.
+        dodge: () => {
+          if (!this.story.holding) this.self?.queue(InputFlag.Dodge);
         },
-        cycleMode: () => room.send(MODE_MESSAGE, [(this.mode + 1) % 4]),
+        cast: (slot) => {
+          if (this.mode === 3 && !this.story.holding) this.self?.queue(castFlag(slot));
+        },
+        cycleMode: () => {
+          if (!this.story.holding) room.send(MODE_MESSAGE, [(this.mode + 1) % 4]);
+        },
         aim: (at) => {
           const me = this.selfActor?.body;
           if (!at || !me) return room.send(AIM_MESSAGE, []);
@@ -480,6 +516,10 @@ export class WorldScene extends Phaser.Scene {
 
   /** Takes down everything drawn for the map being left. */
   private clearMap(): void {
+    this.story.leaveMap();
+    this.storyCamera = false;
+    this.storyDriven = false;
+    this.storyFacing = undefined;
     const here = this.here;
     this.here = undefined;
     for (const [key, n] of here?.npcs ?? []) {
@@ -567,7 +607,8 @@ export class WorldScene extends Phaser.Scene {
       this.selfSlot = Number(slot);
       this.mode = p.mode;
       // In 완전 자동 and 스킬 수동 the server walks the body; knocked out, nothing moves it.
-      if (this.self) this.self.serverDriven = p.mode === 0 || p.mode === 2 || p.down > 0;
+      this.modeDriven = p.mode === 0 || p.mode === 2 || p.down > 0;
+      if (this.self) this.self.serverDriven = this.modeDriven || this.storyDriven;
     }
     if (!this.here) return;
     for (const [key, n] of state.npcs) this.here.npcs.get(key)?.face(n.facing);
@@ -794,6 +835,8 @@ export class WorldScene extends Phaser.Scene {
   private interact(): void {
     const room = this.room;
     if (!room || !this.here || this.holding || !this.live) return;
+    // A scene's offered talk in reach is the scene's; while a scene holds the keys, nothing else.
+    if (this.story.interact() || this.story.holding) return;
     this.asking = true;
     room.send(MAP_MESSAGES.interact, [++this.interactN]);
   }
@@ -845,7 +888,7 @@ export class WorldScene extends Phaser.Scene {
     const here = this.here;
 
     const move = (): [number, number] => {
-      this.lastMove = this.holding ? [0, 0] : sampleMove(this.keys);
+      this.lastMove = this.holding || this.story.holding ? [0, 0] : sampleMove(this.keys);
       return this.lastMove;
     };
     // Held keys go quiet at a door, but the inputs that bring the server's body up to the drawn
@@ -861,13 +904,14 @@ export class WorldScene extends Phaser.Scene {
         }
       }
       const moved = Math.hypot(drawn.x - this.selfActor.body.x, drawn.y - this.selfActor.body.y);
-      this.selfActor.update(drawn.x, drawn.y, drawn.facing, dt);
-      this.camera.follow(drawn.x, drawn.y - CHEST_PX, drawn.facing, dt);
+      this.selfActor.update(drawn.x, drawn.y, this.storyFacing ?? drawn.facing, dt);
+      if (!this.storyCamera) this.camera.follow(drawn.x, drawn.y - CHEST_PX, drawn.facing, dt);
       worldView.self = { x: drawn.x, y: drawn.y };
       if (this.selfId) this.overlays.move(this.selfId, drawn.x, drawn.y);
       this.watchDoors(here.map, drawn.x, drawn.y, drawn.facing, moved, dt);
       this.aimPrompt(here, drawn.x, drawn.y);
     }
+    this.story.update();
 
     const t = this.clock.renderTime(time);
     // Guards stand where the server had them at the time everyone else is drawn at.
@@ -933,7 +977,8 @@ export class WorldScene extends Phaser.Scene {
    * HUD's E key and the phone's context button with its kind.
    */
   private aimPrompt(here: Here, x: number, y: number): void {
-    const target = this.holding ? undefined : nearestUsable(here.usable, x, y);
+    const target =
+      this.holding || this.story.holding ? undefined : nearestUsable(here.usable, x, y);
     const key = target && `${target.kind}:${target.id}`;
     const hushed = key === this.quiet.key && performance.now() < this.quiet.until;
     this.aim(target && !hushed ? target : undefined);
@@ -956,6 +1001,60 @@ export class WorldScene extends Phaser.Scene {
     hud.set({ interact: kind ? { kind } : undefined });
   }
 
+  // The story's stage ------------------------------------------------------------------------
+
+  /** What a scene may do to this map: its view, the player's body, the camera, the keys. */
+  private stageHost(here: Here): StageHost {
+    const facings: Record<Dir, Facing> = { down: 0, up: 1, left: 2, right: 3 };
+    return {
+      scene: this,
+      ui: this.scene.get("ui"),
+      meta: this.meta,
+      map: here.map,
+      view: here.view,
+      curtain: this.curtain,
+      playerBody: () => this.selfActor?.body,
+      posePlayer: (anim) => this.selfActor?.pose(anim) ?? false,
+      facePlayer: (dir) => {
+        this.storyFacing = dir === undefined ? undefined : facings[dir];
+      },
+      takeCamera: (on) => {
+        if (this.storyCamera === on) return;
+        this.storyCamera = on;
+        const me = this.selfActor?.body;
+        if (!on && me) this.camera?.handBack(me.x, me.y - CHEST_PX);
+      },
+      panTo: (x, y, ms) => {
+        const cam = this.cameras.main;
+        const to = this.camera?.clampCenter(x, y) ?? { x, y };
+        if (ms <= 0) {
+          cam.centerOn(to.x, to.y);
+          return Promise.resolve();
+        }
+        return new Promise((resolve) =>
+          cam.pan(to.x, to.y, ms, "Sine.easeInOut", true, (_c, k) => {
+            if (k >= 1) resolve();
+          }),
+        );
+      },
+      followServer: (on) => {
+        this.storyDriven = on;
+        if (this.self) this.self.serverDriven = this.modeDriven || on;
+      },
+      hideNpc: (speaker, hidden) => {
+        for (const [key, n] of here.npcs) {
+          if (here.room.state.npcs.get(key)?.speaker !== speaker) continue;
+          n.body.setVisible(!hidden);
+          if (hidden) worldUi.npcGone(speaker);
+          else worldUi.npc(speaker, speakerName(speaker), n.x, n.y);
+        }
+      },
+      send: (req) => {
+        if (this.room === here.room) here.room.send(STORY_MESSAGES.story, req);
+      },
+    };
+  }
+
   /** Notes how long into a map change a stage was reached, for the development numbers. */
   private mark(stage: string): void {
     const t = this.transitionStart;
@@ -975,6 +1074,11 @@ export class WorldScene extends Phaser.Scene {
       npcs: this.here?.npcs.size ?? 0,
       holding: this.holding,
       transitions: this.transitions,
+      story: {
+        scene: this.story.sceneId,
+        waiting: this.story.waitingOn,
+        holding: this.story.holding,
+      },
       self: this.selfActor ? { x: this.selfActor.body.x, y: this.selfActor.body.y } : undefined,
       scroll: { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY },
     };

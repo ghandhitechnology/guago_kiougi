@@ -62,6 +62,9 @@ export class PlayerActor extends Actor {
   private fidgeting = false;
   private lastX: number | undefined;
   private lastY: number | undefined;
+  private readonly anims: ReadonlySet<string>;
+  /** A scene's pose is playing; the body keeps it until it walks. */
+  private posing = false;
   /** Called when a foot lands, with the feet position: footstep sounds hang on it. */
   onStep: ((x: number, y: number) => void) | undefined;
 
@@ -72,8 +75,14 @@ export class PlayerActor extends Actor {
     const walk = (meta.rigs[rig] as RigMeta).anims.walk;
     this.walkFrames = walk?.frames ?? [];
     this.stride = walk ? (speed * walk.frames.length) / walk.fps : 32;
+    this.anims = new Set(Object.keys((meta.rigs[rig] as RigMeta).anims));
     this.playIdle();
     this.body.on("animationcomplete", (anim: Phaser.Animations.Animation) => {
+      if (this.posing && !anim.key.endsWith("/idle")) {
+        this.posing = false;
+        this.playIdle();
+        return;
+      }
       if (FIDGETS.some((f) => anim.key.endsWith(`/${f}`))) {
         this.fidgeting = false;
         this.stillFor = 0;
@@ -93,6 +102,15 @@ export class PlayerActor extends Actor {
     this.body.anims.setProgress(Math.random());
   }
 
+  /** Plays one of the rig's animations (a scene's stretch, a drink); walking ends it. */
+  pose(anim: string): boolean {
+    if (!this.anims.has(anim)) return false;
+    this.posing = true;
+    this.fidgeting = false;
+    this.body.play(this.anim(anim));
+    return true;
+  }
+
   update(x: number, y: number, facing: Facing, dtMs: number): void {
     const dist =
       this.lastX === undefined ? 0 : Math.hypot(x - this.lastX, y - (this.lastY as number));
@@ -103,7 +121,12 @@ export class PlayerActor extends Actor {
     this.dir = dir;
     this.body.setFlipX(facing === Facing.Left);
 
+    if (this.posing && dist <= STILL_PX) {
+      this.place(x, y);
+      return;
+    }
     if (dist > STILL_PX) {
+      this.posing = false;
       this.stillFor = 0;
       if (!this.walking) {
         this.walking = true;

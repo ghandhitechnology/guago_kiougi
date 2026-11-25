@@ -59,7 +59,8 @@ export function titleMusic(): void {
 
 /** What a place sounds like. */
 export interface Soundscape {
-  readonly music: SongId;
+  /** The song, or null for none (a scene's silence). */
+  readonly music: SongId | null;
   readonly ambient: AmbientId;
 }
 

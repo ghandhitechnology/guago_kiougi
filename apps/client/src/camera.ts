@@ -74,6 +74,24 @@ export class CameraRig {
     this.apply(x, y);
   }
 
+  /**
+   * Takes the camera back from wherever a scene left it: the offset to the player at (x, y) is
+   * eased away like any jump, so the view glides home instead of cutting.
+   */
+  handBack(x: number, y: number): void {
+    this.ox = this.cam.scrollX + W / 2 - Math.round(x) - this.leanX;
+    this.oy = this.cam.scrollY + H / 2 - Math.round(y) - this.leanY;
+    this.lastX = x;
+    this.lastY = y;
+  }
+
+  /** Where the camera's centre lands for a point, kept inside the map. */
+  clampCenter(x: number, y: number): { x: number; y: number } {
+    const sx = this.mapW <= W ? (this.mapW - W) / 2 : clamp(x - W / 2, 0, this.mapW - W);
+    const sy = this.mapH <= H ? (this.mapH - H) / 2 : clamp(y - H / 2, 0, this.mapH - H);
+    return { x: Math.round(sx + W / 2), y: Math.round(sy + H / 2) };
+  }
+
   private apply(x: number, y: number): void {
     const cx = Math.round(x) + Math.round(this.ox + this.leanX);
     const cy = Math.round(y) + Math.round(this.oy + this.leanY);
