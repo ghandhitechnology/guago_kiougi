@@ -6,16 +6,24 @@ export const INPUT_QUEUE_MAX = 10;
 export const INPUT_BURST = 10;
 /** Inputs left waiting after a tick before the queue spends a second one to catch up. */
 export const INPUT_JITTER_DEPTH = 1;
+/** Ticks an input must sit unused in reserve before the reserve is spent: a calm link sheds its buffer. */
+const RESERVE_TICKS = 40;
 
 /**
  * One player's inputs between arrival and simulation. Each tick applies one input, or two while
  * the queue runs deeper than the jitter buffer, and never more than the ticks that have passed
  * plus a small bank: a flood, a burst after a stall or a held-back input never buys more than
  * {@link INPUT_BURST} ticks of extra distance. Repeated and out-of-order inputs are dropped.
+ *
+ * A late input leaves the next tick with nothing to apply, and the input after it then waits a
+ * tick in reserve, which absorbs the next late one. When two seconds pass without the reserve
+ * being needed, it is spent, so a link that has calmed down stops paying a tick of delay.
  */
 export class InputQueue {
   private readonly waiting: MoveInput[] = [];
   private tokens = INPUT_BURST;
+  /** Ticks in a row that ended with an input still waiting. */
+  private reserved = 0;
   /** Highest sequence number accepted. */
   lastSeq = 0;
   /** Inputs refused or pushed out since the queue was made. */
@@ -50,11 +58,18 @@ export class InputQueue {
       out.push(this.waiting.shift() as MoveInput);
       this.tokens -= 1;
     }
+    this.reserved = this.waiting.length > 0 ? this.reserved + 1 : 0;
+    if (this.reserved >= RESERVE_TICKS && out.length === 1 && this.tokens >= 1) {
+      out.push(this.waiting.shift() as MoveInput);
+      this.tokens -= 1;
+      this.reserved = 0;
+    }
     return out;
   }
 
   /** Forgets waiting inputs, as when the player drops; the sequence floor stays. */
   clear(): void {
     this.waiting.length = 0;
+    this.reserved = 0;
   }
 }
