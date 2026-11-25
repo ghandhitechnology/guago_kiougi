@@ -2,7 +2,6 @@
  * Accounts, sessions and the one character per account (PLAN §20, §22). Every method returns
  * either a result or an `ApiErrorCode`; nothing here knows about HTTP.
  */
-import { LAWN } from "@guago/content";
 import {
   type Account,
   type ApiErrorCode,
@@ -21,6 +20,7 @@ import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { type Db, pgErrorCode } from "../db/index.ts";
 import { accounts, characters, loginFailures, sessions } from "../db/schema.ts";
 import { livePage } from "../live/current.ts";
+import { startPlace } from "../world-maps.ts";
 import {
   dummyHash,
   HashBusy,
@@ -43,7 +43,8 @@ export const DEFAULT_LIMITS = {
 };
 export type Limits = typeof DEFAULT_LIMITS;
 /** Where a new character first stands. */
-export const START_MAP = LAWN;
+/** Where new characters stand: where the story starts. */
+const start = startPlace();
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: ApiErrorCode };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
@@ -94,6 +95,19 @@ export interface AuthServiceOptions {
    */
   onCharacterCreated?: (tx: Pick<Db, "execute">, characterId: string) => Promise<void>;
   limits?: Partial<Limits>;
+  /** Moderation (moderation/service.ts): IP bans, and where each account comes in from. */
+  gate?: AuthGate;
+}
+
+/** What the auth paths ask moderation. `ip` is always the keyed IP hash, never an address. */
+export interface AuthGate {
+  /** True when an active ban covers this IP hash: signup, login and recovery are refused. */
+  ipBanned(ip: string): Promise<boolean>;
+  /**
+   * Called inside the transaction that opens a session (signup or login), so an IP ban can cover
+   * the addresses the account has used.
+   */
+  seen(tx: Pick<Db, "execute">, accountId: string, ip: string): Promise<void>;
 }
 
 export function createAuthService({
@@ -101,6 +115,7 @@ export function createAuthService({
   onSessionsRevoked,
   onCharacterCreated,
   limits,
+  gate,
 }: AuthServiceOptions) {
   const limit: Limits = { ...DEFAULT_LIMITS, ...limits };
   const windowStart = sql`now() - make_interval(mins => ${LOGIN_WINDOW_MINUTES})`;
@@ -209,6 +224,7 @@ export function createAuthService({
       ip: string,
     ): Promise<Result<{ session: Session; recoveryCode: string }>> {
       if (isBannedName(req.loginId)) return fail("login_banned");
+      if (await gate?.ipBanned(ip)) return fail("account_banned");
       // Cheap check first, so a limited IP costs no Argon2 work; re-checked under the lock below.
       if ((await signupsFrom(db, ip)) >= limit.signupsPerIpPerDay) return fail("signup_limit");
       const recovery = newRecoveryCode();
@@ -241,6 +257,7 @@ export function createAuthService({
             .returning({ id: accounts.id });
           if (!account) throw new Error("insert returned no account");
           const session = await openSession(tx, account.id);
+          await gate?.seen(tx, account.id, ip);
           return ok({ session, recoveryCode: recovery.display });
         });
       } catch (error) {
@@ -253,6 +270,7 @@ export function createAuthService({
       req: LoginRequest,
       from: Origin,
     ): Promise<Result<{ session: Session; account: Account; character: Character | null }>> {
+      if (await gate?.ipBanned(from.ip)) return fail("account_banned");
       const attempt = await beginAttempt(req.loginId, from);
       if (attempt === null) return fail("rate_limited");
       const [row] = await db.select().from(accounts).where(eq(accounts.loginId, req.loginId));
@@ -277,7 +295,9 @@ export function createAuthService({
             ),
           )
           .returning({ id: accounts.id });
-        return still ? openSession(tx, row.id) : null;
+        if (!still) return null;
+        await gate?.seen(tx, row.id, from.ip);
+        return openSession(tx, row.id);
       });
       if (!session) return fail("bad_credentials");
       await onSessionsRevoked?.(row.id);
@@ -328,9 +348,9 @@ export function createAuthService({
               name: req.name,
               major: req.major,
               look: req.look,
-              mapId: START_MAP.id,
-              x: START_MAP.spawn.x,
-              y: START_MAP.spawn.y,
+              mapId: start.map.id,
+              x: start.x,
+              y: start.y,
               cohort: livePage(),
             })
             .returning();
@@ -349,6 +369,7 @@ export function createAuthService({
 
     /** Sets a new password and replaces the spent recovery code with a fresh one. */
     async recover(req: RecoverRequest, from: Origin): Promise<Result<{ recoveryCode: string }>> {
+      if (await gate?.ipBanned(from.ip)) return fail("account_banned");
       const attempt = await beginAttempt(req.loginId, from);
       if (attempt === null) return fail("rate_limited");
       const [row] = await db.select().from(accounts).where(eq(accounts.loginId, req.loginId));

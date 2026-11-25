@@ -17,6 +17,12 @@ export interface LiveRows {
   notice?: string;
   /** Whether the character posted a notice still up, or holds one as helper. */
   helpState?: boolean;
+  /** The character's `floor_leaders` row of this board week, locked. */
+  leader?: number;
+  /** The character's `merit_daily` counts of this board day. */
+  tallyDay?: number;
+  /** Whether conduct rows were already booked under this operation id. */
+  conductKey?: string;
 }
 
 export interface HelpNoticeRow {
@@ -39,6 +45,12 @@ export interface LiveLoaded {
   /** The character's own notice still up, and the one it helps with. */
   posted: boolean;
   helping: boolean;
+  /** The 층장 row asked for: absent, or whether it was paid. */
+  leader: { paid: boolean } | null;
+  /** `merit_daily` counts of the day asked for, by key. */
+  daily: ReadonlyMap<string, number>;
+  /** Conduct rows exist under the `conductKey` asked for. */
+  keyed: boolean;
 }
 
 export const NO_LIVE: LiveLoaded = {
@@ -46,6 +58,9 @@ export const NO_LIVE: LiveLoaded = {
   notice: null,
   posted: false,
   helping: false,
+  leader: null,
+  daily: new Map(),
+  keyed: false,
 };
 
 /** Living-world columns an operation sets on the character. */
@@ -65,6 +80,7 @@ export interface LiveCharacter {
   expulsions?: number;
   boardStreak?: number;
   boardStreakDay?: number | null;
+  liveSession?: string | null;
 }
 
 export interface NewQuest {
@@ -75,6 +91,8 @@ export interface NewQuest {
 
 export interface LiveWrite {
   character?: LiveCharacter;
+  /** The key conduct rows are booked under instead of the operation id (a strike id). */
+  conductKey?: string;
   /** Conduct ledger rows: `demerits` and `merits` move by exactly these. */
   conduct?: readonly { kind: "demerit" | "merit"; amount: number; reason: string }[];
   /** New lifetime totals by monster. */
@@ -84,6 +102,10 @@ export interface LiveWrite {
   /** Notices to post; one already there under its id is left as it is. */
   quests?: readonly NewQuest[];
   notice?: { update: Pick<HelpNoticeRow, "id" | "state" | "helperId"> } | { insert: HelpNoticeRow };
+  /** Marks the character's 층장 row of this week paid. */
+  leaderPaid?: number;
+  /** `merit_daily` counts to add to. */
+  daily?: readonly { day: number; key: string; n: number }[];
 }
 
 export async function loadLive(
@@ -118,7 +140,27 @@ export async function loadLive(
     posted = rows[0]?.posted === true;
     helping = rows[0]?.helping === true;
   }
-  return { kills, notice, posted, helping };
+  let leader: LiveLoaded["leader"] = null;
+  if (want.leader !== undefined) {
+    const { rows } = await q.execute(sql`
+      select paid from floor_leaders where week = ${want.leader} and character_id = ${characterId}
+      for update`);
+    if (rows[0]) leader = { paid: rows[0].paid === true };
+  }
+  const daily = new Map<string, number>();
+  if (want.tallyDay !== undefined) {
+    const { rows } = await q.execute(sql`
+      select key, n from merit_daily where character_id = ${characterId} and day = ${want.tallyDay}`);
+    for (const r of rows) daily.set(r.key as string, Number(r.n));
+  }
+  let keyed = false;
+  if (want.conductKey !== undefined) {
+    const { rows } = await q.execute(sql`
+      select 1 from conduct_ledger
+      where character_id = ${characterId} and operation_id = ${want.conductKey} limit 1`);
+    keyed = rows.length > 0;
+  }
+  return { kills, notice, posted, helping, leader, daily, keyed };
 }
 
 export function noticeFromDb(r: Record<string, unknown>): HelpNoticeRow {
@@ -153,6 +195,7 @@ const COLUMNS: Readonly<Record<keyof LiveCharacter, string>> = {
   expulsions: "expulsions",
   boardStreak: "board_streak",
   boardStreakDay: "board_streak_day",
+  liveSession: "live_session",
 };
 
 function value(key: keyof LiveCharacter, v: unknown): SQL {
@@ -186,7 +229,7 @@ export async function writeLive(
   if (conduct.length > 0) {
     await q.execute(sql`
       insert into conduct_ledger (character_id, operation_id, kind, amount, reason)
-      select ${characterId}, ${opId}, u.kind, u.amount, u.reason
+      select ${characterId}, ${w.conductKey ?? opId}, u.kind, u.amount, u.reason
       from unnest(
         ${sql.param(conduct.map((c) => c.kind))}::text[],
         ${sql.param(conduct.map((c) => c.amount))}::integer[],
@@ -226,6 +269,16 @@ export async function writeLive(
       returning quest_id`);
     const made = new Set(rows.map((r) => r.quest_id as string));
     quests = n.filter((x) => made.has(x.row.id)).map((x) => questView(x.row));
+  }
+  for (const d of (w.daily ?? []).filter((x) => x.n > 0)) {
+    await q.execute(sql`
+      insert into merit_daily (character_id, day, key, n) values (${characterId}, ${d.day}, ${d.key}, ${d.n})
+      on conflict (character_id, day, key) do update set n = merit_daily.n + excluded.n`);
+  }
+  if (w.leaderPaid !== undefined) {
+    await q.execute(sql`
+      update floor_leaders set paid = true
+      where week = ${w.leaderPaid} and character_id = ${characterId}`);
   }
   if (w.notice && "insert" in w.notice) {
     const n = w.notice.insert;

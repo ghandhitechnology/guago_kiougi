@@ -81,6 +81,8 @@ export interface Meal {
   readonly id: string;
   readonly stat: BuffStat;
   readonly amount: number;
+  /** A broadcast id the day of this menu begins with. */
+  readonly announce?: string;
 }
 
 /** One menu a board day, in this order; the 30-minute buff follows the menu. */
@@ -91,7 +93,7 @@ export const MEALS: readonly Meal[] = [
   { id: "curry", stat: "pinecone", amount: 0.05 },
   { id: "bulgogi", stat: "damage", amount: 0.05 },
   { id: "seaweed-soup", stat: "regen", amount: 0.01 },
-  { id: "jjajang", stat: "exp", amount: 0.05 },
+  { id: "jjajang", stat: "exp", amount: 0.05, announce: "menu-wednesday" },
 ];
 
 export function mealOf(ms: number): Meal {
@@ -121,6 +123,13 @@ export const STORY_CHAPTERS: readonly StoryChapter[] = NARRATIVE.story.map((beat
   const boss = NARRATIVE.bosses.find((b) => b.freed === beat.cutscene)?.boss;
   return { id: beat.id, after: beat.after, ...(boss ? { boss } : {}) };
 });
+
+// ── Chores (PLAN §11 청소 당번) ─────────────────────────────────────────────
+
+/** The places a chore notice sends a player to: every campus place with a 학교 entry. */
+export const CHORE_PLACES: readonly string[] = NARRATIVE.codex.flatMap((e) =>
+  e.unlock.when === "visited" ? [e.unlock.place] : [],
+);
 
 // ── Where a board is drawn ──────────────────────────────────────────────────
 

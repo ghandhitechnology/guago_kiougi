@@ -21,6 +21,7 @@ import {
   vendingWeek,
 } from "@guago/content";
 import {
+  type Amounts,
   addBookExp,
   addExp,
   allInBag,
@@ -44,6 +45,7 @@ import {
   type OpOutcome,
   type OpRequests,
   type Purse,
+  pay,
   payClubFee,
   pilgi,
   pilgiChance,
@@ -63,6 +65,7 @@ import type { Queryable } from "./executor.ts";
 import {
   type CharacterRow,
   type ItemRow,
+  inherit,
   type ListingRow,
   newBookRow,
   newToolRow,
@@ -87,6 +90,24 @@ export interface InternalRequests {
   "club.found": Record<string, never>;
   "trade.commit": TradeCommitRequest;
   "listing.expire": ExpireRequest;
+  /** An admin's grant or removal (moderation/service.ts), run inside its audit transaction. */
+  "admin.adjust": AdminAdjustRequest;
+}
+
+/**
+ * Items and currency an admin gives or takes, checked by `checkAdjust` (moderation/service.ts) before
+ * it gets here. Booked as `admin.grant` and `admin.remove`; who and why ride in the request, so
+ * the operation's record and the audit row say the same.
+ */
+export interface AdminAdjustRequest {
+  admin: string;
+  reason: string;
+  /** Whole amounts per currency: positive is given, negative taken. */
+  amounts: Amounts;
+  /** Definitions to make: books as 교과서 copies, tools at level 1. */
+  add: readonly string[];
+  /** Item ids to take away. */
+  remove: readonly string[];
 }
 
 /** What combat credits one character with since its last flush (PLAN §6 drops, §9 EXP). */
@@ -224,7 +245,7 @@ export interface World {
   readonly parties: ReadonlyMap<string, Loaded>;
   readonly listings: ReadonlyMap<string, ListingRow>;
   /** What the operation's `facts` read, once everything was locked. */
-  readonly facts: Readonly<Record<string, boolean>>;
+  readonly facts: Readonly<Record<string, boolean | number>>;
 }
 
 export interface PartyApplied {
@@ -267,8 +288,8 @@ export interface PartyOpDef<R> {
   /** The parties hear of it some other way (a trade window's `done`), not by `onChange`. */
   readonly quiet?: boolean;
   rows(req: R, party: string, locked: Locked): Rows;
-  /** Yes-or-no facts outside the economy's rows, read in the transaction (a block). */
-  facts?(q: Queryable, req: R, locked: Locked): Promise<Record<string, boolean>>;
+  /** Facts outside the economy's rows, read in the transaction (a block, a day's count). */
+  facts?(q: Queryable, req: R, locked: Locked, ctx: Ctx): Promise<Record<string, boolean | number>>;
   currencies(
     req: R,
     party: string,
@@ -361,6 +382,38 @@ export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
       const r = payClubFee(l.purse, env.page);
       if (!r.ok) return no(r.error);
       return ok({ purse: r.purse, ledger: r.ledger });
+    },
+  },
+
+  "admin.adjust": {
+    client: false,
+    rows: (req) => ({ items: req.remove }),
+    currencies: (req) => Object.keys(req.amounts),
+    apply(l, req, env) {
+      const gain: Amounts = {};
+      const cost: Amounts = {};
+      for (const [c, n] of Object.entries(req.amounts) as [keyof Amounts, number][]) {
+        if (n > 0) gain[c] = n;
+        else if (n < 0) cost[c] = -n;
+      }
+      const paid = pay(l.purse, cost, "admin.remove");
+      if (!paid) return no("insufficient");
+      const given = earn(paid.purse, gain, "admin.grant");
+      if (req.remove.some((id) => !l.items.has(id))) return no("item_missing");
+      const put = req.add.map((def) =>
+        isBook(def)
+          ? newBookRow(textbook(env.newId(), def), "admin")
+          : newToolRow({ id: env.newId(), def, level: 1 }, "admin"),
+      );
+      const taken = new Set(req.remove);
+      return ok({
+        purse: given.purse,
+        ledger: [...paid.ledger, ...given.ledger],
+        put,
+        remove: req.remove,
+        itemKey: (id) => (taken.has(id) ? "admin.remove" : "admin.grant"),
+        outcome: { admin: req.admin, items: put.map((r) => r.id), removed: req.remove },
+      });
     },
   },
 
@@ -465,7 +518,7 @@ export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
       return ok({
         purse: r.state.purse,
         ledger: r.ledger,
-        put: [withBook(kept, r.state.item)],
+        put: [inherit(withBook(kept, r.state.item), rows)],
         remove: r.state.consumed,
         itemKey: "sink.forge",
         outcome: { item: kept.id, consumed: r.state.consumed },
@@ -509,7 +562,10 @@ export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
       // A copy that is used up must come from the bag; one with levels left keeps its place.
       if (left === null && !allInBag(wornAmong([from]), [from.id])) return no("item_equipped");
       return ok({
-        put: [withTool(into, r.state.into), ...(left ? [withTool(from, left)] : [])],
+        put: [
+          inherit(withTool(into, r.state.into), [from]),
+          ...(left ? [withTool(from, left)] : []),
+        ],
         remove: left ? [] : [from.id],
         itemKey: "sink.merge",
         outcome: { item: into.id, level: r.state.into.level, left: left?.level ?? 0 },
@@ -529,7 +585,9 @@ export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
       const unlocked = hasUnlock(tierOf(l.character), "evolution");
       const r = evolve(toBook(book), toTool(tool), bookById(book.def).tool, unlocked);
       if (!r.ok) return no(r.error);
-      return ok({ put: [withBook(book, r.state)] });
+      // The tool is not used up, but what it made carries its binding: an era boss's bound tool
+      // must not be a factory of tradable evolutions.
+      return ok({ put: [inherit(withBook(book, r.state), [tool])] });
     },
   },
 

@@ -1,18 +1,22 @@
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { buildAllMaps, LAWN } from "@guago/content";
+import { buildAllMaps } from "@guago/content";
 import {
   type Collidable,
+  ENTER_PATH,
   encodeInput,
   INPUT_MESSAGE,
-  MAP_ROOM,
   MapState,
   MOVE_MAX,
+  moveBody,
   overlapsSolid,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   POS_SCALE,
   Predictor,
+  portalAt,
+  type Seating,
+  shutDoors,
   TICK_MS,
   TILE_SIZE,
 } from "@guago/shared";
@@ -27,8 +31,11 @@ import { startNetsim } from "./netsim.ts";
  *   pnpm --filter @guago/loadtest start --bots 80 --seconds 60 --url ws://localhost:2601
  *   … --latency 150 --jitter 30 --loss 0.01   runs every bot through a simulated mobile link
  *
- * `--map campus-field` runs a built map instead of the lawn and `--monsters 150` fills it; the
- * server must run with ALLOW_MAP_OPTION=1 for either. Bots walk to places all over the map, so
+ * Bots enter through `POST /api/enter` like the browser. `--map campus-yard` seats them on that
+ * map instead of where their characters were saved and `--monsters 150` fills a channel it
+ * opens; the server must run with ALLOW_MAP_OPTION=1 for either. A channel holds 60 players
+ * (PLAN §10): to put more in one room, run the server with MAP_CHANNEL_SEATS raised; the report
+ * reads the busiest room. Bots walk to places all over the map but never through a door, so
  * interest cells and view changes are exercised, and each bot counts what it is sent and sees.
  *
  * Bots sign in through the HTTP API as bot0001, bot0002 … (`--accounts` changes the prefix),
@@ -46,7 +53,7 @@ const { values } = parseArgs({
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
     accounts: { type: "string", default: "bot" },
-    map: { type: "string", default: "lawn" },
+    map: { type: "string", default: "campus-field" },
     monsters: { type: "string" },
     metrics: { type: "string" },
   },
@@ -57,12 +64,14 @@ const SECONDS = Number(values.seconds);
 const WARMUP = Number(values.warmup);
 const target = new URL(values.url);
 const metricsUrl = values.metrics ?? `http://127.0.0.1:${Number(target.port) + 100}/metrics`;
-const walls: Collidable | undefined =
-  values.map === LAWN.id ? LAWN : buildAllMaps().find((r) => r.map.id === values.map)?.map;
-if (!walls) throw new Error(`no map ${values.map}`);
+const built = buildAllMaps().find((r) => r.map.id === values.map)?.map;
+if (!built) throw new Error(`no map ${values.map}`);
+/** The room's walls: the map's own, with doors to unbuilt maps shut, as the server has them. */
+const walls: Collidable = { collision: shutDoors(built.collision, built.portals) };
+const doors = built.portals;
 const MAP_W = walls.collision.w * TILE_SIZE;
 const MAP_H = walls.collision.h * TILE_SIZE;
-const joinOptions = {
+const choice = {
   map: values.map,
   ...(values.monsters === undefined ? {} : { monsters: Number(values.monsters) }),
 };
@@ -98,7 +107,7 @@ function anywhere(): { x: number; y: number } {
   for (;;) {
     const x = PLAYER_RADIUS + Math.random() * (MAP_W - 2 * PLAYER_RADIUS);
     const y = PLAYER_RADIUS + Math.random() * (MAP_H - 2 * PLAYER_RADIUS);
-    if (!overlapsSolid(walls as Collidable, x, y, PLAYER_RADIUS)) return { x, y };
+    if (!overlapsSolid(walls, x, y, PLAYER_RADIUS) && portalAt(doors, x, y) < 0) return { x, y };
   }
 }
 
@@ -166,7 +175,7 @@ class Bot {
     }
     const body = { x: me.x / POS_SCALE, y: me.y / POS_SCALE, facing: me.facing as 0 };
     if (!this.predictor) {
-      this.predictor = new Predictor(walls as Collidable, body, PLAYER_SPEED);
+      this.predictor = new Predictor(walls, body, PLAYER_SPEED);
       this.seen = { x: me.x, y: me.y, seq: me.seq };
       return;
     }
@@ -208,6 +217,13 @@ class Bot {
         const a = Math.round(Math.atan2(this.goal.y - at.y, this.goal.x - at.x) / (Math.PI / 4));
         mx = Math.round(Math.cos((a * Math.PI) / 4)) * MOVE_MAX;
         my = Math.round(Math.sin((a * Math.PI) / 4)) * MOVE_MAX;
+        // A door would take the bot to another map: turn away instead.
+        const next = moveBody(walls, p.body, mx, my, PLAYER_SPEED);
+        if (portalAt(doors, next.x, next.y) >= 0) {
+          mx = 0;
+          my = 0;
+          this.goal = anywhere();
+        }
       }
     }
     const input = p.tick(mx, my);
@@ -235,8 +251,15 @@ for (let i = 0; i < BOTS; i++) {
   // A join can lose a race with a keep-alive close on a slow link; a player would retry too.
   for (let attempt = 1; ; attempt++) {
     try {
+      const res = await fetch(`http://${target.host}${ENTER_PATH}`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(choice),
+      });
+      if (!res.ok) throw new Error(`enter answered ${res.status}`);
+      const { seat } = (await res.json()) as Seating;
       const client = new Client(url, { headers: { cookie } });
-      bots.push(new Bot(await client.joinOrCreate(MAP_ROOM, joinOptions, MapState)));
+      bots.push(new Bot(await client.consumeSeatReservation(seat, MapState)));
       break;
     } catch (err) {
       if (attempt === 3) throw err;

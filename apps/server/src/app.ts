@@ -5,10 +5,13 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
 import { type LookOptions, MAP_ROOM, WORLD_ROOM } from "@guago/shared";
 import { type ApiRoute, createApiHandler, type HttpSettings } from "./auth/http.ts";
 import type { AuthService } from "./auth/service.ts";
+import { channels } from "./channels.ts";
 import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
+import { enterRoute } from "./enter.ts";
+import { sendHomeOnExpel } from "./home.ts";
 import type { Live } from "./live/index.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
@@ -34,6 +37,7 @@ export function createGameServer(
     live?: Live;
     trading?: Trading;
   } = {},
+  world: { channelSeats?: number; emptyGraceSeconds?: number } = {},
 ) {
   const { grants, live } = economy;
   provideGrants(grants);
@@ -59,10 +63,15 @@ export function createGameServer(
     ...(live ? { handlers: live.handlers } : {}),
     ...(economy.trading ? { trading: economy.trading } : {}),
   });
+  if (world.channelSeats !== undefined) channels.seats = world.channelSeats;
+  if (world.emptyGraceSeconds !== undefined) channels.graceSeconds = world.emptyGraceSeconds;
   const api = createApiHandler(auth, settings, looks, economy.routes);
+  const enter = enterRoute();
+  if (live) sendHomeOnExpel(live);
 
-  // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays
-  // the one the server made, and map rooms open only through `joinOrCreate`, when none has room.
+  // Clients join rooms; they never create one. Without `create`, the WorldRoom stays the one the
+  // server made. Map rooms refuse every client matchmaking call: their seats come from
+  // `POST /api/enter` and from doors, reserved by the server (channels.ts).
   matchMaker.controller.exposedMethods = ["joinOrCreate", "join", "joinById", "reconnect"];
   // Colyseus echoes any Origin with credentials by default; only the client's origin may call us.
   matchMaker.controller.getCorsHeaders = () => ({
@@ -73,12 +82,12 @@ export function createGameServer(
   return defineServer({
     transport: new WebSocketTransport(),
     rooms: {
-      [MAP_ROOM]: defineRoom(MapRoom).filterBy(["map"]),
+      [MAP_ROOM]: defineRoom(MapRoom),
       [WORLD_ROOM]: defineRoom(WorldRoom),
     },
     express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
       app.disable("x-powered-by");
-      if (live) app.use(live.adminRoute);
+      app.use(enter);
       app.use(api);
     },
     greet: false,
