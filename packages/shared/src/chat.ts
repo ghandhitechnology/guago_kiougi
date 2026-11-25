@@ -8,8 +8,8 @@ import { checkName, type Major, normalizeName } from "./api.ts";
 export const WORLD_ROOM = "world";
 
 /**
- * Chat channels. `system` is server to player only. `party` and `club` are part of the protocol
- * already; the server refuses them with `no_channel` until parties and clubs exist.
+ * Chat channels. `system` is server to player only. `party` and `club` reach the speaker's party
+ * and club; the server refuses them with `no_party` and `no_club` outside one.
  */
 export const CHAT_CHANNELS = ["world", "near", "whisper", "party", "club", "system"] as const;
 export type ChatChannel = (typeof CHAT_CHANNELS)[number];
@@ -22,10 +22,12 @@ export const CHAT_MAX_LENGTH = 120;
 /** UTF-16 units per message after cleaning: 120 characters of up to four units each. */
 export const CHAT_MAX_UNITS = 480;
 /**
- * Longest raw string the validator accepts; anything longer is garbage and drops the client. It
- * leaves room for spaces and invisible characters that cleaning removes.
+ * Longest raw string a validator accepts for text of `maxLength` characters; anything longer is
+ * garbage and drops the client. It leaves room for spaces and invisible characters that cleaning
+ * removes.
  */
-export const CHAT_MAX_RAW = 1024;
+export const textMaxRaw = (maxLength: number) => maxLength * 4 + 544;
+export const CHAT_MAX_RAW = textMaxRaw(CHAT_MAX_LENGTH);
 /** Rate limit: a burst of 5, then one more each second. */
 export const CHAT_BURST = 5;
 export const CHAT_PER_SECOND = 1;
@@ -57,6 +59,10 @@ export const WORLD_MESSAGES = {
    * as a combat grant landing. Applied like an operation's change, by `rev`.
    */
   change: "change",
+  /** Server to client: `Done`, the answer to a social request that was carried out (social.ts). */
+  done: "done",
+  /** Server to client: `SocialEvent` (social.ts): the login snapshot, then small changes. */
+  social: "social",
 } as const;
 
 /** Why a request was not carried out. The client owns the copy for each. */
@@ -72,6 +78,58 @@ export const REFUSAL_CODES = [
   "no_channel",
   /** The filter could not read the message in its time budget. */
   "unreadable",
+  // Social requests (social.ts). Each names the rule that stopped the request.
+  /** Something went wrong on the server; nothing was changed. */
+  "server_error",
+  /** No character has that name or id. */
+  "no_player",
+  /** The other player is on your block list. */
+  "blocked",
+  "blocks_full",
+  "already_friends",
+  "not_friends",
+  "friends_full",
+  /** The other player's friend list is full. */
+  "their_friends_full",
+  "requests_full",
+  "no_request",
+  "no_party",
+  "in_party",
+  "target_in_party",
+  "party_full",
+  "not_leader",
+  "no_invite",
+  "invites_full",
+  "not_member",
+  "no_club",
+  "in_club",
+  "target_in_club",
+  "club_full",
+  "invite_only",
+  "applications_full",
+  /** The rank does not allow this. */
+  "rank",
+  /** The 짱 hands the club over before leaving a club with other members. */
+  "leader_stays",
+  /** A disband names the club exactly, as a safeguard. */
+  "name_mismatch",
+  "name_invalid",
+  "name_banned",
+  "name_taken",
+  "jacket_invalid",
+  "emblem_invalid",
+  /** An emblem part the club's level has not unlocked. */
+  "emblem_locked",
+  /** Not enough 솔방울. */
+  "insufficient",
+  /** The operation id was used for a different request. */
+  "op_id_reused",
+  /** One active 대자보 post per category. */
+  "post_active",
+  "no_post",
+  /** Pinning is for 층장. */
+  "not_allowed",
+  "unknown_emote",
 ] as const;
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 
@@ -122,6 +180,7 @@ export interface Refusal {
   /** The message type that was refused. */
   type: string;
   code: RefusalCode;
+  /** The request's own number: `n` of a `ChatSend` or of a social request. */
   n?: number;
   /** For `muted`: when the mute ends, ms since the epoch. */
   until?: number;
@@ -227,7 +286,19 @@ function dropInvisible(text: string): string {
 export function cleanChatText(
   raw: string,
 ): { ok: true; text: string } | { ok: false; code: "empty" | "too_long" } {
-  if (raw.length > CHAT_MAX_RAW) return { ok: false, code: "too_long" };
+  return cleanText(raw, CHAT_MAX_LENGTH);
+}
+
+/**
+ * `cleanChatText` for any player text with its own length: 대자보 posts, club notices, report
+ * notes. `maxLength` is in user-perceived characters, each at most `CHAT_MAX_CHARACTER_UNITS`.
+ */
+export function cleanText(
+  raw: string,
+  maxLength: number,
+): { ok: true; text: string } | { ok: false; code: "empty" | "too_long" } {
+  const maxUnits = maxLength * 4;
+  if (raw.length > textMaxRaw(maxLength)) return { ok: false, code: "too_long" };
   const text = dropInvisible(
     raw
       .normalize("NFC")
@@ -237,10 +308,10 @@ export function cleanChatText(
     .replace(/\s+/gu, " ")
     .trim();
   if (text === "") return { ok: false, code: "empty" };
-  if (text.length > CHAT_MAX_UNITS) return { ok: false, code: "too_long" };
+  if (text.length > maxUnits) return { ok: false, code: "too_long" };
   let n = 0;
   for (const { segment } of graphemes.segment(text)) {
-    if (++n > CHAT_MAX_LENGTH || segment.length > CHAT_MAX_CHARACTER_UNITS) {
+    if (++n > maxLength || segment.length > CHAT_MAX_CHARACTER_UNITS) {
       return { ok: false, code: "too_long" };
     }
   }
@@ -276,7 +347,8 @@ export interface WorldMessageSchema<Out> {
   };
 }
 
-function worldSchema<Out>(check: (value: unknown) => Out | string): WorldMessageSchema<Out> {
+/** A validator from a check that answers the value, or a string saying what is wrong. */
+export function worldSchema<Out>(check: (value: unknown) => Out | string): WorldMessageSchema<Out> {
   return {
     "~standard": {
       version: 1,

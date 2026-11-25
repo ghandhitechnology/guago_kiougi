@@ -21,6 +21,7 @@ import {
 import {
   boardWeek,
   type Character,
+  CLUB_EXP_FOR_NOTICE,
   type CodexView,
   DEMERIT_WARNING,
   DEMERITS,
@@ -53,6 +54,7 @@ import {
   type WorldMessageSchema,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { clubActivity } from "../club-activity.ts";
 import type { Db } from "../db/index.ts";
 import { describeError } from "../db/index.ts";
 import { Buckets } from "../economy/buckets.ts";
@@ -308,6 +310,7 @@ export function createLive(db: Db, o: LiveOptions) {
         const h = helping.get(characterId);
         helping.delete(characterId);
         line("merit.help", undefined, characterId);
+        clubActivity.add(characterId, CLUB_EXP_FOR_NOTICE.help);
         const view = await board.notice(id.slice("help:".length));
         if (view) {
           push(characterId, { t: "help", notice: view });
@@ -604,6 +607,8 @@ export function createLive(db: Db, o: LiveOptions) {
     if (name === "quest.claim") {
       const quest = result.change.quests?.[0]?.id ?? "";
       const [kind, day] = quest.split(":");
+      const club = CLUB_EXP_FOR_NOTICE[kind as keyof typeof CLUB_EXP_FOR_NOTICE];
+      if (club) clubActivity.add(characterId, club);
       if (kind === "daily" && dailyIds(Number(day)).includes(quest)) {
         background("streak", async () => {
           const r = await run(characterId, `board-day:${day}`, "live.boardDay", {

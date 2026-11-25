@@ -24,6 +24,8 @@ export function readConfig(env: Record<string, string | undefined> = process.env
   const localPgPort = Number(env.LOCAL_PG_PORT ?? 54329);
   return {
     port: Number(env.PORT ?? SERVER_PORT),
+    /** Room metrics as JSON, on the loopback address only (default: the game port + 100). */
+    metricsPort: Number(env.METRICS_PORT ?? Number(env.PORT ?? SERVER_PORT) + 100),
     databaseUrl: env.DATABASE_URL ?? `postgres://guago:guago@127.0.0.1:${localPgPort}/guago_dev`,
     clientOrigin,
     /** Plain-http local development: `NODE_ENV` development or test, served to a localhost origin. */

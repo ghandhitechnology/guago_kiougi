@@ -43,6 +43,7 @@ import {
   type OpOutcome,
   type OpRequests,
   type Purse,
+  payClubFee,
   pilgi,
   pilgiChance,
   resetStats,
@@ -75,6 +76,8 @@ import {
 export interface InternalRequests {
   kit: Record<string, never>;
   grant: GrantRequest;
+  /** The 동아리 founding fee, run inside the founding transaction (social/fees.ts). */
+  "club.found": Record<string, never>;
 }
 
 /** What combat credits one character with since its last flush (PLAN §6 drops, §9 EXP). */
@@ -210,6 +213,17 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
         put.push({ ...row, slot });
       }
       return ok({ put, itemKey: "kit", outcome: { items: put.map((r) => r.id) } });
+    },
+  },
+
+  "club.found": {
+    client: false,
+    rows: () => ({}),
+    currencies: () => ["pinecone"],
+    apply(l, _req, env) {
+      const r = payClubFee(l.purse, env.page);
+      if (!r.ok) return no(r.error);
+      return ok({ purse: r.purse, ledger: r.ledger });
     },
   },
 

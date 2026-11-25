@@ -65,7 +65,9 @@ const MARKS = {
   room: "navy.pale",
   mark: "gold.pale",
   npc: "rose.pale",
+  patrol: "clay.dust",
   arena: "clay.pale",
+  elite: "red.pale",
 } as const;
 
 function rgb(ramps: Ramps, name: string): Rgb {
@@ -202,6 +204,48 @@ export function overlay(
       put(Math.round(cx + Math.cos(t) * 4 * scale), Math.round(cy + Math.sin(t) * 4 * scale), nc);
     }
     labels.push({ text: n.speaker, x: cx + 6 * scale, y: cy + 2 * scale, color: nc });
+  }
+  // Patrol routes as dotted lines, and the guard's cone at each waypoint, looking down the next
+  // leg.
+  const pc = rgb(ramps, MARKS.patrol);
+  for (const p of map.patrols ?? []) {
+    const pts = p.route;
+    const legs = p.loop === "cycle" ? [...pts, pts[0]] : pts;
+    for (let i = 0; i + 1 < legs.length; i++) {
+      const a = legs[i] as { x: number; y: number };
+      const b = legs[i + 1] as { x: number; y: number };
+      const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * scale);
+      for (let k = 0; k <= n; k += 2) {
+        const x = Math.round((a.x + ((b.x - a.x) * k) / n) * scale);
+        const y = Math.round((a.y + ((b.y - a.y) * k) / n) * scale);
+        put(x, y, pc);
+      }
+      const face = Math.atan2(b.y - a.y, b.x - a.x);
+      const half = ((p.cone.angle / 2) * Math.PI) / 180;
+      for (const edge of [-half, half]) {
+        for (let r = 0; r < p.cone.length * scale; r += 2) {
+          put(
+            Math.round(a.x * scale + Math.cos(face + edge) * r),
+            Math.round(a.y * scale + Math.sin(face + edge) * r),
+            pc,
+          );
+        }
+      }
+      for (let t = -half; t <= half; t += 0.02)
+        put(
+          Math.round(a.x * scale + Math.cos(face + t) * p.cone.length * scale),
+          Math.round(a.y * scale + Math.sin(face + t) * p.cone.length * scale),
+          pc,
+        );
+    }
+    const first = pts[0];
+    if (first)
+      labels.push({
+        text: `⚑ ${p.id}`,
+        x: first.x * scale + 4 * scale,
+        y: first.y * scale,
+        color: pc,
+      });
   }
   const sc = rgb(ramps, MARKS.spawn);
   for (const [name, s] of Object.entries(map.spawns)) {

@@ -153,6 +153,18 @@ export function neatBonus(amount: number, rolls: readonly number[]): number {
   return extra;
 }
 
+/**
+ * Club EXP a member's finished notice brings their 동아리 (PLAN §12: 수행평가 is club activity).
+ * A level 10 club (81,000) takes ten members on full boards about three months.
+ */
+export const CLUB_EXP_FOR_NOTICE = {
+  daily: 10,
+  weekly: 30,
+  repeat: 5,
+  story: 20,
+  help: 15,
+} as const;
+
 /** 층장: the five players with the most 상점 in a week (PLAN §11). */
 export const FLOOR_LEADERS = 5;
 
