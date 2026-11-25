@@ -31,7 +31,6 @@ import { CostRow } from "../ui/cost-row.ts";
 import { CELL, type CellItem, ItemCell } from "../ui/item-cell.ts";
 import { ItemGrid } from "../ui/item-grid.ts";
 import { fade, shake, slide, stamp } from "../ui/motion.ts";
-import { screen } from "../ui/screen.ts";
 import { sound } from "../ui/sound.ts";
 import { Stepper } from "../ui/stepper.ts";
 import { Label } from "../ui/text.ts";
@@ -39,6 +38,7 @@ import { paint } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
 import type { OpCall } from "../world-link.ts";
 import { onGone, opRefusal, SaidLine } from "./common.ts";
+import { evolutionMoment } from "./evolution.ts";
 
 /**
  * The six ways an item changes (PLAN §8), each one small screen on the notebook page: what goes
@@ -72,6 +72,8 @@ export class StationView {
   private readonly said: SaidLine;
   private readonly row: CostRow;
   private pending = false;
+  /** A result is on show: changes wait until it has been seen. */
+  private holding = false;
   /** Drawn on every inventory change; stations set it to redraw what they show. */
   private redraw: () => void = () => {};
 
@@ -109,7 +111,7 @@ export class StationView {
     });
     this.root.add([home, title.obj, this.stage, this.row.root]);
     const unwatch = inventory.watch(() => {
-      if (!this.pending) this.redraw();
+      if (!this.pending && !this.holding) this.redraw();
     });
     onGone(this.root, unwatch);
     this.build();
@@ -229,6 +231,7 @@ export class StationView {
 
   private pilgi(item: ItemView): void {
     const s = this.ctx.scene;
+    const subject = bookDef(item.def)?.subject ?? "math";
     const wx = this.mid - 120;
     const well = this.well(wx, 14, cellOf(item));
     const name = this.label(wx - 8, 70, itemGood(item).name, GRADE_INK[item.grade] ?? "ink.dark");
@@ -236,6 +239,8 @@ export class StationView {
     from.obj.setScale(2);
     const chance = this.label(this.mid - 40, 46, "", "red.dark", "galmuri11-bold");
     chance.obj.setScale(2);
+    // Pity earned by failing, in gold beside the odds it adds to.
+    const pityText = this.label(0, 52, "", "gold.deep", "galmuri11-bold");
     // The chance as a bar: the book's own odds, and the pity earned by failing, in gold.
     const BAR = 150;
     const bx = this.mid - 40;
@@ -244,8 +249,13 @@ export class StationView {
     const base = s.add.rectangle(bx, by, 0, 6, paint("red.mid")).setOrigin(0);
     const pity = s.add.rectangle(bx, by, 0, 6, paint("gold.mid")).setOrigin(0);
     this.stage.add([base, pity]);
+    // What one more + is worth: the power before and after.
+    const powerWord = this.label(bx, 98, t("bag.power"), "stone.dark");
+    const power = this.label(bx + powerWord.width + 6, 96, "", "ink.dark", "galmuri11-bold");
     const scratch = s.add.graphics();
     this.stage.add(scratch);
+    const wb = { x: wx, y: 14, w: CELL * 2, h: CELL * 2 };
+    const centre = { x: wb.x + wb.w / 2, y: wb.y + wb.h / 2 };
     this.redraw = () => {
       const it = inventory.item(item.id);
       if (!it) return;
@@ -256,6 +266,11 @@ export class StationView {
       const c = odds?.chance ?? 0;
       chance.set(`${Math.round(c * 100)}%`);
       const pityShare = Math.min(c, 0.1 * it.pilgiFails);
+      pityText.set(pityShare > 0 ? `+${Math.round(pityShare * 100)}%` : "");
+      pityText.at(bx + chance.width * 2 + 8, 52);
+      power.set(
+        `${bookPower(it).toLocaleString("en-US")}  →  ${bookPower({ ...it, pilgi: it.pilgi + 1 }).toLocaleString("en-US")}`,
+      );
       slide(base, { x: bx, y: by }, 0);
       s.tweens.add({ targets: base, width: Math.round(BAR * (c - pityShare)), duration: 220 });
       s.tweens.add({
@@ -283,13 +298,13 @@ export class StationView {
       const it = inventory.item(item.id);
       if (!it?.next || this.pending) return;
       const failsBefore = it.pilgiFails;
+      const pityBefore = { x: pity.x, w: pity.width };
       this.pending = true;
       this.row.setPending(true);
       this.said.clear();
       // The pen scratches over the book while the answer comes.
       const started = Date.now();
-      const wb = { x: wx, y: 14, w: CELL * 2, h: CELL * 2 };
-      scratch.clear().lineStyle(1, paint("red.mid"), 1);
+      scratch.clear().setAlpha(1).lineStyle(1, paint("red.mid"), 1);
       let step = 0;
       const pen = s.time.addEvent({
         delay: 60,
@@ -297,7 +312,7 @@ export class StationView {
         callback: () => {
           step++;
           const x0 = wb.x + 4 + ((step * 7) % (wb.w - 8));
-          const y0 = wb.y + 8 + (Math.floor((step * 3) / 1) % (wb.h - 16));
+          const y0 = wb.y + 8 + ((step * 3) % (wb.h - 16));
           scratch.lineBetween(x0, y0, x0 + 6, y0 + (step % 2 === 0 ? 4 : -4));
           if (step % 2 === 0) sound("type");
         },
@@ -314,31 +329,97 @@ export class StationView {
         this.redraw();
         return;
       }
-      const success = r.outcome.success === true;
-      if (success) {
+      const after = inventory.item(item.id);
+      const level = `+${after?.pilgi ?? it.pilgi + 1}`;
+      if (r.outcome.success === true && failsBefore > 0) {
+        // Pity: the gold the failures earned pours from the bar into the book, then the book
+        // takes it in a gold flash, the + stamps in gold, and the whole page jolts.
         scratch.clear();
-        const pityLanded = failsBefore > 0;
-        this.burst(wb.x + wb.w / 2, wb.y + wb.h / 2, pityLanded ? "gold.light" : "stone.bright");
-        const after = inventory.item(item.id);
-        this.stampText(
-          wb.x + wb.w / 2,
-          wb.y + wb.h / 2,
-          `+${after?.pilgi ?? it.pilgi + 1}`,
-          pityLanded ? "gold.mid" : "red.mid",
-        );
-        cue(pityLanded ? "jingle.level-up" : "jingle.rare-drop");
-        sound("stamp");
-      } else {
-        // The line smears grey, the book shudders, and the pity bar grows.
-        scratch.clear().lineStyle(1, paint("stone.dark"), 1);
-        for (let i = 0; i < 5; i++)
-          scratch.lineBetween(wb.x + 6 + i * 7, wb.y + 10, wb.x + 12 + i * 7, wb.y + wb.h - 10);
-        shake(well, { x: well.x, y: well.y });
-        sound("error");
-        cue("page-flutter", { volume: 0.6 });
-        s.time.delayedCall(600, () => fade(scratch, 0, 300, () => scratch.clear().setAlpha(1)));
+        const pours = Math.max(6, Math.min(16, failsBefore * 3));
+        for (let i = 0; i < pours; i++) {
+          const sq = s.add
+            .rectangle(
+              pityBefore.x + Math.random() * Math.max(4, pityBefore.w),
+              by + 3,
+              3,
+              3,
+              paint(i % 2 ? "gold.light" : "gold.pale"),
+            )
+            .setOrigin(0.5);
+          this.stage.add(sq);
+          s.tweens.add({
+            targets: sq,
+            x: centre.x,
+            y: centre.y,
+            duration: 300,
+            delay: i * 22,
+            ease: "Quad.In",
+            onComplete: () => sq.destroy(),
+          });
+          if (i % 3 === 0) s.time.delayedCall(i * 22, () => sound("select"));
+        }
+        s.time.delayedCall(300 + pours * 22, () => {
+          if (!this.root.active) return;
+          this.flash(wb, "gold.pale");
+          this.burst(centre.x, centre.y, "gold.light", 18, 40);
+          this.ringOut(centre.x, centre.y, "gold.light");
+          this.stampText(centre.x, centre.y, level, "gold.mid", 3);
+          s.cameras.main.shake(180, 0.006);
+          cue("jingle.level-up");
+          cue(`hit.${subject}.crit`);
+          sound("stamp");
+          this.redraw();
+        });
+        return;
       }
+      if (r.outcome.success === true) {
+        // Success: the scratches turn to clean ink, the book flashes white, red ink bursts and
+        // the new + stamps down over it.
+        scratch.clear();
+        this.flash(wb, "stone.bright");
+        this.burst(centre.x, centre.y, "red.light", 12, 30);
+        this.stampText(centre.x, centre.y, level, "red.mid", 2);
+        stamp(well, { x: well.x, y: well.y, scale: 2 });
+        s.cameras.main.shake(90, 0.003);
+        cue("jingle.rare-drop");
+        sound("stamp");
+        this.redraw();
+        return;
+      }
+      // Fail: the line smears grey, the book shudders and goes dull, and the pity it earned
+      // floats up off the bar in gold while the bar grows.
+      scratch.clear().lineStyle(1, paint("stone.dark"), 1);
+      for (let i = 0; i < 5; i++)
+        scratch.lineBetween(wb.x + 6 + i * 7, wb.y + 10, wb.x + 12 + i * 7, wb.y + wb.h - 10);
+      shake(well, { x: well.x, y: well.y });
+      well.setAlpha(0.55);
+      s.tweens.add({ targets: well, alpha: 1, delay: 500, duration: 400 });
+      sound("error");
+      cue("page-flutter", { volume: 0.6 });
       this.redraw();
+      const earned =
+        Math.round((after?.next?.chance ?? it.next.chance) * 100) -
+        Math.round(it.next.chance * 100);
+      if (earned > 0) {
+        const up = this.label(
+          pity.x + pity.width + 4,
+          by - 4,
+          `+${earned}%`,
+          "gold.deep",
+          "galmuri11-bold",
+        );
+        up.obj.setAlpha(0);
+        s.tweens.add({
+          targets: up.obj,
+          y: up.obj.y - 10,
+          alpha: { from: 1, to: 0 },
+          delay: 250,
+          duration: 900,
+          onComplete: () => up.obj.destroy(),
+        });
+        s.time.delayedCall(250, () => sound("select"));
+      }
+      s.time.delayedCall(700, () => fade(scratch, 0, 300, () => scratch.clear().setAlpha(1)));
     };
   }
 
@@ -357,6 +438,7 @@ export class StationView {
     this.redraw = () => {
       const have = inventory.count(sheet);
       sheets.set({ icon: "icon/page", count: have });
+      if (!this.holding) out.set({ icon: book.icon, grade: 0, dim: true });
       count.set(`${Math.min(have, BIND.sheets)} / ${BIND.sheets}`);
       count.color(have < BIND.sheets ? "red.dark" : "ink.mid");
       const cost = bindCost(def, page());
@@ -377,21 +459,45 @@ export class StationView {
       this.pending = true;
       this.row.setPending(true);
       cue("chalk");
-      // The sheets and the thread go into the middle while the table works.
+      cue("page-flutter", { volume: 0.7 });
+      // The sheets flutter over one by one and the thread follows them into the binding.
       const s = this.ctx.scene;
-      for (const w of [sheets, binding]) {
+      const to = { x: out.x + CELL, y: out.y + CELL };
+      for (let i = 0; i < 10; i++) {
+        const p = s.add.image(sheets.x + CELL, sheets.y + CELL, "ui", "icon/page").setAlpha(0);
+        this.stage.add(p);
+        const lift = 18 + (i % 3) * 8;
         s.tweens.add({
-          targets: w,
-          x: this.mid + 60,
-          alpha: 0.2,
-          duration: 380,
-          ease: "Cubic.In",
-          yoyo: true,
-          hold: 120,
+          targets: p,
+          x: to.x,
+          alpha: { from: 1, to: 0.6 },
+          duration: 420,
+          delay: i * 55,
+          ease: "Sine.InOut",
+          onComplete: () => p.destroy(),
         });
+        s.tweens.add({
+          targets: p,
+          y: { from: sheets.y + CELL, to: sheets.y + CELL - lift },
+          duration: 210,
+          delay: i * 55,
+          yoyo: true,
+          ease: "Quad.Out",
+        });
+        s.tweens.add({ targets: p, angle: (i % 2 ? 1 : -1) * 40, duration: 420, delay: i * 55 });
       }
+      s.tweens.add({
+        targets: binding,
+        x: out.x,
+        alpha: 0.2,
+        duration: 380,
+        delay: 420,
+        ease: "Cubic.In",
+        yoyo: true,
+        hold: 160,
+      });
       const r = await inventory.op("craft", { def });
-      await wait(s, 700);
+      await wait(s, 900);
       this.pending = false;
       this.row.setPending(false);
       if (!this.root.active) return;
@@ -399,11 +505,21 @@ export class StationView {
         this.refuse(r);
         return;
       }
+      // A new book: the binding flashes, the copy stamps down whole and the page jolts.
       out.set({ icon: book.icon, grade: 0 });
-      stamp(out, { x: out.x, y: out.y });
-      this.burst(out.x + CELL, out.y + CELL, "stone.bright");
+      this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "stone.bright");
+      stamp(out, { x: out.x, y: out.y, scale: 2 });
+      this.burst(to.x, to.y, "gold.pale", 14, 30);
+      this.ringOut(to.x, to.y, "stone.mid", 56);
+      s.cameras.main.shake(110, 0.004);
       sound("stamp");
       cue("sfx.pickup.page");
+      cue("jingle.rare-drop");
+      this.holding = true;
+      s.time.delayedCall(1400, () => {
+        this.holding = false;
+        if (this.root.active) this.redraw();
+      });
       this.redraw();
     };
   }
@@ -412,8 +528,10 @@ export class StationView {
 
   private forge(item: ItemView): void {
     const s = this.ctx.scene;
+    // The copy the station follows: the forge keeps one of the three, which may not be this one.
+    let current = item.id;
     const pick = () => {
-      const it = inventory.item(item.id);
+      const it = inventory.item(current);
       if (!it) return [];
       const others = inventory
         .items("book")
@@ -424,11 +542,13 @@ export class StationView {
         .slice(0, 2);
       return [it, ...others];
     };
-    const x0 = this.mid - 150;
-    const wells = [0, 1, 2].map((i) => this.well(x0 + i * 40, 26, undefined, 1.5));
-    this.arrow(this.mid + 6, 44);
+    const PITCH = CELL * 2 + 6;
+    const x0 = this.mid - 30 - 3 * PITCH;
+    const wells = [0, 1, 2].map((i) => this.well(x0 + i * PITCH, 14, undefined, 2));
+    this.arrow(this.mid + 6, 38);
     const out = this.well(this.mid + 40, 14, undefined, 2);
     const outName = this.label(this.mid + 30, 70, "");
+    const to = { x: out.x + CELL, y: out.y + CELL };
     this.redraw = () => {
       const copies = pick();
       wells.forEach((w, i) => {
@@ -461,25 +581,30 @@ export class StationView {
       if (copies.length < 3 || this.pending) return;
       this.pending = true;
       this.row.setPending(true);
-      // Three into one: the copies slam together in the middle.
+      // Three into one: the copies slam together in the middle, one after another.
       wells.forEach((w, i) => {
-        s.time.delayedCall(i * 140, () => sound("stamp"));
+        s.time.delayedCall(i * 150 + 240, () => {
+          sound("stamp");
+          this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "stone.bright");
+          nudgeOut();
+        });
         s.tweens.add({
           targets: w,
-          x: this.mid + 40,
-          y: 26,
-          alpha: 0.3,
-          duration: 260,
-          delay: i * 140,
+          x: out.x,
+          y: out.y,
+          alpha: 0,
+          duration: 240,
+          delay: i * 150,
           ease: "Cubic.In",
         });
       });
+      const nudgeOut = () => shake(out, { x: out.x, y: out.y });
       const r = await inventory.op("forge", {
         items: copies.map((c) => c.id) as [string, string, string],
       });
-      await wait(s, 650);
+      await wait(s, 760);
       wells.forEach((w, i) => {
-        w.setPosition(x0 + i * 40, 26).setAlpha(1);
+        w.setPosition(x0 + i * PITCH, 14).setAlpha(1);
       });
       this.pending = false;
       this.row.setPending(false);
@@ -489,10 +614,32 @@ export class StationView {
         this.redraw();
         return;
       }
-      stamp(out, { x: out.x, y: out.y });
-      this.burst(out.x + CELL, out.y + CELL, "gold.light");
+      // The new grade: a flash, the copy stamps down in its new frame, light in the grade's
+      // colour breaks out of it, and the grade's name lands over it.
+      const kept = typeof r.outcome.item === "string" ? r.outcome.item : current;
+      current = kept;
+      const made = inventory.item(kept);
+      const ink = GRADE_INK[made?.grade ?? 0] ?? "ink.dark";
+      for (const w of wells) w.set(undefined);
+      if (made) {
+        out.set(cellOf(made));
+        outName.set(`${gradeName(made.grade)} · Lv ${made.level}`);
+        outName.color(ink);
+      }
+      this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "gold.pale");
+      stamp(out, { x: out.x, y: out.y, scale: 2 });
+      this.burst(to.x, to.y, "gold.light", 18, 40);
+      this.ringOut(to.x, to.y, ink, 80);
+      this.stampText(to.x, out.y - 2, gradeName(made?.grade ?? 0), ink, 2);
+      s.cameras.main.shake(200, 0.008);
+      sound("stamp");
+      cue(`hit.${bookDef(item.def)?.subject ?? "math"}.heavy`);
       cue("jingle.level-up");
-      this.redraw();
+      this.holding = true;
+      s.time.delayedCall(1600, () => {
+        this.holding = false;
+        if (this.root.active) this.redraw();
+      });
     };
   }
 
@@ -583,7 +730,7 @@ export class StationView {
         this.refuse(r);
         return;
       }
-      stamp(well, { x: well.x, y: well.y });
+      stamp(well, { x: well.x, y: well.y, scale: 2 });
       sound("confirm");
       n = 1;
       this.redraw();
@@ -645,7 +792,7 @@ export class StationView {
       const level = Number(r.outcome.level ?? 0);
       for (let i = 0; i < level; i++) s.time.delayedCall(i * 90, () => sound("select"));
       s.time.delayedCall(level * 90, () => sound("stamp"));
-      stamp(into, { x: into.x, y: into.y });
+      stamp(into, { x: into.x, y: into.y, scale: 2 });
       this.redraw();
     };
   }
@@ -726,152 +873,66 @@ export class StationView {
   }
 
   /** Bright squares bursting out from a point: a moment landing. */
-  private burst(x: number, y: number, color: string): void {
+  private burst(x: number, y: number, color: string, count = 10, reach = 22): void {
     const s = this.ctx.scene;
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2;
-      const sq = s.add.rectangle(x, y, 2, 2, paint(color)).setOrigin(0.5);
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const d = reach + (i % 3) * 6;
+      const sq = s.add.rectangle(x, y, i % 3 === 0 ? 3 : 2, i % 3 === 0 ? 3 : 2, paint(color));
+      sq.setOrigin(0.5);
       this.stage.add(sq);
       s.tweens.add({
         targets: sq,
-        x: x + Math.cos(a) * (22 + (i % 3) * 6),
-        y: y + Math.sin(a) * (22 + (i % 3) * 6),
+        x: x + Math.cos(a) * d,
+        y: y + Math.sin(a) * d,
         alpha: 0,
-        duration: 420,
+        duration: 420 + (i % 4) * 60,
         ease: "Cubic.Out",
         onComplete: () => sq.destroy(),
       });
     }
   }
 
+  /** A ring breaking outward from a point. */
+  private ringOut(x: number, y: number, color: string, reach = 70): void {
+    const s = this.ctx.scene;
+    const g = s.add.graphics();
+    this.stage.add(g);
+    const r = { v: 8 };
+    s.tweens.add({
+      targets: r,
+      v: reach,
+      duration: 420,
+      ease: "Cubic.Out",
+      onUpdate: () => {
+        g.clear()
+          .lineStyle(2, paint(color), 1 - r.v / reach)
+          .strokeCircle(x, y, r.v);
+      },
+      onComplete: () => g.destroy(),
+    });
+  }
+
+  /** The well lit up for two frames, then fading: a hit landing on the book. */
+  private flash(at: { x: number; y: number; w: number; h: number }, color: string): void {
+    const f = this.ctx.scene.add.rectangle(at.x, at.y, at.w, at.h, paint(color)).setOrigin(0);
+    this.stage.add(f);
+    this.ctx.scene.time.delayedCall(34, () => fade(f, 0, 200, () => f.destroy()));
+  }
+
   /** A number stamped onto the page in ink, slamming down from big. */
-  private stampText(x: number, y: number, text: string, color: string): void {
+  private stampText(x: number, y: number, text: string, color: string, scale = 2): void {
     const s = this.ctx.scene;
     const l = new Label(s, 0, 0, text, { font: "galmuri11-bold", color });
-    const c = s.add.container(x, y, [l.obj]).setScale(2);
+    const shadow = new Label(s, 1, 1, text, { font: "galmuri11-bold", color: "stone.bright" });
+    const c = s.add.container(x, y, [shadow.obj, l.obj]);
     l.at(-Math.round(l.width / 2), -6);
+    shadow.at(-Math.round(l.width / 2) + 1, -5);
     this.stage.add(c);
-    c.setScale(5).setAlpha(0);
-    s.tweens.add({ targets: c, scale: 2, alpha: 1, duration: 140, ease: "Quad.In" });
+    c.setScale(scale * 2.5).setAlpha(0);
+    s.tweens.add({ targets: c, scale, alpha: 1, duration: 140, ease: "Quad.In" });
     s.time.delayedCall(1400, () => fade(c, 0, 300, () => c.destroy()));
   }
-}
-
-/**
- * An evolution takes the whole screen: the ink rises, the book hangs in the middle with its own
- * effect art turning round it, light breaks, and the new book is stamped with its new name.
- * `land` plays the reveal once the server agrees; `abort` lets the ink fall back.
- */
-function evolutionMoment(
-  scene: Phaser.Scene,
-  item: ItemView,
-): { land: (then: () => void) => void; abort: () => void } {
-  const def = bookDef(item.def);
-  const before = bookGood(item.def, false);
-  const after = bookGood(item.def, true);
-  const cx = Math.round(screen.w / 2);
-  const cy = Math.round(screen.h / 2) - 10;
-  const dim = scene.add
-    .rectangle(0, 0, screen.w, screen.h, paint("ink.deep"))
-    .setOrigin(0)
-    .setAlpha(0)
-    .setInteractive();
-  const rays = scene.add.graphics();
-  const ring = scene.add.container(cx, cy);
-  const icon = scene.add.image(cx, cy, "ui", before.icon).setOrigin(0.5).setScale(4);
-  const root = scene.add.container(0, 0, [dim, rays, ring, icon]).setDepth(3000);
-  fade(dim, 0.92, 400);
-  sound("open");
-  cue(def?.cues.cast ?? "chalk");
-  // The book's own effect art, from its attack, circling it.
-  const body = def?.evolution.cues.body ?? def?.cues.body;
-  const frames =
-    body && scene.textures.exists("combat")
-      ? scene.textures
-          .get("combat")
-          .getFrameNames()
-          .filter((f) => f.startsWith(`${body}/`))
-          .sort()
-      : [];
-  const sprites = frames.length
-    ? [0, 1, 2, 3, 4, 5].map((i) => {
-        const sp = scene.add
-          .image(
-            Math.cos((i / 6) * Math.PI * 2) * 52,
-            Math.sin((i / 6) * Math.PI * 2) * 52,
-            "combat",
-            frames[0],
-          )
-          .setScale(2);
-        ring.add(sp);
-        return sp;
-      })
-    : [];
-  let k = 0;
-  const spin = scene.time.addEvent({
-    delay: 70,
-    loop: true,
-    callback: () => {
-      k++;
-      ring.rotation += 0.06;
-      for (const [i, sp] of sprites.entries())
-        sp.setFrame(frames[(k + i) % frames.length] as string);
-      rays.clear();
-      for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * Math.PI * 2 + k * 0.03;
-        rays.lineStyle(
-          1,
-          paint(i % 2 ? "gold.pale" : "stone.bright"),
-          0.25 + 0.15 * Math.sin(k / 4 + i),
-        );
-        rays.lineBetween(
-          cx + Math.cos(a) * 30,
-          cy + Math.sin(a) * 30,
-          cx + Math.cos(a) * 200,
-          cy + Math.sin(a) * 200,
-        );
-      }
-      icon.y = cy + (k % 6 < 3 ? -1 : 0);
-    },
-  });
-  const close = (then?: () => void) => {
-    spin.remove();
-    fade(root, 0, 300, () => {
-      root.destroy();
-      then?.();
-    });
-  };
-  return {
-    abort: () => close(),
-    land: (then) => {
-      scene.time.delayedCall(1100, () => {
-        const flash = scene.add
-          .rectangle(0, 0, screen.w, screen.h, paint("stone.bright"))
-          .setOrigin(0);
-        root.add(flash);
-        fade(flash, 0, 500, () => flash.destroy());
-        icon.setFrame(after.icon).setOrigin(0.5);
-        stamp(icon, { x: cx, y: cy });
-        icon.setScale(4);
-        cue("jingle.liberation");
-        sound("stamp");
-        const name = new Label(scene, 0, 0, after.name, {
-          font: "galmuri11-bold",
-          color: "gold.light",
-        });
-        name.obj.setScale(2);
-        name.at(cx - name.width, cy + 48);
-        root.add(name.obj);
-        name.obj.setAlpha(0);
-        fade(name.obj, 1, 400);
-        // Any press goes back to the bag, the new book picked.
-        scene.time.delayedCall(900, () => {
-          dim.once("pointerup", () => close(then));
-          scene.input.keyboard?.once("keydown", () => close(then));
-        });
-      });
-    },
-  };
 }
 
 function cellOf(it: ItemView): CellItem {
