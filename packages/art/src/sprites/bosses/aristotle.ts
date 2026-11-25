@@ -156,7 +156,7 @@ const LINEN = { line: "G", dark: "q", mid: "p", light: "w" } as const;
 
 const HX = 61;
 const HY = 33;
-const HAIR = { line: "X", dark: "h", mid: "H", light: "g" } as const;
+const HAIR = { dark: "h", mid: "H", light: "g" } as const;
 
 /** Steel-grey curls receding at the temples, a broad forehead, a full square beard. */
 function head(): Pic {
