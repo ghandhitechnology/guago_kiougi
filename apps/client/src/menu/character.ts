@@ -259,7 +259,7 @@ class CharacterPage {
       buffs.push({ icon: "icon/pool", name: t("character.rested"), until: rules.restedUntil });
     }
     if (rules?.drowsy) buffs.push({ icon: "icon/focus", name: t("character.drowsy"), until: null });
-    y = Math.max(y + 6, 96);
+    y += 6;
     for (const b of buffs) {
       add(s.add.image(rx, y, "ui", b.icon).setOrigin(0));
       add(
@@ -277,25 +277,32 @@ class CharacterPage {
       }
       y += 16;
     }
-    this.ladder(rx, this.size.h - 6, prog.tier);
+    this.ladder(rx, y + 8, this.size.h - 6, prog.tier);
   }
 
   /**
-   * The 전직 ladder at the foot of the right page, earliest at the bottom: each tier at its
-   * level, those passed in ink, the current one ringed in red pen, the ones ahead in pencil.
+   * The 전직 ladder down the rest of the right page, earliest at the bottom: each tier at its
+   * level, those passed in ink, the current one ringed in red pen, the ones ahead in pencil, and
+   * beside each the book and tool slots it opens, the ones the next tier adds outlined in red.
    */
-  private ladder(x: number, bottom: number, current: number): void {
+  private ladder(x: number, top: number, bottom: number, current: number): void {
     const s = this.ctx.scene;
-    const row = 13;
+    const row = Math.max(13, Math.min(24, Math.floor((bottom - top) / TIERS.length)));
     const g = s.add.graphics();
     this.body.add(g);
     TIERS.forEach((tier, i) => {
-      const y = bottom - (i + 1) * row;
+      const y = bottom - (i + 1) * row + Math.floor((row - 13) / 2);
       const passed = i < current;
       const here = i === current;
       const color = here ? "red.dark" : passed ? "ink.dark" : "stone.mid";
       // The rung: a short rule joining this tier to the next.
-      g.fillStyle(paint(passed ? "ink.mid" : "stone.light")).fillRect(x + 4, y - 3, 1, row - 6);
+      if (i < TIERS.length - 1)
+        g.fillStyle(paint(i + 1 <= current ? "ink.mid" : "stone.light")).fillRect(
+          x + 4,
+          y - row + 8,
+          1,
+          row - 5,
+        );
       g.fillStyle(paint(here ? "red.mid" : passed ? "ink.mid" : "stone.light")).fillRect(
         x + 2,
         y + 3,
@@ -312,6 +319,22 @@ class CharacterPage {
       });
       this.body.add([lv.obj, name.obj]);
       if (here) g.lineStyle(1, paint("red.mid")).strokeRect(x + 43.5, y - 0.5, name.width + 6, 12);
+      // The slots it opens: books, a gap, tools; what the next tier adds outlined in red pen.
+      const before = TIERS[i - 1];
+      const next = i === current + 1;
+      const pips = (n: number, had: number, at: number, fill: string) => {
+        for (let k = 0; k < n; k++) {
+          const px = at + k * 6;
+          const fresh = k >= had;
+          if (next && fresh) {
+            g.lineStyle(1, paint("red.mid")).strokeRect(px + 0.5, y + 3.5, 4, 4);
+            continue;
+          }
+          g.fillStyle(paint(i <= current ? fill : "stone.light")).fillRect(px, y + 3, 5, 5);
+        }
+      };
+      pips(tier.books, before?.books ?? 0, x + 120, "plum.mid");
+      pips(tier.tools, before?.tools ?? 0, x + 120 + 6 * 6 + 4, "gold.mid");
     });
   }
 
