@@ -411,7 +411,6 @@ export interface FieldRule {
 export interface Pacing {
   readonly surge: number;
   readonly lull: number;
-  readonly surgeOpening: number;
   readonly respawnDelay: number;
   readonly spawnMinDistance: number;
   readonly spawnMaxDistance: number;
@@ -419,6 +418,8 @@ export interface Pacing {
   readonly despawnDistance: number;
   readonly despawnAfter: number;
   population(players: number): number;
+  /** Spawn events dropped around each player when a surge starts. */
+  surgeOpening(players: number): number;
   /** Spawns per second the field may add. */
   refillCap(players: number, surge: boolean): number;
 }

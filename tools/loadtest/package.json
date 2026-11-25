@@ -8,7 +8,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "page-run": "node src/page-run.ts",
     "raid-run": "node src/raid-run.ts",
-    "opening-check": "node src/opening-check.ts"
+    "opening-check": "node src/opening-check.ts",
+    "solo-field": "node src/solo-field.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"

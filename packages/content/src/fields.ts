@@ -7,11 +7,16 @@
  * churn is bounded twice: never more than `population` alive (PLAN §6, at most 150) and never
  * more than `refillCap` spawns per second for the field, which grows with the players present.
  * A character strong enough to outpace the cap gets more out of hunting higher regions.
+ *
+ * A horde chases whoever is there, so one player alone takes all of it: a lone player's field
+ * runs the `alone` numbers, a crowd a new student walks through and outlasts with books running
+ * by themselves. From two players it runs the full horde, which keeps a 복습 newcomer's pace
+ * (PLAN §9, the balance sim hunts sealed Pages two at a time).
  */
 export const FIELD_PACING = {
   surgeSeconds: 50,
   lullSeconds: 12,
-  /** Monsters dropped at once in a ring around each player group when a surge starts. */
+  /** Spawn events dropped at once in a ring around each player when a surge starts. */
   surgeOpening: 12,
   /** Alive target: 45 + 15 per player, held between 60 and 150. */
   populationBase: 45,
@@ -23,6 +28,8 @@ export const FIELD_PACING = {
   /** Spawns per second the field may add at most: 3 + 2 per player, 19 for eight players. */
   refillBase: 3,
   refillPerPlayer: 2,
+  /** One player alone: alive target, surge opening and spawns per second. */
+  alone: { population: 20, surgeOpening: 3, refill: 0.25 },
   /** Spawns land off every player's screen but close enough to arrive within seconds. */
   spawnMinDistance: 280,
   spawnMaxDistance: 480,
@@ -53,15 +60,22 @@ export function surgeShare(): number {
 
 export function fieldPopulation(players: number): number {
   const p = FIELD_PACING;
+  if (players <= 1) return p.alone.population;
   return Math.min(
     p.populationMax,
     Math.max(p.populationMin, p.populationBase + p.populationPerPlayer * players),
   );
 }
 
+/** Spawn events in the ring around each player when a surge starts. */
+export function surgeOpening(players: number): number {
+  return players <= 1 ? FIELD_PACING.alone.surgeOpening : FIELD_PACING.surgeOpening;
+}
+
 /** The most monsters per second a field may add, whatever its players kill. */
 export function refillCap(players: number, phase: WavePhase): number {
   if (phase === "lull" || players <= 0) return 0;
+  if (players === 1) return FIELD_PACING.alone.refill;
   return FIELD_PACING.refillBase + FIELD_PACING.refillPerPlayer * players;
 }
 
