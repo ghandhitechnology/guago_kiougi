@@ -32,7 +32,7 @@ body {
     sans-serif;
   font-variant-numeric: tabular-nums;
   word-break: keep-all;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 a {
@@ -207,6 +207,7 @@ input[type="checkbox"] {
 input.wide {
   flex: 1 1 260px;
   min-width: 200px;
+  max-width: 520px;
 }
 textarea {
   width: 100%;

@@ -162,11 +162,17 @@ export async function signUp(base: string, loginId: string, name: string, major 
 }
 
 /** An admin signed in on the admin port, as the admin page would be. */
-export async function adminLogin(origin: string, loginId: string, password: string) {
+export async function adminLogin(
+  target: string,
+  loginId: string,
+  password: string,
+  /** The admin page's origin, which the listener requires on state changes. */
+  origin = target,
+) {
   let cookie = "";
   let csrf = "";
   const send = async (pathname: string, body?: unknown) => {
-    const res = await fetch(`${origin}/admin/api${pathname}`, {
+    const res = await fetch(`${target}/admin/api${pathname}`, {
       method: body === undefined ? "GET" : "POST",
       headers: {
         origin,

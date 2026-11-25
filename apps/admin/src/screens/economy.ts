@@ -79,7 +79,10 @@ export async function economyScreen(ctx: Ctx): Promise<Node> {
       td(amount(k.total.toString(), true), "num"),
       td(amount(k.entries), "num"),
     ]);
-  const currencies = [...new Set(rows.map((r) => r.currency))].sort();
+  // Items are counted one by one in the ledger; the source view is for currencies and stacks.
+  const currencies = [...new Set(rows.map((r) => r.currency))]
+    .filter((c) => !c.startsWith("item:"))
+    .sort();
 
   const { check } = await get<{ check: Check }>("/economy/check");
   const audit = h(
@@ -165,8 +168,14 @@ interface TradeRow {
   payload: unknown;
 }
 
-/** What moved, from the defs the log indexes: `wangdo ×1, pinecone`. */
-const moved = (t: TradeRow) => t.defs.join(", ");
+/** What moved, in a line: `ink ×2 · 950 each · 1,900` for a board sale, the defs otherwise. */
+function moved(t: TradeRow): string {
+  const p = t.payload as { def?: string; qty?: number; unitPrice?: string; total?: string } | null;
+  if (t.kind === "board" && p?.def && p.total) {
+    return `${p.def} ×${p.qty ?? 1} · ${amount(p.unitPrice ?? "0")} each · ${amount(p.total)}`;
+  }
+  return t.defs.join(", ");
+}
 
 export async function tradesScreen(ctx: Ctx): Promise<Node> {
   const p = ctx.params;
@@ -233,7 +242,7 @@ export async function tradesScreen(ctx: Ctx): Promise<Node> {
       },
     ),
     table(
-      ["Time", "Kind", "From", "To", "What", ["Tax", "num"], ""],
+      ["Time", "Kind", "From", "To", "What", ["Tax", "num"]],
       trades.map((t) => [
         td(when(t.at), "when"),
         td(t.kind === "board" ? "게시판" : "직거래"),
@@ -241,7 +250,6 @@ export async function tradesScreen(ctx: Ctx): Promise<Node> {
         td(who(t.toId, t.to)),
         td(moved(t)),
         td(amount(t.tax), "num"),
-        td(h("pre", { class: "muted" }, JSON.stringify(t.payload))),
       ]),
       "No trades",
     ),

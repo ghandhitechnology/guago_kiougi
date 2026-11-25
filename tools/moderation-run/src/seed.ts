@@ -28,6 +28,8 @@ const ORIGIN = values.page as string;
 
 const url = await freshDatabase("guago_modseed");
 const server = await startServer(url, PORTS, ORIGIN);
+// The server goes down with this process, however it ends.
+process.on("exit", () => server.kill("SIGTERM"));
 process.on("SIGINT", () => server.kill("SIGTERM"));
 process.on("SIGTERM", () => server.kill("SIGTERM"));
 say(`server on :${PORTS.game}, admin on :${PORTS.admin} for the page at ${ORIGIN}`);
@@ -59,7 +61,7 @@ const PLAYERS: [string, string, string][] = [
   ["examfail", "시험망함", "math"],
   ["kgsking", "과고짱", "physics"],
 ];
-const bots = [];
+const bots: Awaited<ReturnType<typeof signUp>>[] = [];
 for (const [login, name, major] of PLAYERS) bots.push(await signUp(BASE, login, name, major));
 say(`${bots.length} players`);
 
@@ -71,9 +73,9 @@ for (const [i, b] of bots.entries()) {
       "apps/server/src/economy/cli.ts",
       "grant",
       b.name,
-      `exp=${200_000 + i * 90_000}`,
+      `exp=${6_500_000 + i * 400_000}`,
       `coin=${3_000 + i * 750}`,
-      "ink=4",
+      "ink=10",
     ],
     { DATABASE_URL: url },
   );
@@ -159,9 +161,52 @@ for (const [i, b] of bots.entries()) {
 }
 say("자판기 purchases");
 
+// The 매점 게시판: ink listed and bought, through the same operation endpoint. 도배왕 sells to one
+// buyer again and again, the pattern the trade partners table is for.
+const op = (b: (typeof bots)[number], name: string, req: unknown) =>
+  api(BASE, API.op, b.jar, { id: randomUUID(), op: name, req });
+const sales: [string, string, number, string][] = [
+  ["도배왕", "밤샘공부", 2, "900"],
+  ["도배왕", "밤샘공부", 3, "850"],
+  ["도배왕", "밤샘공부", 2, "950"],
+  ["수학천재", "별빛소년", 1, "400"],
+  ["화학쟁이", "생명실험", 2, "350"],
+  ["급식대장", "착한친구", 1, "500"],
+];
+for (const [seller, buyer, qty, price] of sales) {
+  const made = await op(byName.get(seller) as (typeof bots)[number], "listing.create", {
+    stack: "ink",
+    qty,
+    unitPrice: price,
+  });
+  const listing = (made.body.outcome as { listing?: string } | undefined)?.listing;
+  if (!listing) {
+    say(`listing by ${seller} refused: ${JSON.stringify(made.body)}`);
+    continue;
+  }
+  const bought = await op(byName.get(buyer) as (typeof bots)[number], "listing.buy", {
+    listing,
+    qty,
+    unitPrice: price,
+  });
+  if (bought.body.ok !== true) say(`purchase by ${buyer} refused: ${JSON.stringify(bought.body)}`);
+  await sleep(2100);
+}
+say("매점 게시판 trades");
+
 // The admins at work.
-const andy = await adminLogin(`http://127.0.0.1:${PORTS.admin}`, "andy", "correct horse battery");
-const jiwoo = await adminLogin(`http://127.0.0.1:${PORTS.admin}`, "jiwoo", "jiwoo moderator pass");
+const andy = await adminLogin(
+  `http://127.0.0.1:${PORTS.admin}`,
+  "andy",
+  "correct horse battery",
+  ORIGIN,
+);
+const jiwoo = await adminLogin(
+  `http://127.0.0.1:${PORTS.admin}`,
+  "jiwoo",
+  "jiwoo moderator pass",
+  ORIGIN,
+);
 const account = async (name: string) => {
   const out = await andy(`/players?q=${encodeURIComponent(name)}`);
   return (out.body.players as { accountId: string; name: string }[]).find((p) => p.name === name)
@@ -229,12 +274,13 @@ const minseo = ((await andy("/admins")).body.admins as { id: string; loginId: st
 if (minseo) await andy(`/admins/${minseo.id}`, { status: "disabled", reason: "인턴 기간 종료" });
 say("admin actions done");
 
-// Spread the ledger over two weeks of Korean days, so the daily totals show a trend.
+// Spread the ledger over two weeks of Korean days, each operation kept whole on one day, so the
+// daily totals show a trend.
 const db = new pg.Client({ connectionString: url });
 await db.connect();
 await db.query(`
   update economy_ledger set
-    at = at - make_interval(days => (id % 14)::int),
-    day = ((at - make_interval(days => (id % 14)::int)) at time zone 'Asia/Seoul')::date`);
+    at = at - make_interval(days => (abs(hashtext(operation_id)) % 14)::int),
+    day = ((at - make_interval(days => (abs(hashtext(operation_id)) % 14)::int)) at time zone 'Asia/Seoul')::date`);
 await db.end();
 say("ledger spread over 14 days; server stays up (Ctrl-C to stop)");

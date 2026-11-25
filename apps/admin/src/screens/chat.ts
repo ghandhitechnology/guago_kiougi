@@ -32,6 +32,23 @@ function where(l: ChatLine): string {
   return "";
 }
 
+/**
+ * A line's text. System lines are logged as their key and params (the client words them), so
+ * they read as `muted · until 2026-11-26 15:42`.
+ */
+function text(l: ChatLine): string {
+  if (l.channel !== "system" || !l.body.startsWith("{")) return l.body;
+  try {
+    const { key, params } = JSON.parse(l.body) as { key: string; params?: Record<string, unknown> };
+    const parts = Object.entries(params ?? {}).map(([k, v]) =>
+      k === "until" && typeof v === "number" ? `until ${when(v, true)}` : `${k} ${String(v)}`,
+    );
+    return [key, ...parts].join(" · ");
+  } catch {
+    return l.body;
+  }
+}
+
 /** A strike button that turns into its reason form in place. */
 function strikeCell(l: ChatLine, done: () => void): HTMLElement {
   const cell = h("td", { class: "when" });
@@ -72,7 +89,7 @@ export function chatTable(
     const body = h(
       "td",
       opts.mark && l.senderId === opts.mark ? { class: "strong" } : null,
-      l.body,
+      text(l),
     );
     return [
       td(when(l.at), "when"),
