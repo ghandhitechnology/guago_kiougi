@@ -1,0 +1,16 @@
+{
+  "name": "@guago/balance-sim",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sanity": "node src/sanity.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  },
+  "dependencies": {
+    "@guago/content": "workspace:*",
+    "@guago/shared": "workspace:*"
+  }
+}
