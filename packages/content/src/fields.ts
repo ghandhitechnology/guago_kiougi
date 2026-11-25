@@ -86,6 +86,8 @@ export interface FieldDef {
   readonly page: number;
   readonly levels: { readonly min: number; readonly max: number };
   readonly roster: readonly FieldRosterEntry[];
+  /** At most this many alive, whoever is present; absent for the usual 60 to 150. */
+  readonly populationMax?: number;
 }
 
 export function regionCount(field: FieldDef): number {
@@ -165,3 +167,21 @@ export const PAGE1_FIELDS: readonly FieldDef[] = [
     ],
   },
 ];
+
+/**
+ * 생태공원, the campus tutorial ground (PLAN §4 opening): 오답 and pencil 오답 at the first
+ * levels, about 60 at full count like the 운동장. Page 0: it belongs to the campus, not to an era.
+ */
+export const ECO_PARK_FIELD: FieldDef = {
+  id: "eco-park",
+  page: 0,
+  levels: { min: 1, max: 5 },
+  roster: [
+    { monster: "odap", weight: 6 },
+    { monster: "odap-pencil", weight: 2 },
+  ],
+  populationMax: 60,
+};
+
+/** Every hunting ground a map can run, by its map id. */
+export const FIELDS: readonly FieldDef[] = [ECO_PARK_FIELD, ...PAGE1_FIELDS];

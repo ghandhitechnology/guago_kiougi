@@ -150,8 +150,8 @@ const sun = (x: number, wall: number, reach = 80): Light => ({
 const sunAt = (x: number, wall: number, reach?: number): LightSource => ({
   at: [x - 8, wall + 40],
   radius: 70,
-  color: "stone.bright",
-  intensity: 0.45,
+  color: "gold.pale",
+  intensity: 0.7,
   paint: sun(x, wall, reach),
 });
 
@@ -165,7 +165,7 @@ const map: MapSource = {
   time: { clock: "08:40", phase: "morning", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "stone.bright", intensity: 0.85 },
+  ambient: { color: "stone.bright", intensity: 0.78, unlit: "campus" },
   plan: PLAN,
   legend: {
     "#": { terrain: "terrazzo", solid: "#" },
@@ -256,14 +256,14 @@ const map: MapSource = {
       at: [240, AV + 20],
       radius: 120,
       color: "gold.pale",
-      intensity: 0.6,
+      intensity: 0.25,
       paint: { bands: ["campus-lamp", "campus-glow"], at: [240, AV + 14], r: [96, 22], ragged: 4 },
     },
     {
       at: [744, 840],
       radius: 30,
       color: "sea.pale",
-      intensity: 0.4,
+      intensity: 0.18,
       flicker: { amount: 0.06, period: 2.5 },
     },
   ],

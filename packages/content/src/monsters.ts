@@ -356,6 +356,8 @@ export const ELITE = {
   massMult: 3,
   speedMult: 1.15,
   armor: 0.2,
+  /** Drawn at ×2 (`<sprite>-elite`), so it collides at ×2 as well: what it visibly touches, it hits. */
+  scale: 2,
   aura: "fx-elite-aura",
   spawnCue: "sfx.monster.elite.spawn",
   /** Never promoted. */

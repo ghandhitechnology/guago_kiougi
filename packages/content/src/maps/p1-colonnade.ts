@@ -304,7 +304,13 @@ const lights: LightSource[] = [
     flicker: { amount: 0.2, period: 0.7 },
   },
   // The tear's cold night light, falling on the north terrace.
-  { at: [904, 120], radius: 120, color: "navy.light", intensity: 0.25 },
+  {
+    at: [904, 120],
+    radius: 120,
+    color: "navy.pale",
+    intensity: 0.7,
+    flicker: { amount: 0.06, period: 3.2 },
+  },
 ];
 
 const placed = merge(
@@ -427,7 +433,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.pale",
-  ambient: { color: "gold.pale", intensity: 1 },
+  ambient: { color: "gold.pale", intensity: 0.95 },
   plan: GROUND,
   legend: fieldLegend("slab"),
   backdrop: [
