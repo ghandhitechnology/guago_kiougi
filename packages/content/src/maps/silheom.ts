@@ -165,6 +165,11 @@ const map: MapSource = {
     place("van-de-graaff", 32, 16, { anim: "spark", play: true }),
     place("air-track", 6, 18),
     place("interferometer", 19, 18, { anim: "shift", play: true }),
+    // 0조's things, left where they were: the report drafts, a bag, the logbook stand.
+    { prop: "textbooks", frame: "tall", at: [392, 300] },
+    { prop: "textbooks", frame: "stack", at: [292, 316] },
+    { prop: "bag", frame: "slump", at: [408, 330] },
+    place("log-stand", 18, 18),
     ...[19, 23].map((x): Prop => ({ prop: "stool", at: [x * T + 8, 20 * T - 4] })),
     place("lab-bench", 9, 21),
     place("lab-bench", 24, 21),

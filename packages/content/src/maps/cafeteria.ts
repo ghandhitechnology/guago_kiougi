@@ -197,6 +197,13 @@ const map: MapSource = {
     place("sink-row", 25, 26),
     place("water-cooler", 37, 25, { anim: "glug", play: true }),
     place("water-cooler", 38, 25),
+    // What lunch leaves on the floor: bags dropped by the benches, umbrellas by the door.
+    { prop: "bag", frame: "navy", at: [150, 240] },
+    { prop: "bag", frame: "red", at: [400, 316] },
+    { prop: "bag", frame: "green", at: [610, 236] },
+    { prop: "bag", frame: "slump", at: [260, 396] },
+    { prop: "umbrella", at: [292, 466] },
+    { prop: "umbrella", at: [372, 466], flip: true },
     place("sad-plant", 1, 29),
     place("sad-plant", 40, 29),
   ],
