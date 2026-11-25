@@ -490,25 +490,29 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
     box.id = name;
     box.append(el("h3", "name", name));
     const frames = sp.frames.map((f) => frameImage(sp.atlas, f));
+    // Large art (an era boss's 160 px parts) at ×2 and on one ground: at ×4 on every theme's
+    // ground it would be thousands of 640 px canvases.
+    const large = frames.some((fr) => fr.width > 96 || fr.height > 96);
+    const z = large ? 2 : 4;
     const ones = row(box);
     sp.frames.forEach((_, i) => {
       ones.append(cell(show(frames[i] as HTMLCanvasElement, 1, "checker")));
     });
     const big = row(box);
     sp.frames.forEach((f, i) => {
-      big.append(cell(show(frames[i] as HTMLCanvasElement, 4, "checker"), f.split("/")[1]));
+      big.append(cell(show(frames[i] as HTMLCanvasElement, z, "checker"), f.split("/")[1]));
     });
-    for (const b of backdrops) {
+    for (const b of large ? backdrops.slice(0, 1) : backdrops) {
       const r = row(box);
-      for (const fr of frames) r.append(cell(show(fr, 4, b.color)));
+      for (const fr of frames) r.append(cell(show(fr, z, b.color)));
     }
     const anims = row(box);
     for (const [anim, a] of Object.entries(sp.anims)) {
       const imgs = a.frames.map((f) => frames[sp.frames.indexOf(f)] as HTMLCanvasElement);
       const pair = el("div", "pair");
       pair.append(
-        player(imgs, a.fps, 4, "checker"),
-        player(imgs, a.fps, 4, backdrops[0]?.color ?? "checker"),
+        player(imgs, a.fps, z, "checker"),
+        player(imgs, a.fps, z, backdrops[0]?.color ?? "checker"),
       );
       anims.append(cell(pair, `${anim} ${a.fps}fps`));
     }

@@ -13,10 +13,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { BedPlayer } from "../ambient/bed.ts";
-import { BEDS, EFFECTS, SONGS } from "../content/index.ts";
+import { BEDS, EFFECTS, JINGLES, SONGS } from "../content/index.ts";
 import { CATEGORY_TARGET } from "../sfx/format.ts";
 import { renderEffect, shortLoudness } from "../sfx/render.ts";
 import { compileSong } from "../tracker/compile.ts";
+import { renderJingle } from "../tracker/jingle.ts";
 import { SongPlayer } from "../tracker/player.ts";
 import { rowStart, songShape, timing } from "../tracker/schedule.ts";
 import { BAND_NAMES, type Measurement, measure, seam } from "./measure.ts";
@@ -141,6 +142,19 @@ for (const [id, source] of Object.entries(EFFECTS)) {
     [x],
     "effect",
     `${source.category}, target ${target} dB, loudest 50 ms ${loud} dB; ${r.variants.length} variant${r.variants.length > 1 ? "s" : ""}${loops}`,
+  );
+}
+
+for (const [id, j] of Object.entries(JINGLES)) {
+  if (only && !only.has(id)) continue;
+  const t0 = performance.now();
+  const [L, R] = renderJingle(id, j.song, sr);
+  const ms = performance.now() - t0;
+  save(
+    `${id}`,
+    [L, R],
+    "jingle",
+    `${j.bank} bank, ducks music ${j.duck} dB; render ${ms.toFixed(0)} ms`,
   );
 }
 

@@ -97,8 +97,10 @@ export class SongPlayer {
   private endedAt = -1;
   private readonly frameRows: number[];
   private readonly dcBlock: OnePole[];
+  private range: readonly [number, number] | null = null;
+  private pending: readonly [number, number] | null = null;
 
-  constructor(song: CompiledSong, sampleRate: number, seed = 1) {
+  constructor(song: CompiledSong, sampleRate: number, seed = 1, part?: string) {
     this.song = song;
     this.sampleRate = sampleRate;
     const s = song.source;
@@ -126,6 +128,17 @@ export class SongPlayer {
       p.set(sampleRate, 12);
       return p;
     });
+    const start = part ? s.parts?.[part] : undefined;
+    if (start) {
+      this.range = start;
+      this.pos = { frame: start[0], row: 0 };
+    }
+  }
+
+  /** Moves to a named part at the next bar line; unknown names are ignored. */
+  setPart(name: string): void {
+    const range = this.song.source.parts?.[name];
+    if (range) this.pending = range;
   }
 
   /** True once a song that plays once has finished and its tails have died away. */
@@ -164,6 +177,11 @@ export class SongPlayer {
       return null;
     }
     const startsRow = this.tick === 0;
+    if (startsRow && this.pending && this.pos.row % this.song.rowsPerBar === 0) {
+      this.range = this.pending;
+      this.pos = { frame: this.pending[0], row: 0 };
+      this.pending = null;
+    }
     const at = this.pos;
     if (startsRow) this.startRow(at);
     this.doTick();
@@ -173,7 +191,7 @@ export class SongPlayer {
     } else {
       this.tick = 0;
       this.absRow++;
-      this.pos = nextRow(this.frameRows, this.song.source.loop, at);
+      this.pos = nextRow(this.frameRows, this.song.source.loop, at, this.range);
       if (!this.pos) {
         this.endedAt = rowStart(this.timing, this.absRow);
         this.nextEvent = Number.POSITIVE_INFINITY;

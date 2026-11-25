@@ -1,16 +1,23 @@
 /** Messages between the main thread and the audio worker. */
 
+import type { Bank, EffectSource } from "../sfx/format.ts";
+
 export type ToWorker =
   | { readonly type: "init"; readonly sampleRate: number }
-  | { readonly type: "effects" }
+  /** Render every effect and jingle of a bank, one per task. */
+  | { readonly type: "bank"; readonly bank: Bank }
+  /** Render one effect or jingle now, ahead of its bank. */
+  | { readonly type: "render"; readonly id: string }
   | {
       readonly type: "start";
       readonly deck: number;
       readonly gen: number;
-      readonly kind: "song" | "bed";
+      readonly kind: "song" | "bed" | "jingle";
       readonly id: string;
       readonly seed: number;
+      readonly part?: string;
     }
+  | { readonly type: "part"; readonly deck: number; readonly gen: number; readonly part: string }
   | { readonly type: "stop"; readonly deck: number }
   | {
       readonly type: "pull";
@@ -27,14 +34,30 @@ export interface SongInfo {
   readonly bpm: number;
   readonly rowsPerBar: number;
   readonly loop: number | false;
+  readonly parts: readonly string[];
+}
+
+/** What the main thread needs to know about a sound before its samples exist. */
+export interface CueMeta {
+  readonly bank: Bank;
+  readonly vary: number;
+  readonly priority: number;
+  readonly max: number;
+  readonly loop: boolean;
+  readonly jingle: boolean;
+  /** A jingle's length in seconds, for how long it ducks the music. */
+  readonly seconds?: number;
+  readonly duck?: EffectSource["duck"];
+  readonly streak?: EffectSource["streak"];
 }
 
 export type FromWorker =
+  | { readonly type: "catalog"; readonly cues: Readonly<Record<string, CueMeta>> }
   | {
-      readonly type: "effect";
+      readonly type: "sound";
       readonly id: string;
+      /** One buffer per variant; a jingle has one variant per channel, left then right. */
       readonly variants: Float32Array[];
-      readonly loop: boolean;
     }
   | {
       readonly type: "started";
