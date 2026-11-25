@@ -131,6 +131,7 @@ import {
   START_MAP,
   spawnPlace,
   validPlace,
+  walkersOf,
 } from "./world-maps.ts";
 
 /**
@@ -374,6 +375,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
   private readonly moved = new Set<string>();
   /** The character a private copy of the map was made for (the opening, the 집, a replay). */
   owner: string | undefined;
+  /** Townspeople on walks who bark, and when each may next. */
+  private walkers: (ReturnType<typeof walkersOf>[number] & {
+    nextBark: number | undefined;
+    lastLine: string | undefined;
+  })[] = [];
   /** Bodies a scene is walking, by session: from, to, and ticks gone of ticks. */
   private readonly scripted = new Map<
     string,
@@ -1199,6 +1205,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       this.rattle(door.id, "portal", p.id, door.built ? "door_closed" : "door_unbuilt");
     }
     if (this.world.tick % 4 === 0) this.tendCast();
+    if (this.world.tick % 4 === 0) this.tendWalkers();
     if (this.world.tick % 2 === 0) story.tick(this);
     if (this.patrols.length > 0 && this.world.tick % PATROL_EVERY_TICKS === 0) this.watchPatrols();
   }
@@ -1666,6 +1673,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
   // The cast -----------------------------------------------------------------------------------
 
   private placeCast(): void {
+    this.walkers = this.owner
+      ? []
+      : walkersOf(this.def).map((w) => ({ ...w, nextBark: undefined, lastLine: undefined }));
     // A private copy's people are its scene's, drawn by the client.
     for (const npc of this.owner ? [] : npcsOf(this.def)) {
       const state = new NpcState();
@@ -1715,6 +1725,35 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       if (tick < person.nextBark) continue;
       this.say(person, "bark");
       person.nextBark = tick + between(BARK_GAP);
+    }
+  }
+
+  /**
+   * Townspeople on their walks bark like anyone standing (`walkersOf`), from where their round
+   * has them on the room's clock, the pose clients draw them at. Nothing else of them is sent.
+   */
+  private tendWalkers(): void {
+    const tick = this.world.tick;
+    const t = (tick * TICK_MS) / 1000;
+    for (const w of this.walkers) {
+      const pose = patrolPose(w.walk, t);
+      const near = this.world.players.some(
+        (p) =>
+          p.joined &&
+          this.pawns.get(p.id)?.leaving === false &&
+          Math.hypot(p.x - pose.x, p.y - pose.y) <= BARK_PX,
+      );
+      if (!near) {
+        w.nextBark = undefined;
+        continue;
+      }
+      w.nextBark ??= tick + between(FIRST_BARK);
+      if (tick < w.nextBark) continue;
+      const pool = w.lines.length > 1 ? w.lines.filter((l) => l !== w.lastLine) : w.lines;
+      const text = pool[Math.floor(Math.random() * pool.length)] as string;
+      w.lastLine = text;
+      this.broadcast(MAP_MESSAGES.npcLine, { npc: w.key, text, kind: "bark" } satisfies NpcLine);
+      w.nextBark = tick + between(BARK_GAP);
     }
   }
 

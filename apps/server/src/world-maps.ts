@@ -3,7 +3,14 @@
  * who of the cast stands where. Built once at start from the map sources, the same data the art
  * build writes for the client.
  */
-import { type BuiltMap, buildAllMaps, CAST_ART, narrative, storyPlaces } from "@guago/content";
+import {
+  type BuiltMap,
+  buildAllMaps,
+  CAST_ART,
+  narrative,
+  storyPlaces,
+  type Walk,
+} from "@guago/content";
 import {
   type Collidable,
   type Facing,
@@ -207,6 +214,17 @@ function cast(): Map<string, Npc[]> {
 }
 
 const CAST = cast();
+
+/** Townspeople on `map`'s walks who have something to say now, keyed `walk:<id>`. */
+export function walkersOf(
+  map: BuiltMap,
+): { readonly key: string; readonly walk: Walk; readonly lines: readonly string[] }[] {
+  const barks = narrative.NARRATIVE.barks;
+  return map.walks.flatMap((walk) => {
+    const lines = barks.filter((b) => b.speaker === walk.walker && current(b)).map((b) => b.text);
+    return lines.length > 0 ? [{ key: `walk:${walk.id}`, walk, lines }] : [];
+  });
+}
 
 /** The cast members standing on `map` now. */
 export function npcsOf(map: BuiltMap): readonly Npc[] {

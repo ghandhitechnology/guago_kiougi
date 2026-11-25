@@ -6,6 +6,7 @@ import {
   type Caught,
   castFlag,
   type DoorRattle,
+  type DoorRefusal,
   distanceToArea,
   encodeInput,
   type Facing,
@@ -65,6 +66,7 @@ import { StepSounds } from "./sound/steps.ts";
 import type { Dir } from "./story/actors.ts";
 import { StoryLink } from "./story/link.ts";
 import type { StageHost } from "./story/stage.ts";
+import { toast } from "./ui/overlay.ts";
 import { worldUi } from "./ui/world-ui.ts";
 import { builtView } from "./world/map-view.ts";
 import { WorldOverlays } from "./world/overlays.ts";
@@ -401,8 +403,9 @@ export class WorldScene extends Phaser.Scene {
     ];
     const closed = new Set(room.state.closed);
     const walls = wallsOf(map, closed);
-    const patrols =
-      map.patrols.length > 0 ? new Patrols(this, this.meta, view, walls, map.patrols) : undefined;
+    // Guards on their beats and townspeople on their walks (`patrols.ts`).
+    const rounds = [...map.patrols, ...map.walks];
+    const patrols = rounds.length > 0 ? new Patrols(this, this.meta, view, rounds) : undefined;
     this.here = {
       room,
       map,
@@ -766,7 +769,11 @@ export class WorldScene extends Phaser.Scene {
 
   /** A cast member speaks: a bubble for everyone near, unless it answers our own interact. */
   private onNpcLine(m: NpcLine): void {
-    const speaker = this.here?.room.state.npcs.get(m.npc)?.speaker;
+    // A townsperson on a walk speaks by its walk (`walk:<id>`); everyone else by their spot.
+    const walk = m.npc.startsWith("walk:")
+      ? this.here?.map.walks.find((w) => `walk:${w.id}` === m.npc)
+      : undefined;
+    const speaker = walk?.walker ?? this.here?.room.state.npcs.get(m.npc)?.speaker;
     const text = KO[m.text];
     if (!speaker || !text) return;
     if (m.kind === "talk" && this.asking) return;
@@ -791,6 +798,7 @@ export class WorldScene extends Phaser.Scene {
       emitWorld({ t: "open", id: m.id, kind: m.kind });
     } else if (m.t === "locked") {
       this.rattle(m.id, "thing", true);
+      refuse("door_locked");
     } else if (m.t === "ate") {
       emitWorld({ t: "ate", id: m.id, result: m.result });
     }
@@ -961,7 +969,9 @@ export class WorldScene extends Phaser.Scene {
     this.lastRattle = now;
     this.rattle(door.id, "portal", true);
     // Why it stays shut, for the line said with it; the walls already told the prediction.
-    emitWorld({ t: "door", id: door.id, why: door.built ? "door_closed" : "door_unbuilt" });
+    const why = door.built ? "door_closed" : "door_unbuilt";
+    emitWorld({ t: "door", id: door.id, why });
+    refuse(why);
   }
 
   /**
@@ -1075,6 +1085,13 @@ export class WorldScene extends Phaser.Scene {
       scroll: { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY },
     };
   }
+}
+
+/** A door that stays shut says why, in the voice and channel its refusal is written for. */
+function refuse(why: DoorRefusal): void {
+  const line = narrative.NARRATIVE.system.find((m) => m.id === `refusal.door.${why}`);
+  const text = line && KO[line.text];
+  if (text) toast(text);
 }
 
 function exposeDevStats(scene: WorldScene): void {
