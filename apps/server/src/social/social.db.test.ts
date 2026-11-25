@@ -385,3 +385,22 @@ describe("a well-formed id of no character", () => {
     expect(answers.map(codeOf)).toEqual(["no_player", "no_player"]);
   });
 });
+
+describe("requests from blocked players", () => {
+  it("never fill the blocker's inbox, and do not surface when the block is lifted", async () => {
+    const victim = await character();
+    const pests = await Promise.all(Array.from({ length: 50 }, () => character()));
+    for (const p of pests) await social.friends.request(p, victim);
+    for (const p of pests) await social.friends.block(victim, p);
+    // Each asks again; it looks sent from their side.
+    for (const p of pests) expect(await social.friends.request(p, victim)).toBe("requested");
+    const friend = await character();
+    expect(await social.friends.request(friend, victim)).toBe("requested");
+    expect((await social.friends.requestsOf(victim)).in.map((r) => r.id)).toEqual([friend]);
+    await social.friends.unblock(victim, pests[0] as string);
+    expect((await social.friends.requestsOf(victim)).in.map((r) => r.id)).toEqual([friend]);
+    expect(
+      await count(sql`select requests_in as n from social_counts where character_id = ${victim}`),
+    ).toBe(1);
+  });
+});

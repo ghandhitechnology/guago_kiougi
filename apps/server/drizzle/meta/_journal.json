@@ -29,6 +29,13 @@
       "when": 1795582672684,
       "tag": "0003_social",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795586933787,
+      "tag": "0004_social_review",
+      "breakpoints": true
     }
   ]
 }
