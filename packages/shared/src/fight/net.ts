@@ -12,6 +12,7 @@ import {
   Q,
   SelfField,
   SNAP_CELL_TILES,
+  snapshotCells,
   type WireFx,
   type WireHit,
   WireMinion,
@@ -194,8 +195,9 @@ export class FightNet {
 
   constructor(w: FightWorld) {
     this.w = w;
-    this.cols = Math.max(1, Math.ceil(w.width / CELL_PX));
-    this.rows = Math.max(1, Math.ceil(w.height / CELL_PX));
+    const { cols, rows } = snapshotCells(w.map);
+    this.cols = cols;
+    this.rows = rows;
     for (let i = 0; i < this.cols * this.rows; i++) {
       this.cells.push({
         members: [],

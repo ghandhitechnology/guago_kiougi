@@ -1,8 +1,8 @@
 /** Shared by the moderation run and the screenshot seed: real processes, real HTTP, real sockets. */
 import { type ChildProcess, spawn } from "node:child_process";
 import path from "node:path";
-import { Client } from "@colyseus/sdk";
-import { API } from "@guago/shared";
+import { Client, type Room } from "@colyseus/sdk";
+import { API, ENTER_PATH, MapState, type Seating } from "@guago/shared";
 import pg from "pg";
 
 export const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -141,6 +141,18 @@ export interface Bot {
   jar: Jar;
   characterId: string;
   sdk: () => Client;
+}
+
+/** A map seat the way the browser takes one: `POST /api/enter`, then the one-use seat. */
+export async function enterMap(base: string, jar: Jar): Promise<Room<unknown, MapState>> {
+  const res = await fetch(base + ENTER_PATH, {
+    method: "POST",
+    headers: { cookie: cookieHeader(jar), "content-type": "application/json" },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`enter answered ${res.status}`);
+  const seating = (await res.json()) as Seating;
+  return new Client(base).consumeSeatReservation(seating.seat, MapState);
 }
 
 export async function signUp(base: string, loginId: string, name: string, major = "math") {

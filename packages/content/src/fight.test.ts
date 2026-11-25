@@ -24,13 +24,15 @@ import {
   rebuildHash,
   SnapshotReader,
   settleKills,
+  snapshotCells,
+  snapshotReaderFor,
   spawnMonster,
   stepFight,
   TILE_SIZE,
 } from "@guago/shared";
 import { describe, expect, it } from "vitest";
 import { STARTER_BOOKS } from "./books.ts";
-import { fieldOf, fightMapOf, mapById } from "./fight-map.ts";
+import { fieldOf, fightMapOf, mapById, snapshotReaderForMap } from "./fight-map.ts";
 import { compileKit, monsterKindIndex, simRules } from "./sim-rules.ts";
 import { STATUS_IDS, type StatusId } from "./statuses.ts";
 
@@ -160,9 +162,7 @@ describe("combat replay", () => {
           const v = newViewer();
           v.player = p;
           net.viewers.add(v);
-          const r = new SnapshotReader();
-          r.cols = net.cols;
-          r.rows = net.rows;
+          const r = snapshotReaderForMap("p1-colonnade");
           viewers.push({ v, r });
         }
       }
@@ -182,6 +182,82 @@ describe("combat replay", () => {
     // A pixel and a half, plus the quarter-pixel rounding.
     expect(worst).toBeLessThanOrEqual(1.5 + 0.25);
     expect(viewers.reduce((a, x) => a + x.r.broken, 0)).toBe(0);
+  });
+
+  it("decodes with the browser's reader setup on maps of different sizes, and fails loudly when misread", () => {
+    const sizes: string[] = [];
+    for (const id of ["p1-colonnade", "gaseolgwan-stairs"]) {
+      const def = mapById(id);
+      if (!def) throw new Error(id);
+      const map = fightMapOf(def);
+      const w = createFight(map, rules, fieldOf(id), 7);
+      const odap = rules.monsters[monsterKindIndex("odap")];
+      // Walking players and, on a map with no field, a few monsters to see.
+      const players = [0, 1, 2, 3, 4].map((i) => {
+        const p = w.addPlayer(
+          `p${i}`,
+          i,
+          map.spawn.x + i * 6,
+          map.spawn.y,
+          kitFor("math", ["wangdo"]),
+          10,
+        );
+        p.mode = Mode.Semi;
+        return p;
+      });
+      if (!w.field && odap)
+        for (let i = 0; i < 12; i++)
+          spawnMonster(w, odap, 3, false, map.spawn.x + 40 + i * 8, map.spawn.y - 30);
+      const net = new FightNet(w);
+      const clients = players.map((p) => {
+        const v = newViewer();
+        v.player = p;
+        net.viewers.add(v);
+        return { v, r: snapshotReaderForMap(id), p };
+      });
+      const wrong = new SnapshotReader(1, 1);
+      let wrongFailed = false;
+      let worst = 0;
+      for (let t = 0; t < 300; t++) {
+        const inputs = new Map(
+          players.map((p, i) => [
+            p.id,
+            [
+              {
+                seq: t + 1,
+                mx: Math.round(Math.cos(t / 30 + i) * MOVE_MAX),
+                my: Math.round(Math.sin(t / 25 + i) * MOVE_MAX),
+              },
+            ],
+          ]),
+        );
+        stepFight(w, inputs as never);
+        net.update();
+        for (const { v, r } of clients) {
+          const bytes = net.message(v).slice();
+          r.read(bytes, NULL_SINK);
+          if (v === clients[0]?.v && !wrongFailed) {
+            try {
+              wrong.read(bytes, NULL_SINK);
+            } catch {
+              wrongFailed = true;
+            }
+          }
+          for (const q of w.players) {
+            const seen = q.joined && q !== v.player ? r.members.get(q.entity) : undefined;
+            if (seen)
+              worst = Math.max(worst, Math.abs(seen.qx / Q - q.x), Math.abs(seen.qy / Q - q.y));
+          }
+        }
+      }
+      expect(clients.reduce((a, c) => a + c.r.broken, 0)).toBe(0);
+      expect(worst).toBeLessThanOrEqual(1 + 0.25);
+      expect(wrongFailed).toBe(true);
+      const { cols, rows } = snapshotCells(map);
+      sizes.push(`${cols}x${rows}`);
+    }
+    expect(new Set(sizes).size).toBe(2);
+    expect(() => new SnapshotReader(0, 0)).toThrow();
   });
 });
 
@@ -582,9 +658,7 @@ describe("the wire", () => {
     stepFight(w, new Map());
     net.update();
     const bytes = net.message(v).slice();
-    const r = new SnapshotReader();
-    r.cols = net.cols;
-    r.rows = net.rows;
+    const r = snapshotReaderFor(w.map);
     r.read(bytes, NULL_SINK);
     const seen = r.members.get(m.entity);
     expect(seen?.kind).toBe(m.kind.index);

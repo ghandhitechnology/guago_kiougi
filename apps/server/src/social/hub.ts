@@ -26,6 +26,7 @@
  * `SOCIAL_CONNECTIONS` of the pool, so no player and no burst can park the connections seat
  * saves, item operations and logins need.
  */
+
 import { emoteAllowed } from "@guago/content";
 import {
   type Applicant,
@@ -52,9 +53,11 @@ import {
   WORLD_MESSAGES,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { background } from "../background.ts";
 import { clubActivity } from "../club-activity.ts";
 import { clubTags } from "../club-tags.ts";
 import { describeError } from "../db/index.ts";
+import { MUTED_REQUESTS, mutedUntil } from "../moderation/mutes.ts";
 import { type PartyPerson, parties } from "../parties.ts";
 import { places } from "../places.ts";
 import type { ClubChange } from "./clubs.ts";
@@ -210,10 +213,12 @@ export class SocialHub<P extends Peer> {
     this.room = room;
     this.handlers = this.makeHandlers();
     this.timers.push(setInterval(() => this.tick(), VITALS_MS));
-    this.timers.push(setInterval(() => void this.creditClubs(), CLUB_EXP_MS));
+    this.timers.push(setInterval(() => background("club EXP", this.creditClubs()), CLUB_EXP_MS));
     for (const t of this.timers) t.unref();
     // Changes made outside a request (moderation removing a character) reach members too.
-    this.unlisten = social.onClubChange((change) => void this.clubChanged(change));
+    this.unlisten = social.onClubChange((change) =>
+      background("club change", this.clubChanged(change)),
+    );
   }
 
   dispose(): void {
@@ -254,9 +259,12 @@ export class SocialHub<P extends Peer> {
   join(peer: P, model: Model): void {
     parties.online(person(peer.entry));
     this.flushParties();
-    void this.people.run(peer.characterId, async () => {
-      if (this.state.get(peer.characterId) === model) this.sendSnapshot(peer, model);
-    });
+    background(
+      "social snapshot",
+      this.people.run(peer.characterId, async () => {
+        if (this.state.get(peer.characterId) === model) this.sendSnapshot(peer, model);
+      }),
+    );
   }
 
   /** After a reconnect nothing sent meanwhile arrived: the live model goes again, unread. */
@@ -272,13 +280,16 @@ export class SocialHub<P extends Peer> {
     parties.offline(characterId, this.social.now());
     this.flushParties();
     const model = this.state.get(characterId);
-    void this.people.run(characterId, async () => {
-      // A newer seat of the same character may have loaded its own model since.
-      if (!model || this.state.get(characterId) !== model) return;
-      this.index(characterId, undefined);
-      clubTags.set(characterId, undefined);
-      this.state.delete(characterId);
-    });
+    background(
+      "social lane",
+      this.people.run(characterId, async () => {
+        // A newer seat of the same character may have loaded its own model since.
+        if (!model || this.state.get(characterId) !== model) return;
+        this.index(characterId, undefined);
+        clubTags.set(characterId, undefined);
+        this.state.delete(characterId);
+      }),
+    );
   }
 
   /** The character entered, left or changed a map room. */
@@ -286,12 +297,15 @@ export class SocialHub<P extends Peer> {
     const model = this.state.get(characterId);
     if (!model) return;
     for (const friend of model.friends.keys()) {
-      void this.inLane(friend, async (theirs) => {
-        if (!theirs.friends.has(characterId)) return;
-        const entry = this.friendEntry(characterId);
-        const peer = this.room.online(friend);
-        if (entry && peer) this.event(peer, { t: "friend", f: entry });
-      });
+      background(
+        "friend update",
+        this.inLane(friend, async (theirs) => {
+          if (!theirs.friends.has(characterId)) return;
+          const entry = this.friendEntry(characterId);
+          const peer = this.room.online(friend);
+          if (entry && peer) this.event(peer, { t: "friend", f: entry });
+        }),
+      );
     }
     for (const id of parties.membersOf(characterId)) this.pushParty(id);
   }
@@ -330,6 +344,18 @@ export class SocialHub<P extends Peer> {
   /** Queues one validated request behind the player's others and answers it exactly once. */
   async handle<K extends SocialType>(peer: P, type: K, req: SocialRequest<K>): Promise<void> {
     const id = peer.characterId;
+    // Text other players see is refused while a mute holds (moderation/mutes.ts, the same check
+    // as chat), before it costs a rate-limit token.
+    const muted = MUTED_REQUESTS.has(type) ? mutedUntil(id) : 0;
+    if (muted > Date.now()) {
+      this.room.answer(peer, WORLD_MESSAGES.refused, {
+        type,
+        n: req.n,
+        code: "muted",
+        ...(Number.isFinite(muted) ? { until: muted } : {}),
+      });
+      return;
+    }
     const retryMs = this.room.limit(peer, type);
     const waiting = this.queued.get(id) ?? 0;
     if (retryMs > 0 || waiting >= QUEUED_PER_PLAYER) {

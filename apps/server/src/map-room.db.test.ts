@@ -19,12 +19,13 @@ import {
   WORLD_MESSAGES,
   WORLD_ROOM,
 } from "@guago/shared";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createGameServer } from "./app.ts";
 import { type AuthService, createAuthService } from "./auth/service.ts";
 import { createDb, type Db } from "./db/index.ts";
+import { invariants } from "./invariants.ts";
 import { studentLooks } from "./looks.ts";
-import type { MapRoom } from "./map-room.ts";
+import { checkMapRooms, type MapRoom } from "./map-room.ts";
 import { allRooms } from "./metrics.ts";
 import { serveMetrics } from "./metrics-server.ts";
 import { places } from "./places.ts";
@@ -101,6 +102,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await server.gracefullyShutdown(false);
   await db.pool.end();
+});
+
+afterEach(() => {
+  checkMapRooms();
+  expect(invariants.broken.splice(0)).toEqual([]);
 });
 
 describe("map room", () => {
