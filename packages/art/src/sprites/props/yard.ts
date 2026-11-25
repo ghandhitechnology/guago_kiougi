@@ -704,14 +704,14 @@ export default [
   still("mop", [11, 16], MOP, { outline: false }),
   still("hatch", [22, 12], HATCH, { origin: [0, 0], outline: false }),
   still("flashlight", [10, 4], FLASHLIGHT, { origin: [0, 0], outline: false }),
-  still("notice", [28, 22], NOTICE, {
+  still("notice-case", [28, 22], NOTICE, {
     outline: false,
     lone: "+ry",
     shadow: oval(28, 22, 14, 21, 12, 1.4),
   }),
   still("binocular", [10, 16], BINOCULAR, { outline: false, shadow: oval(10, 16, 5, 15, 4, 1.2) }),
   still("pot", [10, 11], POT, { outline: false, shadow: oval(10, 11, 5, 10, 4, 1.2) }),
-  still("menu-board", [14, 16], MENU, { outline: false, lone: "+y" }),
+  still("menu-stand", [14, 16], MENU, { outline: false, lone: "+y" }),
   sprite({
     name: "walkway",
     size: [32, 16],

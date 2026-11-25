@@ -433,7 +433,7 @@ const map: MapSource = {
     // The east lawn: zelkovas, the bikes, the notice case, benches in the shade.
     ...trees.map(([x, y]) => place("zelkova", x, y)),
     place("bikes", 50, 22),
-    place("notice", 33, 23),
+    place("notice-case", 33, 23),
     place("bench", 37, 35),
     place("bench", 56, 31),
     place("bench", 67, 30),
@@ -446,7 +446,7 @@ const map: MapSource = {
     place("vending", 47, 44, { anim: "glow", play: true }),
     place("vending", 48, 44, { anim: "glow", play: true, index: 2 }),
     place("corkboard", 54, 44),
-    place("menu-board", 49, 46),
+    place("menu-stand", 49, 46),
     place("picnic", 36, 47),
     place("picnic", 43, 47),
     place("picnic", 58, 47),
