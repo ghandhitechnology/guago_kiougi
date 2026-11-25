@@ -155,7 +155,11 @@ export class FightStage extends Phaser.Scene {
     this.self = self;
     this.live = true;
     room.onStateChange((state) => {
-      for (const p of state.players.values()) if (p.sid === room.sessionId) self.onServer(p);
+      for (const p of state.players.values()) {
+        // In 완전 자동 and 스킬 수동 the server walks the body; knocked out, nothing moves it.
+        if (p.sid === room.sessionId)
+          self.serverDriven = p.mode === 0 || p.mode === 2 || p.down > 0;
+      }
     });
     room.onDrop(() => {
       this.live = false;
@@ -167,6 +171,8 @@ export class FightStage extends Phaser.Scene {
     this.fight = FightView.attach(this, this.view, room, {
       self: () => this.drawn,
       mover: self,
+      onSelf: (me) =>
+        self.onServer({ x: me.x, y: me.y, facing: me.facing, seq: me.seq, roll: me.roll }),
       tier,
       music: this.params.get("music") !== "0",
     });

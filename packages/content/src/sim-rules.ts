@@ -597,6 +597,7 @@ export function fieldRule(def: FieldDef): FieldRule {
     levels: def.levels,
     regions,
     levelAt: (region, roll) => spawnLevel(def, region, roll),
+    populationMax: def.populationMax ?? Number.POSITIVE_INFINITY,
     roster: def.roster.map((e) => ({
       kind: monsterIndex.get(e.monster) as number,
       weight: e.weight,
@@ -707,5 +708,3 @@ export function monsterKindIndex(id: string): number {
   if (i === undefined) throw new Error(`unknown monster ${id}`);
   return i;
 }
-
-export { MOMENTUM };

@@ -17,8 +17,10 @@ import { BOOKS, FIELD_PACING, mapById } from "@guago/content";
 import {
   AIM_MESSAGE,
   CONTROL_MODES,
+  castFlag,
   DODGE,
   expToNext,
+  InputFlag,
   KNOCKOUT,
   MAX_AIM,
   type MapState,
@@ -37,18 +39,18 @@ import {
   type WireFx,
   type WireHit,
   type WireHurt,
+  type WireSelf,
 } from "@guago/shared";
 import * as Phaser from "phaser";
 import { createSpriteAnims, loadArt } from "../art.ts";
 import { composeDoll, normalizeLook } from "../doll.ts";
 import type { MapView, Tier } from "../render/index.ts";
 import { TEX } from "../render/textures.ts";
-import type { TickFlags } from "../self.ts";
 import { Bodies, type Body, Cat, PState } from "./bodies.ts";
 import { Catalog, COMBAT } from "./catalog.ts";
 import { TickClock } from "./clock.ts";
 import { type FightContext, RESTRAINT } from "./context.ts";
-import { type ControlSink, FightKeys, MouseAim, nextMode, PendingFlags } from "./controls.ts";
+import { type ControlSink, FightKeys, MouseAim, nextMode } from "./controls.ts";
 import { Effects } from "./effects.ts";
 import { Feedback, TRAUMA } from "./feedback.ts";
 import { FightLights } from "./lights.ts";
@@ -65,8 +67,10 @@ export interface FightOptions {
   readonly self?: () =>
     | { readonly x: number; readonly y: number; readonly facing?: number }
     | undefined;
-  /** The movement code's mover: dodges and casts ride on its inputs. */
-  readonly mover?: { flags: TickFlags | undefined };
+  /** The movement code's mover: dodges and casts ride on its inputs (`SelfMover.queue`). */
+  readonly mover?: { queue(flags: number): void };
+  /** The own body from each snapshot's Self record, for the mover to reconcile against. */
+  readonly onSelf?: (me: WireSelf) => void;
   readonly tier?: Tier;
   /** Play the field's music and follow the waves with it. Default true. */
   readonly music?: boolean;
@@ -109,7 +113,9 @@ export class FightView {
   private readonly feedback: Feedback;
   private readonly reader = new SnapshotReader();
   private readonly clock = new TickClock();
-  private readonly flags = new PendingFlags();
+  /** The own body's health and shield, from the Self record. */
+  private selfHp = 0;
+  private selfShield = 0;
   private readonly keys: FightKeys | null;
   private readonly aim: MouseAim | null;
   private readonly reticle: Phaser.GameObjects.Image | null;
@@ -227,6 +233,11 @@ export class FightView {
       drop: (d) => this.onDrop(d),
       collect: (id) => this.pickups.collect(id),
       cast: () => {},
+      self: (me) => {
+        this.selfHp = me.hp;
+        this.selfShield = me.shield;
+        this.options.onSelf?.(me);
+      },
       note: (type, a) => this.onNote(type, a),
     };
 
@@ -279,12 +290,6 @@ export class FightView {
       clearAim: () => this.room.send(AIM_MESSAGE, []),
       revive: () => this.revive(),
     };
-    if (options.mover) {
-      options.mover.flags = {
-        take: () => this.flags.take(),
-        canRoll: () => this.canRoll(),
-      };
-    }
 
     this.offs.push(room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => this.onSnapshot(bytes)));
     const onState = (s: MapState) => this.onState(s);
@@ -515,7 +520,7 @@ export class FightView {
   private dodge(): void {
     if (MODE_AUTO[this.state.mode as 0]?.dodge) return;
     if (!this.canRoll()) return;
-    this.flags.dodge();
+    this.options.mover?.queue(InputFlag.Dodge);
     this.startRoll();
   }
 
@@ -544,7 +549,7 @@ export class FightView {
       this.ctx.sound.self("ui.error");
       return;
     }
-    this.flags.cast(slot);
+    this.options.mover?.queue(castFlag(slot));
     const book = this.ownBooks[slot] as number;
     const art = this.cat.book(book);
     let angle: number;
@@ -680,7 +685,7 @@ export class FightView {
     this.effects.update(dt);
     this.pickups.update();
     const own = this.own;
-    const hpShare = own ? Math.max(0, own.hp) / Math.max(1, own.maxHp) : 1;
+    const hpShare = own ? Math.max(0, this.selfHp) / Math.max(1, own.maxHp) : 1;
     this.overlays.update(this.bodies.byId.values(), dt, hpShare, this.options.selfBar ?? true);
     ctx.numbers.update(dt);
     ctx.particles.update(dt);
@@ -811,9 +816,9 @@ export class FightView {
     const own = this.own;
     s.ready = own !== undefined && this.bodies.self !== null;
     if (!own) return;
-    s.hp = own.hp;
+    s.hp = this.selfHp;
     s.maxHp = own.maxHp;
-    s.shield = own.shield;
+    s.shield = this.selfShield;
     s.exp = own.exp;
     s.level = own.level;
     s.expToNext = expToNext(own.level);
@@ -858,7 +863,7 @@ export class FightView {
     }
     s.canRevive = canRevive;
     s.statuses.length = 0;
-    if (own.shield > 0) s.statuses.push({ id: "shield", left: 0 });
+    if (this.selfShield > 0) s.statuses.push({ id: "shield", left: 0 });
     const wave = s.wave;
     const span =
       (wave.phase === "surge" ? FIELD_PACING.surgeSeconds : FIELD_PACING.lullSeconds) * 1000;
@@ -918,7 +923,6 @@ export class FightView {
   /** Leaves: everything the fight made goes; the map view stays. */
   detach(): void {
     for (const off of this.offs.splice(0)) off();
-    if (this.options.mover) this.options.mover.flags = undefined;
     this.keys?.dispose();
     this.aim?.dispose();
     this.reticle?.destroy();

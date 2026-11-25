@@ -1,5 +1,5 @@
 import type { FieldRule, FightMap, TileRect } from "@guago/shared";
-import { type FieldDef, PAGE1_FIELDS } from "./fields.ts";
+import { FIELDS, type FieldDef } from "./fields.ts";
 import { type BuiltMap, buildAllMaps } from "./maps/index.ts";
 import { LAWN, type MapDef } from "./maps/lawn.ts";
 import { fieldRule } from "./sim-rules.ts";
@@ -45,6 +45,6 @@ export function mapById(id: string): BuiltMap | MapDef | undefined {
 /** The hunting field a map runs, by its id; `override` names a field's roster for a map that is
  * not one (a test). */
 export function fieldOf(mapId: string, override?: string): FieldRule | null {
-  const def: FieldDef | undefined = PAGE1_FIELDS.find((f) => f.id === (override || mapId));
+  const def: FieldDef | undefined = FIELDS.find((f) => f.id === (override || mapId));
   return def ? fieldRule(def) : null;
 }

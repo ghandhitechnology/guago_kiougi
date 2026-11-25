@@ -1463,12 +1463,16 @@ function stepDash(w: FightWorld, p: Player, wp: Weapon, e: Effect): void {
   p.x = snap(at.x);
   p.y = snap(at.y);
   sweep(w, p, e.slot, wp, e, x0, y0, p.x, p.y);
-  // What it carries rides just ahead of it.
+  // What it carries rides just ahead of it, slid there so a wall still stops it.
   for (let i = 0; i < e.chainCount; i++) {
     const m = w.monsters[e.chain[i] as number] as Monster;
     if (!m.alive || m.dying) continue;
-    m.x = p.x + e.vx * (p.r + m.radius + 2) + ((i % 3) - 1) * m.radius * -e.vy;
-    m.y = p.y + e.vy * (p.r + m.radius + 2) + ((i % 3) - 1) * m.radius * e.vx;
+    const side = ((i % 3) - 1) * m.radius;
+    const tx = p.x + e.vx * (p.r + m.radius + 2) - e.vy * side;
+    const ty = p.y + e.vy * (p.r + m.radius + 2) + e.vx * side;
+    const at = slide(w.monsterMap, m.x, m.y, tx - m.x, ty - m.y, m.radius);
+    m.x = at.x;
+    m.y = at.y;
     m.kx = 0;
     m.ky = 0;
   }
@@ -1625,10 +1629,3 @@ function specializeFor(w: FightWorld, p: Player, n: Minion): number {
   }
   return swarm >= 3 ? MinionRole.Burster : MinionRole.Plain;
 }
-
-/** Dead or departed monsters leave their carried positions. */
-export function forgetMonster(w: FightWorld, m: Monster): void {
-  removeMonster(w, m);
-}
-
-export { Mode };

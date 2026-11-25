@@ -359,6 +359,8 @@ export interface FieldRule {
   readonly regions: readonly { readonly min: number; readonly max: number }[];
   /** A spawn's level in a region; `roll` in [0, 1) (content `spawnLevel`). */
   levelAt(region: number, roll: number): number;
+  /** The most alive at once in this field, whoever is present. */
+  readonly populationMax: number;
   readonly roster: readonly {
     readonly kind: number;
     readonly weight: number;

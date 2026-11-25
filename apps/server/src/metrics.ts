@@ -63,6 +63,8 @@ export interface RoomSnapshot {
     readonly fxPerSecond: number;
     /** Snapshot bytes per client per second by part. */
     readonly bytesByPart: Readonly<Record<string, number>>;
+    /** The same for the client that received the most this window. */
+    readonly worstByPart: Readonly<Record<string, number>>;
     readonly downs: number;
     readonly revives: number;
     readonly wakes: number;
@@ -115,6 +117,7 @@ export class RoomMetrics {
   private lastFight: RoomSnapshot["fight"] | undefined;
   private fightNet: FightNet | undefined;
   private sentAt: number[] = [];
+  private readonly partsAt = new Map<object, Float64Array>();
   private lastSpawnTotal = 0;
   private viewChangesAt = 0;
   private lastViewRate = 0;
@@ -174,6 +177,22 @@ export class RoomMetrics {
     PARTS.forEach((k, i) => {
       bytesByPart[k] = Math.round(((sent[i] ?? 0) - (this.sentAt[i] ?? 0)) / seconds / clients);
     });
+    let worst: number[] = [];
+    let worstSum = -1;
+    for (const v of net?.viewers ?? []) {
+      const before = this.partsAt.get(v) ?? new Float64Array(8);
+      const delta = PARTS.map((_, i) => (v.parts[i] ?? 0) - (before[i] ?? 0));
+      const sum = delta.reduce((a, b) => a + b, 0);
+      if (sum > worstSum) {
+        worstSum = sum;
+        worst = delta;
+      }
+      this.partsAt.set(v, Float64Array.from(v.parts));
+    }
+    const worstByPart: Record<string, number> = {};
+    PARTS.forEach((k, i) => {
+      worstByPart[k] = Math.round((worst[i] ?? 0) / seconds);
+    });
     this.lastFight = {
       simMs: this.sim.summary(),
       netMs: this.net.summary(),
@@ -184,6 +203,7 @@ export class RoomMetrics {
       eventsPerSecond: per(c.events - a.events),
       fxPerSecond: per((net?.totals.fx ?? 0) - a.fx),
       bytesByPart,
+      worstByPart,
       downs: c.downs,
       revives: c.revives,
       wakes: c.wakes,

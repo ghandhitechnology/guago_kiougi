@@ -20,6 +20,7 @@ import {
   TICK_MS,
   TILE_SIZE,
   WirePlayer,
+  type WireSelf,
 } from "@guago/shared";
 import { signIn } from "./account.ts";
 import { startNetsim } from "./netsim.ts";
@@ -34,14 +35,16 @@ import { startNetsim } from "./netsim.ts";
  * client (mean and the worst client), events, knock-outs and the server's memory.
  *
  *   pnpm loadtest --bots 80 --seconds 300 --url ws://localhost:2608
+ *   … --map p1-colonnade  open the room on this map (the server needs ALLOW_MAP_OPTION=1);
+ *                         without it the room runs the server's GUAGO_MAP
  *   … --auto 0.5          share of bots in full auto
  *   … --latency 150 --jitter 30 --loss 0.01   every bot through a simulated mobile link
  *   … --out report.txt    also write the report to a file
  *
  * Bots sign in through the HTTP API as bot0001, bot0002 … (`--accounts` changes the prefix),
  * make their characters on first use and keep their sessions in .local/ for the next run. The
- * server needs a database, a signup limit above the bot count (SIGNUPS_PER_IP_PER_DAY) and the
- * map to run (GUAGO_MAP).
+ * server needs a database and a signup limit above the bot count (SIGNUPS_PER_IP_PER_DAY). Its
+ * numbers come from the loopback metrics port, the game port + 100 unless `--metrics` says.
  */
 
 const { values } = parseArgs({
@@ -55,6 +58,8 @@ const { values } = parseArgs({
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
     accounts: { type: "string", default: "bot" },
+    map: { type: "string" },
+    metrics: { type: "string" },
     out: { type: "string" },
   },
 });
@@ -64,7 +69,8 @@ const SECONDS = Number(values.seconds);
 const WARMUP = Number(values.warmup);
 const AUTO = Number(values.auto);
 const target = new URL(values.url);
-const metricsUrl = `http://${target.host}/metrics`;
+const metricsUrl = values.metrics ?? `http://127.0.0.1:${Number(target.port) + 100}/metrics`;
+const joinOptions = values.map ? { map: values.map } : {};
 
 let url = values.url;
 if (values.latency !== undefined) {
@@ -105,6 +111,10 @@ class Bot {
   private dir: readonly [number, number] = [0, 0];
   private until = 0;
   private wasDown = false;
+  private goal: [number, number] = [0, 0];
+  private goalUntil = 0;
+  private lastX = 0;
+  private lastY = 0;
   private down = false;
   measuring = false;
   readonly room: Room<unknown, MapState>;
@@ -115,9 +125,10 @@ class Bot {
     this.auto = auto;
     room.reconnection.enabled = false;
     room.onMessage("*", () => {});
+    const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
       if (this.measuring) this.stats.snapshots++;
-      this.reader.read(bytes, NULL_SINK);
+      this.reader.read(bytes, sink);
     });
     const events = room.connection.events;
     const onmessage = events.onmessage;
@@ -133,13 +144,16 @@ class Bot {
     return this.reader.broken;
   }
 
+  private map: ReturnType<typeof mapById>;
+  private speed = 60;
+
   private onPatch(state: MapState): void {
     if (this.reader.cols === 1 && state.map) {
-      const map = mapById(state.map);
-      if (map) {
+      this.map = mapById(state.map);
+      if (this.map) {
         const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((map.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((map.collision.h * TILE_SIZE) / cell);
+        this.reader.cols = Math.ceil((this.map.collision.w * TILE_SIZE) / cell);
+        this.reader.rows = Math.ceil((this.map.collision.h * TILE_SIZE) / cell);
       }
     }
     let me = this.slot === undefined ? undefined : state.players.get(this.slot);
@@ -155,15 +169,19 @@ class Bot {
     this.down = me.down > 0;
     if (this.down && !this.wasDown && this.measuring) this.stats.downs++;
     this.wasDown = this.down;
+    this.speed = me.speed || this.speed;
+    if (this.predictor) this.predictor.speed = this.speed;
+  }
+
+  /** The server's word on the own body, from the snapshot's Self record. */
+  private onSelf(me: WireSelf): void {
     const body = { x: me.x / POS_SCALE, y: me.y / POS_SCALE, facing: me.facing as Facing };
-    const map = mapById(state.map);
     if (!this.predictor) {
-      if (!map) return;
-      this.predictor = new Predictor(map, body, me.speed || 60);
+      if (!this.map) return;
+      this.predictor = new Predictor(this.map, body, this.speed);
       this.seen = { x: me.x, y: me.y, seq: me.seq };
       return;
     }
-    this.predictor.speed = me.speed || this.predictor.speed;
     if (me.x === this.seen.x && me.y === this.seen.y && me.seq === this.seen.seq) return;
     this.seen = { x: me.x, y: me.y, seq: me.seq };
     // In full auto the server walks the body; the browser follows it instead of predicting.
@@ -223,16 +241,35 @@ class Bot {
       this.until = n + 6;
       return;
     }
+    // Nothing near: walk to a destination anywhere on the field, deep regions included.
+    const map = this.map;
+    if (!map) return;
+    const gx = this.goal[0] - px;
+    const gy = this.goal[1] - py;
+    const gd = Math.sqrt(gx * gx + gy * gy);
+    if (gd < 24 || n >= this.goalUntil) {
+      const { w, h, rows } = map.collision;
+      for (let tries = 0; tries < 40; tries++) {
+        const tx = Math.floor(Math.random() * w);
+        const ty = Math.floor(Math.random() * h);
+        if (rows[ty]?.[tx] !== ".") continue;
+        this.goal = [(tx + 0.5) * TILE_SIZE, (ty + 0.5) * TILE_SIZE];
+        break;
+      }
+      this.goalUntil = n + 400;
+      return;
+    }
+    // Blocked by something: step aside for a moment.
     if (n >= this.until) {
-      const walking = this.dir[0] !== 0 || this.dir[1] !== 0;
-      if (walking && Math.random() < 0.3) {
-        this.dir = [0, 0];
-        this.until = n + between(6, 30);
-      } else {
+      this.dir = [Math.round((gx / gd) * MOVE_MAX), Math.round((gy / gd) * MOVE_MAX)];
+      const stuck = Math.hypot(px - this.lastX, py - this.lastY) < 1;
+      if (stuck) {
         const a = Math.random() * Math.PI * 2;
         this.dir = [Math.round(Math.cos(a) * MOVE_MAX), Math.round(Math.sin(a) * MOVE_MAX)];
-        this.until = n + between(20, 70);
+        this.until = n + 20;
       }
+      this.lastX = px;
+      this.lastY = py;
     }
   }
 
@@ -258,7 +295,7 @@ for (let i = 0; i < BOTS; i++) {
   for (let attempt = 1; ; attempt++) {
     try {
       const client = new Client(url, { headers: { cookie } });
-      const room = await client.joinOrCreate(MAP_ROOM, {}, MapState);
+      const room = await client.joinOrCreate(MAP_ROOM, joinOptions, MapState);
       bots.push(new Bot(room, i < Math.round(BOTS * AUTO)));
       break;
     } catch (err) {
@@ -298,6 +335,7 @@ interface RoomReport {
     eventsPerSecond: number;
     fxPerSecond: number;
     bytesByPart: Record<string, number>;
+    worstByPart: Record<string, number>;
     downs: number;
     revives: number;
     wakes: number;
@@ -363,13 +401,82 @@ const lines = [
   `${BOTS} bots (${autoCount} full auto, ${BOTS - autoCount} semi-auto), ${fixed(elapsed, 0)} s measured after ${WARMUP} s warm-up, ${link}, map ${rooms[0]?.map ?? "?"}`,
   `${rooms.at(-1)?.players ?? 0} players; monsters alive p50 ${median((r) => r.monsters)} (min ${Math.min(...rooms.map((r) => r.monsters))}, max ${worstOf((r) => r.monsters)})`,
   "",
-  `server tick ms        p50 ${fixed(median((r) => r.tickMs.p50), 2)}  p95 ${fixed(median((r) => r.tickMs.p95), 2)} (worst 10 s window ${fixed(worstOf((r) => r.tickMs.p95), 2)})  p99 ${fixed(median((r) => r.tickMs.p99), 2)}  max ${fixed(worstOf((r) => r.tickMs.max), 2)}   budget p95 < 10`,
-  `  of it on the CPU    p50 ${fixed(median((r) => r.tickCpuMs.p50), 2)}  p95 ${fixed(median((r) => r.tickCpuMs.p95), 2)} (worst ${fixed(worstOf((r) => r.tickCpuMs.p95), 2)})  p99 ${fixed(median((r) => r.tickCpuMs.p99), 2)}`,
-  `  fight step          p50 ${fixed(fmed((f) => f.simMs.p50), 2)}  p95 ${fixed(fmed((f) => f.simMs.p95), 2)}  p99 ${fixed(fmed((f) => f.simMs.p99), 2)}  max ${fixed(fworst((f) => f.simMs.max), 2)}`,
-  `  snapshots           p50 ${fixed(fmed((f) => f.netMs.p50), 2)}  p95 ${fixed(fmed((f) => f.netMs.p95), 2)}  p99 ${fixed(fmed((f) => f.netMs.p99), 2)}  max ${fixed(fworst((f) => f.netMs.max), 2)}   (encode, assemble and send to every client)`,
-  `  schema patch        p95 ${fixed(median((r) => r.patchMs.p95), 2)}`,
-  `downstream B/s/client server ${fixed(median((r) => r.bytesPerClient.mean), 0)} mean, ${fixed(worstOf((r) => r.bytesPerClient.max), 0)} worst client   bots ${fixed(mean(perBot), 0)} mean, ${fixed(Math.max(0, ...perBot), 0)} worst   budget < 8000`,
-  `  snapshot by part    ${parts.map((k) => `${k} ${fixed(fmed((f) => f.bytesByPart[k] ?? 0), 0)}`).join("  ")}`,
+  `server tick ms        p50 ${fixed(
+    median((r) => r.tickMs.p50),
+    2,
+  )}  p95 ${fixed(
+    median((r) => r.tickMs.p95),
+    2,
+  )} (worst 10 s window ${fixed(
+    worstOf((r) => r.tickMs.p95),
+    2,
+  )})  p99 ${fixed(
+    median((r) => r.tickMs.p99),
+    2,
+  )}  max ${fixed(
+    worstOf((r) => r.tickMs.max),
+    2,
+  )}   budget p95 < 10`,
+  `  of it on the CPU    p50 ${fixed(
+    median((r) => r.tickCpuMs.p50),
+    2,
+  )}  p95 ${fixed(
+    median((r) => r.tickCpuMs.p95),
+    2,
+  )} (worst ${fixed(
+    worstOf((r) => r.tickCpuMs.p95),
+    2,
+  )})  p99 ${fixed(
+    median((r) => r.tickCpuMs.p99),
+    2,
+  )}`,
+  `  fight step          p50 ${fixed(
+    fmed((f) => f.simMs.p50),
+    2,
+  )}  p95 ${fixed(
+    fmed((f) => f.simMs.p95),
+    2,
+  )}  p99 ${fixed(
+    fmed((f) => f.simMs.p99),
+    2,
+  )}  max ${fixed(
+    fworst((f) => f.simMs.max),
+    2,
+  )}`,
+  `  snapshots           p50 ${fixed(
+    fmed((f) => f.netMs.p50),
+    2,
+  )}  p95 ${fixed(
+    fmed((f) => f.netMs.p95),
+    2,
+  )}  p99 ${fixed(
+    fmed((f) => f.netMs.p99),
+    2,
+  )}  max ${fixed(
+    fworst((f) => f.netMs.max),
+    2,
+  )}   (encode, assemble and send to every client)`,
+  `  schema patch        p95 ${fixed(
+    median((r) => r.patchMs.p95),
+    2,
+  )}`,
+  `downstream B/s/client server ${fixed(
+    median((r) => r.bytesPerClient.mean),
+    0,
+  )} mean, ${fixed(
+    worstOf((r) => r.bytesPerClient.max),
+    0,
+  )} worst client in any 5 s window   budget < 8000`,
+  `  measured by the bots p50 ${fixed(quantile(perBot, 0.5), 0)}  p95 ${fixed(quantile(perBot, 0.95), 0)}  mean ${fixed(mean(perBot), 0)}  worst ${fixed(Math.max(0, ...perBot), 0)} over the whole run`,
+  `  snapshot by part    ${parts
+    .map(
+      (k) =>
+        `${k} ${fixed(
+          fmed((f) => f.bytesByPart[k] ?? 0),
+          0,
+        )}`,
+    )
+    .join("  ")}`,
   `per second            kills ${fixed(fmed((f) => f.killsPerSecond))}  spawns ${fixed(fmed((f) => f.spawnsPerSecond))} (max ${fixed(fworst((f) => f.spawnsPerSecond))})  casts ${fixed(fmed((f) => f.castsPerSecond))}  hits ${fixed(fmed((f) => f.hitsPerSecond))}  events ${fixed(fmed((f) => f.eventsPerSecond))}  effect records ${fixed(fmed((f) => f.fxPerSecond))}`,
   `knocked out           ${(last?.downs ?? 0) - (firstFight?.downs ?? 0)} times, revived ${(last?.revives ?? 0) - (firstFight?.revives ?? 0)}, woke at the spawn ${(last?.wakes ?? 0) - (firstFight?.wakes ?? 0)}`,
   `server memory         rss ${mb(memStart?.rss)} → ${mb(memEnd?.rss)} MB, heap ${mb(memStart?.heapUsed)} → ${mb(memEnd?.heapUsed)} MB`,

@@ -5,9 +5,9 @@ import type { Character } from "./api.ts";
 export const OWNER_TAG = 1;
 
 /**
- * Synced map state: who is here and what the owner needs of its own character. Everything that
- * moves every tick (monsters, other players' bodies, effects) travels in the fight snapshot
- * instead (`fight/wire.ts`). Positions are in 1/POS_SCALE pixels.
+ * Synced map state: who is here and the owner's numbers that change now and then. Everything
+ * that changes every tick (bodies, monsters, effects, the owner's own position and health)
+ * travels in the fight snapshot instead (`fight/wire.ts`).
  */
 
 /** A student look as drawn by other clients; ids as in `Look` (api.ts). */
@@ -38,17 +38,18 @@ export const PlayerState = schema(
     major: t.string(),
     level: t.uint16(),
     look: LookState,
-    // The owner's own body and numbers; everyone else sees the body in the snapshot.
-    x: t.uint16().view(OWNER_TAG),
-    y: t.uint16().view(OWNER_TAG),
-    facing: t.uint8().view(OWNER_TAG),
-    /** Sequence number of the last input the server applied. */
-    seq: t.uint32().view(OWNER_TAG),
+    /** The 동아리 shown under the name (PLAN §12): its id, or 0 for none. */
+    clubId: t.uint32(),
+    club: t.string(),
+    /** 과잠 colour, a `jacket` swap slot option, and back emblem (`encodeEmblem` form). */
+    jacket: t.string(),
+    emblem: t.string(),
+    // The owner's numbers that change now and then. Its body, health and shield change every
+    // tick and travel in its snapshot's Self record (`fight/wire.ts`); everyone else sees the
+    // body in the snapshot.
     /** Walking speed in px/s, which the owner predicts with. */
     speed: t.float32().view(OWNER_TAG),
-    hp: t.float32().view(OWNER_TAG),
     maxHp: t.float32().view(OWNER_TAG),
-    shield: t.float32().view(OWNER_TAG),
     exp: t.float32().view(OWNER_TAG),
     /** Control mode, `CONTROL_MODES` index. */
     mode: t.uint8().view(OWNER_TAG),
@@ -76,6 +77,17 @@ export function dressPlayer(player: PlayerState, character: Character): void {
   player.name = character.name;
   player.major = character.major;
   player.look = synced;
+}
+
+/** Puts a character's club on its synced player, or takes it off. Fields change only if needed. */
+export function wearClub(
+  player: PlayerState,
+  club: { id: number; name: string; jacket: string; emblem: string } | undefined,
+): void {
+  player.clubId = club?.id ?? 0;
+  player.club = club?.name ?? "";
+  player.jacket = club?.jacket ?? "";
+  player.emblem = club?.emblem ?? "";
 }
 
 /** Player bodies a map room holds, which is also its seat count. */

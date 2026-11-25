@@ -173,22 +173,3 @@ export class MouseAim {
     this.scene.input.off("pointerdown", this.onDown);
   }
 }
-
-/** Flags for the next input: a dodge and at most one cast, taken once. */
-export class PendingFlags {
-  private flags = 0;
-
-  dodge(): void {
-    this.flags |= InputFlag.Dodge;
-  }
-
-  cast(slot: number): void {
-    this.flags = (this.flags & InputFlag.Dodge) | castFlag(slot);
-  }
-
-  take(): number {
-    const f = this.flags;
-    this.flags = 0;
-    return f;
-  }
-}

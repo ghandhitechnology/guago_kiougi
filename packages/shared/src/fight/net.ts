@@ -1,14 +1,16 @@
-import { TILE_SIZE } from "../constants.ts";
+import { POS_SCALE, TILE_SIZE } from "../constants.ts";
 import {
   BurstKind,
   ByteWriter,
   DR_EPS,
+  DR_EPS_MONSTER,
   Extra,
   emptyFx,
   FxRec,
   Leave,
   Priv,
   Q,
+  SelfField,
   SNAP_CELL_TILES,
   type WireFx,
   type WireHit,
@@ -33,6 +35,8 @@ const VIEW_H = 135;
 /** A window takes in a cell this close past the screen's edge, and lets it go this far past. */
 const ENTER = 48;
 const LEAVE = 80;
+/** Bytes of other players' effects a client gets per tick at most (own effects always go). */
+const OTHERS_FX_BYTES = 40;
 /** Players' effects go to viewers whose screen comes within this of the cell. */
 const SCREEN_HALF_W = VIEW_W + 32;
 const SCREEN_HALF_H = VIEW_H + 32;
@@ -59,6 +63,12 @@ interface Cell {
   /** Players' effect records for this tick, as [start, end) pairs in `fxOut`; sent to viewers
    * whose screen reaches the cell. */
   fx: number[];
+  /** Per players' effect record: owner player index, x, y, fx id, 1 for an end. */
+  fxMeta: number[];
+  /** Which of them go to the client being assembled. */
+  fxPick: Uint8Array;
+  /** Effect ids a keyframe of this cell carries. */
+  keyFx: number[];
   /** Monsters' tells and shots, and public bursts: sent to every viewer of the cell. */
   danger: number[];
   /** Codes written sparse this tick. */
@@ -68,8 +78,7 @@ interface Cell {
   headEnd: number;
   arrivals: number[];
   tailAt: number;
-  fxAt: number;
-  fxEnd: number;
+
   /** Bytes of the delta by part, for measuring. */
   parts: number[];
 }
@@ -96,8 +105,14 @@ export interface NetViewer {
   /** Private records other than hits, encoded. */
   readonly priv: ByteWriter;
   privCount: number;
+  /** Players' effects this client was sent and has not seen end, by fx id. */
+  readonly sentFx: Uint8Array;
+  /** The own body as last sent: x, y (1/POS_SCALE px), facing, seq, hp, shield, roll left. */
+  readonly self: Float64Array;
   /** Bytes of the last message, for metrics. */
   lastBytes: number;
+  /** Bytes sent to this client by part (as `FightNet.sent`), running totals. */
+  readonly parts: Float64Array;
 }
 
 export function newViewer(): NetViewer {
@@ -116,7 +131,10 @@ export function newViewer(): NetViewer {
     hitCount: 0,
     priv: new ByteWriter(512),
     privCount: 0,
+    sentFx: new Uint8Array(65536),
+    self: new Float64Array(7).fill(-1),
     lastBytes: 0,
+    parts: new Float64Array(8),
   };
 }
 
@@ -158,6 +176,8 @@ export class FightNet {
   private readonly fxOut = new ByteWriter(1 << 14);
   private readonly msg = new ByteWriter(1 << 13);
   private readonly memberCodes = new Uint8Array(IDS);
+  private readonly cands: number[] = [];
+  private readonly order: number[] = [];
   private readonly payload = new ByteWriter(1 << 14);
   private readonly staying: number[] = [];
   private readonly gone: number[] = [];
@@ -188,13 +208,15 @@ export class FightNet {
         keyAt: 0,
         keyEnd: 0,
         fx: [],
+        fxMeta: [],
+        fxPick: new Uint8Array(64),
+        keyFx: [],
         danger: [],
         sparse: false,
         headEnd: 0,
         arrivals: [],
         tailAt: 0,
-        fxAt: 0,
-        fxEnd: 0,
+
         parts: [0, 0, 0, 0, 0],
       });
     }
@@ -263,6 +285,8 @@ export class FightNet {
       c.keyed = false;
       c.next.length = 0;
       c.fx.length = 0;
+      c.fxMeta.length = 0;
+      c.keyFx.length = 0;
       c.danger.length = 0;
     }
     for (let i = 0; i < w.removedCount; i++) {
@@ -478,14 +502,6 @@ export class FightNet {
       cell.parts[4] = out.n - p3;
     }
     cell.deltaEnd = out.n;
-    cell.fxAt = out.n;
-    if (cell.watched && cell.fx.length > 0) {
-      out.varint(cell.fx.length / 2);
-      for (let i = 0; i < cell.fx.length; i += 2) {
-        out.bytes(this.fxOut.buf.subarray(cell.fx[i] as number, cell.fx[i + 1] as number));
-      }
-    }
-    cell.fxEnd = out.n;
     const final = cell.next;
     final.length = 0;
     for (const id of staying) final.push(id);
@@ -505,7 +521,8 @@ export class FightNet {
 
   /** Dead-reckoning threshold for an entity: a minion may be off by two pixels. */
   private eps(id: number): number {
-    return this.kind[id] === WireMinion ? DR_EPS * 2 : DR_EPS;
+    const k = this.kind[id] as number;
+    return k === WireMinion ? DR_EPS * 2 : k === WirePlayer ? DR_EPS : DR_EPS_MONSTER;
   }
 
   private advance(id: number): void {
@@ -742,9 +759,22 @@ export class FightNet {
     }
   }
 
-  private pushFx(cell: number, begin: number, danger: boolean): void {
+  private pushFx(
+    cell: number,
+    begin: number,
+    danger: boolean,
+    owner = -1,
+    x = 0,
+    y = 0,
+    fx = 0,
+    end = 0,
+  ): void {
     const c = this.cells[cell] as Cell;
-    (danger ? c.danger : c.fx).push(begin, this.fxOut.n);
+    if (danger) c.danger.push(begin, this.fxOut.n);
+    else {
+      c.fx.push(begin, this.fxOut.n);
+      c.fxMeta.push(owner, x, y, fx, end);
+    }
     this.totals.fx++;
   }
 
@@ -767,7 +797,7 @@ export class FightNet {
       fo.u16(r.fx);
       fo.u16(Math.max(0, Math.round(r.x)));
       fo.u16(Math.max(0, Math.round(r.y)));
-      this.pushFx(cell, at, filed >= 0x10000);
+      this.pushFx(cell, at, filed >= 0x10000, -1, r.x, r.y, r.fx, 1);
     }
     for (const e of w.effects) {
       if (e.born !== w.tick || (!e.alive && e.ended !== w.tick)) continue;
@@ -789,14 +819,14 @@ export class FightNet {
       if (!this.describe(e, f)) continue;
       const at = fo.n;
       writeFx(fo, f);
-      this.pushFx(cell, at, danger);
+      this.pushFx(cell, at, danger, e.owner, e.x, e.y, e.fx, 0);
       if (!e.alive && ENDS_EARLY.has(e.kind)) {
         const end = fo.n;
         fo.u8(FxRec.End);
         fo.u16(e.fx);
         fo.u16(Math.max(0, Math.round(e.x)));
         fo.u16(Math.max(0, Math.round(e.y)));
-        this.pushFx(cell, end, danger);
+        this.pushFx(cell, end, danger, e.owner, e.x, e.y, e.fx, 1);
       }
     }
     // Public bursts: reactions, Q.E.D., heals, level ups, elites, revives.
@@ -875,6 +905,7 @@ export class FightNet {
       const at = this.cellAt(anchor ? anchor.x : e.x, anchor ? anchor.y : e.y);
       if (at !== c || !this.describe(e, f)) continue;
       writeFx(out, f);
+      (this.cells[c] as Cell).keyFx.push(e.fx);
       n++;
       if (n === 127) break;
     }
@@ -886,6 +917,9 @@ export class FightNet {
         n++;
       }
     }
+    for (let i = 0; i < cell.fxMeta.length; i += 5) {
+      if (cell.fxMeta[i + 4] === 0) cell.keyFx.push(cell.fxMeta[i + 3] as number);
+    }
     out.setU8(countAt, n);
   }
 
@@ -893,6 +927,66 @@ export class FightNet {
 
   private privates(): void {
     const w = this.w;
+    for (const v of this.viewers) {
+      const p = v.player;
+      if (!p?.joined) continue;
+      const me = v.self;
+      const x = Math.round(p.x * POS_SCALE);
+      const y = Math.round(p.y * POS_SCALE);
+      let mask = 0;
+      if (
+        v.fresh ||
+        me[0] !== x ||
+        me[1] !== y ||
+        me[2] !== p.facing ||
+        me[3] !== p.seq ||
+        me[6] !== p.rollLeft
+      ) {
+        const dx = x - (me[0] as number);
+        const dy = y - (me[1] as number);
+        const ds = p.seq - (me[3] as number);
+        const small =
+          !v.fresh && Math.abs(dx) <= 127 && Math.abs(dy) <= 127 && ds >= 0 && ds <= 255;
+        mask |= small ? SelfField.Step : SelfField.Body;
+      }
+      const hp = Math.fround(p.hp);
+      const shield = Math.fround(p.shield);
+      if (v.fresh || me[4] !== hp) mask |= SelfField.Hp;
+      if (v.fresh || me[5] !== shield) mask |= SelfField.Shield;
+      if (mask === 0) continue;
+      const out = v.priv;
+      out.u8(Priv.Self);
+      out.u8(mask);
+      if (mask & SelfField.Body) {
+        out.u16(x);
+        out.u16(y);
+        out.u8(p.facing);
+        out.u32(p.seq);
+        out.u8(p.rollLeft);
+      } else if (mask & SelfField.Step) {
+        out.i8(x - (me[0] as number));
+        out.i8(y - (me[1] as number));
+        out.u8(p.facing);
+        out.u8(p.seq - (me[3] as number));
+        out.u8(p.rollLeft);
+      }
+      if (mask & (SelfField.Body | SelfField.Step)) {
+        me[0] = x;
+        me[1] = y;
+        me[2] = p.facing;
+        me[3] = p.seq;
+        me[6] = p.rollLeft;
+      }
+      if (mask & SelfField.Hp) {
+        out.f32(hp);
+        me[4] = hp;
+      }
+      if (mask & SelfField.Shield) {
+        out.f32(shield);
+        me[5] = shield;
+      }
+      v.privCount++;
+    }
     for (let i = 0; i < w.eventCount; i++) {
       const ev = w.events[i];
       if (!ev) continue;
@@ -1040,8 +1134,9 @@ export class FightNet {
       const statusAt = m.n;
       const n = w * h;
       for (let i = 0; i < (n + 1) >> 1; i++) m.u8(0);
-      let i = 0;
       const had = !v.fresh && v.lx1 >= v.lx0;
+      this.pickFx(v, p, had);
+      let i = 0;
       for (let cy = v.y0; cy <= v.y1; cy++) {
         for (let cx = v.x0; cx <= v.x1; cx++, i++) {
           const cell = this.cells[cy * this.cols + cx] as Cell;
@@ -1049,7 +1144,8 @@ export class FightNet {
           if (!had || !this.wasIn(v, cx, cy)) {
             status = 2;
             m.bytes(this.out.buf.subarray(cell.keyAt, cell.keyEnd));
-            this.sent[5] = (this.sent[5] as number) + cell.keyEnd - cell.keyAt;
+            for (const fx of cell.keyFx) v.sentFx[fx] = 1;
+            this.add(v, 5, cell.keyEnd - cell.keyAt);
           } else {
             if (cell.quiet) status = 0;
             else {
@@ -1074,15 +1170,23 @@ export class FightNet {
                   m.bytes(buf.subarray(arr[k * 4 + 2] as number, arr[k * 4 + 3] as number));
                 }
               }
-              this.sent[3] = (this.sent[3] as number) + m.n - before;
+              this.add(v, 3, m.n - before);
               m.bytes(buf.subarray(cell.tailAt, cell.deltaEnd));
-              for (const k of [0, 1, 2, 4])
-                this.sent[k] = (this.sent[k] as number) + (cell.parts[k] as number);
+              for (const k of [0, 1, 2, 4]) this.add(v, k, cell.parts[k] as number);
             }
-            if (cell.fxEnd > cell.fxAt && this.reaches(p, cy * this.cols + cx)) {
+            const picked = this.pickedIn(cell);
+            if (picked > 0) {
               status |= 4;
-              m.bytes(this.out.buf.subarray(cell.fxAt, cell.fxEnd));
-              this.sent[4] = (this.sent[4] as number) + cell.fxEnd - cell.fxAt;
+              const before = m.n;
+              m.varint(picked);
+              const fo = this.fxOut.buf;
+              for (let k = 0; k < cell.fx.length / 2; k++) {
+                if (!cell.fxPick[k]) continue;
+                m.bytes(fo.subarray(cell.fx[k * 2] as number, cell.fx[k * 2 + 1] as number));
+                const id = cell.fxMeta[k * 5 + 3] as number;
+                v.sentFx[id] = cell.fxMeta[k * 5 + 4] === 1 ? 0 : 1;
+              }
+              this.add(v, 4, m.n - before);
             }
           }
           const at = statusAt + (i >> 1);
@@ -1106,12 +1210,71 @@ export class FightNet {
       }
       m.bytes(v.priv.buf.subarray(0, v.priv.n));
       this.totals.hits += v.hitCount;
-      this.sent[6] = (this.sent[6] as number) + v.hitCount * 14 + v.priv.n + 1;
+      this.add(v, 6, v.hitCount * 14 + v.priv.n + 1);
     }
     v.fresh = false;
     v.lastBytes = m.n;
-    this.sent[7] = (this.sent[7] as number) + 7 + 4;
+    this.add(v, 7, 7 + 4);
     return m.buf.subarray(0, m.n);
+  }
+
+  private pickedIn(cell: Cell): number {
+    let n = 0;
+    for (let k = 0; k < cell.fx.length / 2; k++) if (cell.fxPick[k]) n++;
+    return n;
+  }
+
+  /**
+   * Chooses the players' effects a client gets this tick, from the cells it holds that its screen
+   * reaches: all of its own, every end of something it was sent, and others' spawns nearest
+   * first up to `OTHERS_FX_BYTES`. In a crowd of eighty the far casts are the ones it loses.
+   */
+  private pickFx(v: NetViewer, p: Player, had: boolean): void {
+    const cands = this.cands;
+    cands.length = 0;
+    for (let cy = v.y0; cy <= v.y1; cy++) {
+      for (let cx = v.x0; cx <= v.x1; cx++) {
+        const c = cy * this.cols + cx;
+        const cell = this.cells[c] as Cell;
+        const n = cell.fx.length / 2;
+        if (cell.fxPick.length < n) cell.fxPick = new Uint8Array(n * 2);
+        cell.fxPick.fill(0, 0, n);
+        if (n === 0 || !had || !this.wasIn(v, cx, cy) || !this.reaches(p, c)) continue;
+        for (let k = 0; k < n; k++) {
+          const owner = cell.fxMeta[k * 5] as number;
+          const id = cell.fxMeta[k * 5 + 3] as number;
+          if (cell.fxMeta[k * 5 + 4] === 1) {
+            if (v.sentFx[id]) cell.fxPick[k] = 1;
+          } else if (owner === p.index) {
+            cell.fxPick[k] = 1;
+          } else {
+            const dx = (cell.fxMeta[k * 5 + 1] as number) - p.x;
+            const dy = (cell.fxMeta[k * 5 + 2] as number) - p.y;
+            cands.push(dx * dx + dy * dy, c, k);
+          }
+        }
+      }
+    }
+    const count = cands.length / 3;
+    if (count === 0) return;
+    const order = this.order;
+    order.length = 0;
+    for (let i = 0; i < count; i++) order.push(i);
+    order.sort((a, b) => (cands[a * 3] as number) - (cands[b * 3] as number));
+    let used = 0;
+    for (const i of order) {
+      const cell = this.cells[cands[i * 3 + 1] as number] as Cell;
+      const k = cands[i * 3 + 2] as number;
+      const size = (cell.fx[k * 2 + 1] as number) - (cell.fx[k * 2] as number);
+      if (used + size > OTHERS_FX_BYTES) continue;
+      used += size;
+      cell.fxPick[k] = 1;
+    }
+  }
+
+  private add(v: NetViewer, part: number, bytes: number): void {
+    this.sent[part] = (this.sent[part] as number) + bytes;
+    v.parts[part] = (v.parts[part] as number) + bytes;
   }
 
   /** Whether a cell lies within reach of the player's screen. */
@@ -1138,5 +1301,3 @@ export class FightNet {
     }
   }
 }
-
-export { HitFlag };

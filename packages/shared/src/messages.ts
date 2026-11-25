@@ -68,7 +68,9 @@ export const inputMessage = messageSchema<MoveInput & { readonly flags?: number 
 });
 
 export function encodeInput(input: MoveInput & { readonly flags?: number }): InputMessage {
-  return input.flags ? [input.seq, input.mx, input.my, input.flags] : [input.seq, input.mx, input.my];
+  return input.flags
+    ? [input.seq, input.mx, input.my, input.flags]
+    : [input.seq, input.mx, input.my];
 }
 
 /** Largest aim offset accepted, px. */

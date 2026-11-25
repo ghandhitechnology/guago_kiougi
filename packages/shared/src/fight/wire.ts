@@ -28,6 +28,8 @@ export const Q = 4;
 /** Dead reckoning: a member is corrected only when its guessed position is off by more than
  * this, in Q units (one pixel: drawn at whole pixels, the error never shows as more than one). */
 export const DR_EPS = 4;
+/** Monsters may be off by a pixel and a half: they are drawn in crowds, and hits use the truth. */
+export const DR_EPS_MONSTER = 6;
 
 /** Wire kinds besides monster kind indices. */
 export const WirePlayer = 250;
@@ -73,7 +75,30 @@ export const Priv = {
   Wake: 11,
   /** u16 fx · u16 cast: which of the owner's casts an effect belongs to. */
   Cast: 12,
+  /** The client's own body when it changed: u8 mask, then the fields it names (`SelfField`). */
+  Self: 13,
 } as const;
+
+/**
+ * Fields of a Self record: the body absolutely (u16 x, u16 y in 1/POS_SCALE px, u8 facing, u32
+ * seq, u8 roll inputs left) or as a step from the last one (i8 dx, i8 dy in 1/POS_SCALE px, u8
+ * facing, u8 inputs applied since, u8 roll inputs left), health as f32, shield as f32.
+ */
+export const SelfField = { Body: 1, Hp: 2, Shield: 4, Step: 8 } as const;
+
+/** The client's own body as the server last left it: what its prediction reconciles against. */
+export interface WireSelf {
+  /** In 1/POS_SCALE px, as `PlayerState` carried it. */
+  x: number;
+  y: number;
+  facing: number;
+  /** Last input applied. */
+  seq: number;
+  /** Inputs left in a dodge roll it asked for, for replaying the rest of it. */
+  roll: number;
+  hp: number;
+  shield: number;
+}
 
 /** Burst kinds (a reaction's index is below 16). */
 export const BurstKind = { Qed: 16, Heal: 17, LevelUp: 18, Elite: 19, Revive: 20 } as const;
@@ -654,6 +679,8 @@ export interface SnapshotSink {
   collect(id: number): void;
   /** One of the client's own effects and the cast it came from. */
   cast(fx: number, cast: number): void;
+  /** The client's own body changed; fields not in the record keep their last value. */
+  self(s: WireSelf): void;
   /** Level ups, phases, merits, rolls, knock-outs: `type` is a `Priv` value. */
   note(type: number, a: number, b: number, c: number): void;
 }
@@ -817,6 +844,10 @@ export class SnapshotReader {
     this.members.set(id, m);
   }
 
+  /** The client's own body, accumulated over Self records. */
+  readonly me: WireSelf = { x: 0, y: 0, facing: 0, seq: 0, roll: 0, hp: 0, shield: 0 };
+  hasSelf = false;
+
   /** Transfers that found nothing to transfer: zero unless the two sides disagree. */
   broken = 0;
 
@@ -976,6 +1007,28 @@ export class SnapshotReader {
         case Priv.Cast:
           sink.cast(r.u16(), r.u16());
           break;
+        case Priv.Self: {
+          const me = this.me;
+          const mask = r.u8();
+          if (mask & SelfField.Body) {
+            me.x = r.u16();
+            me.y = r.u16();
+            me.facing = r.u8();
+            me.seq = r.u32();
+            me.roll = r.u8();
+          } else if (mask & SelfField.Step) {
+            me.x += r.i8();
+            me.y += r.i8();
+            me.facing = r.u8();
+            me.seq += r.u8();
+            me.roll = r.u8();
+          }
+          if (mask & SelfField.Hp) me.hp = r.f32();
+          if (mask & SelfField.Shield) me.shield = r.f32();
+          this.hasSelf = true;
+          sink.self(me);
+          break;
+        }
         default:
           sink.note(type, r.i16(), r.i16(), r.i16());
       }
@@ -994,7 +1047,6 @@ export const NULL_SINK: SnapshotSink = {
   drop() {},
   collect() {},
   cast() {},
+  self() {},
   note() {},
 };
-
-export { CODE_EXTRA, CODE_FLASH, CODE_MOVE, CODE_SAME };

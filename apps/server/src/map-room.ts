@@ -14,8 +14,10 @@ import {
   aimMessage,
   type ChangeNotice,
   type Character,
+  CONTROL_MODES,
   createFight,
   dressPlayer,
+  Ev,
   type FightInput,
   type FightMap,
   FightNet,
@@ -36,7 +38,6 @@ import {
   PLAYER_RADIUS,
   type Player,
   PlayerState,
-  POS_SCALE,
   RECONNECT_SECONDS,
   REVIVE_MESSAGE,
   reviveMessage,
@@ -44,22 +45,30 @@ import {
   spawnMonster,
   startRevive,
   stepFight,
-  TICK_MS,
   TILE_SIZE,
+  wearClub,
 } from "@guago/shared";
+import { clubActivity } from "./club-activity.ts";
+import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
-import { InterestGrid, type Viewer } from "./interest.ts";
+import { expMultiplier, fightFacts } from "./fight/seams.ts";
 import { RoomMetrics } from "./metrics.ts";
+import { parties } from "./parties.ts";
 import { places } from "./places.ts";
+import { mapOptionAllowed } from "./room-maps.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { TickClock } from "./tick-clock.ts";
 
-/** Messages a second past which a client is dropped; inputs are 20 a second. */
-const MAX_MESSAGES_PER_SECOND = 120;
+/**
+ * Messages a second past which a client is dropped. Inputs come 20 a second, but a link that
+ * stalls delivers all it held at once, and the server drops a link silent for more than about
+ * nine seconds anyway: 400 lets every stall the connection survives through, and the input queue
+ * already bounds what a burst can buy.
+ */
+const MAX_MESSAGES_PER_SECOND = 400;
 /** How often each room logs its numbers. */
 const LOG_EVERY_MS = 30_000;
-/** Ticks the loop will run back to back to catch up after a stall before it lets time go. */
-const MAX_CATCH_UP = 3;
 /**
  * The loop wakes this often and steps whenever a tick is due. A 50 ms interval timer drifts late
  * by a millisecond or so each time and then has to double-step, so patches would leave up to a
@@ -67,6 +76,16 @@ const MAX_CATCH_UP = 3;
  * keeps every tick within a few milliseconds of its time.
  */
 const POLL_MS = 5;
+/** Party frames hear about health and mode this often (only changes go on). */
+const VITALS_EVERY_MS = 500;
+
+/** The step's party key for a party id. */
+function partyOf(id: number | undefined): string | null {
+  return id === undefined ? null : String(id);
+}
+
+/** EXP modifiers are read this often. */
+const MODIFIERS_EVERY_MS = 2_000;
 /** Aim, mode and revive requests a client may send per second, after a small burst. */
 const RATES = { aim: [20, 10], mode: [2, 2], revive: [4, 4] } as const;
 
@@ -97,7 +116,7 @@ class Bucket {
 interface Pawn {
   readonly slot: string;
   readonly state: InstanceType<typeof PlayerState>;
-  readonly viewer: Viewer;
+  readonly view: StateView;
   readonly net: NetViewer;
   readonly queue: InputQueue;
   readonly player: Player;
@@ -107,9 +126,9 @@ interface Pawn {
   loadout: Loadout;
   /** EXP below one, carried to the next grant: grants take whole numbers. */
   expCarry: number;
+  /** Tick it was seated, for "present for the whole surge". */
+  readonly since: number;
 }
-
-const wire = (px: number) => Math.round(px * POS_SCALE);
 
 let loadouts: Loadouts = starterLoadouts;
 
@@ -136,8 +155,23 @@ export function fightLoadoutChanged(characterId: string, change: ChangeNotice): 
   void at.room.reload(at.pawn);
 }
 
-/** The map a room runs: `GUAGO_MAP` names it (the lawn by default). */
-function mapToRun(): string {
+/**
+ * Seats per room: `MAP_SEATS`, or more for a load test (`GUAGO_SEATS`, up to 127 so every body
+ * keeps a one-byte schema id).
+ */
+function seatsPerRoom(): number {
+  const n = Number(process.env.GUAGO_SEATS);
+  return Number.isInteger(n) && n > 0 ? Math.min(127, n) : MAP_SEATS;
+}
+
+/**
+ * The map a room runs: `GUAGO_MAP` names it (the lawn by default); a load test or a developer may
+ * name another in the create options where `ALLOW_MAP_OPTION=1`.
+ */
+function mapToRun(options?: { map?: unknown }): string {
+  if (mapOptionAllowed() && typeof options?.map === "string" && mapById(options.map)) {
+    return options.map;
+  }
   return process.env.GUAGO_MAP || LAWN.id;
 }
 
@@ -150,29 +184,33 @@ function mapToRun(): string {
 export class MapRoom extends Room<{ state: MapState }> {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
-  override maxClients = MAP_SEATS;
+  override maxClients = seatsPerRoom();
 
   private mapId = LAWN.id;
   private map!: FightMap;
   private world!: FightWorld;
   private net!: FightNet;
-  private grid!: InterestGrid;
+  /** Bodies entering or leaving a client's view, for metrics: only on joins and leaves. */
+  private viewChanges = 0;
   private metrics!: RoomMetrics;
   private readonly pawns = new Map<string, Pawn>();
   private readonly bySlot = new Map<number, Pawn>();
   /** Free body slots, longest free first, so a body is never handed on within one patch. */
   private readonly free: string[] = [];
   private seats!: RoomSeats;
-  private acc = 0;
-  private lastLoop = 0;
+  private ticks!: TickClock;
+  /** Tick the current surge began. */
+  private surgeFrom = 0;
+  private unlistenClubs: (() => void) | undefined;
+  private unlistenParties: (() => void) | undefined;
 
   /** Only a browser with a live session and a character gets a seat. */
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
     return authenticateJoin(ctx);
   }
 
-  override onCreate(): void {
-    this.mapId = mapToRun();
+  override onCreate(options?: { map?: unknown }): void {
+    this.mapId = mapToRun(options);
     const def = mapById(this.mapId);
     if (!def) throw new Error(`no map ${this.mapId}`);
     this.map = fightMapOf(def);
@@ -184,12 +222,11 @@ export class MapRoom extends Room<{ state: MapState }> {
     const field = fieldOf(this.mapId, process.env.GUAGO_FIELD);
     this.world = createFight(this.map, simRules(), field, seed);
     this.net = new FightNet(this.world);
-    this.grid = new InterestGrid(this.world.width, this.world.height);
     this.metrics = new RoomMetrics(this.roomId, this.mapId);
     this.seats = new RoomSeats(this.mapId, (id) => this.placeOf(id));
     this.state.map = this.mapId;
     // Bodies before anything else, so their ref ids are the smallest the room will ever hand out.
-    for (let i = 0; i < MAP_SEATS; i++) {
+    for (let i = 0; i < this.maxClients; i++) {
       const slot = String(i);
       this.state.players.set(slot, new PlayerState());
       this.free.push(slot);
@@ -197,7 +234,7 @@ export class MapRoom extends Room<{ state: MapState }> {
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: FightInput) => {
       const pawn = this.pawns.get(client.sessionId);
-      if (pawn && !pawn.queue.push(input)) this.metrics.inputsDropped++;
+      if (pawn) this.metrics.inputsDropped += pawn.queue.push(input);
     });
     this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
       const pawn = this.pawns.get(client.sessionId);
@@ -222,7 +259,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
     // Patches and snapshots go out right after each step, so each is exactly one tick of the world.
-    this.lastLoop = performance.now();
+    this.ticks = new TickClock(performance.now());
     this.setTimestep(() => this.loop(), POLL_MS);
     this.patchRate = 0;
     this.clock.setInterval(() => {
@@ -230,6 +267,96 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    // A club joined, left or restyled shows under the name at once.
+    this.unlistenClubs = clubTags.listen((characterId, tag) => {
+      for (const pawn of this.pawns.values()) {
+        if (pawn.character.id === characterId) wearClub(pawn.state, tag);
+      }
+    });
+    // Party members on this map share kills within 20 tiles (PLAN §6); the step reads the party.
+    this.unlistenParties = parties.listen((characterId, partyId) => {
+      const pawn = fighting.get(characterId)?.pawn;
+      if (pawn && this.pawns.get(pawn.player.id) === pawn) pawn.player.party = partyOf(partyId);
+    });
+    // Party frames: health and mode, which the party module passes on only when they change.
+    this.clock.setInterval(() => {
+      for (const pawn of this.pawns.values()) {
+        const p = pawn.player;
+        const mode = CONTROL_MODES[p.mode] ?? "semi";
+        parties.report(pawn.character.id, { hp: p.hp, maxHp: p.kit.maxHp, mode });
+      }
+    }, VITALS_EVERY_MS);
+    // EXP modifiers come from memory every couple of seconds, never on the tick.
+    this.clock.setInterval(() => {
+      for (const pawn of this.pawns.values())
+        pawn.player.expMult = expMultiplier(pawn.character.id);
+    }, MODIFIERS_EVERY_MS);
+  }
+
+  /** The step's events that other systems learn about (`fight/seams.ts`), all buffered. */
+  private tellFacts(): void {
+    const sink = fightFacts();
+    if (!sink) return;
+    const w = this.world;
+    const field = w.field?.id ?? this.mapId;
+    const of = (index: number) => {
+      const p = w.players[index];
+      return p?.joined ? this.pawns.get(p.id) : undefined;
+    };
+    for (let i = 0; i < w.eventCount; i++) {
+      const e = w.events[i];
+      if (!e) continue;
+      switch (e.type) {
+        case Ev.Credit: {
+          const pawn = of(e.a);
+          const kind = w.rules.monsters[e.d];
+          if (!pawn || !kind) break;
+          const rank = e.f === 2 ? "boss" : e.f === 1 ? "elite" : "normal";
+          sink.add({
+            kind: "kill",
+            characterId: pawn.character.id,
+            field,
+            monster: kind.id,
+            level: e.e,
+            rank,
+          });
+          break;
+        }
+        case Ev.Down:
+        case Ev.Wake: {
+          const pawn = of(e.a);
+          if (pawn)
+            sink.add({
+              kind: e.type === Ev.Down ? "down" : "wake",
+              characterId: pawn.character.id,
+              field,
+            });
+          break;
+        }
+        case Ev.Revive: {
+          const target = of(e.a);
+          const by = of(e.b);
+          if (target && by)
+            sink.add({ kind: "revive", characterId: by.character.id, target: target.character.id });
+          break;
+        }
+        case Ev.Phase:
+          if (e.d === 1) this.surgeFrom = w.tick;
+          else {
+            for (const pawn of this.pawns.values()) {
+              if (pawn.since > this.surgeFrom) continue;
+              const hit = pawn.player.lastHurt >= this.surgeFrom;
+              sink.add({ kind: "wave", characterId: pawn.character.id, field, hit });
+            }
+          }
+          break;
+      }
+    }
+    for (const g of w.grants) {
+      const pawn = this.pawns.get(g.player.id);
+      if (pawn)
+        sink.add({ kind: "collect", characterId: pawn.character.id, drop: g.drop.payload as Drop });
+    }
   }
 
   /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
@@ -300,14 +427,44 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override async onJoin(client: Client): Promise<void> {
     const character = await this.seats.join(client);
+    try {
+      await this.seat(client, character);
+    } catch (error) {
+      // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
+      this.unseat(client);
+      await this.seats.leave(client);
+      throw error;
+    }
+  }
+
+  /** Puts a joined character's body into the fight and the client's views around it. */
+  private async seat(client: Client, character: Character): Promise<void> {
     const id = client.sessionId;
     const start = this.startOf(character.mapId, character.x, character.y);
+    const loadout = await loadouts.read(character);
     const slot = this.free.shift();
     const state = slot === undefined ? undefined : this.state.players.get(slot);
     if (slot === undefined || !state)
       throw new Error("no free body; maxClients should have refused the join");
+    try {
+      this.seatIn(client, character, loadout, slot, state, start);
+    } catch (error) {
+      this.free.unshift(slot);
+      this.world.removePlayer(id);
+      throw error;
+    }
+  }
+
+  private seatIn(
+    client: Client,
+    character: Character,
+    loadout: Loadout,
+    slot: string,
+    state: InstanceType<typeof PlayerState>,
+    start: { x: number; y: number },
+  ): void {
+    const id = client.sessionId;
     const rules = this.world.rules;
-    const loadout = await loadouts.read(character);
     const level = Math.max(1, loadout.level);
     const kitAt = (lv: number) => rules.kit(buildOf(character, pawn.loadout, lv));
     const player = this.world.addPlayer(
@@ -320,28 +477,29 @@ export class MapRoom extends Room<{ state: MapState }> {
     );
     player.exp = loadout.exp;
     player.rebuild = kitAt;
+    player.party = partyOf(parties.of(character.id)?.id);
     state.sid = id;
-    state.seq = 0;
     dressPlayer(state, character);
+    wearClub(state, clubTags.get(character.id));
     this.syncOwn(state, player);
 
     const view = new StateView();
     client.view = view;
     view.add(state, OWNER_TAG);
-    const viewer: Viewer = { view, cell: undefined };
     const net = newViewer();
     net.player = player;
     this.net.viewers.add(net);
     const pawn: Pawn = {
       slot,
       state,
-      viewer,
+      view,
       net,
       queue: new InputQueue(),
       player,
       character,
       loadout,
       expCarry: 0,
+      since: this.world.tick,
       buckets: {
         aim: new Bucket(RATES.aim[0], RATES.aim[1]),
         mode: new Bucket(RATES.mode[0], RATES.mode[1]),
@@ -351,8 +509,14 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.pawns.set(id, pawn);
     this.bySlot.set(Number(slot), pawn);
     fighting.set(character.id, { room: this, pawn });
-    const cell = this.grid.place(state, player.x, player.y);
-    this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
+    // Who is here is small and rare, so every client holds every seated player's identity;
+    // the bodies themselves move in the snapshot.
+    for (const other of this.pawns.values()) {
+      if (other === pawn) continue;
+      view.add(other.state);
+      if (!other.view.has(state)) other.view.add(state);
+      this.viewChanges += 2;
+    }
     this.countBytes(client);
     places.enter(character.id, {
       mapId: this.mapId,
@@ -388,13 +552,22 @@ export class MapRoom extends Room<{ state: MapState }> {
     places.leave(client.sessionId);
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
+    this.unseat(client);
+  }
+
+  /** Takes a body out of the fight and every view, hands over its EXP, and frees its slot. */
+  private unseat(client: Client): void {
     const id = client.sessionId;
+    places.leave(id);
     const pawn = this.pawns.get(id);
     if (pawn) {
       this.handOverExp(pawn);
       if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
-      this.grid.watch(pawn.viewer, undefined);
-      this.grid.remove(pawn.state);
+      for (const other of this.pawns.values()) {
+        if (other === pawn || !other.view.has(pawn.state)) continue;
+        other.view.remove(pawn.state);
+        this.viewChanges++;
+      }
       pawn.state.sid = "";
       this.pawns.delete(id);
       this.bySlot.delete(Number(pawn.slot));
@@ -407,6 +580,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override onDispose(): void {
+    this.unlistenClubs?.();
+    this.unlistenParties?.();
     this.metrics.dispose();
   }
 
@@ -431,21 +606,21 @@ export class MapRoom extends Room<{ state: MapState }> {
     pawn.expCarry = total - whole;
     if (whole >= 1 && Number.isSafeInteger(whole)) {
       grants()?.add(pawn.character.id, { exp: whole, drops: [] });
+      clubActivity.add(pawn.character.id, whole);
     }
   }
 
   private loop(): void {
     const now = performance.now();
-    this.acc = Math.min(this.acc + now - this.lastLoop, TICK_MS * MAX_CATCH_UP);
-    this.lastLoop = now;
-    if (this.acc < TICK_MS) return;
+    const { run, skip } = this.ticks.advance(now);
+    if (run === 0) return;
     const start = now;
     const cpu = process.threadCpuUsage();
-    let ticks = 0;
+    // Ticks lost to a stall keep their numbers, so the stamps on every message keep wall time.
+    if (skip > 0) this.world.tick += skip;
     let simMs = 0;
     let netMs = 0;
-    while (this.acc >= TICK_MS) {
-      this.acc -= TICK_MS;
+    for (let i = 0; i < run; i++) {
       const inputs = new Map<string, FightInput[]>();
       for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take() as FightInput[]);
       const s0 = performance.now();
@@ -457,6 +632,7 @@ export class MapRoom extends Room<{ state: MapState }> {
         if (pawn) sink?.add(pawn.character.id, { exp: 0, drops: [g.drop.payload as Drop] });
       }
       for (const pawn of this.pawns.values()) this.handOverExp(pawn);
+      this.tellFacts();
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {
@@ -468,9 +644,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       simMs += s1 - s0;
       netMs += s2 - s1;
       this.metrics.countTick(this.world, this.net);
-      ticks++;
     }
-    if (ticks === 0) return;
     this.sync();
     const patchStart = performance.now();
     this.broadcastPatch();
@@ -481,19 +655,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.metrics.players = this.pawns.size;
     this.metrics.clients = this.clients.length;
     this.metrics.monsters = this.world.director.alive;
-    this.metrics.viewChanges = this.grid.changes;
+    this.metrics.viewChanges = this.viewChanges;
   }
 
   private syncOwn(state: InstanceType<typeof PlayerState>, p: Player): void {
-    state.x = wire(p.x);
-    state.y = wire(p.y);
-    state.facing = p.facing;
-    state.seq = p.seq;
     state.speed = p.kit.speed;
-    state.hp = p.hp;
     state.maxHp = p.kit.maxHp;
-    state.shield = p.shield;
-    state.exp = p.exp;
+    state.exp = Math.floor(p.exp);
     state.level = p.level;
     state.mode = p.mode;
     state.down = p.downAt >= 0 ? p.downAt + 1 : 0;
@@ -505,13 +673,8 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
   }
 
-  /** Mirrors each player into its synced body and moves bodies between identity views. */
+  /** Mirrors each player into its own synced body. */
   private sync(): void {
-    for (const pawn of this.pawns.values()) {
-      const p = pawn.player;
-      this.syncOwn(pawn.state, p);
-      const cell = this.grid.place(pawn.state, p.x, p.y);
-      if (cell !== undefined) this.grid.watch(pawn.viewer, cell);
-    }
+    for (const pawn of this.pawns.values()) this.syncOwn(pawn.state, pawn.player);
   }
 }
