@@ -359,7 +359,7 @@ const map: MapSource = {
   time: { clock: "19:20", phase: "dusk", weather: "clear" },
   theme: "greece-dusk",
   sky: "plum.dark",
-  ambient: { color: "plum.light", intensity: 0.55 },
+  ambient: { color: "plum.light", intensity: 0.62, unlit: "greece" },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [{ prop: "dusk-sky", at: [0, 0], repeat: 6, raw: true }],

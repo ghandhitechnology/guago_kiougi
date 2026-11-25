@@ -112,7 +112,7 @@ function stoa(): Placed {
   const cols = [32, 36, 40, 44, 48];
   const done = new Set([32, 36, 40]);
   const feet = (tx: number): Vec => [tx * T + 8, (STOA_Y + 1) * T - 2];
-  const crane = place("crane", CRANE[0], CRANE[1]);
+  const crane = place("crane", CRANE[0], CRANE[1], { raw: true });
   return {
     objects: [
       ...cols.map((tx): Prop | Thing =>
@@ -121,7 +121,12 @@ function stoa(): Placed {
           : place("column-stump", tx, STOA_Y, { frame: tx === 44 ? "high" : "low" }),
       ),
       // Scaffolding around the column going up next.
-      { prop: "scaffold", at: [44 * T + 8, (STOA_Y + 1) * T], sort: (STOA_Y + 1) * T - 1 },
+      {
+        prop: "scaffold",
+        at: [44 * T + 8, (STOA_Y + 1) * T],
+        sort: (STOA_Y + 1) * T - 1,
+        raw: true,
+      },
       // The back wall, built a course high, with blocks waiting.
       place("blocks", 31, 14),
       place("blocks", 37, 14),
@@ -132,7 +137,7 @@ function stoa(): Placed {
       ...cols
         .filter((tx) => done.has(tx))
         .map((tx): Prop => ({ prop: "column-capital", at: feet(tx) })),
-      { prop: "crane-top", at: crane.at },
+      { prop: "crane-top", at: crane.at, raw: true },
     ],
     shadows: [blob(crane.at[0] + 30, crane.at[1] - 60, 10, 3, 1)],
   };
@@ -145,7 +150,10 @@ function market(): Placed {
   const colours = ["red", "blue", "ochre", "blue", "red"];
   [24, 34].forEach((ty, row) => {
     [30, 35, 40, 46, 51].forEach((tx, k) => {
-      const stall = place("stall", tx, ty, { frame: goods[(k + row) % goods.length] as string });
+      const stall = place("stall", tx, ty, {
+        frame: goods[(k + row) % goods.length] as string,
+        raw: true,
+      });
       out.objects.push(stall);
       out.overhead.push({
         prop: "awning",
@@ -179,6 +187,7 @@ function corners(): Placed {
       // Air: banners and washing on the windy terrace.
       {
         prop: "banner",
+        raw: true,
         anim: "snap",
         play: true,
         at: [62 * T, 11 * T],
@@ -186,6 +195,7 @@ function corners(): Placed {
       },
       {
         prop: "banner",
+        raw: true,
         anim: "snap",
         play: true,
         index: 1,
@@ -194,16 +204,18 @@ function corners(): Placed {
       },
       {
         prop: "banner",
+        raw: true,
         anim: "snap",
         play: true,
         index: 2,
         at: [72 * T, 16 * T],
         foot: { x: 71, y: 15, w: 1, h: 1 },
       },
-      { prop: "drying-line", anim: "snap", play: true, at: [65 * T, 15 * T] },
-      { prop: "drying-line", anim: "snap", play: true, index: 1, at: [60 * T, 19 * T] },
+      { prop: "drying-line", raw: true, anim: "snap", play: true, at: [65 * T, 15 * T] },
+      { prop: "drying-line", raw: true, anim: "snap", play: true, index: 1, at: [60 * T, 19 * T] },
       {
         prop: "banner",
+        raw: true,
         anim: "snap",
         play: true,
         index: 1,
@@ -223,14 +235,14 @@ function corners(): Placed {
       ...FURNACES.map(([tx, ty], i) =>
         place("furnace", tx, ty, { anim: "glow", play: true, index: i }),
       ),
-      place("amphora-rack", 60, 47),
+      place("amphora-rack", 60, 47, { raw: true }),
       place("furnace", 60, 41, { anim: "glow", play: true, index: 2 }),
       place("blocks", 66, 49),
       // The square's middle: a kouros on its plinth everyone gives directions by.
       place("statue", 43, 31),
       // The way into the city: the boundary stone, a rack of jars waiting to go in.
       place("horos", 72, 27),
-      place("amphora-rack", 68, 33),
+      place("amphora-rack", 68, 33, { raw: true }),
     ],
     overhead: [],
     shadows: [],

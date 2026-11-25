@@ -112,9 +112,9 @@ function crossroads(): Placed {
       { prop: "amphora", at: [588, 316] },
       { prop: "amphora", at: [600, 320] },
       place("shrine", 36, 27),
-      { prop: "basket", at: [440, 352] },
-      { prop: "basket", at: [470, 360] },
-      { prop: "ladder", at: [404, 318], sort: 318 },
+      { prop: "basket", raw: true, at: [440, 352] },
+      { prop: "basket", raw: true, at: [470, 360] },
+      { prop: "ladder", raw: true, at: [404, 318], sort: 318 },
     ],
     overhead: [{ prop: "olive-giant-crown", anim: "stir", play: true, at: feet }],
     shadows: [
@@ -197,7 +197,7 @@ const placed = merge(
     objects: [
       ...walls(),
       // The bend where the cart tipped: jars broken in the road.
-      place("cart", 59, 42),
+      place("cart", 59, 42, { raw: true }),
       { prop: "amphora-tipped", at: [912, 700] },
       { prop: "amphora-tipped", at: [940, 716], flip: true },
       { prop: "amphora", at: [976, 690] },
@@ -206,12 +206,12 @@ const placed = merge(
       // The farm: hives on their bench, the well.
       place("hives", 66, 17),
       place("hives", 68, 20),
-      place("well", 58, 20),
+      place("well", 58, 20, { raw: true }),
       // The harvest under the trees.
-      { prop: "basket", at: [342, 700] },
-      { prop: "basket", at: [372, 712] },
-      { prop: "ladder", at: [870, 300] },
-      { prop: "ladder", at: [214, 590] },
+      { prop: "basket", raw: true, at: [342, 700] },
+      { prop: "basket", raw: true, at: [372, 712] },
+      { prop: "ladder", raw: true, at: [870, 300] },
+      { prop: "ladder", raw: true, at: [214, 590] },
       // Rocks the plough went around.
       place("boulder", 50, 30),
       place("boulder-big", 14, 40),
@@ -225,7 +225,7 @@ const placed = merge(
 );
 
 const details: (Decal | Prop)[] = [
-  { prop: "bridge", at: [32, 330] },
+  { prop: "bridge", at: [32, 330], raw: true },
   { prop: "oil-stain", at: [920, 680] },
   { prop: "oil-stain", at: [952, 700], flip: true },
   { prop: "ground-net", at: px(22, 44) },
