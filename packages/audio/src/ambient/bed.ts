@@ -425,9 +425,11 @@ class Door implements Call {
       const time = this.t / this.sr;
       if (time > 0.6) return false;
       this.p += (68 * (1 - 0.2 * time)) / this.sr;
+      const attack = Math.min(1, time / 0.003);
       const thud =
-        sin1(this.p) * Math.exp(-time / 0.11) +
-        this.lp.lowpass(this.rng.bi()) * 2.5 * Math.exp(-time / 0.06);
+        (sin1(this.p) * Math.exp(-time / 0.11) +
+          this.lp.lowpass(this.rng.bi()) * 2.5 * Math.exp(-time / 0.06)) *
+        attack;
       const ct = time - 0.045;
       const click = ct > 0 ? this.hp.highpass(this.rng.bi()) * Math.exp(-ct / 0.006) * 0.6 : 0;
       out[k] = (out[k] as number) + thud + click;
@@ -510,8 +512,12 @@ export class BedPlayer {
   readonly source: BedSource;
   private readonly parts: Part[];
   private readonly gain: number;
+  private readonly dcLeft = new OnePole();
+  private readonly dcRight = new OnePole();
   constructor(source: BedSource, sr: number, seed = 1) {
     this.source = source;
+    this.dcLeft.set(sr, 12);
+    this.dcRight.set(sr, 12);
     const rng = new Rng(seed);
     this.gain = dbToGain(source.gain);
     this.parts = source.layers.map((l) => {
@@ -536,10 +542,10 @@ export class BedPlayer {
     const L = out[0] as Float32Array;
     const R = out[1] as Float32Array;
     for (const p of this.parts) p.render(L, R, offset, n);
-    if (this.gain !== 1)
-      for (let i = offset; i < offset + n; i++) {
-        L[i] = (L[i] as number) * this.gain;
-        R[i] = (R[i] as number) * this.gain;
-      }
+    // Brown noise drifts; a 12 Hz high-pass keeps the bed centred on zero.
+    for (let i = offset; i < offset + n; i++) {
+      L[i] = this.dcLeft.highpass(L[i] as number) * this.gain;
+      R[i] = this.dcRight.highpass(R[i] as number) * this.gain;
+    }
   }
 }

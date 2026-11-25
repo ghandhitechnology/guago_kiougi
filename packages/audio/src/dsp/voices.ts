@@ -344,7 +344,9 @@ export class PluckVoice extends BaseVoice {
         }
       }
       if (!this.stepKill()) break;
-      const s = y * gain * this.fade * this.killGain;
+      // A 1.5 ms ramp keeps the pick's noise burst from starting as a step.
+      const attack = Math.min(1, (this.age + k) / (0.0015 * this.sr));
+      const s = y * gain * this.fade * this.killGain * attack;
       out[start + k] = (out[start + k] as number) + s;
       const a = Math.abs(y);
       if (a > peak) peak = a;

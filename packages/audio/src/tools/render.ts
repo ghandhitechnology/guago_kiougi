@@ -123,11 +123,13 @@ for (const id of Object.keys(SONGS)) {
 for (const [id, source] of Object.entries(EFFECTS)) {
   if (only && !only.has(id)) continue;
   const r = renderEffect(id, source, sr);
-  const gap = Math.round(0.35 * sr);
-  const total = r.variants.reduce((n, v) => n + v.length + gap, 0);
+  // A loop is written three times over, so its seam sits inside the file and gets measured.
+  const gap = r.loop ? 0 : Math.round(0.35 * sr);
+  const takes = r.loop ? [0, 0, 0].map(() => r.variants[0] as Float32Array) : r.variants;
+  const total = takes.reduce((n, v) => n + v.length + gap, 0);
   const x = new Float32Array(total);
   let o = 0;
-  for (const v of r.variants) {
+  for (const v of takes) {
     x.set(v, o);
     o += v.length + gap;
   }
