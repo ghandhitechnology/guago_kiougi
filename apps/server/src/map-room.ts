@@ -56,6 +56,7 @@ import { places } from "./places.ts";
 import { RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
 import {
+  belongsOn,
   builtMap,
   describe,
   HOME_MAP,
@@ -311,6 +312,9 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.retireTimer = undefined;
     const character = await this.seats.join(client);
     try {
+      // A seat is good only for where the character belongs as it is taken: a ticket from before
+      // a door, an expel or another page's move is refused, and the client enters again.
+      if (!(await this.belongsHere(character))) throw new ServerError(409, "elsewhere");
       this.seat(client, character, options);
     } catch (error) {
       // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
@@ -319,6 +323,19 @@ export class MapRoom extends Room<{ state: MapState }> {
       await this.seats.leave(client);
       throw error;
     }
+    // Sent home while the seat was being taken, the expel found no body to move: move it now.
+    if (this.def.id !== HOME_MAP && (await live()?.homeUntil(character.id)) != null) {
+      this.relocate(character.id, HOME_MAP, "main", "home");
+    }
+  }
+
+  /**
+   * Whether the character belongs on this map by its durable record (`belongsOn`): every seat,
+   * whether from entering, a door, the school moving them or a reconnection, is checked by it.
+   */
+  private async belongsHere(saved: Pick<Character, "id" | "mapId" | "x" | "y">): Promise<boolean> {
+    const sentHome = (await live()?.homeUntil(saved.id)) != null;
+    return belongsOn(saved, sentHome) === this.def.id;
   }
 
   /** Puts a joined character's body into the world and the client's view around it. */
@@ -646,8 +663,10 @@ export class MapRoom extends Room<{ state: MapState }> {
     const l = live();
     if (!l) return;
     for (const pawn of this.pawns.values()) {
-      if (pawn.leaving || l.homeUntil(pawn.character.id) !== null) continue;
-      this.relocate(pawn.character.id, START_MAP, "main", "school");
+      if (pawn.leaving) continue;
+      void l.homeUntil(pawn.character.id).then((until) => {
+        if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
+      });
     }
   }
 

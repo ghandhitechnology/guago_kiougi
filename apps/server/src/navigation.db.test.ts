@@ -26,12 +26,17 @@ import { createGameServer } from "./app.ts";
 import { type AuthService, createAuthService } from "./auth/service.ts";
 import { channels } from "./channels.ts";
 import { createDb, type Db } from "./db/index.ts";
+import { createEconomy } from "./economy/index.ts";
+import { LiveClock } from "./live/clock.ts";
+import { provideLive } from "./live/current.ts";
+import { createLive, type Live } from "./live/index.ts";
+import { PageClock } from "./live/page.ts";
 import { studentLooks } from "./looks.ts";
 import type { MapRoom } from "./map-room.ts";
 import { places } from "./places.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
-import { joinMap, sdk } from "./test/enter.ts";
+import { enter, joinMap, sdk } from "./test/enter.ts";
 import { call, type Jar, remember, waitFor, within } from "./test/http.ts";
 
 const SETTINGS = {
@@ -46,6 +51,7 @@ let auth: AuthService;
 let server: ReturnType<typeof createGameServer>;
 let base: string;
 let nextIp = 1;
+let live: Live;
 
 /** Holds the next write of a character's place until `open` is called. */
 const gate = { armed: false, reached: false, open: () => {} };
@@ -143,15 +149,51 @@ async function savedPlace(characterId: string) {
 const closed = (room: Room) =>
   new Promise<number>((resolve) => room.onLeave((code) => resolve(code)));
 
+/**
+ * The living world on the real clock, as a server process starts it: nothing about who is sent
+ * home is in memory until it is read or happens.
+ */
+async function startLive(): Promise<Live> {
+  const clock = new LiveClock({ realMs: Date.now(), gameMs: Date.now(), rate: 1 });
+  const page = new PageClock(db, clock);
+  await page.load(1);
+  let made: Live | undefined;
+  const economy = createEconomy(db, {
+    now: () => clock.date(),
+    page: page.live,
+    onApplied: (id, name, r) => made?.onApplied(id, name, r),
+  });
+  made = createLive(db, { clock, page, economy, world: () => undefined, log: () => {} });
+  return made;
+}
+
+/** 벌점 up to 명령퇴사, the way a patrol hands it out. */
+async function expel(characterId: string): Promise<void> {
+  for (let i = 0; i < 10; i++) await live.events.patrolCaught(characterId);
+}
+
+/** A seat that must be refused: the room does not take the character. */
+async function refused(seat: Transfer["seat"], jar: Jar): Promise<boolean> {
+  try {
+    const room = await sdk(base, jar).consumeSeatReservation(seat, MapState);
+    await room.leave();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
   auth = createAuthService({ db, onSessionsRevoked: evictAccount });
+  live = await startLive();
+  provideLive(live);
   server = createGameServer(
     auth,
     SETTINGS,
     studentLooks,
     {},
-    {},
+    { live },
     { channelSeats: 2, emptyGraceSeconds: 1 },
   );
   provideSeatServices({
@@ -175,6 +217,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  provideLive(undefined);
   await server.gracefullyShutdown(false);
   await db.pool.end();
 });
@@ -302,6 +345,110 @@ describe("walking through a door", () => {
     expect(seen.most).toBe(1);
     expect(await whereIs(id)).toEqual(["gaseolgwan-stairs"]);
     await first.leave();
+  });
+});
+
+describe("a seat is good only where the character belongs", () => {
+  it("refuses a seat taken before an expel, so the 집 cannot be walked out of", async () => {
+    const { jar, id } = await player("homebody");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    // A second seat on the yard, taken while still allowed there.
+    const spare = (await enter(base, jar)).seating;
+    expect(spare?.map).toBe("campus-yard");
+    const home = new Promise<Transfer>((resolve) =>
+      room.onMessage(MAP_MESSAGES.transfer, (t: Transfer) => resolve(t)),
+    );
+    await expel(id);
+    const trip = await within(home, 5000, "the trip home");
+    expect(trip.map).toBe("home");
+    expect(await refused((spare as NonNullable<typeof spare>).seat, jar)).toBe(true);
+    expect(await whereIs(id)).toEqual([]);
+    const there = await sdk(base, jar).consumeSeatReservation(trip.seat, MapState);
+    there.onMessage("*", () => {});
+    await room.leave();
+    await waitFor(async () => (await whereIs(id)).length === 1);
+    expect(await whereIs(id)).toEqual(["home"]);
+    await there.leave();
+  });
+
+  it("keeps a player sent home there after a restart, before anything else loaded them", async () => {
+    const { jar, id } = await player("restarted");
+    const until = new Date(Date.now() + 10 * 60_000);
+    await db.pool.query(
+      "update characters set map_id = 'home', x = 344, y = 108, home_until = $2 where id = $1",
+      [id, until],
+    );
+    // A fresh process: nobody's 명령퇴사 is in memory.
+    provideLive(await startLive());
+    try {
+      const { room, seating } = await joinMap(base, jar);
+      room.onMessage("*", () => {});
+      expect(seating.map).toBe("home");
+      // The 집 looks every two seconds for players whose time is up; this one's is not.
+      let sentBack = false;
+      room.onMessage(MAP_MESSAGES.transfer, () => {
+        sentBack = true;
+      });
+      await new Promise((r) => setTimeout(r, 2600));
+      expect(sentBack).toBe(false);
+      expect(await whereIs(id)).toEqual(["home"]);
+      await room.leave();
+    } finally {
+      provideLive(live);
+    }
+  });
+
+  it("sends a player expelled between two rooms home, not on through the door", async () => {
+    const { jar, id } = await player("dodger");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    gate.armed = true;
+    const moving = walkUpToDoor(room);
+    await waitFor(() => gate.reached);
+    // Expelled while the door's write is held: no room holds a body to send home.
+    await expel(id);
+    gate.open();
+    const transfer = await moving;
+    expect(transfer.map).toBe("gaseolgwan-stairs");
+    expect(await refused(transfer.seat, jar)).toBe(true);
+    await room.leave();
+    const { room: there, seating } = await joinMap(base, jar);
+    there.onMessage("*", () => {});
+    expect(seating.map).toBe("home");
+    expect(await whereIs(id)).toEqual(["home"]);
+    await there.leave();
+  });
+
+  it("refuses a seat taken before the door when it evicts the page walking through", async () => {
+    const { jar, id } = await player("evictee");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    // Another page of the same session holds a seat on the yard from before the door.
+    const spare = (await enter(base, jar)).seating as NonNullable<
+      Awaited<ReturnType<typeof enter>>["seating"]
+    >;
+    expect(spare.map).toBe("campus-yard");
+    gate.armed = true;
+    walkUpToDoor(room).catch(() => {});
+    await waitFor(() => gate.reached);
+    // It takes that seat while the door's write is slow: the walking page is evicted mid-write.
+    const second = sdk(base, jar)
+      .consumeSeatReservation(spare.seat, MapState)
+      .then(
+        (r) => r,
+        () => undefined,
+      );
+    await new Promise((r) => setTimeout(r, 150));
+    gate.open();
+    const taken = await within(second, 5000, "the second page's answer");
+    expect(taken).toBeUndefined();
+    expect(await savedPlace(id)).toMatchObject({ map_id: "gaseolgwan-stairs" });
+    const { room: there, seating } = await joinMap(base, jar);
+    there.onMessage("*", () => {});
+    expect(seating.map).toBe("gaseolgwan-stairs");
+    expect(await whereIs(id)).toEqual(["gaseolgwan-stairs"]);
+    await there.leave();
   });
 });
 

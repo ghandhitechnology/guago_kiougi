@@ -98,6 +98,20 @@ export function validPlace(mapId: string, x: number, y: number): Place {
   return spot ? { map, ...spot, facing: facingOf("down") } : mainOf(map);
 }
 
+/**
+ * The map a character belongs on by its durable record: the 집 while sent home, else where it
+ * was saved (made valid), and never the 집 once the time is up. Entering seats a character there,
+ * and a room takes only a character that belongs on it at the moment of joining.
+ */
+export function belongsOn(
+  saved: { readonly mapId: string; readonly x: number; readonly y: number },
+  sentHome: boolean,
+): string {
+  if (sentHome) return HOME_MAP;
+  const map = validPlace(saved.mapId, saved.x, saved.y).map.id;
+  return map === HOME_MAP ? START_MAP : map;
+}
+
 /** A spawn of `map` by name, nudged clear of walls, else its main spawn. */
 export function spawnPlace(map: BuiltMap, name: string): Place {
   const s = map.spawns[name];

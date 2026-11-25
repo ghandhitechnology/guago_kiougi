@@ -79,6 +79,11 @@ export async function characterAfterMoves(
   return use().auth.characterOf(accountId);
 }
 
+/** Development entries only (`ALLOW_MAP_OPTION`): puts the character on a map it chose. */
+export function placeCharacter(characterId: string, mapId: string, x: number, y: number) {
+  return use().auth.saveCharacterPlace(characterId, mapId, x, y);
+}
+
 // One seat per account and slot, across rooms ------------------------------------------------
 
 /** A client holds one map seat and one world seat at a time (PLAN §19 runtime topology). */
@@ -194,7 +199,7 @@ export class RoomSeats {
 
   /** Takes the account's seat (closing an older one) and loads the character fresh. */
   async join(client: Client): Promise<Character> {
-    const { accountId, tokenHash } = client.auth as RoomAuth;
+    const { accountId, characterId, tokenHash } = client.auth as RoomAuth;
     const seat: Seat = {
       client,
       characterId: "",
@@ -217,7 +222,8 @@ export class RoomSeats {
       // The session was checked at matchmaking; a logout or recovery since then voids the seat.
       const me = await auth.authenticateHash(tokenHash);
       if (me?.account.id !== accountId) throw new ServerError(401, "unauthorized");
-      const character = await auth.characterOf(accountId);
+      // A door this character is walking through, written meanwhile, decides where it stands.
+      const character = await characterAfterMoves(accountId, characterId);
       if (!character) throw new ServerError(403, "no_character");
       // A newer session may have taken the account while this one was loading.
       if (seat.evicted) throw new ServerError(409, "session_replaced");
