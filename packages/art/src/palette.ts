@@ -688,6 +688,63 @@ const OLIVE_MORNING = theme("olive-morning", {
   "clay.pale": "stone.bright",
 });
 
+/**
+ * 동굴 입구 at 19:20, the sun just gone behind the hill: dust turns mauve grey, grass teal, the
+ * limestone keeps a pale top over darker faces and its rims catch the last rose light. Wood and
+ * clay drop a step. Mid-toned on purpose, so the dark 그림자 still read against it.
+ */
+const GREECE_DUSK = theme("greece-dusk", {
+  "wood.pale": "stone.vein",
+  "wood.light": "stone.light",
+  "wood.mid": "stone.mid",
+  "wood.dark": "stone.dark",
+  "clay.pale": "stone.light",
+  "grass.bright": "rose.pale",
+  "grass.pale": "clay.dust",
+  "grass.light": "board.light",
+  "grass.soft": "board.mid",
+  "grass.mid": "board.mid",
+  "grass.dark": "board.dark",
+  "grass.deep": "board.deep",
+  "stone.bright": "rose.pale",
+  "stone.lamp": "stone.light",
+  "stone.vein": "stone.mid",
+  "stone.mid": "stone.dark",
+  "stone.dark": "ink.mid",
+  "olive.light": "olive.mid",
+  "olive.mid": "olive.dark",
+  "olive.dark": "olive.deep",
+  "sea.pale": "sea.light",
+  "sea.light": "sea.mid",
+  "sea.mid": "sea.dark",
+  "sea.dark": "sea.deep",
+});
+
+/**
+ * Firelight at dusk, the band just outside a fire's core (whose core is the `greece` afternoon):
+ * dust and stone warm to ochre and orange, grass to dark olive.
+ */
+const DUSK_FIRE = theme("dusk-fire", {
+  "wood.pale": "clay.dust",
+  "wood.light": "clay.light",
+  "wood.mid": "clay.mid",
+  "wood.dark": "clay.dark",
+  "clay.pale": "gold.pale",
+  "grass.bright": "gold.pale",
+  "grass.pale": "gold.light",
+  "grass.light": "olive.mid",
+  "grass.soft": "olive.dark",
+  "grass.mid": "olive.dark",
+  "grass.dark": "olive.deep",
+  "stone.bright": "gold.pale",
+  "stone.pale": "clay.pale",
+  "stone.lamp": "clay.dust",
+  "stone.light": "clay.dust",
+  "stone.vein": "clay.light",
+  "stone.mid": "clay.mid",
+  "stone.dark": "clay.dark",
+});
+
 /** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
 export const THEMES: readonly Theme[] = [
   theme("campus", {}),
@@ -707,6 +764,8 @@ export const THEMES: readonly Theme[] = [
   // Page 1 hunting fields
   GREECE_SHADE,
   OLIVE_MORNING,
+  GREECE_DUSK,
+  DUSK_FIRE,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */
