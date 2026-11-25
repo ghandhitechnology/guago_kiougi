@@ -156,11 +156,25 @@ function thunder(k: number): Pic {
   for (let y = 6; y < 58; y += 6) pts.push([12 + Math.round((r() - 0.5) * 8), y]);
   pts.push([12, 60]);
   path(pic, pts, k === 0 ? "W" : "p");
+  path(
+    pic,
+    pts.map(([x, y]) => [x + 1, y] as [number, number]),
+    k === 0 ? "p" : "l",
+    false,
+    ".",
+  );
+  // A gold glow either side, and an umber edge outside it so the strike holds on bright dirt.
   const glow = pic.clone();
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       if (pic.at(x, y) !== ".") continue;
       if (pic.at(x - 1, y) !== "." || pic.at(x + 1, y) !== ".") glow.set(x, y, k === 0 ? "l" : "m");
+    }
+  const edged = glow.clone();
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      if (glow.at(x, y) !== ".") continue;
+      if (glow.at(x - 1, y) !== "." || glow.at(x + 1, y) !== ".") edged.set(x, y, "o");
     }
   put(
     glow,
