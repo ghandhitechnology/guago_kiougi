@@ -3,7 +3,7 @@ import { WORLD_ROOM } from "@guago/shared";
 import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
-import { background } from "./background.ts";
+import { background, guarded } from "./background.ts";
 import { channels } from "./channels.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
@@ -130,14 +130,17 @@ startListingSweeper(
   (id, change) => worldRoom()?.notify(id, change),
 );
 setInterval(
-  () => {
-    auth.sweep().catch(() => {});
-    economy.prune(live.progress.inflightIds()).catch(() => {});
+  guarded("ten-minute sweeps", () => {
+    background("session sweep", auth.sweep());
+    background("operation prune", economy.prune(live.progress.inflightIds()));
     background("social sweep", social.sweep());
-  },
+  }),
   10 * 60 * 1000,
 ).unref();
-setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
+setInterval(
+  guarded("moderation sweep", () => admin.sweep()),
+  60 * 1000,
+).unref();
 await serveMetrics(config.metricsPort, "127.0.0.1", live.adminRoute);
 // Its own port on a loopback or Tailscale address (config.ts), never through the game port.
 await admin.listen({

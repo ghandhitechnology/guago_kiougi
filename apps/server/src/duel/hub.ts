@@ -9,6 +9,7 @@
  * A block either way keeps two players apart: a blocked player's challenge is held silently and
  * lapses, and the queue never puts them in one match.
  */
+
 import { matchMaker } from "@colyseus/core";
 import {
   DUEL_ACCEPT_SECONDS,
@@ -37,6 +38,7 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
+import { guarded } from "../background.ts";
 import { Buckets } from "../economy/buckets.ts";
 import type { MapRoom } from "../map-room.ts";
 import { parties } from "../parties.ts";
@@ -207,7 +209,10 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       to: target,
       expiresAt,
       silent: host?.blocked(target, me) ?? false,
-      timer: setTimeout(() => endChallenge(c, "expired"), DUEL_CHALLENGE_SECONDS * 1000),
+      timer: setTimeout(
+        guarded("duel challenge expiry", () => endChallenge(c, "expired")),
+        DUEL_CHALLENGE_SECONDS * 1000,
+      ),
     };
     challenges.set(id, c);
     outgoing.set(me, c);
@@ -374,7 +379,10 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       entries: [...a, ...b],
       accepted: new Set(),
       expiresAt,
-      timer: setTimeout(() => cancelPending(p, "lapsed"), DUEL_ACCEPT_SECONDS * 1000),
+      timer: setTimeout(
+        guarded("duel ready check lapse", () => cancelPending(p, "lapsed")),
+        DUEL_ACCEPT_SECONDS * 1000,
+      ),
     };
     pendings.set(id, p);
     const sides = sidesOf(p);
@@ -665,7 +673,7 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
           handle(me, type, m),
         );
       }
-      sweep = setInterval(matchmake, everyMs);
+      sweep = setInterval(guarded("duel matchmaking", matchmake), everyMs);
     },
     /** The character's WorldRoom seat dropped or left: out of the queue, ready checks and challenges. */
     left(characterId: string): void {

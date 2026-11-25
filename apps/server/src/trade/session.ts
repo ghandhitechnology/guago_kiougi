@@ -12,6 +12,7 @@
  * Messages of one window run one at a time, in arrival order, so a confirm and an offer change
  * can never interleave: whichever the window takes second sees the first.
  */
+
 import { randomUUID } from "node:crypto";
 import {
   type OpError,
@@ -28,6 +29,7 @@ import {
   type TradeUpdate,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { guarded } from "../background.ts";
 import { type Db, describeError } from "../db/index.ts";
 import { Buckets } from "../economy/buckets.ts";
 import { type ExecResult, type Executor, isTransient } from "../economy/executor.ts";
@@ -490,7 +492,7 @@ export function createTrades({
     check,
     /** Runs `check` every second; returns the stop. */
     start(): () => void {
-      const timer = setInterval(check, CHECK_EVERY_MS);
+      const timer = setInterval(guarded("trade window check", check), CHECK_EVERY_MS);
       timer.unref();
       return () => clearInterval(timer);
     },
