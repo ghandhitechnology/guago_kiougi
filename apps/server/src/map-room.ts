@@ -27,6 +27,7 @@ import {
   type Arrival,
   aimMessage,
   applyBetween,
+  arrivalAt,
   type Between,
   type Caught,
   type ChangeNotice,
@@ -917,7 +918,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     }
     player.facing = facing;
     // Put down here: a key still held from the last door does not carry it straight back out.
-    this.arrivals.set(id, { x: player.x, y: player.y });
+    this.arrive(id, player.x, player.y);
     player.mode = mode;
     player.exp = loadout.exp;
     // Back within a quarter of an hour: as hurt and as busy as it left (fight/carry.ts).
@@ -1420,6 +1421,13 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     }
   }
 
+  /** A body put down at (x, y): the door beside it does not take it straight back. */
+  private arrive(id: string, x: number, y: number): void {
+    const a = arrivalAt(this.def.portals, x, y);
+    if (a) this.arrivals.set(id, a);
+    else this.arrivals.delete(id);
+  }
+
   /** Puts a body back where it stood after a door that could not be walked through. */
   private restoreBody(pawn: Pawn, x: number, y: number): void {
     try {
@@ -1605,7 +1613,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     p.forceTicks = 0;
     pawn.queue.clear();
     this.inside.delete(pawn.client.sessionId);
-    this.arrivals.set(pawn.client.sessionId, { x: p.x, y: p.y });
+    this.arrive(pawn.client.sessionId, p.x, p.y);
     return true;
   }
 
@@ -1773,7 +1781,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     p.rollLeft = 0;
     p.forceTicks = 0;
     this.inside.delete(id);
-    this.arrivals.set(id, { x: p.x, y: p.y });
+    this.arrive(id, p.x, p.y);
     this.broadcast(MAP_MESSAGES.halt, { patrol: patrol.id } satisfies Halt);
     pawn.client.send(MAP_MESSAGES.caught, {
       patrol: patrol.id,

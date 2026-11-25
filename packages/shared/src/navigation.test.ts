@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type Collidable, gridOf } from "./collision.ts";
 import { TILE_SIZE } from "./constants.ts";
 import { MOVE_MAX, type MoveInput } from "./movement.ts";
-import { type Arrival, type Doorway, stepDoors } from "./navigation.ts";
+import { type Arrival, arrivalAt, type Doorway, stepDoors } from "./navigation.ts";
 import { addPlayer, createWorld, type SimWorld, step } from "./sim.ts";
 
 /**
@@ -86,31 +86,37 @@ describe("doorways in the simulation step", () => {
 
   it("walks a player through a door once, however long the key from the last door is held", () => {
     const { map, portals } = corridor();
-    // Put down by the far side of a door a tile under it, still holding the key toward it.
-    const at = { x: 4 * T + 8, y: 2 * T + 8 };
+    // Put down by the far side of a door a tile and a half under it, still holding the key
+    // toward it: the door it came out of.
+    const at = { x: 4 * T + 8, y: 3 * T + 8 };
+    const arrival = arrivalAt(portals, at.x, at.y);
+    expect(arrival?.door).toBe(0);
     let world = createWorld(map, [], 1);
     world = addPlayer(world, "d", at.x, at.y);
-    const arrived = new Map([["d", at]]);
-    // Three seconds of the held key (60 ticks), then let go for two, then up again.
-    const held = run(world, map, portals, 60, { d: () => up }, arrived);
-    expect(held.log).toEqual([]);
+    const arrived = new Map([["d", arrival as Arrival]]);
+    // Three seconds of the held key (60 ticks): it walks into the door and stands there.
+    expect(run(world, map, portals, 60, { d: () => up }, arrived).log).toEqual([]);
+    // Let go, step out and walk back in: now it walks through, once.
     const again: Script = { d: (t) => (t <= 60 ? up : t <= 62 ? undefined : t <= 70 ? down : up) };
     const { log } = run(world, map, portals, 90, again, arrived);
-    // Released at tick 61; it steps out of the door it stood in, and only walking back fires.
     expect(log.length).toBe(1);
     expect(log[0]?.endsWith(":d:0")).toBe(true);
+    // Held all along, stepping off the door and back on walks through too.
+    const off: Script = { d: (t) => (t <= 20 ? up : t <= 28 ? down : up) };
+    expect(run(world, map, portals, 50, off, arrived).log.length).toBe(1);
   });
 
-  it("lets go of an arrival once the player walks clear of where it was put down", () => {
+  it("opens every other door to a player who has not let go of the key", () => {
     const { map, portals } = corridor();
-    const at = { x: 1 * T + 8, y: 2 * T + 8 };
+    // Put down beside door 0, it walks along the wall to door 1 and up into it.
+    const at = { x: 6 * T + 8, y: 2 * T + 8 };
+    const arrival = arrivalAt(portals, at.x, at.y) as Arrival;
+    expect(arrival.door).toBe(0);
     let world = createWorld(map, [], 1);
     world = addPlayer(world, "e", at.x, at.y);
-    // Holding right the whole way: past the arrival's reach, the door at tile 4 is no door it
-    // came out of, but the wall keeps it from entering, so nothing fires until it turns up.
-    const script: Script = { e: (t) => (t <= 20 ? right : up) };
-    const { log } = run(world, map, portals, 40, script, new Map([["e", at]]));
-    expect(log.length).toBe(1);
+    const script: Script = { e: (t) => (t <= 48 ? right : up) };
+    const { log } = run(world, map, portals, 70, script, new Map([["e", arrival]]));
+    expect(log).toEqual([expect.stringMatching(/:e:1$/)]);
   });
 
   it("ignores walking along a wall past both doors without entering", () => {

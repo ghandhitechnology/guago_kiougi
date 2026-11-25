@@ -3,13 +3,14 @@ import type { ArtMetadata } from "@guago/art";
 import { type BuiltMap, narrative, snapshotReaderForMap } from "@guago/content";
 import {
   type Arrival,
-  arrivalHolds,
+  arrivalAt,
   type Caught,
   type DoorRattle,
   distanceToArea,
   encodeInput,
   type Facing,
   type Halt,
+  holdArrival,
   INPUT_MESSAGE,
   type Interaction,
   MAP_MESSAGES,
@@ -424,7 +425,7 @@ export class WorldScene extends Phaser.Scene {
       unbindHud,
     };
     this.selfInside = portalAt(map.portals, x, y);
-    this.arrival = { x, y };
+    this.arrival = arrivalAt(map.portals, x, y);
     this.doorAt = undefined;
     this.roomZone = map.zones.find((z) => z.kind === "room" && this.zones.includes(z.id))?.id;
     this.clock.reset();
@@ -689,7 +690,7 @@ export class WorldScene extends Phaser.Scene {
   private onCaught(m: Caught): void {
     this.holding = true;
     this.caughtAt = { x: m.x, y: m.y };
-    this.arrival = { x: m.x, y: m.y };
+    if (this.here) this.arrival = arrivalAt(this.here.map.portals, m.x, m.y);
     void this.curtain.close(120);
     emitWorld({ t: "caught", patrol: m.patrol });
   }
@@ -858,15 +859,14 @@ export class WorldScene extends Phaser.Scene {
     const at = portalAt(map.portals, x, y);
     const was = this.selfInside;
     this.selfInside = at;
-    // Just put down: the doors stay shut until the keys let go or the player walks clear.
+    // Just put down: the door it came out of stays shut while the key that brought it is held.
     const pressing = this.lastMove[0] !== 0 || this.lastMove[1] !== 0;
-    if (this.arrival && !arrivalHolds(this.arrival, x, y, pressing, at >= 0)) {
-      this.arrival = undefined;
-    }
+    if (this.arrival) this.arrival = holdArrival(this.arrival, pressing, at);
+    const back = this.arrival?.door === at;
     const closed = this.here?.closed ?? new Set<string>();
     const entered = map.portals[at];
     const open = entered?.built && !closed.has(entered.id);
-    if (!this.holding && !this.arrival && at >= 0 && at !== was && open) {
+    if (!this.holding && !back && at >= 0 && at !== was && open) {
       this.predictDoor();
       return;
     }

@@ -122,30 +122,48 @@ export interface DoorStep {
   readonly arrivals: ReadonlyMap<string, Arrival>;
 }
 
-/** Where a body was put down: the far side of a door, a login, a reload. */
+/**
+ * A body just put down beside a door (the far side of the door it came through, a login, a
+ * reload): that door does not take it straight back while the key that brought it is held.
+ */
 export interface Arrival {
-  readonly x: number;
-  readonly y: number;
+  /** The door it stands by, as an index into the map's portals. */
+  readonly door: number;
+  /** It has stood in that door since arriving. */
+  readonly wasIn: boolean;
 }
 
-/** An arrival lets doors open again once the body is this far from where it was put down. */
-export const ARRIVAL_CLEAR_PX = 24;
+/**
+ * How near a door a body must be put down for the door to be the one it came out of: the
+ * farthest arrival spawn in the game stands six and a half tiles from its way back (the 아고라's
+ * rift).
+ */
+export const ARRIVAL_DOOR_PX = 112;
+
+/** The arrival of a body put down at (x, y): by the nearest door within reach, else none. */
+export function arrivalAt(portals: readonly Doorway[], x: number, y: number): Arrival | undefined {
+  let door = -1;
+  let best = ARRIVAL_DOOR_PX;
+  portals.forEach((p, i) => {
+    const d = distanceToArea(p.rect, x, y);
+    if (d <= best) {
+      best = d;
+      door = i;
+    }
+  });
+  return door >= 0 ? { door, wasIn: false } : undefined;
+}
 
 /**
- * Whether an arrival still keeps the doors shut for its body: a door is walked through once, so
- * the key still held from the last door cannot carry the player straight back through the one
- * they came out of. It lets go when the keys let go, or once the body has walked clear of where
- * it was put down while standing in no doorway; then a doorway fires when it is stepped into.
+ * The arrival one tick on: a door is walked through once. The door it stands by stays shut to
+ * it while a direction is held; it lets go when the keys let go, or when the body has stepped
+ * onto that door and off it again, after which stepping back on walks through. `at` is the
+ * portal the body stands in now.
  */
-export function arrivalHolds(
-  a: Arrival,
-  x: number,
-  y: number,
-  pressing: boolean,
-  inDoor: boolean,
-): boolean {
-  if (!pressing) return false;
-  return inDoor || Math.hypot(x - a.x, y - a.y) <= ARRIVAL_CLEAR_PX;
+export function holdArrival(a: Arrival, pressing: boolean, at: number): Arrival | undefined {
+  if (!pressing) return undefined;
+  if (at === a.door) return a.wasIn ? a : { door: a.door, wasIn: true };
+  return a.wasIn ? undefined : a;
 }
 
 /**
@@ -160,7 +178,7 @@ export function stepDoors(
     readonly id: string;
     readonly x: number;
     readonly y: number;
-    /** A direction is held this tick (`arrivalHolds`); bodies with no arrival may leave it out. */
+    /** A direction is held this tick (`holdArrival`); bodies with no arrival may leave it out. */
     readonly pressing?: boolean;
   }[],
   portals: readonly Doorway[],
@@ -173,11 +191,10 @@ export function stepDoors(
     const at = portalAt(portals, b.x, b.y);
     const was = before.get(b.id) ?? at;
     inside.set(b.id, at);
-    const arrival = arrivals.get(b.id);
-    if (arrival && arrivalHolds(arrival, b.x, b.y, b.pressing ?? false, at >= 0)) {
-      held.set(b.id, arrival);
-      continue;
-    }
+    const prior = arrivals.get(b.id);
+    const arrival = prior && holdArrival(prior, b.pressing ?? false, at);
+    if (arrival) held.set(b.id, arrival);
+    if (arrival && at === arrival.door) continue;
     if (at >= 0 && at !== was) entered.push({ id: b.id, portal: at });
   }
   return { inside, entered, arrivals: held };
