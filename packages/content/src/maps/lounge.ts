@@ -13,9 +13,9 @@ import { place } from "./props.ts";
 
 const WALL = 0;
 /** A lamp's warm pool, for the engine and painted for the sheet. */
-const pool = (x: number, y: number, rx: number, ry: number, intensity = 0.5): LightSource => ({
+const pool = (x: number, y: number, rx: number, ry: number, intensity = 0.85): LightSource => ({
   at: [x, y],
-  radius: rx,
+  radius: rx * 1.15,
   color: "gold.light",
   intensity,
   flicker: { amount: 0.03, period: 2.4 },
@@ -24,18 +24,18 @@ const pool = (x: number, y: number, rx: number, ry: number, intensity = 0.5): Li
 
 const lights: LightSource[] = [
   // The stage, lit from the floor lamp beside the piano.
-  pool(88, 104, 70, 38, 0.6),
+  pool(88, 104, 70, 38, 0.95),
   // Sofas under two lamps, the reading nook, the pool table's lamp.
   pool(212, 150, 54, 30),
   pool(356, 150, 54, 30),
   pool(70, 250, 46, 28),
-  pool(418, 262, 56, 26, 0.4),
+  pool(418, 262, 56, 26, 0.7),
   // The vending machines' cold panels.
   {
     at: [440, 84],
     radius: 40,
     color: "sea.pale",
-    intensity: 0.45,
+    intensity: 0.6,
     flicker: { amount: 0.06, period: 2.5 },
     paint: { bands: ["campus"], at: [440, 90], r: [40, 16], ragged: 2 },
   },
@@ -44,9 +44,43 @@ const lights: LightSource[] = [
     at: [456, 152],
     radius: 26,
     color: "sea.light",
-    intensity: 0.3,
+    intensity: 0.5,
     paint: { bands: ["campus"], at: [456, 160], r: [24, 10], ragged: 2 },
   },
+  // Rain-grey dusk falling through the three windows.
+  ...[56, 128, 232].map(
+    (x): LightSource => ({
+      at: [x, 40],
+      radius: 30,
+      color: "stone.pale",
+      intensity: 0.38,
+      paint: {
+        bands: ["campus"],
+        spill: { top: [x - 13, x + 13, 64], bottom: [x - 20, x + 22, 104] },
+      },
+    }),
+  ),
+  // The fairy lights, each string a faint warm glow on the floor under it.
+  ...(
+    [
+      [64, 110],
+      [160, 120],
+      [256, 118],
+      [352, 112],
+      [96, 210],
+      [192, 216],
+      [288, 212],
+      [384, 206],
+    ] as const
+  ).map(
+    ([x, y], i): LightSource => ({
+      at: [x + 16, y + 4],
+      radius: 26,
+      color: "gold.pale",
+      intensity: 0.3,
+      flicker: { amount: 0.15, period: 1.3 + (i % 3) * 0.4 },
+    }),
+  ),
 ];
 
 /** The fairy lights, strung wall to wall at three depths. */
@@ -68,7 +102,7 @@ const map: MapSource = {
   time: { clock: "19:20", phase: "dusk", weather: "drizzle" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "clay.dust", intensity: 0.62, unlit: "campus" },
+  ambient: { color: "stone.dark", intensity: 0.5, unlit: "campus" },
   plan: `
     ################################
     #||||||||||||||||||||||||||||||#

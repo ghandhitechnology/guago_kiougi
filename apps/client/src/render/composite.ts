@@ -43,6 +43,7 @@ uniform float uRiftOn;
 uniform float uTime;
 uniform float uHaze;
 uniform float uChroma;
+uniform vec3 uAmbient;
 
 varying vec2 outTexCoord;
 
@@ -74,14 +75,16 @@ void main () {
     return;
   }
   vec2 luv = vec2((screen.x + uMargin + 0.5) / uLightRes.x, 1.0 - (screen.y + uMargin + 0.5) / uLightRes.y);
-  vec3 light = texture2D(uLight, luv).rgb * 2.0;
-  float peak = max(max(light.r, light.g), max(light.b, 0.0001));
+  // Bands count the light added above the ambient, so open ground at ambient stays flat.
+  vec3 extra = max(texture2D(uLight, luv).rgb * 2.0 - uAmbient, 0.0);
+  float peak = max(max(extra.r, extra.g), max(extra.b, 0.0001));
   float q = peak * uSteps;
   float lower = floor(q);
   float t = clamp((q - lower - 0.5) * uSharp + 0.5, 0.0, 1.0);
   float d = mix(0.5, bayer4(world) + 0.03125, uDither);
   float stepped = (lower + step(d, t)) / uSteps;
-  gl_FragColor = vec4(albedo.rgb * light * (stepped / peak), albedo.a);
+  vec3 light = uAmbient + extra * (stepped / peak);
+  gl_FragColor = vec4(albedo.rgb * light, albedo.a);
 }
 `;
 
@@ -153,6 +156,7 @@ export class LightComposite extends Phaser.Filters.Controller {
   time = 0;
   haze = 0;
   chroma = 0;
+  ambient: [number, number, number] = [1, 1, 1];
 
   constructor(camera: Phaser.Cameras.Scene2D.Camera) {
     super(camera, LIGHT_NODE);
@@ -208,6 +212,7 @@ class LightNode extends Phaser.Renderer.WebGL.RenderNodes.BaseFilterShader {
     p.setUniform("uTime", c.time);
     p.setUniform("uHaze", c.haze);
     p.setUniform("uChroma", c.chroma);
+    p.setUniform("uAmbient", c.ambient);
   }
 }
 
@@ -249,16 +254,22 @@ export function glTexture(scene: Phaser.Scene, key: string): Texture | null {
   return scene.textures.get(key).source[0]?.glTexture ?? null;
 }
 
-/** The light composite's banding on the CPU. */
+/** The light composite's banding on the CPU: steps of the light added above the ambient. */
 export function bandLight(
   light: readonly [number, number, number],
+  ambient: readonly [number, number, number],
   steps: number,
   sharp: number,
 ): [number, number, number] {
-  const peak = Math.max(light[0], light[1], light[2], 0.0001);
+  const extra = light.map((v, i) => Math.max(0, v - (ambient[i] as number)));
+  const peak = Math.max(extra[0] as number, extra[1] as number, extra[2] as number, 0.0001);
   const q = peak * steps;
   const lower = Math.floor(q);
   const t = Math.max(0, Math.min(1, (q - lower - 0.5) * sharp + 0.5));
   const k = (lower + (t >= 0.5 ? 1 : 0)) / steps / peak;
-  return [light[0] * k, light[1] * k, light[2] * k];
+  return [0, 1, 2].map((i) => (ambient[i] as number) + (extra[i] as number) * k) as [
+    number,
+    number,
+    number,
+  ];
 }

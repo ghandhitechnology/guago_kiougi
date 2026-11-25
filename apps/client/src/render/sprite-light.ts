@@ -30,6 +30,7 @@ uniform vec3 uShade;
 uniform vec3 uRim;
 uniform vec2 uSun;
 uniform float uRimOn;
+uniform vec3 uAmbient;
 
 varying vec2 outTexCoord;
 
@@ -63,13 +64,13 @@ void main () {
     shade = clamp((255.0 - code) / 127.0, 0.0, 1.0);
   }
   vec2 luv = vec2((screen.x + uMargin + 0.5) / uLightRes.x, 1.0 - (feet + uMargin + 0.5) / uLightRes.y);
-  vec3 light = texture2D(uLight, clamp(luv, 0.0, 1.0)).rgb * 2.0;
-  float peak = max(max(light.r, light.g), max(light.b, 0.0001));
+  vec3 extra = max(texture2D(uLight, clamp(luv, 0.0, 1.0)).rgb * 2.0 - uAmbient, 0.0);
+  float peak = max(max(extra.r, extra.g), max(extra.b, 0.0001));
   float q = peak * uSteps;
   float lower = floor(q);
   float t = clamp((q - lower - 0.5) * uSharp + 0.5, 0.0, 1.0);
   float d = mix(0.5, bayer4(screen + uScroll) + 0.03125, uDither);
-  light *= ((lower + step(d, t)) / uSteps) / peak;
+  vec3 light = uAmbient + extra * (((lower + step(d, t)) / uSteps) / peak);
   light *= mix(vec3(1.0), uShade, shade);
   vec3 base = c.rgb / c.a;
   vec3 lit = base * light;
@@ -97,6 +98,7 @@ export class SpriteLightFilter extends Phaser.Filters.Controller {
   /** Screen direction toward the sun, in whole pixels, when a low sun rims sprites. */
   sun: [number, number] = [-1, 0];
   rimOn = false;
+  ambient: [number, number, number] = [1, 1, 1];
 
   constructor(camera: Phaser.Cameras.Scene2D.Camera) {
     super(camera, NODE);
@@ -136,6 +138,7 @@ class SpriteLightNode extends Phaser.Renderer.WebGL.RenderNodes.BaseFilterShader
     p.setUniform("uRim", c.rim);
     p.setUniform("uSun", c.sun);
     p.setUniform("uRimOn", c.rimOn ? 1 : 0);
+    p.setUniform("uAmbient", c.ambient);
   }
 }
 

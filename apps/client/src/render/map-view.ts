@@ -272,6 +272,12 @@ export class MapView {
   private floodAt: [number, number] = [0, 0];
   private barRamp: Ramp = { from: 0, to: 0, ms: 0, age: 0 };
   private time = 0;
+  /** A map with interior walls: no wind or rain falls across its screen. */
+  private get indoors(): boolean {
+    return (this.map.scene.edges ?? []).some((e) =>
+      (typeof e.overlay === "string" ? [e.overlay] : e.overlay).includes("wall-top"),
+    );
+  }
 
   /** Builds the view of a map whose assets `loadMap` has loaded. */
   static create(scene: Phaser.Scene, id: string, options: MapViewOptions = {}): MapView {
@@ -390,6 +396,7 @@ export class MapView {
       const r = this.region.fxRect;
       this.composite.riftRect = [r.x, r.y, r.w, r.h];
     }
+    this.composite.ambient = this.ambientStored(ambient);
     this.lit.filters?.internal.add(this.composite);
 
     this.feet = new FeetBuffer(
@@ -405,6 +412,7 @@ export class MapView {
     this.spriteLight.lightW = lightW;
     this.spriteLight.lightH = lightH;
     this.spriteLight.shade = this.shadeTint;
+    this.spriteLight.ambient = this.ambientStored(ambient);
     if (sun) {
       const len = Math.hypot(sun.dir[0], sun.dir[1]) || 1;
       this.spriteLight.sun = [-Math.round(sun.dir[0] / len), -Math.round(sun.dir[1] / len)];
@@ -770,6 +778,14 @@ export class MapView {
     };
   }
 
+  /**
+   * The ambient as the light map holds it after 8-bit storage at half strength, so the filters
+   * subtract exactly what is there and flat ambient bands to nothing.
+   */
+  private ambientStored(a: Rgb): Rgb {
+    return a.map((v) => (Math.round(Math.min(1, v / 2) * 255) / 255) * 2) as Rgb;
+  }
+
   /** How a sprite is coded for the sprite light pass. */
   private code(obj: Phaser.GameObjects.GameObject): SpriteCode {
     const y = (obj as unknown as { y: number }).y;
@@ -978,6 +994,7 @@ export class MapView {
       willReadFrequently: true,
     });
     let most = 0;
+    let spread = 0;
     for (const name of sp.frames) {
       if (!glowTex.has(name) || !ctx) continue;
       const f = glowTex.get(name);
@@ -985,21 +1002,29 @@ export class MapView {
       let n = 0;
       let sx = 0;
       let sy = 0;
+      let x0 = Number.POSITIVE_INFINITY;
+      let x1 = Number.NEGATIVE_INFINITY;
       for (let y = 0; y < f.cutHeight; y++) {
         for (let x = 0; x < f.cutWidth; x++) {
           if ((data[(y * f.cutWidth + x) * 4 + 3] ?? 0) === 0) continue;
           n++;
           sx += x + f.x;
           sy += y + f.y;
+          x0 = Math.min(x0, x);
+          x1 = Math.max(x1, x);
         }
       }
+      if (n > 0) spread = Math.max(spread, x1 - x0);
       const cx = n > 0 ? sx / n + 0.5 : 0;
       frames.set(name, { n, cx: flip ? W - cx : cx, cy: n > 0 ? sy / n + 0.5 : 0 });
       most = Math.max(most, n);
     }
-    const lamp = this.map.lights.some(
-      (l) => !l.paint?.region && Math.hypot(l.at[0] - prop.x, l.at[1] - prop.y) < 48,
-    );
+    // A halo gathers round one light head; glow spread along a string or a sign gets none.
+    const lamp =
+      spread <= 14 &&
+      this.map.lights.some(
+        (l) => !l.paint?.region && Math.hypot(l.at[0] - prop.x, l.at[1] - prop.y) < 48,
+      );
     let halo: Phaser.GameObjects.Image | null = null;
     if (lamp) {
       halo = new Phaser.GameObjects.Image(this.scene, 0, 0, TEX.halo);
@@ -1035,6 +1060,8 @@ export class MapView {
   private buildWeather(): void {
     const kind = this.map.time.weather;
     if (kind !== "sea-wind" && kind !== "drizzle") return;
+    // Indoors the weather stays at the windows, in their own art.
+    if (this.indoors) return;
     const W = this.camera.width;
     const H = this.camera.height;
     const config: Phaser.Types.GameObjects.Particles.ParticleEmitterConfig =

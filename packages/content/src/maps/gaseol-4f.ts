@@ -113,13 +113,14 @@ SEATS.forEach((row, r) => {
     if (seat.lamp)
       carrelLights.push({
         at: [x + 1, y - 8],
-        radius: 18,
+        radius: 30,
         color: "gold.light",
-        intensity: 0.5,
+        intensity: 1,
+        flicker: { amount: 0.03, period: 3.1 },
         paint: {
           bands: ["campus-lamp", "campus-dusk"],
-          at: [x + 1, y - 8],
-          r: [13, 15],
+          at: [x + 1, y - 2],
+          r: [26, 17],
           ragged: 2,
         },
       });
@@ -131,7 +132,7 @@ const tube = (x: number, y: number, rx: number, ry: number): LightSource => ({
   at: [x, y],
   radius: rx + 10,
   color: "stone.bright",
-  intensity: 0.85,
+  intensity: 0.7,
   paint: { bands: TUBE, at: [x, y], r: [rx, ry], ragged: 4 },
 });
 const moon = (x: number): Light => ({
@@ -159,17 +160,17 @@ const lights: LightSource[] = [
   },
   {
     at: [56, 224],
-    radius: 30,
+    radius: 40,
     color: "gold.light",
-    intensity: 0.45,
+    intensity: 0.9,
     paint: { bands: ["campus-dusk", "campus-glow"], at: [52, 236], r: [30, 18], ragged: 3 },
   },
   {
     at: [120, 70],
-    radius: 26,
-    color: "sea.pale",
-    intensity: 0.4,
-    flicker: { amount: 0.06, period: 2.5 },
+    radius: 24,
+    color: "sea.light",
+    intensity: 0.7,
+    flicker: { amount: 0.08, period: 2.5 },
   },
   ...carrelLights,
   ...[176, 240, 352, 416, 608].map(
@@ -177,7 +178,7 @@ const lights: LightSource[] = [
       at: [x, WALL + 20],
       radius: 30,
       color: "navy.pale",
-      intensity: 0.15,
+      intensity: 0.32,
       paint: moon(x),
     }),
   ),
@@ -190,7 +191,7 @@ const map: MapSource = {
   time: { clock: "23:38", phase: "night", weather: "clear" },
   theme: "campus-night",
   sky: "ink.deep",
-  ambient: { color: "navy.light", intensity: 0.3, unlit: "campus" },
+  ambient: { color: "navy.dark", intensity: 0.24, unlit: "campus" },
   plan: PLAN,
   legend: {
     "#": { terrain: "lino", solid: "#" },
