@@ -125,6 +125,14 @@ export const characters = pgTable(
     /** Full daily boards in a row, ending on board day `board_streak_day` (개근상). */
     boardStreak: integer("board_streak").notNull().default(0),
     boardStreakDay: integer("board_streak_day"),
+    /**
+     * The opening (PLAN §4): the beat the character is at and the `play` steps of it met. A
+     * beat past the last is a finished opening, never shown again.
+     */
+    openingBeat: smallint("opening_beat").notNull().default(0),
+    openingPlay: smallint("opening_play").notNull().default(0),
+    /** Story scenes played through personally (PLAN §15 story quests, §10 복습), by scene id. */
+    storySeen: text("story_seen").array().notNull().default(sql`'{}'::text[]`),
     /** The world session that logged in last; a logout from an older one starts no pool. */
     liveSession: text("live_session"),
     /** Bumped by every applied item or currency operation; change notices carry it. */

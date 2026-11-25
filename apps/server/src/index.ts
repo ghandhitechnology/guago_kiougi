@@ -19,6 +19,7 @@ import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
 import { createSocial } from "./social/index.ts";
+import { story } from "./story/director.ts";
 import { startListingSweeper } from "./trade/board.ts";
 import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
@@ -54,6 +55,8 @@ const live = createLive(db, {
   adminSecret: config.serverSecret,
 });
 provideLive(live);
+// The story: new characters play the opening, and freed bosses play their scenes (PLAN §4, §10).
+story.provide({ db, opening: true });
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
 const adminReads = createDb(config.databaseUrl, { max: 2, statementTimeoutMs: 30_000 });
 const admin = await createModerationStack({

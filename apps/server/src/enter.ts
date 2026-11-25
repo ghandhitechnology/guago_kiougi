@@ -9,7 +9,6 @@ import { type AuthContext, ServerError } from "@colyseus/core";
 import { ENTER_PATH, type Entry, type Seating } from "@guago/shared";
 import { channels } from "./channels.ts";
 import { describeError } from "./db/index.ts";
-import { live } from "./live/current.ts";
 import {
   admitPage,
   authenticateJoin,
@@ -17,7 +16,8 @@ import {
   placeCharacter,
   presentedGen,
 } from "./seats.ts";
-import { belongsOn, builtMap, spawnPlace } from "./world-maps.ts";
+import { story } from "./story/director.ts";
+import { builtMap, spawnPlace } from "./world-maps.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 
@@ -117,20 +117,21 @@ export function enterRoute(): Middleware {
     let character = await characterAfterMoves(auth.accountId, auth.characterId);
     if (!character) return send(res, 403, { error: "forbidden" });
     const chosen = choice.map ? builtMap(choice.map) : undefined;
-    if (chosen && chosen.id !== character.mapId) {
-      // Written first, so the room's join check finds the character where it chose to be.
-      const at = spawnPlace(chosen, "main");
-      await placeCharacter(character.id, chosen.id, at.x, at.y);
-      character = { ...character, mapId: chosen.id, x: at.x, y: at.y };
+    if (chosen) {
+      // A development entry that names its map has no opening to play.
+      await story.skipOpening(character.id);
+      if (chosen.id !== character.mapId) {
+        // Written first, so the room's join check finds the character where it chose to be.
+        const at = spawnPlace(chosen, "main");
+        await placeCharacter(character.id, chosen.id, at.x, at.y);
+        character = { ...character, mapId: chosen.id, x: at.x, y: at.y };
+      }
     }
-    // Sent home (명령퇴사) lands in the 집 until the time is up; after it, never there.
-    const sentHome = (await live()?.homeUntil(character.id)) != null;
-    const map = belongsOn(character, sentHome);
-    const seating: Seating = await channels.enter(
-      map,
-      auth,
-      choice.monsters ? { monsters: choice.monsters } : {},
-    );
+    // The opening and 명령퇴사 play in private copies of their maps; otherwise the saved place.
+    const where = await story.whereBelongs(character);
+    const seating: Seating = where.instance
+      ? await channels.instance(where.map, auth)
+      : await channels.enter(where.map, auth, choice.monsters ? { monsters: choice.monsters } : {});
     send(res, 200, { ...seating, gen } satisfies Entry);
   }
 

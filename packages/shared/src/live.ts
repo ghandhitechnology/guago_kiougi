@@ -95,6 +95,8 @@ export const DEMERITS = {
   "dorm-food": 1,
   /** A chat filter strike an admin confirmed. */
   chat: 3,
+  /** Out on the 운동장 after 점호 (the opening's whistle, PLAN §4). */
+  curfew: 1,
 } as const;
 export type DemeritReason = keyof typeof DEMERITS;
 

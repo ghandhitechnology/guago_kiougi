@@ -21,9 +21,12 @@ import {
   NULL_SINK,
   POS_SCALE,
   type PresenceMessage,
+  type SceneCue,
+  type SceneStart,
   SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
   SnapshotReader,
+  STORY_MESSAGES,
   TILE_SIZE,
   type Transfer,
   WORLD_MESSAGES,
@@ -44,6 +47,7 @@ import { studentLooks } from "./looks.ts";
 import { checkMapRooms, type MapRoom } from "./map-room.ts";
 import { places } from "./places.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
+import { story } from "./story/director.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
 import { enter, joinMap, sdk } from "./test/enter.ts";
 import { call, type Jar, remember, waitFor, within } from "./test/http.ts";
@@ -166,6 +170,13 @@ function follow(room: Room<unknown, MapState>): void {
 function ownBody(room: Room<unknown, MapState>) {
   const reader = readers.get(room);
   return reader?.hasSelf ? reader.me : undefined;
+}
+
+async function openingOf(characterId: string) {
+  const r = await db.pool.query("select opening_beat, opening_play from characters where id = $1", [
+    characterId,
+  ]);
+  return r.rows[0] as { opening_beat: number; opening_play: number };
 }
 
 async function savedPlace(characterId: string) {
@@ -517,6 +528,79 @@ describe("a seat is good only where the character belongs", () => {
     there.onMessage("*", () => {});
     expect(seating.map).toBe("gaseolgwan-stairs");
     await there.leave();
+  });
+});
+
+describe("the opening", () => {
+  /** The next story message of a kind a room sends. */
+  const next = <T>(room: Room<unknown, MapState>, type: string) =>
+    within(
+      new Promise<T>((resolve) => {
+        const off = room.onMessage(type, (m: T) => {
+          off();
+          resolve(m);
+        });
+      }),
+      5000,
+      `a ${type}`,
+    );
+
+  it("plays for a new character in private copies, resumes after a reload, and never again", async () => {
+    story.provide({ db, opening: true });
+    const was = process.env.ALLOW_MAP_OPTION;
+    process.env.ALLOW_MAP_OPTION = "1";
+    try {
+      const { jar, id } = await player("newcomer");
+      // The first login is the 자습실 at 23:38, in a copy of 가설관 4층 nobody else is in.
+      const first = (await enter(base, jar)).seating as Entry;
+      expect(first).toMatchObject({ map: "gaseol-4f", channel: 0 });
+      const room = await sdk(base, jar).consumeSeatReservation(first.seat, MapState);
+      room.onMessage("*", () => {});
+      const scene = await next<SceneStart>(room, STORY_MESSAGES.scene);
+      expect(scene).toMatchObject({ scene: "opening-b1", from: 0, shared: false, skip: false });
+      // Its plays are met by the server (here by the development hook), never by saying so.
+      room.send(STORY_MESSAGES.story, { t: "done", run: scene.run });
+      room.send(STORY_MESSAGES.story, { t: "signal", until: "near:cooler" });
+      expect((await next<SceneCue>(room, STORY_MESSAGES.cue)).until).toBe("near:cooler");
+      await waitFor(async () => (await openingOf(id)).opening_play === 1);
+      // A reload resumes after the last play met.
+      await room.leave();
+      const again = (await enter(base, jar)).seating as Entry;
+      expect(again.map).toBe("gaseol-4f");
+      const back = await sdk(base, jar).consumeSeatReservation(again.seat, MapState);
+      back.onMessage("*", () => {});
+      const resumed = await next<SceneStart>(back, STORY_MESSAGES.scene);
+      expect(resumed).toMatchObject({ scene: "opening-b1", from: 1 });
+      back.send(STORY_MESSAGES.story, { t: "signal", until: "interact:logbook" });
+      await next<SceneCue>(back, STORY_MESSAGES.cue);
+      // Done with the beat: the next one plays in the same room, then the stairs in their copy.
+      back.send(STORY_MESSAGES.story, { t: "done", run: resumed.run });
+      const hum = await next<SceneStart>(back, STORY_MESSAGES.scene);
+      expect(hum.scene).toBe("opening-b2");
+      back.send(STORY_MESSAGES.story, { t: "done", run: hum.run });
+      const page = await next<SceneStart>(back, STORY_MESSAGES.scene);
+      expect(page.scene).toBe("opening-b3");
+      const toStairs = next<Transfer>(back, MAP_MESSAGES.transfer);
+      back.send(STORY_MESSAGES.story, { t: "done", run: page.run });
+      const door = await toStairs;
+      expect(door).toMatchObject({ map: "gaseolgwan-stairs", channel: 0 });
+      expect(await openingOf(id)).toMatchObject({ opening_beat: 3, opening_play: 0 });
+      const stairs = await sdk(base, jar).consumeSeatReservation(door.seat, MapState);
+      stairs.onMessage("*", () => {});
+      expect((await next<SceneStart>(stairs, STORY_MESSAGES.scene)).scene).toBe("opening-b4");
+      await back.leave();
+      await stairs.leave();
+      // Finished: the saved place, and the opening never again.
+      await db.pool.query("update characters set opening_beat = 8 where id = $1", [id]);
+      story.provide({ db, opening: true });
+      const after = (await enter(base, jar)).seating as Entry;
+      expect(after).toMatchObject({ map: "campus-yard", channel: 1 });
+      await (await sdk(base, jar).consumeSeatReservation(after.seat, MapState)).leave();
+    } finally {
+      if (was === undefined) delete process.env.ALLOW_MAP_OPTION;
+      else process.env.ALLOW_MAP_OPTION = was;
+      story.provide({});
+    }
   });
 });
 

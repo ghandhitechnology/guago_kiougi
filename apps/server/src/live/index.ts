@@ -626,8 +626,17 @@ export function createLive(db: Db, o: LiveOptions) {
     }
   }
 
-  async function onFreed(_boss: string): Promise<void> {
+  const freedListeners = new Set<(boss: string) => void>();
+
+  async function onFreed(boss: string): Promise<void> {
     for (const id of online.keys()) background("codex", () => freedCodex(id));
+    for (const l of freedListeners) {
+      try {
+        l(boss);
+      } catch (error) {
+        log(`freed listener failed: ${describeError(error)}`);
+      }
+    }
   }
 
   async function onDay(day: number): Promise<void> {
@@ -816,6 +825,12 @@ export function createLive(db: Db, o: LiveOptions) {
     patrolCaught(characterId: string): Promise<void> {
       return background("patrol", () =>
         conduct(characterId, { kind: "demerit", reason: "patrol" }),
+      );
+    },
+    /** Out on the 운동장 after 점호 in the opening (PLAN §4 beat 6): +1 벌점, once. */
+    curfew(characterId: string): Promise<void> {
+      return background("curfew", () =>
+        conduct(characterId, { kind: "demerit", reason: "curfew", key: `curfew:${characterId}` }),
       );
     },
     /** 권 사감 caught a snack in the 기숙사: +1 벌점. */
@@ -1189,6 +1204,11 @@ export function createLive(db: Db, o: LiveOptions) {
       }
       const until = homeUntil.get(characterId);
       return until !== undefined && until > now() ? until : null;
+    },
+    /** Called once a boss is freed on the live Page (the story plays its freed scene). */
+    onFreed(listener: (boss: string) => void): () => void {
+      freedListeners.add(listener);
+      return () => freedListeners.delete(listener);
     },
     /** Called when 명령퇴사 sends a player home (navigation moves them to the `home` map). */
     onSentHome(listener: (characterId: string, until: number) => void): () => void {

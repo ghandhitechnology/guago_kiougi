@@ -325,15 +325,23 @@ export class RoomSeats {
    * freed and the seat forgotten here; its socket stays open until the client leaves. Returns
    * the auth to reserve the seat on the other side with.
    *
+   * With no `place` nothing is written (a move between private copies of maps, which are never
+   * anyone's saved place), but writes still in flight land first.
+   *
    * Throws when the write fails, with the seat left as it was, or when a newer session took the
    * account meanwhile.
    */
-  async moveOut(client: Client, mapId: string, x: number, y: number): Promise<RoomAuth> {
+  async moveOut(
+    client: Client,
+    place: { mapId: string; x: number; y: number } | null,
+  ): Promise<RoomAuth> {
     const seat = this.seats.get(client.sessionId);
     if (!seat || seat.evicted) throw new ServerError(409, "session_replaced");
     seat.moving = true;
     const write = seat.writes.then(() =>
-      use().auth.saveCharacterPlace(seat.characterId, mapId, x, y),
+      place
+        ? use().auth.saveCharacterPlace(seat.characterId, place.mapId, place.x, place.y)
+        : undefined,
     );
     seat.writes = write.catch(() => {});
     moves.set(seat.characterId, write);

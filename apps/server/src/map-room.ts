@@ -71,6 +71,7 @@ import {
   REVIVE_MESSAGE,
   reviveMessage,
   SNAPSHOT_MESSAGE,
+  STORY_MESSAGES,
   sameModifiers,
   shutDoorAhead,
   shutDoors,
@@ -79,6 +80,7 @@ import {
   startRevive,
   stepDoors,
   stepFight,
+  storyMessage,
   TICK_MS,
   TILE_SIZE,
   type Transfer,
@@ -98,10 +100,10 @@ import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { parties } from "./parties.ts";
 import { places } from "./places.ts";
-import { type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { characterAfterMoves, type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { type Destination, registerSharedRoom, type StoryRoom, story } from "./story/director.ts";
 import { TickClock } from "./tick-clock.ts";
 import {
-  belongsOn,
   builtMap,
   clearSpot,
   describe,
@@ -312,7 +314,7 @@ type RoomMap = { -readonly [K in keyof FightMap]: FightMap[K] };
  * numbers, the cast and the shut doors. Doors, zones, the cast and patrols are worked out from the
  * step's positions after each tick.
  */
-export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
+export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, StoryRoom {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
   override maxClients = MAP_SEATS;
@@ -346,6 +348,14 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private unlistenClubs: (() => void) | undefined;
   /** Sessions whose body walked out through a door; their socket stays open a little while. */
   private readonly moved = new Set<string>();
+  /** The character a private copy of the map was made for (the opening, the 집, a replay). */
+  owner: string | undefined;
+  /** Bodies a scene is walking, by session: from, to, and ticks gone of ticks. */
+  private readonly scripted = new Map<
+    string,
+    { fx: number; fy: number; tx: number; ty: number; ticks: number; t: number }
+  >();
+  private unlistenShared: (() => void) | undefined;
   private unlistenParties: (() => void) | undefined;
   /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
   private readonly devActions: (() => void)[] = [];
@@ -371,13 +381,16 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       throw new Error(`map ${def.id} is larger than positions can address (${MAX_MAP_PX} px)`);
     }
     const seed = (Math.random() * 2 ** 32) >>> 0;
-    const field = fieldOf(def.id, process.env.GUAGO_FIELD);
+    this.owner = options.owner;
+    // A private copy for a scene is calm: its fights are the scene's to bring.
+    const field = options.calm ? null : fieldOf(def.id, process.env.GUAGO_FIELD);
     this.world = createFight(this.map, simRules(), field, seed);
     this.net = new FightNet(this.world);
     // A map with no field gets wandering 오답 only when a load test asks (`monsters`).
     if (!field && options.monsters) this.scatter(options.monsters);
     this.metrics = new RoomMetrics(this.roomId, def.id);
-    this.seats = new RoomSeats(def.id, (id) => this.placeOf(id));
+    // A private copy is nobody's saved place: its bodies are never written down.
+    this.seats = new RoomSeats(def.id, (id) => (this.owner ? undefined : this.placeOf(id)));
     this.state.map = def.id;
     this.state.channel = options.channel;
     void this.setMetadata({ map: def.id, channel: options.channel });
@@ -397,6 +410,15 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     this.onMessage(MAP_MESSAGES.interact, interactMessage, (client, n: number) => {
       this.interact(client, n);
     });
+    this.onMessage(STORY_MESSAGES.story, storyMessage, (client, req) => {
+      const pawn = this.pawns.get(client.sessionId);
+      if (pawn) story.request(this, client.sessionId, pawn.character.id, req);
+    });
+    if (!this.owner) {
+      this.unlistenShared = registerSharedRoom(def.id, {
+        playShared: (scene) => this.playShared(scene),
+      });
+    }
     this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.aim.take()) return;
@@ -412,6 +434,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       pawn.player.mode = mode as Mode;
       pawn.player.casts = 0;
       this.tellMode(pawn);
+      story.modeChanged(client.sessionId);
     });
     this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
       const pawn = this.pawns.get(client.sessionId);
@@ -662,8 +685,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     try {
       // A seat is good only for where the character belongs as it is taken: a ticket from before
       // a door, an expel or another page's move is refused, and the client enters again.
-      if (!(await this.belongsHere(character))) throw new ServerError(409, "elsewhere");
-      await this.seat(client, character, options);
+      if (!(await story.mayJoin(this, character))) throw new ServerError(409, "elsewhere");
+      // In a private copy the scene says where the player stands.
+      const at = this.owner ? await story.startPlace(this, character.id) : undefined;
+      await this.seat(client, character, at ? { ...options, at } : options);
     } catch (error) {
       // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
       this.removeBody(client.sessionId);
@@ -674,24 +699,19 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     // Sent home while the seat was being taken, the expel found no body to move: move it now.
     if (this.def.id !== HOME_MAP && (await live()?.homeUntil(character.id)) != null) {
       this.relocate(character.id, HOME_MAP, "main", "home");
+      return;
     }
-  }
-
-  /**
-   * Whether the character belongs on this map by its durable record (`belongsOn`): every seat,
-   * whether from entering, a door, the school moving them or a reconnection, is checked by it.
-   */
-  private async belongsHere(saved: Pick<Character, "id" | "mapId" | "x" | "y">): Promise<boolean> {
-    const sentHome = (await live()?.homeUntil(saved.id)) != null;
-    return belongsOn(saved, sentHome) === this.def.id;
+    const pawn = this.pawns.get(client.sessionId);
+    if (pawn) void story.arrived(this, client.sessionId, character.id, pawn.zones);
   }
 
   /** Puts a joined character's body into the fight and the client's views around it. */
   private async seat(client: Client, character: Character, options: SeatOptions): Promise<void> {
     const id = client.sessionId;
     if (invariants.on) oneBody(character.id, this);
-    const place =
-      character.mapId === this.def.id
+    const place = options.at
+      ? { ...options.at, facing: spawnPlace(this.def, "main").facing }
+      : character.mapId === this.def.id
         ? validPlace(this.def.id, character.x, character.y)
         : spawnPlace(this.def, "main");
     // Clear of the walls as they stand now, doors the Page clock shut included.
@@ -831,7 +851,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     // Moved by the server while the socket was down (sent home, let back, walked out): there is
     // no body here to come back to. The client enters again and lands where it belongs.
     const pawn = this.pawns.get(client.sessionId);
-    if (!pawn || pawn.leaving || !(await this.belongsHere(pawn.character))) {
+    if (!pawn || pawn.leaving || !(await story.mayJoin(this, pawn.character))) {
       if (client.state !== ClientState.LEAVING) client.leave(CLOSE_MAP_CHANGED);
       return;
     }
@@ -842,6 +862,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   override async onLeave(client: Client): Promise<void> {
     places.leave(client.sessionId);
+    story.left(client.sessionId);
+    this.scripted.delete(client.sessionId);
     this.moved.delete(client.sessionId);
     const pawn = this.pawns.get(client.sessionId);
     if (pawn) pawn.leaving = true;
@@ -854,6 +876,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   override onDispose(): void {
     ROOMS.delete(this);
+    this.unlistenShared?.();
     channels.forget(this.roomId);
     this.unlistenClubs?.();
     this.unlistenParties?.();
@@ -1014,7 +1037,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       if (!p.joined || p.down || p.away || MODE_AUTO[p.mode].move) continue;
       if (this.pawns.get(p.id)?.leaving === false) walkers.push(p);
     }
-    const doors = stepDoors(this.inside, walkers, this.def.portals);
+    this.walkScripted();
+    // A private copy's doors stay shut: its scene says when the player moves on.
+    const doors = stepDoors(this.inside, this.owner ? [] : walkers, this.def.portals);
     this.inside = new Map(doors.inside);
     const now = Date.now();
     for (const { id, portal } of doors.entered) {
@@ -1040,6 +1065,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
           pawn.client.send(MAP_MESSAGES.zones, { zones } satisfies ZoneUpdate);
           // The living world counts each place once; walking back in costs nothing.
           this.visit(pawn.character.id, placesAt(this.def, p.x, p.y));
+          story.zonesChanged(this, pawn.client.sessionId, pawn.character.id, zones);
         }
         this.standAtDesk(pawn, p.x, p.y);
       }
@@ -1053,6 +1079,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.rattle(door.id, "portal", p.id, door.built ? "door_closed" : "door_unbuilt");
     }
     if (this.world.tick % 4 === 0) this.tendCast();
+    if (this.world.tick % 2 === 0) story.tick(this);
     if (this.patrols.length > 0 && this.world.tick % PATROL_EVERY_TICKS === 0) this.watchPatrols();
   }
 
@@ -1079,7 +1106,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private refreshDoors(): void {
     const l = live();
     const closed = new Set(
-      this.def.portals.filter((p) => p.built && l && !l.isOpen(p.to)).map((p) => p.id),
+      this.def.portals
+        .filter((p) => this.owner !== undefined || (p.built && l && !l.isOpen(p.to)))
+        .map((p) => p.id),
     );
     if ([...closed].join() === [...this.closed].join()) return;
     this.closed = closed;
@@ -1106,18 +1135,41 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.rattle(via, "portal", pawn.client.sessionId, "door_closed");
       return;
     }
+    noteDoor(pawn.character.id);
+    const arrive = spawnPlace(target, spawn);
+    await this.moveOn(pawn, {
+      map: target.id,
+      x: arrive.x,
+      y: arrive.y,
+      facing: arrive.facing,
+      instance: false,
+      write: true,
+      via,
+    });
+  }
+
+  /**
+   * Takes the body out and seats the character at `to`: a door, the school, or the story. A move
+   * out of a shared room writes down where it goes (or, into a private copy, where it stood); a
+   * move out of a private copy writes nothing unless `to.write`.
+   */
+  private async moveOn(pawn: Pawn, to: Destination): Promise<void> {
     const { client } = pawn;
     const id = client.sessionId;
     const at = this.placeOf(id);
-    noteDoor(pawn.character.id);
     pawn.leaving = true;
     pawn.queue.clear();
+    this.scripted.delete(id);
     this.removeBody(id);
     this.moved.add(id);
-    const arrive = spawnPlace(target, spawn);
+    const record = to.write
+      ? { mapId: to.map, x: to.x, y: to.y }
+      : !this.owner && at
+        ? { mapId: this.def.id, x: at.x, y: at.y }
+        : null;
     let auth: Awaited<ReturnType<RoomSeats["moveOut"]>>;
     try {
-      auth = await this.seats.moveOut(client, target.id, arrive.x, arrive.y);
+      auth = await this.seats.moveOut(client, record);
     } catch {
       // Nothing was written, or another login took the account: stay, or let eviction end it.
       if (this.seats.mayReconnect(client) && at && this.clients.includes(client)) {
@@ -1128,10 +1180,13 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     // Dropped meanwhile: the far side is written, and entering again lands there.
     if (!this.clients.includes(client)) return;
     let seating: Awaited<ReturnType<typeof channels.seat>> | undefined;
+    const options = { facing: to.facing, ...(to.instance ? { at: { x: to.x, y: to.y } } : {}) };
     try {
-      seating = await channels.seat(target.id, auth, { facing: arrive.facing });
+      seating = to.instance
+        ? await channels.instance(to.map, auth, options)
+        : await channels.seat(to.map, auth, options);
     } catch (error) {
-      console.error(`seating ${id} in ${target.id} failed: ${String(error)}`);
+      console.error(`seating ${id} in ${to.map} failed: ${String(error)}`);
     }
     if (!this.clients.includes(client)) return;
     if (!seating) {
@@ -1139,33 +1194,120 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       client.leave(CLOSE_MAP_CHANGED);
       return;
     }
-    client.send(MAP_MESSAGES.transfer, { ...seating, via } satisfies Transfer);
+    client.send(MAP_MESSAGES.transfer, { ...seating, via: to.via } satisfies Transfer);
     this.clock.setTimeout(() => {
       if (this.clients.includes(client)) client.leave(CLOSE_MAP_CHANGED);
     }, MOVED_SOCKET_MS);
   }
 
   /**
-   * Sends a character standing here to another map: 명령퇴사 to the 집 and back (PLAN §11).
-   * Returns false when they are not here.
+   * Sends a character standing here to another map: 명령퇴사 to the 집 (a private copy) and
+   * back (PLAN §11). Returns false when they are not here.
    */
   relocate(characterId: string, to: string, spawn: string, via: string): boolean {
     const pawn = [...this.pawns.values()].find((p) => p.character.id === characterId);
-    if (!pawn || pawn.leaving) return false;
-    void this.walkThrough(pawn, via, to, spawn);
+    const target = builtMap(to);
+    if (!pawn || pawn.leaving || !target) return false;
+    const arrive = spawnPlace(target, spawn);
+    void this.moveOn(pawn, {
+      map: target.id,
+      x: arrive.x,
+      y: arrive.y,
+      facing: arrive.facing,
+      instance: target.id === HOME_MAP,
+      write: true,
+      via,
+    });
     return true;
   }
 
-  /** In the 집: whoever has served their time goes back to school. */
+  /** In the 집: whoever has served their time, and seen the scene to its end, goes to school. */
   private letGoHome(): void {
     const l = live();
     if (!l) return;
     for (const pawn of this.pawns.values()) {
-      if (pawn.leaving) continue;
+      if (pawn.leaving || story.busy(pawn.client.sessionId)) continue;
       void l.homeUntil(pawn.character.id).then((until) => {
         if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
       });
     }
+  }
+
+  // The story's calls (`StoryRoom`) ----------------------------------------------------------
+
+  get mapDef(): BuiltMap {
+    return this.def;
+  }
+
+  tell(sessionId: string, type: string, body: unknown): void {
+    this.clients.find((c) => c.sessionId === sessionId)?.send(type, body);
+  }
+
+  bodyOf(sessionId: string): { x: number; y: number } | undefined {
+    const p = this.pawns.get(sessionId)?.player;
+    return p && { x: p.x, y: p.y };
+  }
+
+  /** A scene walks a body to a spot: straight there over `ms`, its own inputs set aside. */
+  walkBody(sessionId: string, x: number, y: number, ms: number): void {
+    const p = this.pawns.get(sessionId)?.player;
+    if (!p) return;
+    const ticks = Math.max(1, Math.round(ms / TICK_MS));
+    this.scripted.set(sessionId, { fx: p.x, fy: p.y, tx: x, ty: y, ticks, t: 0 });
+  }
+
+  /** Each tick after the step: bodies a scene walks go one step further along their line. */
+  private walkScripted(): void {
+    for (const [id, w] of this.scripted) {
+      const pawn = this.pawns.get(id);
+      if (!pawn) {
+        this.scripted.delete(id);
+        continue;
+      }
+      w.t = Math.min(w.ticks, w.t + 1);
+      const k = w.t / w.ticks;
+      const p = pawn.player;
+      pawn.queue.clear();
+      p.x = snap(w.fx + (w.tx - w.fx) * k);
+      p.y = snap(w.fy + (w.ty - w.fy) * k);
+      if (w.t < w.ticks) p.facing = facingToward(w.fx, w.fy, w.tx, w.ty);
+      if (w.t >= w.ticks) this.scripted.delete(id);
+    }
+  }
+
+  sendOn(sessionId: string, to: Destination): void {
+    const pawn = this.pawns.get(sessionId);
+    if (pawn && !pawn.leaving) void this.moveOn(pawn, to);
+  }
+
+  /** After a replay: back to where the character's saved record says it belongs. */
+  sendBack(sessionId: string): void {
+    const pawn = this.pawns.get(sessionId);
+    if (!pawn || pawn.leaving) return;
+    const auth = pawn.client.auth as RoomAuth;
+    void characterAfterMoves(auth.accountId, auth.characterId).then(async (c) => {
+      if (!c) return;
+      const where = await story.whereBelongs(c);
+      const place = validPlace(where.map, c.x, c.y);
+      const here = c.mapId === where.map ? place : spawnPlace(place.map, "main");
+      this.sendOn(sessionId, {
+        map: place.map.id,
+        x: here.x,
+        y: here.y,
+        facing: here.facing,
+        instance: where.instance,
+        write: false,
+        via: "replay",
+      });
+    });
+  }
+
+  /** Plays a scene for everyone here, and whoever comes while it runs; resolves when it ended. */
+  playShared(sceneId: string): Promise<void> {
+    const present = [...this.pawns.values()]
+      .filter((p) => !p.leaving)
+      .map((p) => [p.client.sessionId, p.character.id] as [string, string]);
+    return story.playShared(this, sceneId, present);
   }
 
   /** Puts a body back where it stood after a door that could not be walked through. */
@@ -1217,7 +1359,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   // The cast -----------------------------------------------------------------------------------
 
   private placeCast(): void {
-    for (const npc of npcsOf(this.def)) {
+    // A private copy's people are its scene's, drawn by the client.
+    for (const npc of this.owner ? [] : npcsOf(this.def)) {
       const state = new NpcState();
       state.speaker = npc.speaker;
       state.x = wire(npc.x);
@@ -1293,6 +1436,13 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     pawn.lastInteract = now;
     const at = this.world.playerById(client.sessionId);
     const target = at && nearestUsable(this.usable, at.x, at.y);
+    // A scene waiting on this use answers it instead.
+    const thing = target && "thing" in target.what ? target.what.thing.id : undefined;
+    const scripted = story.interacted(this, client.sessionId, thing, n);
+    if (scripted) {
+      client.send(MAP_MESSAGES.interaction, scripted);
+      return;
+    }
     void this.answer(pawn, target, n, at).then((answer) => {
       if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
     });
