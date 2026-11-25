@@ -1498,7 +1498,15 @@ export class Effects {
     const progress = strikes === 0 ? t / delay : charging ? sinceStrike / period : 1;
     if (line) {
       if (enemy) this.lane(a, strikes, sinceStrike, progress);
-      else this.forecastLine(a, t, strikes, sinceStrike, charging, progress);
+      else {
+        // The player's own repeat is traced only over the same wind-up as the first strike, not
+        // across the whole wait: a long line lying for seconds says nothing.
+        const lead = Math.min(delay, period);
+        const tracing = strikes === 0 || !charging || period - sinceStrike <= lead;
+        const shown =
+          strikes === 0 || !charging ? progress : (sinceStrike - (period - lead)) / lead;
+        this.forecastLine(a, t, strikes, sinceStrike, charging, clamp01(shown), tracing);
+      }
       return false;
     }
     if (!enemy && this.ring)
@@ -1598,13 +1606,14 @@ export class Effects {
     sinceStrike: number,
     charging: boolean,
     progress: number,
+    tracing: boolean,
   ): void {
     const cat = this.ctx.cat;
     const struck = strikes > 0 && !charging;
     const strip = this.lines.get("fx-forecast");
     const set = strip?.anims.get(struck ? "break" : "warn");
     const fade = struck ? clamp01((FLASH - sinceStrike) / 3) : 1;
-    if (strip && set && fade > 0) {
+    if (strip && set && fade > 0 && tracing) {
       const idx = struck
         ? Math.floor((sinceStrike * TICK_MS * set.fps) / 1000)
         : Math.floor(progress * (set.full[0]?.length ?? 1));
