@@ -364,7 +364,8 @@ export const economyLedger = pgTable(
       .where(sql`${t.coalesced}`),
     index("economy_ledger_character_idx").on(t.characterId, t.currency),
     index("economy_ledger_item_idx").on(t.itemId).where(sql`${t.itemId} is not null`),
-    check("economy_ledger_amount_check", sql`${t.amount} <> 0`),
+    // A coalesced row may net to zero (a day's escrow out and back, compacted together).
+    check("economy_ledger_amount_check", sql`${t.amount} <> 0 or ${t.coalesced}`),
     check(
       "economy_ledger_coalesced_check",
       sql`${t.entries} >= 1 and (${t.coalesced} or ${t.entries} = 1) and not (${t.coalesced} and ${t.itemId} is not null)`,
@@ -443,6 +444,7 @@ export const listings = pgTable(
   (t) => [
     index("listings_seller_idx").on(t.sellerId, t.createdAt),
     uniqueIndex("listings_item_key").on(t.itemId).where(sql`${t.state} = 'live'`),
+    index("listings_price_idx").on(t.unitPrice, t.id).where(sql`${t.state} = 'live'`),
     index("listings_category_idx")
       .on(t.category, t.unitPrice, t.id)
       .where(sql`${t.state} = 'live'`),
@@ -685,7 +687,10 @@ export const tradeLog = pgTable(
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     kind: text("kind").notNull(),
     opId: text("op_id").notNull(),
+    /** The server clock's time of the trade (live/clock.ts). */
     at: at("at").notNull().defaultNow(),
+    /** Wall-clock time it was written: what retention is counted against. */
+    recordedAt: at("recorded_at").notNull().defaultNow(),
     fromId: uuid("from_id").notNull(),
     toId: uuid("to_id").notNull(),
     itemIds: uuid("item_ids").array().notNull(),
@@ -705,6 +710,7 @@ export const tradeLog = pgTable(
     index("trade_log_from_idx").on(t.fromId, t.at),
     index("trade_log_to_idx").on(t.toId, t.at),
     index("trade_log_at_idx").on(t.at),
+    index("trade_log_recorded_idx").on(t.recordedAt),
     index("trade_log_items_idx").using("gin", t.itemIds),
     index("trade_log_defs_idx").using("gin", t.defs),
     index("trade_log_price_idx").on(t.defId, t.grade, t.at).where(sql`${t.kind} = 'board'`),
@@ -902,5 +908,32 @@ export const helpNotices = pgTable(
     uniqueIndex("help_notices_helper_key").on(t.helperId).where(sql`${t.state} = 'taken'`),
     check("help_notices_state_check", sql`${t.state} in ('open', 'taken', 'done', 'cancelled')`),
     check("help_notices_count_check", sql`${t.count} >= 1`),
+  ],
+);
+
+/**
+ * Trades past the trade log's retention, summed per Korean day and pair of players (`a` < `b`),
+ * so a real-money-trading case can still see who traded with whom, how often and how much
+ * 솔방울 went each way (`tradePartners`) after the rows themselves are gone.
+ */
+export const tradePairs = pgTable(
+  "trade_pairs",
+  {
+    day: date("day").notNull(),
+    a: uuid("a").notNull(),
+    b: uuid("b").notNull(),
+    kind: text("kind").notNull(),
+    trades: integer("trades").notNull(),
+    /** 솔방울 sent from `a` to `b`, and from `b` to `a`. */
+    aSent: amount("a_sent").notNull(),
+    bSent: amount("b_sent").notNull(),
+    items: integer("items").notNull(),
+    tax: amount("tax").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.day, t.a, t.b, t.kind] }),
+    index("trade_pairs_a_idx").on(t.a, t.day),
+    index("trade_pairs_b_idx").on(t.b, t.day),
+    check("trade_pairs_order_check", sql`${t.a} < ${t.b}`),
   ],
 );

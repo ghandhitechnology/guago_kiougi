@@ -413,9 +413,11 @@ async function loadItems(
   return new Map(rows.map((r) => [r.id as string, itemFromDb(r)]));
 }
 
-async function countListings(q: Queryable, sellerId: string): Promise<number> {
+/** Live listings not yet past their time: an expired one stops counting before it is swept. */
+async function countListings(q: Queryable, sellerId: string, now: Date): Promise<number> {
   const { rows } = await q.execute(sql`
-    select count(*)::int as n from listings where seller_id = ${sellerId} and state = 'live'`);
+    select count(*)::int as n from listings
+    where seller_id = ${sellerId} and state = 'live' and expires_at > ${now.toISOString()}::timestamptz`);
   return (rows[0]?.n as number | undefined) ?? 0;
 }
 
@@ -854,7 +856,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       );
       const { purse, exact } = await loadPurse(q, id, [...touched].sort());
       const worn = want.worn ? [...items.values()].filter((r) => r.slot !== null) : [];
-      const listingCount = want.listingCount ? await countListings(q, id) : 0;
+      const listingCount = want.listingCount ? await countListings(q, id, ctx.now) : 0;
       const live = await loadLive(q, id, want.live);
       touchedBy.set(id, touched);
       loaded.set(id, {
@@ -868,7 +870,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         live,
       });
     }
-    const facts = (await def.facts?.(q, request, locked)) ?? {};
+    const facts = (await def.facts?.(q, request, locked, ctx)) ?? {};
     await hooks.afterLoad?.(op);
 
     const world: World = { initiator, parties: loaded, listings, facts };

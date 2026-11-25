@@ -225,7 +225,7 @@ export interface World {
   readonly parties: ReadonlyMap<string, Loaded>;
   readonly listings: ReadonlyMap<string, ListingRow>;
   /** What the operation's `facts` read, once everything was locked. */
-  readonly facts: Readonly<Record<string, boolean>>;
+  readonly facts: Readonly<Record<string, boolean | number>>;
 }
 
 export interface PartyApplied {
@@ -268,8 +268,8 @@ export interface PartyOpDef<R> {
   /** The parties hear of it some other way (a trade window's `done`), not by `onChange`. */
   readonly quiet?: boolean;
   rows(req: R, party: string, locked: Locked): Rows;
-  /** Yes-or-no facts outside the economy's rows, read in the transaction (a block). */
-  facts?(q: Queryable, req: R, locked: Locked): Promise<Record<string, boolean>>;
+  /** Facts outside the economy's rows, read in the transaction (a block, a day's count). */
+  facts?(q: Queryable, req: R, locked: Locked, ctx: Ctx): Promise<Record<string, boolean | number>>;
   currencies(
     req: R,
     party: string,
