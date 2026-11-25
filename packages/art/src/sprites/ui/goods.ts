@@ -1,0 +1,213 @@
+import { stack } from "../../draw.ts";
+import { sprite } from "../../format.ts";
+import { UI } from "../../ui-legend.ts";
+
+/**
+ * What the 자판기 sells and what a 제본 table eats, as bag icons: 16×16 for the eight snacks
+ * (PLAN §13), 12×12 for 제본 재료 beside the other material icons. Each is a thing from a
+ * Korean school's vending machine, drawn plain, with no maker's marks.
+ */
+const ui = { group: "ui", origin: [0, 0], anim: {} } as const;
+
+const GOODS = {
+  ...UI,
+  a: "wood.deep",
+  c: "wood.dark",
+  C: "wood.mid",
+  L: "clay.mid",
+  h: "grass.mid",
+  "3": "sea.mid",
+  "4": "sea.light",
+  "5": "sea.pale",
+  "9": "plum.light",
+  "0": "plum.pale",
+  w: "stone.bright",
+} as const;
+
+const snack = sprite({
+  ...ui,
+  name: "snack",
+  size: [16, 16],
+  palette: GOODS,
+  lone: "w",
+  frames: {
+    /** 생수: a clear bottle with a blue cap and a label band. */
+    water: stack(
+      "................",
+      "......oooo......",
+      "......o33o......",
+      "......oooo......",
+      ".....o5555o.....",
+      "....o5w5555o....",
+      "...o55555555o...",
+      "...oBBBBBBBBo...",
+      "...oB33BB33Bo...",
+      "...oBBBBBBBBo...",
+      "...o44444444o...",
+      "...o45555554o...",
+      "...o44444444o...",
+      "...o44444444o...",
+      "....oooooooo....",
+      "................",
+    ),
+    /** 바나나맛 우유: the squat round jar. */
+    "banana-milk": stack(
+      "................",
+      "......oooo......",
+      "......oWWo......",
+      "......oooo......",
+      "......oyyo......",
+      ".....oyyyyo.....",
+      "....oyyyyyyo....",
+      "...oyywyyyyyo...",
+      "...oyyyyyyyyo...",
+      "...oYYYYYYYYo...",
+      "...oYYYYYYYYo...",
+      "...oyyyyyyyyo...",
+      "...oYyyyyyyYo...",
+      "....oYYYYYYo....",
+      ".....oooooo.....",
+      "................",
+    ),
+    /** 에너지 드링크: a dark can with a red bolt. */
+    "energy-drink": stack(
+      "................",
+      ".....oooooo.....",
+      "....osssssso....",
+      "....oooooooo....",
+      "....oNNNNNNo....",
+      "....oNNNrNNo....",
+      "....oNNrrNNo....",
+      "....oNrrrrNo....",
+      "....oNNrrNNo....",
+      "....oNrrNNNo....",
+      "....oNrNNNNo....",
+      "....oNNNNNNo....",
+      "....onnnnnno....",
+      "....oooooooo....",
+      "................",
+      "................",
+    ),
+    /** 김밥: one slice, seaweed round the rice, the fillings in the middle. */
+    kimbap: stack(
+      "................",
+      ".....oooooo.....",
+      "...ookkkkkkoo...",
+      "..okkWWWWWWkko..",
+      "..okWWWWWWWWko..",
+      ".okWWWhhyyWWWko.",
+      ".okWWhhyyrrWWko.",
+      ".okWWyyrrLLWWko.",
+      ".okWWyyLLhhWWko.",
+      ".okWWWhhLLWWWko.",
+      "..okWWWWWWWWko..",
+      "..okkWWWWWWkko..",
+      "...ookkkkkkoo...",
+      ".....oooooo.....",
+      "................",
+      "................",
+    ),
+    /** 초코바: the wrapper torn back from the squares. */
+    "choco-bar": stack(
+      "................",
+      "................",
+      "..oooooooooooo..",
+      "..oaCCaCCaCCao..",
+      "..oaCCaCCaCCao..",
+      "..oaaaaaaaaaao..",
+      "..oxrrrrrrrrxo..",
+      "..oxrRRrrrrrxo..",
+      "..oxrrYYYYrrxo..",
+      "..oxrrrrrrrrxo..",
+      "..oxrrrrrrrrxo..",
+      "..oxxxxxxxxxxo..",
+      "..oooooooooooo..",
+      "................",
+      "................",
+      "................",
+    ),
+    /** 컵라면: the paper lid half peeled. */
+    "cup-ramen": stack(
+      "................",
+      "....oooooooo....",
+      "...oWWWWWWWWo...",
+      "..oooooooooooo..",
+      "..oWWWWWWWWWWo..",
+      "...orrrrrrrro...",
+      "...oRRRRRRRRo...",
+      "...orrWWWWrro...",
+      "...orrWrrWrro...",
+      "...orrWWWWrro...",
+      "....orrrrrro....",
+      "....oRRRRRRo....",
+      "....oooooooo....",
+      "................",
+      "................",
+      "................",
+    ),
+    /** 푸딩: caramel on top, on its saucer. */
+    pudding: stack(
+      "................",
+      "................",
+      "......oooo......",
+      ".....oCCCCo.....",
+      ".....oyyyyo.....",
+      "....oywyyyyo....",
+      "....oyyyyyyo....",
+      "...oyyyyyyyyo...",
+      "...oYyyyyyyYo...",
+      "...oYYYYYYYYo...",
+      "..oooooooooooo..",
+      ".oWWWWWWWWWWWWo.",
+      "..oooooooooooo..",
+      "................",
+      "................",
+      "................",
+    ),
+    /** 쭈쭈바: the squeeze tube, ridged, with its twist cap. */
+    "ice-pop": stack(
+      "................",
+      ".......oo.......",
+      "......oWWo......",
+      "......oooo......",
+      ".....o0000o.....",
+      ".....o0w00o.....",
+      ".....o0000o.....",
+      ".....o9999o.....",
+      ".....o0000o.....",
+      ".....o0000o.....",
+      ".....o9999o.....",
+      ".....o0000o.....",
+      ".....o0000o.....",
+      "......oooo......",
+      "................",
+      "................",
+    ),
+  },
+});
+
+/** 제본 재료: a spool of binding thread. */
+const material = sprite({
+  ...ui,
+  name: "material",
+  size: [12, 12],
+  palette: GOODS,
+  frames: {
+    binding: stack(
+      "............",
+      "..oooooooo..",
+      "..oCCCCCCo..",
+      "...oooooo...",
+      "...oRrrro...",
+      "...oRrrro...",
+      "...oRrrro...",
+      "...oRrrro...",
+      "...oooooo...",
+      "..oCCCCCCo..",
+      "..oooooooo..",
+      "............",
+    ),
+  },
+});
+
+export default [snack, material];

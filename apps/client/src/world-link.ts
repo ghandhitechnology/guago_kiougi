@@ -38,7 +38,11 @@ import {
   type Done,
   type FriendEntry,
   type FriendRequest,
+  type HelpTemplate,
   isPlayerName,
+  LIVE_MESSAGES,
+  type LivePush,
+  type LiveReadKind,
   type OpName,
   type OpRequests,
   type OpResult,
@@ -134,7 +138,13 @@ export type WorldEvent =
   /** A change the player did not ask for (a combat grant), applied like a result's, by `rev`. */
   | { type: "change"; change: ChangeNotice }
   /** After `social` has been updated with it. */
-  | { type: "social"; event: SocialEvent };
+  | { type: "social"; event: SocialEvent }
+  /** The living world: a view read back, a notice done, a 도감 unlock, an award, a 도움 change. */
+  | { type: "live"; push: LivePush };
+
+/** A living-world view, as `read` answers it. */
+export type LiveView<K extends LiveReadKind> = Extract<LivePush, { t: K }>;
+export type LiveCall<T> = { ok: true; value: T } | { ok: false; code: string; retryMs?: number };
 
 export interface WorldLink {
   readonly status: WorldStatus;
@@ -162,6 +172,16 @@ export interface WorldLink {
    * The result's `change` holds the new values to apply over the inventory snapshot.
    */
   op<K extends OpName>(op: K, req: OpRequests[K], id?: string): Promise<OpCall>;
+  /** One living-world view (`live.read`): the Page, the board, the 도감, the 연구노트, the rules. */
+  read<K extends LiveReadKind>(what: K): Promise<LiveCall<LiveView<K>>>;
+  /**
+   * A 도움 notice: post one, take one, or take yours down. Resolves once the server sends the
+   * notice's new state, or with the refusal.
+   */
+  help(
+    action: "post" | "take" | "cancel",
+    body: { template?: HelpTemplate; quest?: string; notice?: string },
+  ): Promise<LiveCall<null>>;
   close(): Promise<void>;
 }
 
@@ -258,6 +278,24 @@ export function connectWorld(
     { op: OpName; resolve: (r: OpCall) => void; timer: ReturnType<typeof setTimeout> | undefined }
   >();
   const results = new ResultLog(SEEN_RESULTS);
+  /** Living-world reads and 도움 requests waiting, by counter. */
+  const reads = new Map<
+    number,
+    {
+      resolve: (r: LiveCall<unknown>) => void;
+      timer: ReturnType<typeof setTimeout> | undefined;
+      help: boolean;
+    }
+  >();
+  const settleRead = (n: number, r: LiveCall<unknown>) => {
+    const p = reads.get(n);
+    if (!p) return;
+    reads.delete(n);
+    clearTimeout(p.timer);
+    p.resolve(r);
+  };
+  const armRead = (n: number) =>
+    setTimeout(() => settleRead(n, { ok: false, code: "timeout" }), SEND_TIMEOUT_MS);
   let status: WorldStatus = "connecting";
   let me: string | undefined;
   let room: Room | undefined;
@@ -412,11 +450,28 @@ export function connectWorld(
       emit({ type: "change", change });
     });
     joined.onMessage(WORLD_MESSAGES.social, onSocial);
+    joined.onMessage(LIVE_MESSAGES.push, (push: LivePush) => {
+      if ("n" in push && push.n !== undefined) settleRead(push.n, { ok: true, value: push });
+      // A 도움 notice's new state answers the oldest 도움 request still waiting.
+      if (push.t === "help") {
+        const first = [...reads].find(([, p]) => p.help);
+        if (first) settleRead(first[0], { ok: true, value: null });
+      }
+      emit({ type: "live", push });
+    });
     joined.onMessage(WORLD_MESSAGES.done, (d: Done) => {
       settleRequest(d.n, { ok: true, data: d.data as SocialDone<SocialType> });
     });
     joined.onMessage(WORLD_MESSAGES.refused, (r: Refusal) => {
       if (r.n === undefined) return;
+      if (reads.has(r.n)) {
+        settleRead(r.n, {
+          ok: false,
+          code: r.code,
+          ...(r.retryMs === undefined ? {} : { retryMs: r.retryMs }),
+        });
+        return;
+      }
       const { code, until, retryMs, need } = r;
       if (r.type !== WORLD_MESSAGES.chat) {
         settleRequest(r.n, {
@@ -441,12 +496,14 @@ export function connectWorld(
       for (const p of pending.values()) clearTimeout(p.timer);
       for (const p of requests.values()) clearTimeout(p.timer);
       for (const p of ops.values()) clearTimeout(p.timer);
+      for (const p of reads.values()) clearTimeout(p.timer);
       setStatus("reconnecting");
     });
     joined.onReconnect(() => {
       for (const [n, p] of pending) p.timer = arm(n);
       for (const [n, p] of requests) p.timer = armRequest(n);
       for (const [id, p] of ops) p.timer = armOp(id);
+      for (const [n, p] of reads) p.timer = armRead(n);
       setStatus("online");
     });
   }
@@ -484,6 +541,7 @@ export function connectWorld(
       for (const n of [...pending.keys()]) settle(n, { ok: false, code: "offline" });
       for (const n of [...requests.keys()]) settleRequest(n, { ok: false, code: "offline" });
       for (const [id, p] of [...ops]) settleOp(id, { id, op: p.op, ok: false, error: "offline" });
+      for (const n of [...reads.keys()]) settleRead(n, { ok: false, code: "offline" });
       if (code === CLOSE_SESSION_REPLACED) {
         setStatus("replaced");
         return;
@@ -575,6 +633,45 @@ export function connectWorld(
       return new Promise<OpCall>((resolve) => {
         ops.set(id, { op: name, resolve, timer: armOp(id) });
         open.send(name, { id, req });
+      });
+    },
+    read(what) {
+      type R = LiveCall<LiveView<typeof what>>;
+      const open = room;
+      if (!open || status !== "online") return Promise.resolve({ ok: false, code: "offline" } as R);
+      const n = ++counter;
+      return new Promise<R>((resolve) => {
+        reads.set(n, {
+          resolve: resolve as (r: LiveCall<unknown>) => void,
+          timer: armRead(n),
+          help: false,
+        });
+        open.send(LIVE_MESSAGES.read, { what, n });
+      });
+    },
+    help(action, body) {
+      const open = room;
+      if (!open || status !== "online") {
+        return Promise.resolve({ ok: false, code: "offline" } as LiveCall<null>);
+      }
+      const n = ++counter;
+      const type =
+        action === "post"
+          ? LIVE_MESSAGES.helpPost
+          : action === "take"
+            ? LIVE_MESSAGES.helpTake
+            : LIVE_MESSAGES.helpCancel;
+      const message =
+        action === "post"
+          ? { template: body.template, ...(body.quest ? { quest: body.quest } : {}), n }
+          : { notice: body.notice, n };
+      return new Promise<LiveCall<null>>((resolve) => {
+        reads.set(n, {
+          resolve: resolve as (r: LiveCall<unknown>) => void,
+          timer: armRead(n),
+          help: true,
+        });
+        open.send(type, message);
       });
     },
     async close() {

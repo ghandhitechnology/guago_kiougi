@@ -1,5 +1,7 @@
 import type { WorldEntry } from "../entry.ts";
 import { hud } from "../hud/store.ts";
+import { inventory } from "../state/inventory.ts";
+import { live } from "../state/live.ts";
 import { connectWorld, type WorldLink } from "../world-link.ts";
 
 /**
@@ -21,14 +23,31 @@ class Session {
     hud.set({ player: { name, level, major } });
     const link = connectWorld();
     this.link = link;
+    inventory.attach(link);
+    live.attach(link);
+    // 벌점 and the 자습 pool on the HUD come from the rules and the progression the server keeps.
+    const unrules = live.watch((l) => {
+      if (l.rules) hud.set({ demerits: l.rules.demerits });
+    });
+    const unpool = inventory.watch((inv) => {
+      const pool = inv.snap?.progression.pool;
+      hud.set({ pool: pool ? { now: pool.fill.seconds, max: pool.cap } : undefined });
+    });
     // The level follows presence, which the server updates on a level-up.
-    this.stopLink = link.on((e) => {
+    const stopPresence = link.on((e) => {
       if (e.type !== "presence" || !link.me) return;
       const me = link.presence.get(link.me);
       const shown = hud.get().player;
       if (me && shown && me.level !== shown.level)
         hud.set({ player: { ...shown, level: me.level } });
     });
+    this.stopLink = () => {
+      stopPresence();
+      unrules();
+      unpool();
+      inventory.detach();
+      live.detach();
+    };
     for (const l of this.listeners) l(this);
   }
 
