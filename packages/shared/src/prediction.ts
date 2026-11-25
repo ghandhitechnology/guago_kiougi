@@ -1,5 +1,6 @@
 import type { Collidable } from "./collision.ts";
-import { type Body, type MoveInput, moveBody, moveDirection } from "./movement.ts";
+import { stepBody } from "./fight/body.ts";
+import { type Body, type MoveInput, moveDirection } from "./movement.ts";
 
 /** A correction longer than this is snapped to instead of eased in. */
 export const SNAP_PX = 32;
@@ -8,16 +9,34 @@ const SMOOTH_MS = 90;
 /** Unacknowledged inputs kept for replay; five seconds of walking. */
 const MAX_PENDING = 100;
 
+/** An input sent, with its flags and the roll it left, so a replay rolls exactly as it did. */
+interface Sent extends MoveInput {
+  readonly flags: number;
+  readonly canRoll: boolean;
+  readonly roll: number;
+  readonly rdx: number;
+  readonly rdy: number;
+}
+
 /**
  * Client-side prediction of the player's own movement. Each tick runs the same step the server
  * runs and remembers the input; when the server reports where it put the player after input
  * `ack`, the inputs it has not seen yet are replayed on top. The simulation is deterministic, so
  * the replay matches and nothing moves; when it does not, the difference is eased out over a few
- * frames, or snapped when it is large.
+ * frames, or snapped when it is large. A dodge roll and a manual cast travel as the input's
+ * flags (`fight/body.ts`), and the roll is predicted with the step the server runs.
  */
 export class Predictor {
-  private readonly pending: MoveInput[] = [];
+  private readonly pending: Sent[] = [];
   private seq = 0;
+  /** The roll in progress after the last input sent: steps left and the step. */
+  private roll = 0;
+  private rdx = 0;
+  private rdy = 0;
+  /** The roll the server is in after the last input it acknowledged. */
+  private ackRoll = 0;
+  private ackRdx = 0;
+  private ackRdy = 0;
   /** The predicted body after every input sent so far. */
   body: Body;
   /** The body one tick earlier; drawing moves from here toward `body`. */
@@ -40,19 +59,42 @@ export class Predictor {
     return this.pending.length;
   }
 
+  /** A roll is under way: every tick sends an input until it ends. */
+  get rolling(): boolean {
+    return this.roll > 0;
+  }
+
   /**
-   * Advances one tick with the move held now. Returns the input to send, or undefined when the
-   * player is standing still: an idle tick changes nothing and costs nothing on the wire.
+   * Advances one tick with the move held now and any flags (a dodge, a cast). Returns the input
+   * to send, or undefined when the player is standing still with nothing to ask: an idle tick
+   * changes nothing and costs nothing on the wire. `canRoll` is whether a dodge may start now.
    */
-  tick(mx: number, my: number): MoveInput | undefined {
+  tick(
+    mx: number,
+    my: number,
+    flags = 0,
+    canRoll = true,
+  ): (MoveInput & { flags?: number }) | undefined {
     this.prev = this.body;
     const [vx, vy] = moveDirection(mx, my);
-    if (vx === 0 && vy === 0) return undefined;
-    const input: MoveInput = { seq: ++this.seq, mx, my };
-    this.pending.push(input);
+    if (vx === 0 && vy === 0 && flags === 0 && this.roll === 0) return undefined;
+    const b = stepBody(
+      this.map,
+      { ...this.body, roll: this.roll, rdx: this.rdx, rdy: this.rdy },
+      mx,
+      my,
+      flags,
+      this.speed,
+      canRoll,
+    );
+    this.body = { x: b.x, y: b.y, facing: b.facing };
+    this.roll = b.roll;
+    this.rdx = b.rdx;
+    this.rdy = b.rdy;
+    const seq = ++this.seq;
+    this.pending.push({ seq, mx, my, flags, canRoll, roll: b.roll, rdx: b.rdx, rdy: b.rdy });
     if (this.pending.length > MAX_PENDING) this.pending.shift();
-    this.body = moveBody(this.map, this.body, mx, my, this.speed);
-    return input;
+    return flags ? { seq, mx, my, flags } : { seq, mx, my };
   }
 
   /**
@@ -60,11 +102,19 @@ export class Predictor {
    * Returns how far off the prediction was, in pixels.
    */
   reconcile(server: Body, ack: number): number {
-    while (this.pending.length > 0 && (this.pending[0] as MoveInput).seq <= ack)
-      this.pending.shift();
-    let body = server;
+    while (this.pending.length > 0 && (this.pending[0] as Sent).seq <= ack) {
+      const done = this.pending.shift() as Sent;
+      this.ackRoll = done.roll;
+      this.ackRdx = done.rdx;
+      this.ackRdy = done.rdy;
+    }
+    let b = { ...server, roll: this.ackRoll, rdx: this.ackRdx, rdy: this.ackRdy };
     for (const input of this.pending)
-      body = moveBody(this.map, body, input.mx, input.my, this.speed);
+      b = stepBody(this.map, b, input.mx, input.my, input.flags, this.speed, input.canRoll);
+    const body: Body = { x: b.x, y: b.y, facing: b.facing };
+    this.roll = b.roll;
+    this.rdx = b.rdx;
+    this.rdy = b.rdy;
     const dx = this.body.x - body.x;
     const dy = this.body.y - body.y;
     const error = Math.sqrt(dx * dx + dy * dy);
@@ -101,6 +151,8 @@ export class Predictor {
   /** Starts over from the server's position, as after a reconnect. Sequence numbers keep counting. */
   reset(server: Body): void {
     this.pending.length = 0;
+    this.roll = 0;
+    this.ackRoll = 0;
     this.body = server;
     this.prev = server;
     this.ox = 0;

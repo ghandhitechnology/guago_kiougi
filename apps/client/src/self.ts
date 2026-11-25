@@ -12,6 +12,14 @@ import {
 /** A frame gap longer than this (a background tab, a debugger) restarts the tick clock. */
 const STALL_MS = 250;
 
+/** What a tick may carry besides movement: a dodge or a cast (`fight/body.ts` flags). */
+export interface TickFlags {
+  /** Flags for the tick now ending, taken once; 0 for none. */
+  take(): number;
+  /** Whether a dodge may start this tick. */
+  canRoll(): boolean;
+}
+
 /** The own player as the server last described it, in wire units. */
 export interface ServerSelf {
   readonly x: number;
@@ -29,12 +37,14 @@ export class SelfMover {
   private seen: ServerSelf | undefined;
   private acc = 0;
   private readonly map: Collidable;
-  private readonly send: (input: MoveInput) => void;
+  private readonly send: (input: MoveInput & { readonly flags?: number }) => void;
+  /** Dodges and casts ride on the inputs; set by the fight view. */
+  flags: TickFlags | undefined;
   /** Largest correction seen, for development checks. */
   worstError = 0;
   corrections = 0;
 
-  constructor(map: Collidable, send: (input: MoveInput) => void) {
+  constructor(map: Collidable, send: (input: MoveInput & { readonly flags?: number }) => void) {
     this.map = map;
     this.send = send;
   }
@@ -81,7 +91,8 @@ export class SelfMover {
     while (this.acc >= TICK_MS) {
       this.acc -= TICK_MS;
       const [mx, my] = live ? move() : [0, 0];
-      const input = p.tick(mx, my);
+      const flags = live ? (this.flags?.take() ?? 0) : 0;
+      const input = p.tick(mx, my, flags, this.flags?.canRoll() ?? false);
       if (input) this.send(input);
     }
     return p.draw(this.acc / TICK_MS, dtMs);

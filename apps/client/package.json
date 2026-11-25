@@ -9,12 +9,14 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
     "vite": "8.3.8"
   },
   "dependencies": {
     "@colyseus/schema": "5.0.51",
     "@colyseus/sdk": "0.18.10",
     "@guago/art": "workspace:*",
+    "@guago/audio": "workspace:*",
     "@guago/content": "workspace:*",
     "@guago/shared": "workspace:*",
     "phaser": "4.2.1"

@@ -11,6 +11,11 @@ const viewer =
   import.meta.env.DEV && new URLSearchParams(location.search).has("view")
     ? (await import("./render/viewer.ts")).ViewerScene
     : null;
+/** So does the fight stage, `?fight=<map id>`. */
+const stage =
+  import.meta.env.DEV && new URLSearchParams(location.search).has("fight")
+    ? (await import("./fight/stage.ts")).FightStage
+    : null;
 
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
@@ -22,7 +27,7 @@ const game = new Phaser.Game({
   render: { pixelArt: true },
   scale: { mode: Phaser.Scale.NONE },
   // Back to front; the UI scene stays on top of the world.
-  scene: viewer ? [viewer] : [BootScene, FrontScene, WorldScene, UiScene],
+  scene: viewer ? [viewer] : stage ? [stage] : [BootScene, FrontScene, WorldScene, UiScene],
 });
 
 /**
