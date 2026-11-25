@@ -11,6 +11,7 @@ import {
   CLUB_EXP_FOR_NOTICE,
   catchUp,
   DAY_MS,
+  DEMERITS,
   HOUR_MS,
   MERIT_TALLY_DAILY,
   MINUTE_MS,
@@ -726,5 +727,31 @@ describe("청소 당번", () => {
     expect((await w.live.board.quest(c.id, `chore:${day}:cleaning`))?.state).toBe("claimed");
     expect((await row(c.id)).merits).toBe(1);
     expect(await ledgerCount(c.id, "merit.cleaning")).toBe(1);
+  });
+});
+
+describe("chat strikes", () => {
+  it("book their 벌점 once per strike id, retried from anywhere, however late", async () => {
+    const w = await world();
+    const other = await world();
+    const c = await character(w);
+    const tries = await Promise.all([
+      w.live.events.chatStrike(c.id, "41"),
+      other.live.events.chatStrike(c.id, "41"),
+      w.live.events.chatStrike(c.id, "41"),
+    ]);
+    expect(tries).toEqual([true, true, true]);
+    expect((await row(c.id)).demerits).toBe(DEMERITS.chat);
+    // Two hours on, past the operation ids' retention, the same strike still counts once.
+    w.clock.step(2 * HOUR_MS);
+    expect(await w.live.events.chatStrike(c.id, "41")).toBe(true);
+    expect((await row(c.id)).demerits).toBe(DEMERITS.chat);
+    expect(await w.live.events.chatStrike(c.id, "42")).toBe(true);
+    expect((await row(c.id)).demerits).toBe(2 * DEMERITS.chat);
+    const rows = await db.pool.query(
+      "select operation_id from conduct_ledger where character_id = $1 order by id",
+      [c.id],
+    );
+    expect(rows.rows.map((r) => r.operation_id)).toEqual(["chat-strike:41", "chat-strike:42"]);
   });
 });

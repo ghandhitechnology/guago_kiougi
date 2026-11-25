@@ -86,7 +86,16 @@ export interface LogoutRequest {
 }
 
 export type ConductRequest =
-  | { kind: "demerit"; reason: DemeritReason; amount: number }
+  | {
+      kind: "demerit";
+      reason: DemeritReason;
+      amount: number;
+      /**
+       * The caller's own key for this 벌점 (a moderation strike id). Its conduct rows are booked
+       * under it, so a later call with the same key changes nothing, however long after.
+       */
+      key?: string;
+    }
   | {
       kind: "merit";
       reason: MeritReason;
@@ -368,7 +377,12 @@ export function liveOps(h: Helpers): Defs {
 
     "live.conduct": {
       client: false,
-      rows: (req) => (req.kind === "merit" ? { live: { tallyDay: req.day } } : {}),
+      rows: (req) =>
+        req.kind === "merit"
+          ? { live: { tallyDay: req.day } }
+          : req.key
+            ? { live: { conductKey: req.key } }
+            : {},
       currencies: (req) => (req.kind === "merit" ? ["merit"] : []),
       apply(l, req, env) {
         const c = l.character;
@@ -392,6 +406,8 @@ export function liveOps(h: Helpers): Defs {
             },
           });
         }
+        // Booked under this key already (its conduct rows carry it as their operation id).
+        if (l.live.keyed) return ok({ outcome: { already: true, demerits: c.demerits } });
         const d = addDemerits({ demerits: c.demerits }, req.amount);
         const ch: LiveCharacter = { demerits: d.demerits };
         const conduct: { kind: "demerit" | "merit"; amount: number; reason: string }[] = [
@@ -414,7 +430,7 @@ export function liveOps(h: Helpers): Defs {
         if (titles !== c.titles) ch.titles = titles;
         return ok({
           character: {},
-          live: { character: ch, conduct },
+          live: { character: ch, conduct, ...(req.key ? { conductKey: req.key } : {}) },
           outcome: {
             demerits: d.demerits,
             expelled: d.expelled,

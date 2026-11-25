@@ -21,6 +21,8 @@ export interface LiveRows {
   leader?: number;
   /** The character's `merit_daily` counts of this board day. */
   tallyDay?: number;
+  /** Whether conduct rows were already booked under this operation id. */
+  conductKey?: string;
 }
 
 export interface HelpNoticeRow {
@@ -47,6 +49,8 @@ export interface LiveLoaded {
   leader: { paid: boolean } | null;
   /** `merit_daily` counts of the day asked for, by key. */
   daily: ReadonlyMap<string, number>;
+  /** Conduct rows exist under the `conductKey` asked for. */
+  keyed: boolean;
 }
 
 export const NO_LIVE: LiveLoaded = {
@@ -56,6 +60,7 @@ export const NO_LIVE: LiveLoaded = {
   helping: false,
   leader: null,
   daily: new Map(),
+  keyed: false,
 };
 
 /** Living-world columns an operation sets on the character. */
@@ -86,6 +91,8 @@ export interface NewQuest {
 
 export interface LiveWrite {
   character?: LiveCharacter;
+  /** The key conduct rows are booked under instead of the operation id (a strike id). */
+  conductKey?: string;
   /** Conduct ledger rows: `demerits` and `merits` move by exactly these. */
   conduct?: readonly { kind: "demerit" | "merit"; amount: number; reason: string }[];
   /** New lifetime totals by monster. */
@@ -146,7 +153,14 @@ export async function loadLive(
       select key, n from merit_daily where character_id = ${characterId} and day = ${want.tallyDay}`);
     for (const r of rows) daily.set(r.key as string, Number(r.n));
   }
-  return { kills, notice, posted, helping, leader, daily };
+  let keyed = false;
+  if (want.conductKey !== undefined) {
+    const { rows } = await q.execute(sql`
+      select 1 from conduct_ledger
+      where character_id = ${characterId} and operation_id = ${want.conductKey} limit 1`);
+    keyed = rows.length > 0;
+  }
+  return { kills, notice, posted, helping, leader, daily, keyed };
 }
 
 export function noticeFromDb(r: Record<string, unknown>): HelpNoticeRow {
@@ -215,7 +229,7 @@ export async function writeLive(
   if (conduct.length > 0) {
     await q.execute(sql`
       insert into conduct_ledger (character_id, operation_id, kind, amount, reason)
-      select ${characterId}, ${opId}, u.kind, u.amount, u.reason
+      select ${characterId}, ${w.conductKey ?? opId}, u.kind, u.amount, u.reason
       from unnest(
         ${sql.param(conduct.map((c) => c.kind))}::text[],
         ${sql.param(conduct.map((c) => c.amount))}::integer[],

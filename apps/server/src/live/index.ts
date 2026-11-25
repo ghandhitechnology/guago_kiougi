@@ -418,7 +418,9 @@ export function createLive(db: Db, o: LiveOptions) {
 
   async function conduct(
     characterId: string,
-    req: { kind: "demerit"; reason: DemeritReason } | { kind: "merit"; reason: MeritReason },
+    req:
+      | { kind: "demerit"; reason: DemeritReason; key?: string }
+      | { kind: "merit"; reason: MeritReason },
     opId = `conduct:${randomUUID()}`,
   ): Promise<ExecResult> {
     const amount = req.kind === "demerit" ? DEMERITS[req.reason] : MERITS[req.reason];
@@ -427,7 +429,7 @@ export function createLive(db: Db, o: LiveOptions) {
       opId,
       "live.conduct",
       req.kind === "demerit"
-        ? { kind: "demerit", reason: req.reason, amount }
+        ? { kind: "demerit", reason: req.reason, amount, ...(req.key ? { key: req.key } : {}) }
         : {
             kind: "merit",
             reason: req.reason,
@@ -441,8 +443,9 @@ export function createLive(db: Db, o: LiveOptions) {
       log(`conduct ${req.kind}.${req.reason} for ${characterId} refused: ${result.error}`);
       return result;
     }
-    notify(characterId, result);
     const out = result.outcome;
+    if (out.already) return result;
+    notify(characterId, result);
     line(`${req.kind}.${req.reason}`, undefined, characterId);
     if (req.kind === "merit" && Number(out.cancelled) > 0) {
       line("merit.cancel", { count: Number(out.demerits) }, characterId);
@@ -829,9 +832,23 @@ export function createLive(db: Db, o: LiveOptions) {
     },
 
     // Moderation.
-    /** A chat filter strike an admin confirmed: +3 벌점. */
-    chatStrike(characterId: string): Promise<void> {
-      return background("chat", () => conduct(characterId, { kind: "demerit", reason: "chat" }));
+    /**
+     * A chat filter strike an admin confirmed: +3 벌점, once per `strikeId`. Resolves true when
+     * the 벌점 is booked (now or by an earlier call with the same id), false when it could not be
+     * and a retry with the same id is safe. Never throws.
+     */
+    async chatStrike(characterId: string, strikeId: string): Promise<boolean> {
+      try {
+        const r = await conduct(characterId, {
+          kind: "demerit",
+          reason: "chat",
+          key: `chat-strike:${strikeId}`,
+        });
+        return r.ok;
+      } catch (error) {
+        log(`live chat strike ${strikeId} failed: ${describeError(error)}`);
+        return false;
+      }
     },
 
     // The raid system.
