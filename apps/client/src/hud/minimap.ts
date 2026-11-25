@@ -4,7 +4,7 @@ import { paint, sliceOf } from "../ui/theme.ts";
 import { type MapView, worldView } from "../world/view.ts";
 
 /** The map's frame and the window inside it, as in the kit's composed HUD. */
-export const MINIMAP = { x: 416, y: 6, size: 58, inset: 4 } as const;
+export const MINIMAP = { size: 58, inset: 4 } as const;
 const INNER = MINIMAP.size - MINIMAP.inset * 2;
 const TILE = 16;
 /** Minimap pixels per tile: at two, a street reads as a street and a door as a door. */
@@ -71,8 +71,8 @@ export class Minimap {
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
-    const { x, y, size, inset } = MINIMAP;
-    this.root = scene.add.container(x, y);
+    const { size, inset } = MINIMAP;
+    this.root = scene.add.container(0, 0);
     const back = scene.add.rectangle(inset, inset, INNER, INNER, paint("ink.deep")).setOrigin(0);
     this.ground = scene.add.image(0, 0, "__WHITE").setOrigin(0).setVisible(false);
     this.me = scene.add.image(0, 0, "ui", "map-dot/me").setOrigin(0.5);
@@ -102,10 +102,16 @@ export class Minimap {
     }
   }
 
+  /**
+   * The place under the map. A long name (a room with its channel) widens the card to the left,
+   * keeping its right edge under the map's, so it never runs off the screen.
+   */
   setName(name: string): void {
-    const fitted = name;
-    this.nameText.set(fitted);
-    this.nameText.at(Math.floor((MINIMAP.size - this.nameText.width) / 2), MINIMAP.size + 2);
+    this.nameText.set(name);
+    const w = Math.max(MINIMAP.size, this.nameText.width + 10);
+    const x = MINIMAP.size - w;
+    this.nameCard.setX(x).setSize(w, 15);
+    this.nameText.at(x + Math.floor((w - this.nameText.width) / 2), MINIMAP.size + 2);
   }
 
   /** Follows the player; call every frame. */

@@ -39,6 +39,13 @@ export interface BookSlot {
   readonly book: string;
   /** 0 when ready, up to 1 right after casting. */
   readonly cooldown: number;
+  /**
+   * When the source knows them (the schema's `ready` and `cooldown` ticks): the `performance.now()`
+   * the slot is ready again and its whole cooldown in ms. The row then sweeps from these every
+   * frame; without them it runs on from the values it has been given.
+   */
+  readonly readyAt?: number;
+  readonly span?: number;
 }
 
 type Key = keyof HudData;

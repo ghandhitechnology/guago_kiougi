@@ -479,12 +479,110 @@ const LARGE = {
   `,
 };
 
+// 5 rows of fill: 7 with the outline, 8 with the shadow. A well's corner badge (`+21`, a tool's
+// level) in gold, small enough to sit on the frame without covering the icon.
+const BADGE = {
+  "0": `
+    ###
+    #.#
+    #.#
+    #.#
+    ###
+  `,
+  "1": `
+    .#.
+    ##.
+    .#.
+    .#.
+    ###
+  `,
+  "2": `
+    ###
+    ..#
+    ###
+    #..
+    ###
+  `,
+  "3": `
+    ###
+    ..#
+    .##
+    ..#
+    ###
+  `,
+  "4": `
+    #.#
+    #.#
+    ###
+    ..#
+    ..#
+  `,
+  "5": `
+    ###
+    #..
+    ###
+    ..#
+    ###
+  `,
+  "6": `
+    ###
+    #..
+    ###
+    #.#
+    ###
+  `,
+  "7": `
+    ###
+    ..#
+    ..#
+    .#.
+    .#.
+  `,
+  "8": `
+    ###
+    #.#
+    ###
+    #.#
+    ###
+  `,
+  "9": `
+    ###
+    #.#
+    ###
+    ..#
+    ###
+  `,
+  "+": `
+    .#.
+    .#.
+    ###
+    .#.
+    .#.
+  `,
+  만: `
+    ##.#.
+    ##.##
+    ...#.
+    #..#.
+    ###..
+  `,
+};
+
 const small = font("dmg-small", 4, SMALL);
 const large = font("dmg", 6, LARGE);
+// The same digits in white for a stack's count, so a count never reads as a 필기 level.
+const count = font("count", 2, BADGE);
+const badge = {
+  ...count,
+  name: "badge",
+  recolor: { "stone.bright": "gold.pale", "stone.pale": "gold.light" },
+};
 
 export default [
   small,
   { ...small, name: "dmg-small-crit", recolor: crit },
   large,
   { ...large, name: "dmg-crit", recolor: crit },
+  badge,
+  count,
 ];

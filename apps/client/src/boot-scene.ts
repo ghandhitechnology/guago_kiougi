@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import { artMeta, createSpriteAnims, loadArt } from "./art.ts";
 import { backend } from "./backend/index.ts";
-import { FRONT_SCENE, UI_SCENE, WORLD_SCENE, type WorldEntry } from "./entry.ts";
+import { FRONT_SCENE, UI_SCENE } from "./entry.ts";
 import { startAudio } from "./sound/audio.ts";
 import { setUiArt } from "./ui/theme.ts";
 
@@ -51,11 +51,8 @@ export class BootScene extends Phaser.Scene {
     } catch {
       // The server is unreachable: the title screen says so when the player tries to sign in.
     }
-    if (session?.character) {
-      const entry: WorldEntry = { account: session.account, character: session.character };
-      this.scene.start(WORLD_SCENE, entry);
-    } else {
-      this.scene.start(FRONT_SCENE, { session });
-    }
+    // Everyone passes the title: a returning player's 이어하기 press is the gesture that lets
+    // sound start, so the world is never entered in silence.
+    this.scene.start(FRONT_SCENE, { session });
   }
 }

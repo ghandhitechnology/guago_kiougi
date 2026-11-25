@@ -403,7 +403,8 @@ describe("a seat is good only where the character belongs", () => {
 
   it("keeps a player sent home there after a restart, before anything else loaded them", async () => {
     const { jar, id } = await player("restarted");
-    const until = new Date(Date.now() + 10 * 60_000);
+    // Ten minutes on the Page clock, which the rooms read, not the wall clock.
+    const until = new Date(live.clock.now() + 10 * 60_000);
     await db.pool.query(
       "update characters set map_id = 'home', x = 344, y = 108, home_until = $2 where id = $1",
       [id, until],

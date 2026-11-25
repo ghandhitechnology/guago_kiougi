@@ -79,7 +79,30 @@ export const Priv = {
   Cast: 12,
   /** The client's own body when it changed: u8 mask, then the fields it names (`SelfField`). */
   Self: 13,
+  /** A boss fight cue (note: a `BOSS_CUES` index, b the player's body slot or -1). */
+  Cue: 14,
+  /** The client completed an objective (note: a `ObjectiveKind`). */
+  Objective: 15,
+  /**
+   * The boss's bar as this client sees it, when it changed (HP at most 5 times a second):
+   * u16 entity · u8 boss · u8 phase · u8 flags (`BossFlag`) · u8 mode · f32 hp · f32 max ·
+   * u8 shield (0–255).
+   */
+  Boss: 16,
 } as const;
+
+/** A boss record as read (`Priv.Boss`). */
+export interface WireBoss {
+  entity: number;
+  boss: number;
+  phase: number;
+  flags: number;
+  mode: number;
+  hp: number;
+  max: number;
+  /** 0 to 1. */
+  shield: number;
+}
 
 /**
  * Fields of a Self record: the body absolutely (u16 x, u16 y in 1/POS_SCALE px, u8 facing, u32
@@ -102,7 +125,16 @@ export interface WireSelf {
   shield: number;
 }
 
-/** Burst kinds (a reaction's index is below 16). */
+/**
+ * Flag on a zone, pool or trail record: a follow-up strike lands `a` ticks after it began, on
+ * everything inside (일기도's lightning); the byte follows the flags.
+ */
+export const ZONE_FOLLOW_UP = 2;
+
+/**
+ * Burst kinds (a reaction's index is below 16). A Q.E.D. burst carries the entity ids it carried
+ * to (완전한 증명's neighbours, at most three) in `chain`: u8 count, then u16 ids.
+ */
 export const BurstKind = { Qed: 16, Heal: 17, LevelUp: 18, Elite: 19, Revive: 20 } as const;
 
 // ── Bytes ───────────────────────────────────────────────────────────────────
@@ -518,6 +550,9 @@ export function writeFx(w: ByteWriter, f: WireFx): void {
       w.u8(clamp8(f.speed * 16));
       w.i8(clampI8(f.spin * 1000));
       w.u8(f.flags & 0xff);
+      // A trail lies along a line (판 구조론's fault); a zone may strike once later (일기도).
+      if (f.kind === K.Trail) w.u16(angle16(f.angle));
+      if (f.flags & ZONE_FOLLOW_UP) w.u8(clamp8(f.a));
       break;
     case K.Dash:
       w.u16(clamp16(f.tx));
@@ -526,6 +561,10 @@ export function writeFx(w: ByteWriter, f: WireFx): void {
       break;
     case K.Burst:
       w.u8(clamp8(f.radius));
+      if (f.def === BurstKind.Qed) {
+        w.u8(f.chain.length);
+        for (const id of f.chain) w.u16(id);
+      }
       break;
   }
 }
@@ -626,6 +665,8 @@ export function readFx(r: ByteReader, f: WireFx): WireFx {
       f.speed = r.u8() / 16;
       f.spin = r.i8() / 1000;
       f.flags = r.u8();
+      if (f.kind === K.Trail) f.angle = fromAngle16(r.u16());
+      f.a = f.flags & ZONE_FOLLOW_UP ? r.u8() : 0;
       break;
     case K.Dash:
       f.tx = r.u16();
@@ -634,6 +675,10 @@ export function readFx(r: ByteReader, f: WireFx): WireFx {
       break;
     case K.Burst:
       f.radius = r.u8();
+      if (f.def === BurstKind.Qed) {
+        const n = r.u8();
+        for (let i = 0; i < n; i++) f.chain.push(r.u16());
+      }
       break;
   }
   return f;
@@ -693,8 +738,10 @@ export interface SnapshotSink {
   cast(fx: number, cast: number): void;
   /** The client's own body changed; fields not in the record keep their last value. */
   self(s: WireSelf): void;
-  /** Level ups, phases, merits, rolls, knock-outs: `type` is a `Priv` value. */
+  /** Level ups, phases, merits, rolls, knock-outs, boss cues, objectives: `type` is a `Priv`. */
   note(type: number, a: number, b: number, c: number): void;
+  /** The boss's bar, phase, shield and gimmick state changed (`Priv.Boss`). */
+  boss?(b: WireBoss): void;
 }
 
 /**
@@ -870,6 +917,17 @@ export class SnapshotReader {
 
   /** The client's own body, accumulated over Self records. */
   readonly me: WireSelf = { x: 0, y: 0, facing: 0, seq: 0, roll: 0, hp: 0, shield: 0 };
+  /** The last boss record. */
+  readonly boss: WireBoss = {
+    entity: 0,
+    boss: 0,
+    phase: 0,
+    flags: 0,
+    mode: 0,
+    hp: 0,
+    max: 0,
+    shield: 0,
+  };
   hasSelf = false;
 
   /** Transfers that found nothing to transfer: zero unless the two sides disagree. */
@@ -1054,6 +1112,19 @@ export class SnapshotReader {
           sink.self(me);
           break;
         }
+        case Priv.Boss: {
+          const b = this.boss;
+          b.entity = r.u16();
+          b.boss = r.u8();
+          b.phase = r.u8();
+          b.flags = r.u8();
+          b.mode = r.u8();
+          b.hp = r.f32();
+          b.max = r.f32();
+          b.shield = r.u8() / 255;
+          sink.boss?.(b);
+          break;
+        }
         default:
           sink.note(type, r.i16(), r.i16(), r.i16());
       }
@@ -1096,4 +1167,5 @@ export const NULL_SINK: SnapshotSink = {
   cast() {},
   self() {},
   note() {},
+  boss() {},
 };

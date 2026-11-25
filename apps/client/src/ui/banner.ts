@@ -1,6 +1,7 @@
 import type * as Phaser from "phaser";
 import { Highlighter } from "./marks.ts";
 import { fade, slide } from "./motion.ts";
+import { screen } from "./screen.ts";
 import { sound } from "./sound.ts";
 import { Label } from "./text.ts";
 import { sliceOf } from "./theme.ts";
@@ -26,7 +27,7 @@ export class PlaceBanner {
     const [l, r, t, b] = sliceOf("hud-plate");
     const card = scene.add.nineslice(0, 0, "ui", "hud-plate/idle", w, 24, l, r, t, b).setOrigin(0);
     const mark = new Highlighter(scene, "gold.mid").box(8, 18, w - 16, 2);
-    const x = Math.round((480 - w) / 2);
+    const x = Math.round((screen.w - w) / 2);
     const rest = { x, y: 34 };
     const root = scene.add.container(x, 20, [card, mark.gfx, label.obj]).setDepth(650).setAlpha(0);
     this.root = root;

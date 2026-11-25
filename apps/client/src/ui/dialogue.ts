@@ -3,6 +3,7 @@ import * as Phaser from "phaser";
 import { Button } from "./button.ts";
 import { FocusScope, popScope, pushScope } from "./focus.ts";
 import { layDown, pickUp } from "./motion.ts";
+import { screen } from "./screen.ts";
 import { sound } from "./sound.ts";
 import { Label, wrap } from "./text.ts";
 import { sliceOf } from "./theme.ts";
@@ -27,7 +28,9 @@ export interface DialogueLine {
   readonly choices?: readonly string[];
 }
 
-const BOX = { x: 8, y: 198, w: 464, h: 66 } as const;
+const BOX = { w: 464, h: 66 } as const;
+/** Centred along the bottom of the screen, whatever its width. */
+const boxAt = () => ({ x: Math.round((screen.w - BOX.w) / 2), y: screen.h - 6 - BOX.h });
 /** Text starts past the margin line and stops before the caret (`DIALOGUE_BOX` in the narrative). */
 const TEXT_X = 78;
 const TEXT_W = narrative.DIALOGUE_BOX.px;
@@ -42,6 +45,10 @@ export class DialogueBox {
   private readonly tab: Phaser.GameObjects.NineSlice;
   private readonly name: Label;
   private readonly portrait: Phaser.GameObjects.Image;
+  private readonly slot: Phaser.GameObjects.Image;
+  private readonly corners: Phaser.GameObjects.Image;
+  private readonly margin: Phaser.GameObjects.NineSlice;
+  private readonly rules: Phaser.GameObjects.NineSlice[];
   private readonly text: Label;
   private readonly caret: Phaser.GameObjects.Sprite;
   private readonly scope = new FocusScope();
@@ -72,18 +79,22 @@ export class DialogueBox {
       .setOrigin(0);
     this.name = new Label(scene, 79, -12, "", { font: "galmuri11-bold", color: "stone.bright" });
     const slot = scene.add.image(10, 7, "ui", "portrait-slot/idle").setOrigin(0);
+    this.slot = slot;
     this.portrait = scene.add.image(12, 9, "portraits", "portrait-entropy/neutral").setOrigin(0);
     const corners = scene.add.image(10, 7, "ui", "portrait-corners/idle").setOrigin(0);
+    this.corners = corners;
     const [ml, mr, mt, mb] = sliceOf("margin");
     const margin = scene.add
       .nineslice(70, 5, "ui", "margin/idle", 1, BOX.h - 10, ml, mr, mt, mb)
       .setOrigin(0);
+    this.margin = margin;
     const [rl, rr, rt, rb] = sliceOf("row");
     const rules = [0, 1, 2].map((i) =>
       scene.add
         .nineslice(71, 6 + i * 17, "ui", "row/idle", BOX.w - 76, 16, rl, rr, rt, rb)
         .setOrigin(0),
     );
+    this.rules = rules;
     this.text = new Label(scene, TEXT_X, 9, "", {
       font: "galmuri11",
       color: "ink.dark",
@@ -103,7 +114,7 @@ export class DialogueBox {
     }
     this.caret.play("ui-caret-bob").setVisible(false);
     this.root = scene.add
-      .container(BOX.x, BOX.y, [
+      .container(boxAt().x, boxAt().y, [
         this.tab,
         this.name.obj,
         page,
@@ -120,7 +131,7 @@ export class DialogueBox {
     this.scope.onBack = () => this.advance();
     // Enter and Space turn the page; they reach the page through the scope's one item.
     this.scope.add({
-      bounds: () => ({ x: BOX.x, y: BOX.y, w: BOX.w, h: BOX.h }),
+      bounds: () => ({ ...boxAt(), w: BOX.w, h: BOX.h }),
       enabled: () => this.resolve !== undefined && !this.choiceBox,
       setFocus: () => undefined,
       activate: () => this.advance(),
@@ -146,7 +157,7 @@ export class DialogueBox {
       this.onOpenChange?.(true);
     }
     this.scope.focus(this.scope.first(), "key");
-    if (!this.root.visible) layDown(this.root, { x: BOX.x, y: BOX.y });
+    if (!this.root.visible) layDown(this.root, boxAt());
     sound("open");
     this.show();
     return done;
@@ -162,12 +173,11 @@ export class DialogueBox {
     const name = speaker ? (narrative.NARRATIVE.ko[speaker.name] ?? line.speaker) : line.speaker;
     this.name.set(name);
     this.tab.setSize(this.name.width + 14, 18);
-    const face = line.face ?? speaker?.faces[0] ?? "neutral";
-    const frame = speaker?.portrait ? `${speaker.portrait}/${face}` : undefined;
-    const has = frame !== undefined && this.scene.textures.get("portraits").has(frame);
-    this.portrait.setVisible(has);
+    const frame = portraitFrame(this.scene, line.speaker, line.face ?? speaker?.faces[0]);
+    this.portrait.setVisible(frame !== undefined);
     // Portrait frames carry their own pivot; the slot wants the top-left corner.
-    if (has) this.portrait.setFrame(frame).setOrigin(0);
+    if (frame) this.portrait.setFrame(frame).setOrigin(0);
+    this.layoutFor(frame !== undefined);
     const text = line.text.replaceAll("{player}", this.playerName);
     this.full = wrap(this.scene, "galmuri11", text, TEXT_W).slice(0, 3);
     this.total = this.full.join("").length;
@@ -175,6 +185,21 @@ export class DialogueBox {
     this.clock = 0;
     this.text.set("");
     this.caret.setVisible(false);
+  }
+
+  /**
+   * With a portrait the page has its pasted photo and a margin beside it. A voice with no face
+   * (the narrator, the broadcast, the 자판기) gets the page without the slot: no empty frame.
+   */
+  private layoutFor(portrait: boolean): void {
+    const left = portrait ? 70 : 8;
+    this.slot.setVisible(portrait);
+    this.corners.setVisible(portrait);
+    this.margin.setX(left);
+    for (const r of this.rules) r.setX(left + 1).setSize(BOX.w - left - 6, 16);
+    this.text.at(portrait ? TEXT_X : left + 8, 9);
+    this.tab.setX(portrait ? 72 : 10);
+    this.name.at(portrait ? 79 : 17, -12);
   }
 
   private tick(_time: number, delta: number): void {
@@ -238,11 +263,11 @@ export class DialogueBox {
       });
       return b;
     });
-    const w = Math.max(...buttons.map((b) => b.bounds().w)) + 12;
+    const w = Math.max(...buttons.map((b) => b.size().w)) + 12;
     const h = buttons.length * 22 + 8;
     const [l, r, t, b] = sliceOf("dialog");
-    const x = BOX.x + BOX.w - w;
-    const y = BOX.y - h - 18;
+    const x = boxAt().x + BOX.w - w;
+    const y = boxAt().y - h - 18;
     box.add(this.scene.add.nineslice(0, 0, "ui", "dialog/idle", w, h, l, r, t, b).setOrigin(0));
     buttons.forEach((btn, i) => {
       btn.setPosition(6, 5 + i * 22);
@@ -259,8 +284,22 @@ export class DialogueBox {
     const r = this.resolve;
     this.resolve = undefined;
     sound("close");
-    pickUp(this.root, { x: BOX.x, y: BOX.y });
+    pickUp(this.root, boxAt());
     this.onOpenChange?.(false);
     r?.(choice);
   }
+}
+
+/**
+ * A speaker's portrait frame: `portrait-<speaker id>/<face>`, the face asked for or else the
+ * neutral one; undefined for a speaker the art has no portrait of.
+ */
+function portraitFrame(scene: Phaser.Scene, speaker: string, face?: string): string | undefined {
+  const atlas = scene.textures.get("portraits");
+  for (const f of [face, "neutral"]) {
+    if (!f) continue;
+    const frame = `portrait-${speaker}/${f}`;
+    if (atlas.has(frame)) return frame;
+  }
+  return undefined;
 }

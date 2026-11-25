@@ -89,6 +89,9 @@ export function createGameServer(
 
   return defineServer({
     transport: new WebSocketTransport(),
+    // Colyseus would exit on the first uncaught exception; the process decides that instead
+    // (process-guard.ts, installed by index.ts), and a test lets Vitest report it.
+    gracefullyShutdown: false,
     rooms: {
       [MAP_ROOM]: defineRoom(MapRoom),
       [WORLD_ROOM]: defineRoom(WorldRoom),

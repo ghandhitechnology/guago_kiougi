@@ -60,6 +60,7 @@ import {
 } from "@guago/shared";
 import { type LiveRequests, liveOps } from "../live/ops.ts";
 import type { LiveLoaded, LiveRows, LiveWrite } from "../live/rows.ts";
+import { type RaidRequests, raidOps } from "../raid/ops.ts";
 import type { ExpireRequest, TradeCommitRequest } from "../trade/ops.ts";
 import type { Queryable } from "./executor.ts";
 import {
@@ -117,7 +118,7 @@ export interface GrantRequest {
   drops: Drop[];
 }
 
-export type Requests = OpRequests & InternalRequests & LiveRequests;
+export type Requests = OpRequests & InternalRequests & LiveRequests & RaidRequests;
 export type AnyOp = keyof Requests;
 /** Operations over listings or several characters; the rest touch one character's own rows. */
 export type PartyOp =
@@ -355,6 +356,7 @@ const isBook = (def: string) => BOOKS.some((b) => b.id === def);
 export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
   // The living world's operations (PLAN §9, §11, §15), in live/ops.ts.
   ...liveOps({ gainExp }),
+  ...raidOps(),
   kit: {
     client: false,
     rows: () => ({}),

@@ -14,6 +14,7 @@
  * a result, a concession, a drop, a logout, a door, a closing room or a deadline. The origin is
  * also kept in the database while the match lasts (`origins.ts`) so a crash cannot strand anyone.
  */
+
 import { matchMaker } from "@colyseus/core";
 import {
   DUEL_ACCEPT_SECONDS,
@@ -43,7 +44,7 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
-import { background } from "../background.ts";
+import { background, guarded } from "../background.ts";
 import { Buckets } from "../economy/buckets.ts";
 import { parties } from "../parties.ts";
 import { places } from "../places.ts";
@@ -261,7 +262,10 @@ export function createDueling({
       to: target,
       expiresAt,
       silent,
-      timer: setTimeout(() => endChallenge(c, "expired"), DUEL_CHALLENGE_SECONDS * 1000),
+      timer: setTimeout(
+        guarded("duel challenge expiry", () => endChallenge(c, "expired")),
+        DUEL_CHALLENGE_SECONDS * 1000,
+      ),
     };
     challenges.set(id, c);
     outgoing.set(me, c);
@@ -432,7 +436,10 @@ export function createDueling({
       entries: [...a, ...b],
       accepted: new Set(),
       expiresAt,
-      timer: setTimeout(() => cancelPending(p, "lapsed"), DUEL_ACCEPT_SECONDS * 1000),
+      timer: setTimeout(
+        guarded("duel ready check lapse", () => cancelPending(p, "lapsed")),
+        DUEL_ACCEPT_SECONDS * 1000,
+      ),
     };
     pendings.set(id, p);
     const sides = sidesOf(p);
@@ -835,7 +842,7 @@ export function createDueling({
           handle(me, type, m),
         );
       }
-      sweep = setInterval(sweepAll, everyMs);
+      sweep = setInterval(guarded("duel sweep", sweepAll), everyMs);
     },
     /** The character's WorldRoom seat dropped or left: out of the queue, ready checks and challenges. */
     left(characterId: string): void {

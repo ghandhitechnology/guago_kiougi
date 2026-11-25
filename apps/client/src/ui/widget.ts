@@ -63,6 +63,15 @@ export abstract class Widget extends Phaser.GameObjects.Container implements Foc
     this.once(Phaser.GameObjects.Events.DESTROY, () => ctx.scope.remove(this));
   }
 
+  /**
+   * The widget's own size, unscaled: what layout measures by. A page built while the notebook
+   * turns is scaled to nothing, so world-space `bounds()` would measure it as zero wide.
+   */
+  size(): { w: number; h: number } {
+    return { w: this.boxW, h: this.boxH };
+  }
+
+  /** Where the widget is on screen, scaled as drawn: for pointer and focus geometry. */
   bounds(): Rect {
     const m = this.getWorldTransformMatrix();
     return { x: m.tx, y: m.ty, w: this.boxW * m.scaleX, h: this.boxH * m.scaleY };

@@ -27,13 +27,59 @@ function loadVolumes(): Partial<Record<Bus, number>> {
   }
 }
 
-/** Arms audio once at start-up: sound begins on the first tap or key. */
+/**
+ * Nothing touches the audio context before the first tap or key: browsers refuse to start one
+ * earlier and warn on every call. Until then the game only remembers which song and air the
+ * current place wants; effects asked for before it are dropped, since nobody heard the moment.
+ */
+let unlocked = false;
+const wanted: { music?: SongId | null; ambient?: AmbientId | null } = {};
+const GESTURES = ["pointerdown", "keydown", "touchend"] as const;
+
+/** Sound has started: the first gesture happened. */
+export function audioLive(): boolean {
+  return unlocked;
+}
+
+function onFirstGesture(): void {
+  if (unlocked) return;
+  unlocked = true;
+  for (const ev of GESTURES) window.removeEventListener(ev, onFirstGesture, true);
+  // Inside the gesture, so the context starts at once.
+  audio.unlock();
+  if (wanted.music !== undefined) audio.music(wanted.music, { fade: 1 });
+  if (wanted.ambient !== undefined) audio.ambient(wanted.ambient, { fade: 1.5 });
+}
+
+function music(id: SongId | null, fade: number): void {
+  wanted.music = id;
+  if (unlocked) audio.music(id, { fade });
+}
+
+function ambient(id: AmbientId | null, fade: number): void {
+  wanted.ambient = id;
+  if (unlocked) audio.ambient(id, { fade });
+}
+
+/** An effect, once sound has started. */
+export function sfx(id: EffectId, o?: { pan?: number; volume?: number }): void {
+  if (unlocked) audio.play(id, o);
+}
+
+/** Any sound the library knows by name (jingles, story and menu cues), once sound has started. */
+export function cue(name: string, o?: { volume?: number; pan?: number }): void {
+  if (unlocked) audio.cue(name, o);
+}
+
+/** Readies audio at start-up; sound itself begins on the first tap or key. */
 export function startAudio(): void {
   for (const [bus, v] of Object.entries(loadVolumes())) {
     if (typeof v === "number") audio.setVolume(bus as Bus, v);
   }
-  audio.unlock();
-  setUiSoundPlayer((name) => audio.play(`ui.${name}` as EffectId));
+  for (const ev of GESTURES) {
+    window.addEventListener(ev, onFirstGesture, { capture: true, passive: true });
+  }
+  setUiSoundPlayer((name) => sfx(`ui.${name}` as EffectId));
 }
 
 export function volume(bus: PlayerBus): number {
@@ -53,8 +99,8 @@ export function setVolume(bus: PlayerBus, value: number): void {
 }
 
 export function titleMusic(): void {
-  audio.music("title", { fade: 1 });
-  audio.ambient(null);
+  music("title", 1);
+  ambient(null, 1);
 }
 
 /** What a place sounds like. */
@@ -114,8 +160,8 @@ let override: Soundscape | undefined;
 function apply(): void {
   const s = override ?? current;
   if (!s) return;
-  audio.music(s.music, { fade: 2 });
-  audio.ambient(s.ambient, { fade: 2.5 });
+  music(s.music, 2);
+  ambient(s.ambient, 2.5);
 }
 
 let page1Ready = false;
@@ -142,5 +188,5 @@ export function overrideSoundscape(s: Soundscape | null): void {
 /** A foot landing. Other players' steps are quieter and placed left or right of the listener. */
 export function footstep(surface: Surface, pan = 0, near = 1): void {
   if (near <= 0) return;
-  audio.play(`step.${surface}`, { pan: Math.max(-1, Math.min(1, pan)), volume: near });
+  sfx(`step.${surface}`, { pan: Math.max(-1, Math.min(1, pan)), volume: near });
 }
