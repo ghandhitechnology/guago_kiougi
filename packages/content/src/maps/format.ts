@@ -20,7 +20,7 @@ import type {
   ShadowShape,
   Vec,
 } from "./layers.ts";
-import type { Patrol, PatrolSource } from "./patrols.ts";
+import type { Patrol, PatrolSource, Walk, WalkSource } from "./patrols.ts";
 
 // Time and light --------------------------------------------------------------------------------
 
@@ -274,6 +274,8 @@ export interface MapSource extends Layers {
   }[];
   /** Guard routes in a 위험 구역, see `patrols.ts`. */
   readonly patrols?: readonly PatrolSource[];
+  /** Townspeople's rounds: routes like a patrol's with no vision, see `patrols.ts`. */
+  readonly walks?: readonly WalkSource[];
   /** Fight floors: dueling grounds (PLAN §14) or, with no modes, boss floors; tiles or a region. */
   readonly arenas?: readonly {
     readonly id: string;
@@ -308,6 +310,8 @@ export interface BuiltMap {
   readonly npcs: readonly NpcSpot[];
   /** Guard routes in world pixels. */
   readonly patrols: readonly Patrol[];
+  /** Townspeople's rounds in world pixels: whoever walks them, at their pace, seeing nothing. */
+  readonly walks: readonly Walk[];
   /** Fight floors, in tiles: dueling grounds, or boss floors when `modes` is empty. */
   readonly arenas: readonly Arena[];
 }

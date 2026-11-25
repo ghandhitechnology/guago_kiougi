@@ -88,6 +88,36 @@ export function autoTarget(w: FightWorld, p: Player, range: number): boolean {
   return true;
 }
 
+/**
+ * The player's own aim, for one book: never further than the book reaches, and never past the
+ * first wall on the way, so aiming chooses a direction and a spot within reach and nothing more.
+ */
+function aimed(w: FightWorld, p: Player, reach: number): void {
+  let dx = p.aimX;
+  let dy = p.aimY;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  if (d > reach && Number.isFinite(reach)) {
+    dx *= reach / d;
+    dy *= reach / d;
+  }
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const steps = Math.ceil(len / AIM_STEP);
+  let k = 1;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    if (w.wallAt(p.x + dx * t, p.y + dy * t)) {
+      k = (i - 1) / steps;
+      break;
+    }
+  }
+  // Pointing at a wall still points: keep the direction, stand the spot just short of it.
+  if (k === 0 && len > 0) k = Math.min(1, 1 / len);
+  setAim(p, p.x + dx * k, p.y + dy * k, null);
+}
+
+/** Aim is walked toward its spot this many pixels at a time, looking for walls. */
+const AIM_STEP = 8;
+
 function setAim(p: Player, x: number, y: number, target: Monster | null): void {
   aim.x = x;
   aim.y = y;
@@ -170,9 +200,9 @@ export function stepWeapons(w: FightWorld): void {
       ) {
         ok = anyNear(w, p, reach);
         if (ok || asked) setAim(p, p.x + facingDir(p)[0] * 16, p.y + facingDir(p)[1] * 16, null);
-        if (ok && p.aiming) setAim(p, p.x + p.aimX, p.y + p.aimY, null);
+        if (ok && p.aiming) aimed(w, p, reach);
       } else if (p.aiming) {
-        setAim(p, p.x + p.aimX, p.y + p.aimY, null);
+        aimed(w, p, reach);
         ok = true;
       } else {
         ok = autoTarget(w, p, Math.min(reach, w.rules.autoPlay.targetRange * 1.5));
@@ -732,7 +762,12 @@ function chain(
   a: Aim,
   pick: StatusPick | null,
 ): void {
-  const first = a.target ?? nearestTo(w, a.x, a.y, wp.range, null);
+  let first = a.target ?? nearestTo(w, a.x, a.y, wp.range, null);
+  // The first link leaves the player: within the book's range of them and not through a wall.
+  if (first && !a.target) {
+    const d = Math.hypot(first.x - p.x, first.y - p.y) - first.radius;
+    if (d > wp.range || !inSight(w, p.x, p.y, first.x, first.y)) first = null;
+  }
   if (!first) return;
   const e = effect(w, p, s, wp, FxKind.Chain, c);
   if (!e) return;
@@ -1626,4 +1661,13 @@ function specializeFor(w: FightWorld, p: Player, n: Minion): number {
     if (m.kind.packMax > 0) swarm++;
   }
   return swarm >= 3 ? MinionRole.Burster : MinionRole.Plain;
+}
+
+/** Nothing solid between two points (sampled every few pixels). */
+function inSight(w: FightWorld, ax: number, ay: number, bx: number, by: number): boolean {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const n = Math.ceil(Math.sqrt(dx * dx + dy * dy) / AIM_STEP);
+  for (let i = 1; i < n; i++) if (w.wallAt(ax + (dx * i) / n, ay + (dy * i) / n)) return false;
+  return true;
 }

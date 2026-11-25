@@ -43,6 +43,8 @@ const THOLOS: Vec = [15, 20];
 const STREET = { y: 45, west: 4, east: 51 };
 /** The council hall east of the fountain, facing the colonnade road. */
 const COUNCIL: Vec = [57, 33];
+/** The sundial at the plaza's middle, where the paved way from the wound turns for the stoa. */
+const SUNDIAL: Vec = [23, 27];
 
 function paintPlan(): string {
   const g = new PlanGrid(W, H, "_");
@@ -102,6 +104,10 @@ function paintPlan(): string {
   g.fray(",", "_", { seed: 51, passes: 1, scale: 2.6 });
   g.majority(",", "_", 2);
   g.majority("r", "%", 1);
+  // The paved way: east from the wound to the sundial's round, then north to the stoa's apron.
+  g.rect(13, 26, 11, 3, "m", "_,");
+  g.rect(23, 12, 3, 13, "m", "_,");
+  g.blob(SUNDIAL[0] + 0.5, SUNDIAL[1] + 0.5, 3.6, 3, "m", { seed: 47, ragged: 0.06, onto: "_," });
   // Under the wound only beaten dust: the hole is drawn whole over it.
   g.blob(WOUND[0], WOUND[1], 4.6, 5.8, "_", { seed: 61, ragged: 0.1, onto: ",_m" });
   settle(g, [WOUND[0] + 8, WOUND[1]]);
@@ -179,7 +185,7 @@ function market(): Partial<Placed> {
 // Places -----------------------------------------------------------------------------------------
 
 const OLIVES: readonly Vec[] = [
-  [24, 15],
+  [20, 13],
   [41, 15],
   [14, 24],
   [24, 41],
@@ -229,24 +235,40 @@ function square(x: number, y: number, n: number): Prop[] {
 
 /** The street of houses, west and east of the orchestra, doors onto the street. */
 const HOUSES: readonly [string, number][] = [
-  ["white", STREET.west],
-  ["ochre", STREET.west + 5],
-  ["white", STREET.west + 10],
-  ["ochre", 34],
-  ["white", 39],
-  ["ochre", 44],
-  ["mint", STREET.east],
-  ["potter", STREET.east + 5],
-  ["ochre", STREET.east + 10],
+  ["street-house/gate", STREET.west],
+  ["street-house/balcony", STREET.west + 5],
+  ["street-house/terrace", STREET.west + 10],
+  ["street-house/shop", 34],
+  ["street-house/gable", 39],
+  ["street-house/dovecote", 44],
+  ["townhouse/mint", STREET.east],
+  ["townhouse/potter", STREET.east + 5],
+  ["street-house/balcony", STREET.east + 10],
 ];
 /** Houses elsewhere: by the hill north of the wound, on the road south of it, under the hall. */
 const MORE_HOUSES: readonly [string, number, number][] = [
-  ["ochre", 2, 16],
-  ["white", 3, 37],
-  ["ochre", 8, 37],
-  ["white", 57, 40],
-  ["ochre", 62, 40],
+  ["street-house/dovecote", 2, 16],
+  ["street-house/gable", 3, 37],
+  ["townhouse/ochre", 8, 37],
+  ["street-house/gate", 57, 40],
+  ["street-house/shop", 62, 40],
+  // Facing the colonnade road below the market.
+  ["street-house/gable", 47, 23],
+  ["townhouse/ochre", 52, 23],
 ];
+/** Every other house stands a step back from the street, so the row has depth and overlaps. */
+const setBack = (i: number) => (i % 2 ? 5 : 0);
+const house = ([art, x]: readonly [string, number], y: number, i: number): Prop => {
+  const [prop, frame] = art.split("/") as [string, string];
+  const at = place("townhouse", x, y).at;
+  return {
+    ...place("townhouse", x, y),
+    prop,
+    frame,
+    at: [at[0], at[1] - setBack(i)],
+    sort: at[1] - setBack(i),
+  };
+};
 
 /** Long afternoon shade off the east side of something standing, `h` px tall, `w` px deep. */
 function shade(x: number, foot: number, h: number, w: number): ShadowShape {
@@ -268,8 +290,8 @@ function town(): Partial<Placed> {
       place("temple", TEMPLE[0], TEMPLE[1]),
       place("tholos", THOLOS[0], THOLOS[1]),
       place("bouleuterion", COUNCIL[0], COUNCIL[1]),
-      ...HOUSES.map(([frame, x]) => place("townhouse", x, STREET.y, { frame })),
-      ...MORE_HOUSES.map(([frame, x, y]) => place("townhouse", x, y, { frame })),
+      ...HOUSES.map((h, i) => house(h, STREET.y, i)),
+      ...MORE_HOUSES.map(([art, x, y], i) => house([art, x], y, i)),
       // The town wall along the slope behind the street.
       ...Array.from(
         { length: 62 },
@@ -277,6 +299,8 @@ function town(): Partial<Placed> {
       ),
       // The street's well.
       { prop: "well", at: [31 * T, 49 * T + 12] },
+      // The sundial at the plaza's middle.
+      place("sundial", SUNDIAL[0], SUNDIAL[1]),
       // The water clock that times the speeches, by the stoa's east end.
       { prop: "clepsydra", anim: "run", play: true, at: [49 * T, 10 * T + 12] },
       // The wall of potsherds, every vote and grudge in town scratched on one.
@@ -309,6 +333,23 @@ function town(): Partial<Placed> {
           play: true,
           index: k % 2,
           at: [(STREET.east + k * 4) * T + 8, (STREET.y + 3) * T + 2],
+        }),
+      ),
+      // Awnings out over the street from the shop, the potter's and two houses: walked under.
+      ...(
+        [
+          [34, "red"],
+          [STREET.east + 5, "ochre"],
+          [STREET.west + 5, "blue"],
+          [STREET.east + 10, "red"],
+          [62, "blue"],
+          [52, "ochre"],
+        ] as const
+      ).map(
+        ([x, frame]): Prop => ({
+          prop: "street-awning",
+          frame,
+          at: [(x + 2.5) * T, (x === 62 ? 43 : x === 52 ? 26 : STREET.y + 3) * T + 28],
         }),
       ),
       // The vine over the fountain's west side.
@@ -379,7 +420,7 @@ function life(): Partial<Placed> {
       // Baskets of the day's goods set out before the stalls.
       { prop: "basket", at: [51 * T + 4, 15 * T + 12] },
       { prop: "basket", at: [57 * T + 8, 15 * T + 12] },
-      { prop: "basket", at: [55 * T, 21 * T + 12] },
+      { prop: "basket", at: [60 * T + 8, 15 * T + 12] },
       { prop: "amphora-rack", at: [48 * T, 15 * T + 14] },
       // The plaza between the wound, the monument and the fountain: shade, a seller or two, jars.
       place("marble-bench", 22, 31),
@@ -392,6 +433,41 @@ function life(): Partial<Placed> {
       { prop: "amphora", at: [37 * T, 27 * T + 10] },
       { prop: "handcart", at: [39 * T + 8, 29 * T + 12] },
       { prop: "basket", at: [49 * T + 8, 31 * T + 12] },
+      // People sitting out on the benches in the shade.
+      { rig: "crowd-b", dir: "down", anim: "sit", play: true, at: [22 * T + 12, 32 * T + 6] },
+      {
+        rig: "crowd-a",
+        dir: "down",
+        anim: "sit",
+        play: true,
+        index: 1,
+        at: [33 * T + 8, 34 * T + 6],
+      },
+      // A bench seats one with room to spare; the friend stands at its end, talking down at them.
+      {
+        rig: "crowd-c",
+        dir: "side",
+        anim: "idle",
+        play: true,
+        flip: true,
+        at: [35 * T + 6, 34 * T + 4],
+      },
+      // Cats: one on the potsherd wall, one on the stoa steps, one on a doorstep in the street.
+      { prop: "cat", anim: "flick", play: true, at: [51 * T + 6, 11 * T - 14], sort: 12 * T },
+      {
+        prop: "cat",
+        anim: "flick",
+        play: true,
+        index: 1,
+        at: [40 * T + 4, 8 * T + 12],
+        flip: true,
+      },
+      {
+        prop: "cat",
+        anim: "flick",
+        play: true,
+        at: [(STREET.west + 12) * T, (STREET.y + 3) * T + 4],
+      },
       // The Pythagoreans' beans, carried well away from the pebbles and left there.
       { prop: "bean-sack", at: [46 * T + 12, 41 * T + 12] },
       // 제논's road: milestones halving the distance to the gate, none of them at it.
@@ -620,6 +696,15 @@ const details: (Decal | Prop)[] = [
   ),
   { prop: "sand-drift", frame: "a", at: [9 * T, 13 * T + 4] },
   { prop: "sand-drift", frame: "b", at: [62 * T, 13 * T + 2] },
+  // The paved way's meander border, along both edges of both legs.
+  ...[13, 15, 17, 19, 21].flatMap((x): Prop[] => [
+    { prop: "paving-meander", at: [x * T, 26 * T - 3] },
+    { prop: "paving-meander", at: [x * T, 29 * T - 3] },
+  ]),
+  ...[12, 14, 16, 18, 20, 22].flatMap((y): Prop[] => [
+    { prop: "paving-meander-v", at: [23 * T - 3, y * T] },
+    { prop: "paving-meander-v", at: [26 * T - 3, y * T] },
+  ]),
   // The paving's medallion before the monument, and its meander along the stoa's apron.
   { prop: "paving-inlay", at: [31 * T + 8, 24 * T + 4] },
   ...Array.from(
@@ -728,6 +813,8 @@ const map: MapSource = {
         drift: { to: [WOUND_AT[0] + 20, WOUND_AT[1] + dy / 2], period: 4, phase },
       }),
     ),
+    // Steam off the cook's pot.
+    { prop: "steam", anim: "rise", play: true, at: [36 * T + 6, 49 * T - 6] },
     // The cook's smoke.
     { prop: "smoke", anim: "rise", play: true, at: [36 * T + 4, 48 * T + 6] },
     {
@@ -739,6 +826,15 @@ const map: MapSource = {
     },
   ],
   emitters: [
+    // Pigeons going up off the paving as the messenger runs through them.
+    {
+      sprite: "pigeon-fly",
+      anim: "fly",
+      area: { x: 30 * T, y: 22 * T, w: 7 * T, h: 4 * T },
+      count: 3,
+      life: 3,
+      velocity: [-22, -38],
+    },
     // Pages of the notebook still lifting out of the wound and blowing across the square.
     {
       sprite: "page-m",
@@ -768,7 +864,7 @@ const map: MapSource = {
     main: { tile: [WOUND[0] + 8, WOUND[1]], facing: "right" },
     "campus-field": { tile: [WOUND[0] + 8, WOUND[1]], facing: "right" },
     "p1-colonnade": { tile: [69, 28], facing: "left" },
-    "p1-agora-edge": { tile: [2, 45], facing: "right" },
+    "p1-agora-edge": { tile: [3, 44], facing: "right" },
   },
   landmark: { name: "채색 주랑", tile: [STOA.x + STOA.bays, STOA.steps - 2] },
   blocks: [{ x: STOA.x - 1, y: STOA.steps - 4, w: STOA.bays * 2 + 2, h: 4 }],
@@ -813,9 +909,13 @@ const map: MapSource = {
     // Where the hub's helpers stand when an escort notice is up.
     "pythagorean-junior": [38, 39],
     "lyceum-scribe": [36, 10],
-    "survey-helper": [16, 16],
+    "survey-helper": [18, 15],
     // Townspeople at what they do.
-    potter: [STREET.east + 7, STREET.y + 4],
+    potter: [STREET.east + 7, STREET.y + 5],
+    "barber-chair": [42, 49],
+    sleeper: [21, 8],
+    sophist: [27, 29],
+    sundial: SUNDIAL,
     barber: [43, 49],
     cook: [37, 50],
     "argument-a": [44, 40],
@@ -823,12 +923,65 @@ const map: MapSource = {
     children: [28, 50],
     "fish-seller": [65, 24],
   },
+  walks: [
+    // The water-carrier, down from the fountain to the street and back with a full jar.
+    {
+      id: "water",
+      walker: "agora-water",
+      route: [
+        [48, 38],
+        [49, 43],
+        [49, 49],
+        [40, 49],
+      ],
+      loop: "pingpong",
+      speed: 0.9,
+      pause: 3,
+    },
+    // The messenger, across the square from the wound's side to the colonnade road and back.
+    {
+      id: "messenger",
+      walker: "agora-messenger",
+      route: [
+        [16, 25],
+        [36, 25],
+        [45, 28],
+        [60, 28],
+      ],
+      loop: "pingpong",
+      speed: 2.4,
+      pause: 1,
+    },
+  ],
   npcs: [
-    { speaker: "aristotle", tile: [STOA.x + STOA.bays, STOA.steps + 2], facing: "down" },
-    { speaker: "zeno", tile: [61, 29], facing: "right" },
-    { speaker: "pythagoreans", tile: [41, 37], facing: "down" },
+    // The minds freed from their books, at their spots once their boss is freed.
+    { speaker: "aristotle-freed", tile: [STOA.x + STOA.bays, STOA.steps + 2], facing: "down" },
+    { speaker: "zeno", tile: [61, 27], facing: "right" },
+    { speaker: "pythagoreans", tile: [39, 37], facing: "down" },
     { speaker: "aristarchus", tile: [GNOMON[0] - 1, GNOMON[1] + 1], facing: "right" },
-    { speaker: "guard", tile: [6, 41], facing: "right" },
+    { speaker: "guard", tile: [20, 42], facing: "left" },
+    // The order under the vines, its youngest, and the one keeping an eye on the beans.
+    { speaker: "pythagorean-order", tile: [36, 37], facing: "right" },
+    { speaker: "pythagorean-junior", tile: [38, 39], facing: "down" },
+    { speaker: "pythagorean-bean", tile: [43, 42], facing: "right" },
+    // The other two helpers waiting for their escort.
+    { speaker: "lyceum-scribe", tile: [36, 10], facing: "down" },
+    { speaker: "survey-helper", tile: [18, 15], facing: "left" },
+    // Townspeople at their work.
+    { speaker: "agora-potter", tile: [STREET.east + 7, STREET.y + 5], facing: "left" },
+    { speaker: "agora-barber", tile: [43, 49], facing: "left" },
+    { speaker: "agora-customer", tile: [42, 49], facing: "down" },
+    { speaker: "agora-cook", tile: [37, 50], facing: "down" },
+    { speaker: "agora-pointer", tile: [44, 40], facing: "right" },
+    { speaker: "agora-counter", tile: [46, 40], facing: "left" },
+    { speaker: "agora-children", tile: [28, 50], facing: "right" },
+    { speaker: "agora-fishmonger", tile: [65, 24], facing: "left" },
+    { speaker: "agora-sleeper", tile: [21, 8], facing: "down" },
+    // The sophist by the sundial and the three he is talking at.
+    { speaker: "agora-sophist", tile: [27, 29], facing: "down" },
+    { speaker: "crowd-a", tile: [26, 31], facing: "up" },
+    { speaker: "crowd-b", tile: [28, 31], facing: "up" },
+    { speaker: "crowd-c", tile: [29, 30], facing: "left" },
   ],
 };
 

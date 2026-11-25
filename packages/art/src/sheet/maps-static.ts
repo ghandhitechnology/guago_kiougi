@@ -2,11 +2,18 @@
  * Maps on the static sheet: each map whole at ×1, a screen at ×3 around each spawn and the
  * landmark, and the overlay view at ×2.
  */
-import type { BuiltMap } from "@guago/content";
+import { type BuiltMap, CAST_ART, patrolPose } from "@guago/content";
 import type { Atlas } from "../build/emit.ts";
 import { COLORS, colorIndex, hexToRgb } from "../palette.ts";
 import { Rgba } from "../raster.ts";
-import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
+import {
+  type Actor,
+  type Doll,
+  renderScene,
+  type SceneAtlas,
+  type SceneDef,
+  type SceneMeta,
+} from "../scene.ts";
 import { drawText } from "./font.ts";
 import { mapViews, overlay } from "./map-view.ts";
 import type { Fonts } from "./static.ts";
@@ -28,6 +35,38 @@ function scaled(src: Rgba, x: number, y: number, w: number, h: number, k: number
   return out;
 }
 
+/**
+ * The map as it is lived in: its scene, plus everyone the game stands in it, each in their cast
+ * art at their spot (idle), and every patrol and walk's walker where their round starts. The
+ * server places these at run time; the sheet shows them so a map is judged with its people.
+ */
+function peopled(map: BuiltMap): SceneDef {
+  const people: (Actor | Doll)[] = [];
+  const who = (id: string, x: number, y: number, facing: string, anim: string) => {
+    const cast = CAST_ART[id];
+    if (!cast) return;
+    const flip = facing === "left";
+    const dir = facing === "up" ? "up" : facing === "down" ? "down" : "side";
+    if (cast.kind === "rig")
+      people.push({ rig: cast.art, dir, anim, play: true, at: [x, y], flip });
+    else people.push({ actor: cast.art, anim: "idle", play: true, at: [x, y], flip });
+  };
+  for (const n of map.npcs) who(n.speaker, n.x, n.y, n.facing, "idle");
+  for (const r of [...map.patrols, ...(map.walks ?? [])]) {
+    const pose = patrolPose(r, 0);
+    const facing =
+      Math.abs(Math.cos(pose.facing)) > 0.7
+        ? Math.cos(pose.facing) < 0
+          ? "left"
+          : "right"
+        : Math.sin(pose.facing) < 0
+          ? "up"
+          : "down";
+    who(r.walker, pose.x, pose.y + 4, facing, "walk");
+  }
+  return { ...(map.scene as SceneDef), objects: [...(map.scene.objects ?? []), ...people] };
+}
+
 export function mapSheets(
   f: Fonts,
   meta: SceneMeta,
@@ -39,7 +78,7 @@ export function mapSheets(
   );
   const out: Record<string, Rgba> = {};
   for (const map of maps) {
-    const img = renderScene(map.scene, meta, pixels, 0);
+    const img = renderScene(peopled(map), meta, pixels, 0);
     for (const w of img.warnings) console.warn(`${map.id}: ${w}`);
     const whole = new Rgba(img.w, img.h);
     whole.data.set(img.data);

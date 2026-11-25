@@ -17,6 +17,13 @@ describe("server config", () => {
     expect(() => assertServable(readConfig(deployed))).toThrow(/ALLOW_MAP_OPTION/);
   });
 
+  it("refuses development commands anywhere but local development", () => {
+    const dev = { GUAGO_DEV_COMMANDS: "1" };
+    expect(() => assertServable(readConfig({ ...dev, NODE_ENV: "development" }))).not.toThrow();
+    const deployed = { ...dev, CLIENT_ORIGIN: "https://game.example", SERVER_SECRET: "k" };
+    expect(() => assertServable(readConfig(deployed))).toThrow(/GUAGO_DEV_COMMANDS/);
+  });
+
   it("keeps cookies Secure for any https origin", () => {
     expect(readConfig({ NODE_ENV: "development" }).secureCookies).toBe(false);
     expect(readConfig({}).secureCookies).toBe(true);
