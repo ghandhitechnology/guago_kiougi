@@ -110,7 +110,7 @@ export class MapRoom extends Room<{ state: MapState }> {
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: MoveInput) => {
       const pawn = this.pawns.get(client.sessionId);
-      if (pawn && !pawn.queue.push(input)) this.metrics.inputsDropped++;
+      if (pawn) this.metrics.inputsDropped += pawn.queue.push(input);
     });
 
     // Patches go out right after each step, so every patch is exactly one tick of the world.
