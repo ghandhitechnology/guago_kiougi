@@ -13,12 +13,12 @@ import {
 import { inventory } from "../state/inventory.ts";
 import { Button } from "../ui/button.ts";
 import { ItemCard } from "../ui/item-card.ts";
-import { CELL, type CellItem, dragGhost, ItemCell } from "../ui/item-cell.ts";
+import { CELL, type CellItem, dragGhost, ItemCell, wellFrame } from "../ui/item-cell.ts";
 import { ItemGrid } from "../ui/item-grid.ts";
 import { RedPen } from "../ui/marks.ts";
-import { stamp, turnPage } from "../ui/motion.ts";
+import { fade, stamp, turnPage } from "../ui/motion.ts";
 import { sound } from "../ui/sound.ts";
-import { Label, wrap } from "../ui/text.ts";
+import { Label, measure, wrap } from "../ui/text.ts";
 import { paint } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
 import { onGone, opRefusal, SaidLine, walletRow } from "./common.ts";
@@ -27,9 +27,10 @@ import { type StationArg, type StationKind, StationView } from "./stations.ts";
 
 /**
  * 가방 (PLAN §8): what is worn on the left, books over tools, with the inspector under them for
- * whatever was picked; the bag on the right by kind; the wallet along the bottom. An item goes on
- * by its button or by dragging it to a slot, and comes off the same ways. Every change to an item
- * starts from the inspector, which names the obvious next action in ink.
+ * whatever was picked: the item large in its well with its name, its power and 필기, its line,
+ * and its actions along the foot of the page; the bag on the right by kind; the wallet along the
+ * bottom. An item goes on by its button or by dragging it to a slot, and comes off the same ways.
+ * Every change to an item starts from the inspector, which names the obvious next action in ink.
  */
 
 type Kind = "book" | "tool" | "material" | "snack";
@@ -42,13 +43,16 @@ export interface BagHost {
 }
 
 const COLS = 9;
-const ROWS = 5;
+const ROWS = 6;
 const PITCH = CELL + 2;
 /** Worn books from the left edge, a pencil line, then worn tools; the bag starts past them. */
 const BOOKS_X = 6;
 const RULE_X = BOOKS_X + 3 * PITCH + 2;
 const TOOLS_X = RULE_X + 4;
 const LEFT_W = TOOLS_X + 3 * PITCH + 4;
+/** The inspector under the worn wells, and where in it the item's line starts. */
+const INSPECTOR_Y = 4 + 2 * PITCH + 8;
+const DESC_Y = 2 * CELL + 22;
 
 export class BagView {
   readonly root: Phaser.GameObjects.Container;
@@ -60,6 +64,8 @@ export class BagView {
   private readonly grid: ItemGrid;
   private readonly card: ItemCard;
   private readonly inspector: Phaser.GameObjects.Container;
+  /** The picked item's line; the school's answer takes its place while it is said. */
+  private desc: Phaser.GameObjects.BitmapText | undefined;
   private readonly said: SaidLine;
   private readonly kindTabs: { kind: Kind; button: Button; mark: Phaser.GameObjects.Rectangle }[] =
     [];
@@ -115,16 +121,13 @@ export class BagView {
     this.root.add(this.pen.gfx);
 
     // The inspector: the picked item, its facts and what can be done with it.
-    this.inspector = s.add.container(6, 4 + 2 * PITCH + 8);
+    this.inspector = s.add.container(6, INSPECTOR_Y);
     this.root.add(this.inspector);
-    // What the school says back sits under the wells, above the wallet, clear of the inspector.
-    this.said = new SaidLine(
-      s,
-      this.root,
-      LEFT_W + 6,
-      20 + ROWS * PITCH + 20,
-      size.w - LEFT_W - 12,
-    );
+    // What the school says back to an action stands where the item's line was, by the buttons.
+    this.said = new SaidLine(s, this.root, 6, INSPECTOR_Y + DESC_Y + 1, LEFT_W - 10);
+    this.said.onShow = (on) => {
+      if (this.desc?.active) fade(this.desc, on ? 0 : 1, on ? 80 : 200);
+    };
 
     // The bag: kinds as words along the top, the wells under them.
     let kx = LEFT_W + 6;
@@ -265,58 +268,36 @@ export class BagView {
   private drawInspector(): void {
     const s = this.ctx.scene;
     this.inspector.removeAll(true);
+    this.desc = undefined;
     const p = this.pick;
     if (!p) return;
     const w = LEFT_W - 10;
-    let y = 0;
     const add = (o: Phaser.GameObjects.GameObject) => this.inspector.add(o);
     const actions: { id: string; label: string; ink?: boolean; run: () => void }[] = [];
+    let well: CellItem;
+    let name: string;
+    let nameInk = "ink.dark";
+    const facts: [string, string][] = [];
+    let text = "";
     if ("item" in p) {
       const it = inventory.item(p.item);
       if (!it) return;
       const good = itemGood(it);
-      const name = new Label(s, 0, y, good.name, {
-        font: "galmuri11-bold",
-        color: it.kind === "book" ? (GRADE_INK[it.grade] ?? "ink.dark") : "ink.dark",
-        width: w,
-      });
-      add(name.obj);
-      y += name.height + 2;
-      const facts =
-        it.kind === "book"
-          ? [
-              gradeName(it.grade),
-              `Lv ${it.level}`,
-              ...(it.pilgi > 0 ? [`${t("bag.pilgi")} +${it.pilgi}`] : []),
-            ]
-          : [`Lv ${it.level} / ${TOOL_MAX_LEVEL}`];
-      add(new Label(s, 0, y, facts.join(" · "), { font: "galmuri9", color: "ink.mid" }).obj);
-      y += 12;
+      well = this.cellOf(it) as CellItem;
+      name = good.name;
+      text = good.desc;
       if (it.kind === "book") {
-        add(
-          new Label(s, 0, y, `${t("bag.power")} ${bookPower(it).toLocaleString("en-US")}`, {
-            font: "galmuri9",
-            color: "ink.dark",
-          }).obj,
-        );
-        y += 12;
-      }
-      y += this.description(good.desc, y, w);
+        nameInk = GRADE_INK[it.grade] ?? "ink.dark";
+        facts.push([gradeName(it.grade), nameInk], [`Lv ${it.level}`, "ink.mid"]);
+      } else facts.push([`Lv ${it.level} / ${TOOL_MAX_LEVEL}`, "ink.mid"]);
       this.itemActions(it, actions);
+      if (it.kind === "book") this.powerRow(it);
     } else {
       const good = materialGood(p.stack);
-      add(
-        new Label(s, 0, y, good.name, { font: "galmuri11-bold", color: "ink.dark", width: w }).obj,
-      );
-      y += 15;
-      add(
-        new Label(s, 0, y, `× ${inventory.count(p.stack).toLocaleString("en-US")}`, {
-          font: "galmuri9",
-          color: "ink.mid",
-        }).obj,
-      );
-      y += 12;
-      y += this.description(good.desc, y, w);
+      well = { icon: good.icon };
+      name = good.name;
+      text = good.desc;
+      facts.push([`× ${inventory.count(p.stack).toLocaleString("en-US")}`, "ink.mid"]);
       if (p.stack.startsWith("sheet:")) {
         actions.push({
           id: "bind",
@@ -334,41 +315,112 @@ export class BagView {
         });
       }
     }
-    // The actions, the obvious next one in ink, as many rows as they need.
-    let bx = 0;
-    let by = y;
-    const firstInk = actions.findIndex((a) => a.ink);
-    actions.forEach((a, i) => {
-      const b = new Button(this.ctx, bx, by, {
-        label: a.label,
-        kind: i === Math.max(0, firstInk) ? "ink" : "paper",
-        font: "galmuri9",
-        h: 17,
-        onPress: a.run,
-      });
-      if (bx > 0 && bx + b.size().w > w) {
-        bx = 0;
-        by += 20;
-        b.setPosition(bx, by);
-      }
-      bx += b.size().w + 4;
-      b.setEnabled(!this.pending);
-      this.inspector.add(b);
+    // The item large in its well, its name and what it is beside it.
+    const big = 2 * CELL;
+    if (well.grade !== undefined)
+      add(s.add.image(0, 0, "ui", wellFrame(well.grade)).setOrigin(0).setScale(2));
+    add(
+      s.add
+        .image(big / 2, big / 2, "ui", well.icon)
+        .setOrigin(0.5)
+        .setScale(2),
+    );
+    const nameLabel = new Label(s, big + 6, 3, name, {
+      font: "galmuri11-bold",
+      color: nameInk,
+      width: w - big - 6,
     });
-  }
-
-  /** An item's whole bag line under its facts; returns the height it took. */
-  private description(text: string, y: number, w: number): number {
-    if (!text) return 0;
-    const rows = wrap(this.ctx.scene, "galmuri9", text, w);
-    this.inspector.add(
-      new Label(this.ctx.scene, 0, y + 1, rows.join("\n"), {
+    add(nameLabel.obj);
+    let fx = big + 6;
+    const fy = 3 + nameLabel.height + 1;
+    for (const [i, [fact, color]] of facts.entries()) {
+      if (i > 0) {
+        add(new Label(s, fx, fy, "·", { font: "galmuri9", color: "stone.mid" }).obj);
+        fx += 8;
+      }
+      const l = new Label(s, fx, fy, fact, { font: "galmuri9", color });
+      add(l.obj);
+      fx += l.width + 4;
+    }
+    // The actions along the foot of the page, the obvious next one in ink.
+    const foot = this.size.h - INSPECTOR_Y - 18;
+    const firstInk = actions.findIndex((a) => a.ink);
+    const buttons = actions.map(
+      (a, i) =>
+        new Button(this.ctx, 0, 0, {
+          label: a.label,
+          kind: i === Math.max(0, firstInk) ? "ink" : "paper",
+          font: "galmuri9",
+          h: 17,
+          onPress: a.run,
+        }),
+    );
+    const rows: Button[][] = [[]];
+    let bx = 0;
+    for (const b of buttons) {
+      if (bx > 0 && bx + b.size().w > w) {
+        rows.push([]);
+        bx = 0;
+      }
+      rows[rows.length - 1]?.push(b);
+      bx += b.size().w + 4;
+    }
+    rows.forEach((row, r) => {
+      let x = 0;
+      for (const b of row) {
+        b.setPosition(x, foot - (rows.length - 1 - r) * 20);
+        x += b.size().w + 4;
+        b.setEnabled(!this.pending);
+        this.inspector.add(b);
+      }
+    });
+    // The item's line fills what is between, in as many rows as it needs.
+    if (text) {
+      const lines = wrap(s, "galmuri9", text, w);
+      // A book's power row stands over it; anything else starts right under its name.
+      const top = "item" in p && inventory.item(p.item)?.kind === "book" ? DESC_Y : big + 8;
+      const room = Math.max(1, Math.floor((foot - (rows.length - 1) * 20 - 4 - top) / 13));
+      const shown = lines.length > room ? fitLines(s, lines, room, w) : lines;
+      const d = new Label(s, 0, top + 1, shown.join("\n"), {
         font: "galmuri9",
         color: "stone.dark",
         leading: 1,
-      }).obj,
-    );
-    return rows.length * 13 + 3;
+      });
+      add(d.obj);
+      this.desc = d.obj;
+      if (this.said.root.length > 0) d.obj.setAlpha(0);
+    }
+  }
+
+  /** A book's power, large, and its 필기 in red pen at the right, between its name and its line. */
+  private powerRow(it: ItemView): void {
+    const s = this.ctx.scene;
+    const w = LEFT_W - 10;
+    const y = 2 * CELL + 6;
+    const label = new Label(s, 0, y + 2, t("bag.power"), { font: "galmuri9", color: "stone.dark" });
+    const value = new Label(s, label.width + 4, y, bookPower(it).toLocaleString("en-US"), {
+      font: "galmuri11-bold",
+      color: "ink.dark",
+    });
+    this.inspector.add([label.obj, value.obj]);
+    if (it.pilgi > 0) {
+      const pen = new Label(s, 0, y, `+${it.pilgi}`, { font: "galmuri11-bold", color: "red.mid" });
+      pen.at(w - pen.width, y);
+      const word = new Label(s, 0, y + 2, t("bag.pilgi"), { font: "galmuri9", color: "red.dark" });
+      word.at(w - pen.width - 4 - word.width, y + 2);
+      this.inspector.add([word.obj, pen.obj]);
+    }
+    const note = it.evolved
+      ? { text: t("bag.evolved"), color: "gold.deep" }
+      : this.evolveReady(it)
+        ? { text: t("bag.evolveReady"), color: "red.dark" }
+        : undefined;
+    // Beside the facts under the name, where there is room for it.
+    if (note) {
+      const n = new Label(s, 0, 0, note.text, { font: "galmuri9", color: note.color });
+      n.at(w - n.width, 2 * CELL - 9);
+      this.inspector.add(n.obj);
+    }
   }
 
   private itemActions(
@@ -620,6 +672,18 @@ export class BagView {
     }
     this.redraw();
   }
+}
+
+/** Lines cut to `room` rows, the last ending in an ellipsis at a whole word where it can. */
+function fitLines(scene: Phaser.Scene, lines: string[], room: number, w: number): string[] {
+  const kept = lines.slice(0, room);
+  let last = kept[room - 1] ?? "";
+  while (last && measure(scene, "galmuri9", `${last}…`) > w) {
+    const cut = last.lastIndexOf(" ");
+    last = cut > 0 ? last.slice(0, cut) : last.slice(0, -1);
+  }
+  kept[room - 1] = `${last}…`;
+  return kept;
 }
 
 function firstSentence(text: string): string {

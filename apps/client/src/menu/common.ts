@@ -48,6 +48,8 @@ export class SaidLine {
   private readonly scene: Phaser.Scene;
   private readonly w: number;
   private timer: Phaser.Time.TimerEvent | undefined;
+  /** Told when a line comes and when it has gone, for a page that makes room for it. */
+  onShow: ((showing: boolean) => void) | undefined;
 
   constructor(
     scene: Phaser.Scene,
@@ -60,12 +62,20 @@ export class SaidLine {
     this.w = w;
     this.root = scene.add.container(x, y);
     parent.add(this.root);
+    onGone(this.root, () => {
+      this.timer?.remove();
+      this.onShow = undefined;
+    });
   }
 
   say(line: Spoken | undefined, color = "ink.mid", ms = 4200): void {
     this.timer?.remove();
     this.root.removeAll(true);
-    if (!line) return;
+    if (!line) {
+      this.onShow?.(false);
+      return;
+    }
+    this.onShow?.(true);
     let x = 0;
     // A speaker the art has a face for delivers the line with it, in a small pasted frame.
     const face = `portrait-${line.voice}/neutral`;
@@ -100,12 +110,16 @@ export class SaidLine {
     this.root.setAlpha(0).setX(rest.x + 3);
     slide(this.root, rest, 120);
     fade(this.root, 1, 120);
-    this.timer = this.scene.time.delayedCall(ms, () => fade(this.root, 0, 300));
+    this.timer = this.scene.time.delayedCall(ms, () =>
+      fade(this.root, 0, 300, () => this.onShow?.(false)),
+    );
   }
 
   clear(): void {
+    const was = this.root.length > 0;
     this.timer?.remove();
     this.root.removeAll(true);
+    if (was) this.onShow?.(false);
   }
 }
 

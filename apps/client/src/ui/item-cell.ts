@@ -1,6 +1,5 @@
 import * as Phaser from "phaser";
 import { sound } from "./sound.ts";
-import { Label } from "./text.ts";
 import { type Ctx, Widget } from "./widget.ts";
 
 /**
@@ -38,6 +37,16 @@ export interface ItemCellOptions {
 
 export const CELL = 24;
 const GRADES = ["textbook", "reference", "advanced", "major", "original"] as const;
+
+/** A stack count that fits a well: every digit up to 99999, then whole 만. */
+function short(n: number): string {
+  return n < 100000 ? String(n) : `${Math.floor(n / 10000)}만`;
+}
+
+/** The `ui` frame of a well: the grade's frame for a book, else the plain well. */
+export function wellFrame(grade?: number): string {
+  return grade !== undefined ? `item/${GRADES[grade] ?? "textbook"}` : "item-empty/idle";
+}
 /** How long a finger rests before the card shows on a phone. */
 const LONG_PRESS_MS = 380;
 
@@ -45,10 +54,9 @@ export class ItemCell extends Widget {
   private readonly back: Phaser.GameObjects.Image;
   private readonly icon: Phaser.GameObjects.Image;
   private readonly ring: Phaser.GameObjects.Image;
-  private readonly countShadow: Label;
-  private readonly countText: Label;
-  private readonly badgeShadow: Label;
-  private readonly badgeText: Label;
+  private readonly countText: Phaser.GameObjects.BitmapText;
+  /** The corner badge in the outlined gold digits of the `badge` font, drawn as it is. */
+  private readonly badgeText: Phaser.GameObjects.BitmapText;
   private readonly pin: Phaser.GameObjects.Image;
   private readonly lock: Phaser.GameObjects.Image;
   private readonly opts: ItemCellOptions;
@@ -67,10 +75,8 @@ export class ItemCell extends Widget {
     this.back = scene.add.image(0, 0, "ui", "item-empty/idle").setOrigin(0);
     this.icon = scene.add.image(CELL / 2, CELL / 2, "ui", "icon/page").setVisible(false);
     this.ring = scene.add.image(-4, -4, "ui", "item-select/idle").setOrigin(0).setVisible(false);
-    this.countShadow = new Label(scene, 0, 0, "", { font: "galmuri9", color: "ink.deep" });
-    this.countText = new Label(scene, 0, 0, "", { font: "galmuri9", color: "stone.bright" });
-    this.badgeShadow = new Label(scene, 3, 3, "", { font: "galmuri9", color: "ink.deep" });
-    this.badgeText = new Label(scene, 2, 2, "", { font: "galmuri9", color: "gold.light" });
+    this.countText = scene.add.bitmapText(0, 0, "count", "").setOrigin(0);
+    this.badgeText = scene.add.bitmapText(0, 0, "badge", "").setOrigin(0);
     this.pin = scene.add
       .image(CELL - 6, 1, "ui", "pin/npc")
       .setOrigin(0)
@@ -79,10 +85,8 @@ export class ItemCell extends Widget {
     this.add([
       this.back,
       this.icon,
-      this.countShadow.obj,
-      this.countText.obj,
-      this.badgeShadow.obj,
-      this.badgeText.obj,
+      this.countText,
+      this.badgeText,
       this.pin,
       this.lock,
       this.ring,
@@ -138,14 +142,10 @@ export class ItemCell extends Widget {
         .setFrame(item.icon)
         .setOrigin(0.5)
         .setAlpha(item.dim ? 0.4 : 1);
-    const count = item?.count !== undefined && item.count > 1 ? String(item.count) : "";
-    this.countText.set(count);
-    this.countShadow.set(count);
-    const cw = this.countText.width;
-    this.countText.at(CELL - 2 - cw, CELL - 9);
-    this.countShadow.at(CELL - 1 - cw, CELL - 8);
-    this.badgeText.set(item?.badge ?? "");
-    this.badgeShadow.set(item?.badge ?? "");
+    const count = item?.count !== undefined && item.count > 1 ? short(item.count) : "";
+    this.countText.setText(count);
+    this.countText.setPosition(CELL - this.countText.width, CELL - 8);
+    this.badgeText.setText(item?.badge ?? "");
     this.pin.setVisible(!!item?.worn);
     this.lock.setVisible(locked);
     return this;

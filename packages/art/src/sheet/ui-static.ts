@@ -13,7 +13,7 @@ import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import type { CompiledSprite } from "../sprite.ts";
 import { type BmFont, measure, parseBmFont, place } from "./bmfont.ts";
-import { FONT_SAMPLES, KIT, NUMERAL_SAMPLES, SHEET } from "./ui-content.ts";
+import { FONT_SAMPLES, KIT, NUMERAL_FONTS, SHEET } from "./ui-content.ts";
 import { type Kit, type Op, type Screen, shadePixels, sliceRects, swept } from "./ui-ops.ts";
 import { screens } from "./ui-screens.ts";
 
@@ -256,22 +256,22 @@ export function fontSheet(kit: StaticKit): Rgba {
     }
     s.y += 16;
   }
-  head(s, kit, "damage numerals");
+  head(s, kit, "numerals");
   for (const scale of [1, 3]) {
     let x = 24;
     let rowH = 0;
-    for (const font of ["dmg-small", "dmg-small-crit", "dmg", "dmg-crit"]) {
+    for (const [font, samples] of NUMERAL_FONTS) {
       const bm = kit.fonts.get(font);
       if (!bm) continue;
-      const w = Math.max(...NUMERAL_SAMPLES.map((t) => measure(bm, t))) + 8;
-      const h = NUMERAL_SAMPLES.length * (bm.lineHeight + 2) + 8;
+      const w = Math.max(...samples.map((t) => measure(bm, t))) + 8;
+      const h = samples.length * (bm.lineHeight + 2) + 8;
       if (x + w * scale > s.w - 24) {
         x = 24;
         s.y += rowH + 8;
         rowH = 0;
       }
       s.c.rect(x, s.y, w * scale, h * scale, rgb(SHEET.ground));
-      NUMERAL_SAMPLES.forEach((t, i) => {
+      samples.forEach((t, i) => {
         drawOp(
           s.c,
           kit,
