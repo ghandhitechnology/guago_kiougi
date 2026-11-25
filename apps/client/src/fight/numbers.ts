@@ -99,6 +99,8 @@ export class DamageNumbers {
    * same target in quick succession add to the one already showing.
    */
   show(target: number, x: number, y: number, amount: number, style: NumberStyle): void {
+    // A tick of damage over time can be a fraction; a number that would read 0 is not shown,
+    // but it still adds to a number already growing on that target.
     if (amount <= 0) return;
     const merges = style !== NumberStyle.Hurt && style !== NumberStyle.Heal;
     let n: Num | undefined;
@@ -127,6 +129,7 @@ export class DamageNumbers {
       n.text.setText(formatKorean(n.amount));
       return;
     }
+    if (amount < 1) return;
     // A plain hit over the frame's budget only shows when it stands out.
     const standout =
       style === NumberStyle.Crit || style === NumberStyle.Hurt || amount > this.average * 2;
