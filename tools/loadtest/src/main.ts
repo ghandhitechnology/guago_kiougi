@@ -12,6 +12,7 @@ import {
   Predictor,
   TICK_MS,
 } from "@guago/shared";
+import { signIn } from "./account.ts";
 import { startNetsim } from "./netsim.ts";
 
 /**
@@ -21,6 +22,10 @@ import { startNetsim } from "./netsim.ts";
  *
  *   pnpm --filter @guago/loadtest start --bots 80 --seconds 60 --url ws://localhost:2601
  *   … --latency 150 --jitter 30 --loss 0.01   runs every bot through a simulated mobile link
+ *
+ * Bots sign in through the HTTP API as bot0001, bot0002 … and make their characters on first
+ * use, so the server needs a database and a signup limit above the bot count
+ * (SIGNUPS_PER_IP_PER_DAY).
  */
 
 const { values } = parseArgs({
@@ -154,13 +159,15 @@ const quantile = (xs: number[], q: number) => {
 };
 const fixed = (v: number, d = 1) => v.toFixed(d);
 
-console.log(`joining ${BOTS} bots at ${url}`);
+console.log(`signing in and joining ${BOTS} bots at ${url}`);
 const bots: Bot[] = [];
 for (let i = 0; i < BOTS; i++) {
+  const cookie = await signIn(`http://${target.host}`, i + 1);
   // A join can lose a race with a keep-alive close on a slow link; a player would retry too.
   for (let attempt = 1; ; attempt++) {
     try {
-      bots.push(new Bot(await new Client(url).joinOrCreate(MAP_ROOM, {}, MapState)));
+      const client = new Client(url, { headers: { cookie } });
+      bots.push(new Bot(await client.joinOrCreate(MAP_ROOM, {}, MapState)));
       break;
     } catch (err) {
       if (attempt === 3) throw err;
