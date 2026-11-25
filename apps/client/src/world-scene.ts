@@ -331,6 +331,8 @@ export class WorldScene extends Phaser.Scene {
       this.here?.fight.setTier(t);
     });
     enteredMap(this, map.id);
+    // The cast's atlases load with the map: their animations are made now, before anyone stands.
+    createSpriteAnims(this, this.meta);
     const npcs = new Map<string, NpcActor>();
     for (const [key, n] of room.state.npcs) {
       const art = npcArt(this.meta, n.speaker);
