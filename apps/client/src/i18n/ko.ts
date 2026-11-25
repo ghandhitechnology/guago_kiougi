@@ -129,4 +129,6 @@ export const ko = {
   "error.id_required": "아이디를 적어 주십시오.",
   "error.code_required": "복구 코드를 적어 주십시오.",
   "error.name_required": "이름을 적어 주십시오.",
+
+  "world.channel": "{n}채널",
 } as const;
