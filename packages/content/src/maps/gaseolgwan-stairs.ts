@@ -80,10 +80,11 @@ const riftSpill = (x: number, row: number): Light => ({
 
 const glow = (x: number, y: number): LightSource => ({
   at: [x, y],
-  radius: 28,
-  color: "grass.pale",
-  intensity: 0.35,
-  paint: { bands: ["campus-glow"], at: [x, y + 10], r: [26, 14], ragged: 2 },
+  radius: 40,
+  color: "grass.light",
+  intensity: 0.8,
+  flicker: { amount: 0.04, period: 1.7 },
+  paint: { bands: ["campus-glow"], at: [x, y + 52], r: [40, 22], ragged: 2 },
 });
 
 const lights: LightSource[] = [
@@ -97,9 +98,9 @@ const lights: LightSource[] = [
   ].map(
     ([x, row]): LightSource => ({
       at: [x as number, mountY(row as number) + 30],
-      radius: 70,
+      radius: 76,
       color: "clay.dust",
-      intensity: 0.7,
+      intensity: 1,
       flicker: { amount: 0.05, period: 2.2 },
       paint: riftSpill(x as number, row as number),
     }),
@@ -131,7 +132,7 @@ const map: MapSource = {
   time: { clock: "23:41", phase: "night", weather: "clear" },
   theme: "campus-night",
   sky: "ink.deep",
-  ambient: { color: "navy.dark", intensity: 0.26 },
+  ambient: { color: "navy.dark", intensity: 0.22, unlit: "campus" },
   plan: PLAN,
   legend: {
     "#": { terrain: "terrazzo", solid: "#" },

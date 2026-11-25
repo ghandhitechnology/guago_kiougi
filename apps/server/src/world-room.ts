@@ -202,15 +202,17 @@ export class WorldRoom extends Room {
       send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
       blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
     });
-    this.unlisten = places.listen((characterId, mapId) => {
+    this.unlisten = places.listen((characterId, mapId, channel) => {
       this.social?.moved(characterId);
       const member = this.byCharacter.get(characterId);
-      if (!member || member.entry.map === mapId) return;
+      if (!member || (member.entry.map === mapId && member.entry.ch === channel)) return;
       member.entry.map = mapId;
+      member.entry.ch = channel;
       this.broadcast(WORLD_MESSAGES.presence, {
         t: "map",
         id: characterId,
         map: mapId,
+        ch: channel,
       } satisfies PresenceMessage);
     });
     this.clock.setInterval(() => this.forget(), 60_000);
@@ -231,6 +233,7 @@ export class WorldRoom extends Room {
       major: character.major,
       level: character.level,
       map: places.get(character.id)?.mapId ?? "",
+      ch: places.get(character.id)?.channel ?? 0,
     };
     use().trading?.joined(character.id);
     const member: Member = { client, characterId: character.id, entry, answers: [] };
@@ -247,8 +250,11 @@ export class WorldRoom extends Room {
   // The close code cannot tell a kick from an ordinary drop: Colyseus closes a stale socket with
   // the same error code when its owner reconnects first. So kicks are remembered by session.
   override onDrop(client: Client): void {
+    // Only the character's current seat ends its trade window; an older one's drop must not.
     const dropped = this.members.get(client.sessionId);
-    if (dropped) use().trading?.left(dropped.characterId);
+    if (dropped && this.byCharacter.get(dropped.characterId) === dropped) {
+      use().trading?.left(dropped.characterId);
+    }
     if (this.kicked.has(client.sessionId) || !this.seats.mayReconnect(client)) return;
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
@@ -275,7 +281,8 @@ export class WorldRoom extends Room {
   override async onLeave(client: Client): Promise<void> {
     const member = this.members.get(client.sessionId);
     if (member) {
-      use().trading?.left(member.characterId);
+      if (this.byCharacter.get(member.characterId) === member)
+        use().trading?.left(member.characterId);
       this.members.delete(client.sessionId);
       // A newer seat of the same character may already be in (after the eviction wait ran out).
       if (this.byCharacter.get(member.characterId) === member) {

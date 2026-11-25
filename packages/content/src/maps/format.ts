@@ -45,6 +45,12 @@ export interface Ambient {
    * already paints the light in for the contact sheet (a night theme). Defaults to `theme`.
    */
   readonly unlit?: string;
+  /**
+   * A low sun the engine draws: the way shadows fall per pixel of height (the same vector the
+   * map's cast shadows are built from), and its colour. Sprites take a rim of it on the side
+   * facing it, entities throw long shadows away from it, and water past the edge glitters.
+   */
+  readonly sun?: { readonly dir: Vec; readonly color: string };
 }
 
 /**

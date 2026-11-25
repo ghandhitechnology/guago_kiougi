@@ -133,9 +133,7 @@ const tortoise: Actor = {
   shadow: "shadow-s/blob",
 };
 
-const lights: LightSource[] = [
-  { at: [W * T * 0.5, 0], radius: 1600, color: "gold.pale", intensity: 0.3 },
-];
+const lights: LightSource[] = [];
 
 const map: MapSource = {
   id: "p1-elea-track",
@@ -145,7 +143,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.pale",
-  ambient: { color: "gold.pale", intensity: 1.05 },
+  ambient: { color: "gold.pale", intensity: 1 },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [

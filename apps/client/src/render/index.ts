@@ -18,9 +18,10 @@
  * frame behind. Anything the game adds to the scene outside the view (names, damage numbers)
  * draws unlit and ungraded above the world at depth 1 or more.
  */
-export { loadMap, mapExists, unloadMap } from "./assets.ts";
+export { loadAtlases, loadMap, mapExists, unloadMap } from "./assets.ts";
 export {
   type EntityOptions,
+  type FlashSpec,
   LAYER_NAMES,
   type LayerName,
   type LightHandle,
@@ -29,6 +30,8 @@ export {
   MapView,
   type MapViewOptions,
   type RenderStats,
+  type TelegraphOptions,
+  type VisionCone,
 } from "./map-view.ts";
 export {
   clearQualityTier,

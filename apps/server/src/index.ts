@@ -13,6 +13,7 @@ import { provideLive, provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
+import { fightLoadoutChanged } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
@@ -37,7 +38,10 @@ const economy = createEconomy(db, {
   page: page.live,
   onLevel: (id, level) => worldRoom()?.setLevel(id, level),
   onChange: (id, change) => worldRoom()?.notify(id, change),
-  onApplied: (id, name, result) => live.onApplied(id, name, result),
+  onApplied: (id, name, result) => {
+    live.onApplied(id, name, result);
+    if (result.ok) fightLoadoutChanged(id, result.change);
+  },
   onCredit: (id, credit) => live.credit(id, credit),
 });
 const live = createLive(db, {
@@ -47,6 +51,7 @@ const live = createLive(db, {
   world: worldRoom,
   looks: studentLooks,
   testEvents: config.liveTestEvents,
+  adminSecret: config.serverSecret,
 });
 provideLive(live);
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
@@ -88,6 +93,7 @@ const server = createGameServer(
     live,
     trading,
   },
+  { channelSeats: config.channelSeats },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
@@ -111,7 +117,7 @@ startListingSweeper(
 setInterval(
   () => {
     auth.sweep().catch(() => {});
-    economy.prune().catch(() => {});
+    economy.prune(live.progress.inflightIds()).catch(() => {});
     void social.sweep();
   },
   10 * 60 * 1000,
