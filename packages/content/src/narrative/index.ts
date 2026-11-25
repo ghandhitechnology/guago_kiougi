@@ -14,6 +14,7 @@ import { QUESTS, QUESTS_KO } from "./quests.ts";
 import { REFUSALS_COPY } from "./refusals.ts";
 import type { CopyPart, Narrative, Strings } from "./schema.ts";
 import { SCHOOL_LIFE_COPY } from "./school-life.ts";
+import { SOCIAL_COPY } from "./social-lines.ts";
 import { SPEAKERS, SPEAKERS_KO } from "./speakers.ts";
 import { STUDY_DESCRIPTIONS, STUDY_KO, STUDY_TERMS } from "./study.ts";
 import { ANNOUNCEMENTS, AWARD_FRAME, AWARDS, SYSTEM, SYSTEM_KO } from "./system.ts";
@@ -30,7 +31,13 @@ function merge(...tables: Strings[]): Strings {
 }
 
 /** Live-world copy (급식, school rules, notices, refusals, social, trade, moderation). */
-const COPY: readonly CopyPart[] = [MEALS_COPY, SCHOOL_LIFE_COPY, HELP_COPY, REFUSALS_COPY];
+const COPY: readonly CopyPart[] = [
+  MEALS_COPY,
+  SCHOOL_LIFE_COPY,
+  HELP_COPY,
+  REFUSALS_COPY,
+  SOCIAL_COPY,
+];
 const parts = <K extends Exclude<keyof CopyPart, "ko">>(k: K) =>
   COPY.flatMap((p) => (p[k] ?? []) as NonNullable<CopyPart[K]>[number][]);
 
