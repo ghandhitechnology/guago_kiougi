@@ -51,6 +51,9 @@ import {
   questView,
 } from "./rows.ts";
 
+/** Operation ids are kept this long (`Economy.prune`); a retry comes within seconds. */
+export const OPERATION_DAYS = 30;
+
 /** `db` itself or an open transaction on it: anything that can run a statement. */
 export type Queryable = Pick<Db, "execute">;
 

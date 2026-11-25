@@ -6,13 +6,15 @@ import { sql } from "drizzle-orm";
 import type { ApiRoute } from "../auth/http.ts";
 import type { AuthService } from "../auth/service.ts";
 import type { Db } from "../db/index.ts";
-import { createExecutor, type ExecutorOptions, type Queryable } from "./executor.ts";
+import {
+  createExecutor,
+  type ExecutorOptions,
+  OPERATION_DAYS,
+  type Queryable,
+} from "./executor.ts";
 import { GrantBuffer } from "./grants.ts";
 import { createOpHandler, KIT_OPERATION_ID } from "./handler.ts";
 import { economyRoutes } from "./routes.ts";
-
-/** Operation ids are kept this long; a retry comes within seconds. */
-export const OPERATION_DAYS = 30;
 
 export function createEconomy(db: Db, options: ExecutorOptions = {}) {
   const executor = createExecutor(db, options);
