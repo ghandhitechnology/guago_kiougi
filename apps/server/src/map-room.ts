@@ -1,8 +1,9 @@
 import { type AuthContext, type Client, Room } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { LAWN, type MapDef } from "@guago/content";
+import { LAWN } from "@guago/content";
 import {
   addPlayer,
+  type Character,
   type Collidable,
   createWorld,
   dressPlayer,
@@ -29,11 +30,17 @@ import {
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
+import { type RoomMap, roomMapFor } from "./room-maps.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
 
-/** Messages a second past which a client is dropped; inputs are 20 a second. */
-const MAX_MESSAGES_PER_SECOND = 120;
+/**
+ * Messages a second past which a client is dropped. Inputs come 20 a second, but a link that
+ * stalls delivers all it held at once, and the server drops a link silent for more than about
+ * nine seconds anyway: 400 lets every stall the connection survives through, and the input queue
+ * already bounds what a burst can buy.
+ */
+const MAX_MESSAGES_PER_SECOND = 400;
 /** How often each room logs its numbers. */
 const LOG_EVERY_MS = 30_000;
 /**
@@ -64,7 +71,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
   override maxClients = MAP_SEATS;
 
-  private def: MapDef = LAWN;
+  private def: RoomMap = LAWN;
   private map!: Collidable;
   private world!: SimWorld;
   private grid!: InterestGrid;
@@ -81,13 +88,8 @@ export class MapRoom extends Room<{ state: MapState }> {
     return authenticateJoin(ctx);
   }
 
-  /** The map this room runs. */
-  protected mapDef(): MapDef {
-    return LAWN;
-  }
-
-  override onCreate(): void {
-    this.def = this.mapDef();
+  override onCreate(options?: { map?: unknown; monsters?: unknown }): void {
+    this.def = roomMapFor(options);
     this.map = this.def;
     const { w, h } = this.def.collision;
     if (w * TILE_SIZE > MAX_MAP_PX || h * TILE_SIZE > MAX_MAP_PX) {
@@ -147,12 +149,30 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override async onJoin(client: Client): Promise<void> {
     const character = await this.seats.join(client);
+    try {
+      this.seat(client, character);
+    } catch (error) {
+      // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
+      this.unseat(client);
+      await this.seats.leave(client);
+      throw error;
+    }
+  }
+
+  /** Puts a joined character's body into the world and the client's view around it. */
+  private seat(client: Client, character: Character): void {
     const id = client.sessionId;
     const start = this.startOf(character.mapId, character.x, character.y);
+    const view = new StateView();
+    client.view = view;
     const slot = this.free.shift();
     const state = slot === undefined ? undefined : this.state.players.get(slot);
-    if (slot === undefined || !state)
+    if (slot === undefined || !state) {
       throw new Error("no free body; maxClients should have refused the join");
+    }
+    // Recorded at once, so unseat finds and frees the slot whatever fails below.
+    const viewer: Viewer = { view, cell: undefined };
+    this.pawns.set(id, { slot, state, viewer, queue: new InputQueue() });
     this.world = addPlayer(this.world, id, start.x, start.y);
     const player = this.world.players.at(-1);
     if (!player) throw new Error("player was not added");
@@ -162,12 +182,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.facing = player.facing;
     state.seq = 0;
     dressPlayer(state, character);
-
-    const view = new StateView();
-    client.view = view;
     view.add(state, OWNER_TAG);
-    const viewer: Viewer = { view, cell: undefined };
-    this.pawns.set(id, { slot, state, viewer, queue: new InputQueue() });
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
@@ -177,6 +192,23 @@ export class MapRoom extends Room<{ state: MapState }> {
       sessionId: id,
       at: () => this.placeOf(id),
     });
+  }
+
+  /** Takes a body out of the world and every view, and frees its slot. */
+  private unseat(client: Client): void {
+    const id = client.sessionId;
+    places.leave(id);
+    const pawn = this.pawns.get(id);
+    if (pawn) {
+      this.grid.watch(pawn.viewer, undefined);
+      this.grid.remove(pawn.state);
+      pawn.state.sid = "";
+      this.pawns.delete(id);
+      this.free.push(pawn.slot);
+    }
+    this.world = removePlayer(this.world, id);
+    client.view?.dispose();
+    this.metrics.forget(id);
   }
 
   override onDrop(client: Client): void {
@@ -195,18 +227,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     places.leave(client.sessionId);
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
-    const id = client.sessionId;
-    const pawn = this.pawns.get(id);
-    if (pawn) {
-      this.grid.watch(pawn.viewer, undefined);
-      this.grid.remove(pawn.state);
-      pawn.state.sid = "";
-      this.pawns.delete(id);
-      this.free.push(pawn.slot);
-    }
-    this.world = removePlayer(this.world, id);
-    client.view?.dispose();
-    this.metrics.forget(id);
+    this.unseat(client);
   }
 
   override onDispose(): void {

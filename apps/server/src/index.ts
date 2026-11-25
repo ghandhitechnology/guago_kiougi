@@ -6,6 +6,7 @@ import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { studentLooks } from "./looks.ts";
+import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 
 assertServable(config);
@@ -25,4 +26,5 @@ await server.listen(config.port);
 // The one WorldRoom exists from the start, so two first joins can never make two.
 await matchMaker.createRoom(WORLD_ROOM, {});
 setInterval(() => auth.sweep().catch(() => {}), 10 * 60 * 1000).unref();
-console.log(`game server on :${config.port}`);
+await serveMetrics(config.metricsPort);
+console.log(`game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}`);
