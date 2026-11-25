@@ -42,12 +42,14 @@ export interface MapLinkTransport {
 }
 
 /**
- * In development, `?map=<id>` asks to be seated on that map; the server honours it only when it
- * runs with ALLOW_MAP_OPTION=1, and ignores it everywhere else.
+ * In development, `?map=<id>` (or the test shortcut's `?fight=<id>`) asks to be seated on that
+ * map; the server honours it only when it runs with ALLOW_MAP_OPTION=1, and ignores it everywhere
+ * else.
  */
 const devChoice = (): Record<string, unknown> => {
   if (!import.meta.env?.DEV) return {};
-  const map = new URLSearchParams(location.search).get("map");
+  const q = new URLSearchParams(location.search);
+  const map = q.get("map") ?? q.get("fight");
   return map ? { map } : {};
 };
 
