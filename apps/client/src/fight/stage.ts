@@ -10,7 +10,7 @@
  */
 import { Client, type Room } from "@colyseus/sdk";
 import { audio } from "@guago/audio";
-import { mapById } from "@guago/content";
+import { BOOKS, mapById } from "@guago/content";
 import {
   API,
   encodeInput,
@@ -41,6 +41,14 @@ const NAMES: Readonly<Record<string, string>> = {
   chemistry: "무대화학",
   biology: "무대생명",
   earth: "무대지구",
+};
+/** The stage's students one step from evolving (`moment=1`): V sends the `evolve` operation. */
+const MOMENT_NAMES: Readonly<Record<string, string>> = {
+  math: "승급수학",
+  physics: "승급물리",
+  chemistry: "승급화학",
+  biology: "승급생명",
+  earth: "승급지구",
 };
 /** The stage's students whose books are worn evolved (`evolved=1`). */
 const EVOLVED_NAMES: Readonly<Record<string, string>> = {
@@ -89,8 +97,9 @@ async function signIn(
   cls: string,
   meta: ReturnType<typeof artMetadata>,
   evolved: boolean,
+  moment: boolean,
 ): Promise<WorldEntry> {
-  const loginId = evolved ? `evo_${cls}` : `stage_${cls}`;
+  const loginId = moment ? `pre_${cls}` : evolved ? `evo_${cls}` : `stage_${cls}`;
   const password = `stage-${cls}-fights-well`;
   let me = await call("GET", API.me);
   const mine = me.status === 200 && (me.body.account as { loginId?: string })?.loginId === loginId;
@@ -106,7 +115,7 @@ async function signIn(
     const i = MAJORS.indexOf(cls as (typeof MAJORS)[number]);
     const pick = (xs: readonly string[], k: number) => xs[(i * 3 + k) % xs.length] as string;
     const made = await call("POST", API.character, {
-      name: (evolved ? EVOLVED_NAMES[cls] : NAMES[cls]) ?? "무대",
+      name: (moment ? MOMENT_NAMES[cls] : evolved ? EVOLVED_NAMES[cls] : NAMES[cls]) ?? "무대",
       major: cls,
       look: {
         body: pick(o.body, 0),
@@ -177,9 +186,11 @@ export class FightStage extends Phaser.Scene {
   private async start(tier: Tier): Promise<void> {
     const cls = this.params.get("cls") ?? "math";
     const evolved = this.params.get("evolved") === "1";
-    const entry = await signIn(cls, artMetadata(this), evolved);
+    const moment = this.params.get("moment") === "1";
+    const entry = await signIn(cls, artMetadata(this), evolved, moment);
     const bots = Number(this.params.get("bots") ?? 0);
-    const follow = encodeURIComponent((evolved ? EVOLVED_NAMES[cls] : NAMES[cls]) ?? "");
+    const name = moment ? MOMENT_NAMES[cls] : evolved ? EVOLVED_NAMES[cls] : NAMES[cls];
+    const follow = encodeURIComponent(name ?? "");
     await fetch(`/__fight/bots?n=${bots}&follow=${follow}`).catch(() => undefined);
     const client = new Client(ROOMS_PATH);
     const room = await client.joinOrCreate(MAP_ROOM, {}, MapState);
@@ -225,8 +236,43 @@ export class FightStage extends Phaser.Scene {
       items.filter((i) => i.kind === "book" && i.slot !== null && i.evolved).map((i) => i.def),
     );
     if (this.params.get("hud") !== "0") bindHud(this, this.fight, entry);
+    // Development only: V evolves the first worn book that can, through the real operation.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyV" && !e.repeat) void this.evolveOne();
+    };
+    window.addEventListener("keydown", onKey);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
+      window.removeEventListener("keydown", onKey),
+    );
     if (this.params.get("readout") === "1") this.makeReadout();
     this.expose();
+  }
+
+  /** Sends `evolve` for the first worn book whose linked tool is in the bag; the fight marks it. */
+  private async evolveOne(): Promise<void> {
+    const inv = await call("GET", API.inventory);
+    const items = (inv.body.items ?? []) as {
+      id: string;
+      kind: string;
+      def: string;
+      slot: number | null;
+      evolved: boolean;
+    }[];
+    for (const book of items) {
+      if (book.kind !== "book" || book.slot === null || book.evolved) continue;
+      const linked = BOOKS.find((b) => b.id === book.def)?.tool;
+      const tool = items.find((i) => i.kind === "tool" && i.def === linked);
+      if (!tool) continue;
+      const res = await call("POST", API.op, {
+        id: crypto.randomUUID(),
+        op: "evolve",
+        req: { item: book.id, tool: tool.id },
+      });
+      if (res.status === 200 && (res.body as { ok?: boolean }).ok !== false) {
+        this.fight?.evolve(book.def);
+        return;
+      }
+    }
   }
 
   override update(time: number, delta: number): void {

@@ -140,6 +140,8 @@ export class FightView {
   private readonly lastCast: number[] = [];
   private rollAt = -1e9;
   private readonly ghosts: Phaser.GameObjects.Sprite[] = [];
+  /** The local player's evolved books, by rules index. */
+  private readonly evolvedBooks: number[] = [];
   /** 중화's shield around the player while it holds. */
   private bubble: Phaser.GameObjects.Sprite | null = null;
   private readonly trail: { x: number; y: number }[] = [];
@@ -955,12 +957,40 @@ export class FightView {
    * own casts are drawn evolved until the effect records carry the flag themselves.
    */
   setEvolved(bookIds: readonly string[]): void {
-    const set: number[] = [];
+    this.evolvedBooks.length = 0;
     for (const id of bookIds) {
       const i = this.cat.rules.books.indexOf(id);
-      if (i >= 0) set.push(i);
+      if (i >= 0) this.evolvedBooks.push(i);
     }
-    this.effects.setEvolved(set);
+    this.effects.setEvolved(this.evolvedBooks);
+  }
+
+  /**
+   * One of the local player's books just evolved (its `evolve` operation succeeded): the moment
+   * is marked on the player, a pillar of light and the 전직 fanfare, and its casts take the
+   * evolved form from now on.
+   */
+  evolve(bookId: string): void {
+    const i = this.cat.rules.books.indexOf(bookId);
+    if (i >= 0 && !this.evolvedBooks.includes(i)) this.evolvedBooks.push(i);
+    this.effects.setEvolved(this.evolvedBooks);
+    const cat = this.cat;
+    const x = this.ctx.selfX;
+    const y = this.ctx.selfY;
+    const color = cat.book(Math.max(0, i), true).color;
+    this.ctx.sound.self("jingle.jeonjik");
+    this.ctx.trauma.add(0.35);
+    this.ctx.lights.flash(x, y - 12, color, 90, 1.6, 900);
+    this.effects.oneShot("fx-levelup", "fx-levelup/burst", x, y, 1);
+    this.effects.oneShot("fx-qed-big", "fx-qed-big/burst", x, y - 18, 0.8);
+    this.ctx.particles.burst(Bit.Mote, x, y - 12, 28, color, 70, 0);
+    this.ctx.particles.burst(Bit.Spark, x, y - 12, 16, cat.color("stone.bright"), 160, 0);
+    const self = this.bodies.self;
+    if (self) {
+      self.flash = 4;
+      self.flashMode = 0;
+      this.bodies.kick(self, -1.6);
+    }
   }
 
   /** Changes the quality tier: particle caps, other players' restraint, the lights kept. */
