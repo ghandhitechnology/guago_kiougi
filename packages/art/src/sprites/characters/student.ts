@@ -827,6 +827,16 @@ const raise = `
   ...121.
   ....111
 `;
+/** The raise turned over: an arm flung out low and wide when a hit lands. */
+const fling = `
+  ....111
+  ...121.
+  ..121..
+  .454...
+  454....
+  O%O....
+  .O.....
+`;
 /** Upper arm pointing away from the camera, forearm hidden. */
 export const away = `
   11.
@@ -840,6 +850,7 @@ const armR: Piece = {
   down: {
     ...armLit,
     raise: { at: [1, 8], grid: raise },
+    fling: { at: [1, 14], grid: fling },
     strike: {
       at: [6, 14],
       grid: `
@@ -878,6 +889,7 @@ const armR: Piece = {
   up: {
     ...armShade,
     raise: { at: [16, 8], grid: mirror(raise) },
+    fling: { at: [16, 14], grid: mirror(fling) },
     strike: { at: [15, 14], grid: away },
     follow: { at: [15, 14], grid: away },
     read: { at: [15, 14], grid: away },
@@ -902,14 +914,26 @@ const armR: Piece = {
       `,
     },
     follow: { at: [8, 14], grid: armSide.fwd },
+    mouth: {
+      at: [9, 10],
+      grid: `
+        .........O.
+        ........O%O
+        ......4454.
+        111111454..
+        12222254...
+        1111114....
+      `,
+    },
     read: {
       at: [9, 14],
       grid: `
-        .11...
-        .121..
-        ..1454
-        ...O%O
-        ....O.
+        1111......
+        1211......
+        1214444O%O
+        12555555O.
+        11444444..
+        111111....
       `,
     },
   },
@@ -920,6 +944,7 @@ const armL: Piece = {
   down: {
     ...armShade,
     raise: { at: [16, 8], grid: mirror(raise) },
+    fling: { at: [16, 14], grid: mirror(fling) },
     mouth: {
       at: [13, 10],
       grid: `
@@ -945,6 +970,7 @@ const armL: Piece = {
   up: {
     ...armLit,
     raise: { at: [1, 8], grid: raise },
+    fling: { at: [1, 14], grid: fling },
     read: { at: [6, 14], grid: mirror(away) },
     mouth: { at: [6, 14], grid: mirror(away) },
   },
@@ -1079,7 +1105,7 @@ const blazer = garment(
       NNNNNNNN
     `,
     side: `
-      NNNwmN
+      NNwwmN
       NVvwmN
       NVvVmN
       NvvVrN
@@ -1121,9 +1147,9 @@ const shirt = garment(
       GGGGGGGG
     `,
     side: `
-      GGGwmG
+      GGwwmG
       GwpwmG
-      GwpprG
+      GwppmG
       GwpprG
       GwpprG
       GwpprG
@@ -1276,6 +1302,16 @@ const textbook = withKo(
               TTTT
             `,
           },
+          fly: {
+            at: [1, 1],
+            grid: `
+              ..TT..
+              .TUuT.
+              TUuuuT
+              TyyuT.
+              .TTT..
+            `,
+          },
           read0: {
             at: [9, 13],
             grid: `
@@ -1339,6 +1375,16 @@ const textbook = withKo(
             `,
           },
           follow: ".",
+          fly: {
+            at: [18, 1],
+            grid: `
+              ..TT..
+              .TttT.
+              TttttT
+              .TttT.
+              ..TT..
+            `,
+          },
           read0: ".",
           read1: ".",
           read2: ".",
@@ -1379,6 +1425,41 @@ const textbook = withKo(
               .TTTTT.
             `,
           },
+          read0: {
+            at: [18, 10],
+            grid: `
+              ..TT
+              .TwT
+              TwwT
+              TUuT
+              TUuT
+              TTTT
+            `,
+          },
+          read1: {
+            at: [18, 8],
+            grid: `
+              ..T.
+              .TwT
+              .TwT
+              .TTT
+              TwwT
+              TUuT
+              TUuT
+              TTTT
+            `,
+          },
+          read2: {
+            at: [18, 10],
+            grid: `
+              TT..
+              TwT.
+              TwwT
+              TUuT
+              TUuT
+              TTTT
+            `,
+          },
         },
       },
     },
@@ -1398,9 +1479,13 @@ export const walkArms = (d: Dir, lead: "R" | "L") => {
     : { legR: "lift", armR: "fwd", armL: "back", hand: [0, 1] };
 };
 
-/** Only the front view shows the book held up and a page turning; elsewhere the head dips. */
+/** The book held up and a page turning; from behind only the head dips. */
 const page = (d: Dir, book: string) =>
-  d === "down" ? { armR: "read", armL: "read", hand: book, head: "read" } : { head: "read" };
+  d === "down"
+    ? { armR: "read", armL: "read", hand: book, head: "read" }
+    : d === "side"
+      ? { armR: "read", hand: book, head: "read" }
+      : { head: "read" };
 
 const lean = (d: Dir): Vec => (d === "side" ? [1, 0] : d === "down" ? [0, 1] : [0, -1]);
 
@@ -1452,7 +1537,14 @@ export default rig({
     hit: (d) =>
       d === "side"
         ? { torso: [-1, 0], hand: [-1, 0], head: "hurt" }
-        : { torso: [0, -1], hand: [0, -1], head: "hurt" },
+        : {
+            torso: [0, -1],
+            armR: "fling",
+            armL: "raise",
+            [d === "down" ? "legR" : "legL"]: "lift",
+            hand: "fly",
+            head: "hurt",
+          },
     ko: {
       ground: "ko",
       armL: "ko",
@@ -1466,11 +1558,11 @@ export default rig({
     },
     yawn0: (d) =>
       d === "side"
-        ? { head: "yawn" }
+        ? { armR: "mouth", head: "yawn" }
         : { armR: "raise", armL: "raise", hand: "raise", head: "yawn" },
     yawn1: (d) =>
       d === "side"
-        ? { torso: [0, -1], head: "yawn", tail: [0, 1], hand: [0, -1] }
+        ? { torso: [0, -1], armR: "mouth", head: "yawn", tail: [0, 1], hand: [0, -1] }
         : {
             torso: [0, -1],
             armR: "raise",
