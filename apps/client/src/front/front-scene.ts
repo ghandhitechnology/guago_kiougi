@@ -141,6 +141,12 @@ export class FrontScene extends Phaser.Scene implements Flow {
     }
     this.session = null;
     this.title();
+    // The next student starts from a clean sheet.
+    const creator = this.screens.get("creator");
+    if (creator instanceof CreatorScreen) {
+      this.screens.delete("creator");
+      this.time.delayedCall(400, () => creator.dispose());
+    }
   }
 
   get account() {

@@ -179,8 +179,8 @@ export class Modal {
     this.scope.onBack = back;
     pushScope(this.scope);
     this.panel.open();
-    // The safe choice (the last one drawn, leftmost) takes focus first.
-    this.scope.focus(buttons.at(-1) ?? buttons[0]);
+    // The last action, drawn rightmost, is the one to keep going with; it takes focus first.
+    this.scope.focus(buttons[0]);
   }
 
   close(done?: () => void): void {

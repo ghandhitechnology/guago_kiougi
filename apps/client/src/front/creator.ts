@@ -465,10 +465,14 @@ export class CreatorScreen extends Screen {
     for (const o of [this.stage, this.plate, this.lookPanel, this.majorPanel, this.center])
       o.setVisible(false);
     scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
-    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
-      releaseDoll(scene, this.lookKey);
-    });
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, this.letGo, this);
+  }
+
+  /** Stops ticking and hands back the look's texture. */
+  private letGo(): void {
+    this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
+    this.scene.events.off(Phaser.Scenes.Events.SHUTDOWN, this.letGo, this);
+    releaseDoll(this.scene, this.lookKey);
   }
 
   protected enter(): void {
@@ -514,6 +518,15 @@ export class CreatorScreen extends Screen {
 
   protected override firstFocus() {
     return this.list;
+  }
+
+  /** Destroys everything the creator drew, for the next account to start from a clean sheet. */
+  dispose(): void {
+    this.tips.hide();
+    this.letGo();
+    for (const o of [this.stage, this.plate, this.lookPanel, this.majorPanel, this.center]) {
+      o.destroy();
+    }
   }
 
   /** The look as the API stores it. */

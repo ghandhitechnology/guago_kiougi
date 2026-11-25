@@ -240,6 +240,14 @@ export class SignupScreen extends FormScreen {
     this.go = this.submitButton(t("signup.submit"), () => void this.submit());
   }
 
+  /** Every 입학 원서 starts blank. */
+  protected override enter(): void {
+    this.id.value = "";
+    this.password.value = "";
+    this.age.checked = false;
+    super.enter();
+  }
+
   private async submit(): Promise<void> {
     const loginId = this.id.value.trim();
     if (!loginId) {
