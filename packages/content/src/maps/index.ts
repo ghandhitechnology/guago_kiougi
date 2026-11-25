@@ -6,6 +6,7 @@ import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 import { checkCutsceneMarks, checkIndoor } from "./indoor.ts";
 import lounge from "./lounge.ts";
+import silheom from "./silheom.ts";
 
 export * from "./build.ts";
 export * from "./buildings.ts";
@@ -18,7 +19,7 @@ export * from "./props.ts";
 export * from "./stamp.ts";
 
 // Campus life: the 급식실, the lounge, 실험동, 새벽관 and home.
-const CAMPUS_LIFE: readonly MapSource[] = [cafeteria, lounge];
+const CAMPUS_LIFE: readonly MapSource[] = [cafeteria, lounge, silheom];
 
 /** Every map written in the map format, in contact-sheet order. */
 export const MAP_SOURCES: readonly MapSource[] = [campusYard, campusField, ...CAMPUS_LIFE];
