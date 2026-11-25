@@ -4,7 +4,7 @@ import { refusal, type Spoken } from "../copy/lines.ts";
 import { amount } from "../items/catalog.ts";
 import { inventory } from "../state/inventory.ts";
 import { fade, slide } from "../ui/motion.ts";
-import { Label, wrap } from "../ui/text.ts";
+import { Label, type LabelStyle, wrap } from "../ui/text.ts";
 import type { OpCall } from "../world-link.ts";
 
 /**
@@ -18,6 +18,18 @@ const speakers = new Map(narrative.NARRATIVE.speakers.map((s) => [s.id, s]));
 export function speakerName(voice: string): string {
   const s = speakers.get(voice);
   return s ? (narrative.NARRATIVE.ko[s.name] ?? "") : "";
+}
+
+/** A one-line label whose right edge sits at `right`. */
+export function rightLabel(
+  scene: Phaser.Scene,
+  right: number,
+  y: number,
+  text: string,
+  style: LabelStyle,
+): Label {
+  const l = new Label(scene, right, y, text, style);
+  return l.at(right - l.width, y);
 }
 
 /** The line an operation's refusal is answered with; undefined for a dropped connection. */
