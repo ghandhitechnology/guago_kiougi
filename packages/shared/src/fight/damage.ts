@@ -3,12 +3,10 @@ import {
   critMultiplier,
   elasticCollision,
   KNOCK_DECAY,
-  KNOCKOUT,
   killCredits,
   mitigate,
   PARTY_RANGE,
   rollCrit,
-  TAG_SHARE,
   ticks,
 } from "../combat.ts";
 import { TICK_RATE_HZ } from "../constants.ts";

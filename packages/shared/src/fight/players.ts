@@ -1,5 +1,4 @@
 import { KNOCKOUT, ticks } from "../combat.ts";
-import { TICK_RATE_HZ } from "../constants.ts";
 import type { MoveInput } from "../movement.ts";
 import { slide, snap } from "../movement.ts";
 import { AI, autoPlay } from "./auto.ts";

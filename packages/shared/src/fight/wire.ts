@@ -40,11 +40,11 @@ export const Leave = { Died: 0, Gone: 1, Moved: 2 } as const;
 
 /**
  * 2-bit member codes. A move is the step from the last position, two bytes, which the client
- * keeps taking every tick until told otherwise; an extra is a mask byte and the fields it names.
+ * keeps taking every tick until told otherwise; an extra (code 2, any other) is a mask byte and
+ * the fields it names.
  */
 const CODE_SAME = 0;
 const CODE_MOVE = 1;
-const CODE_EXTRA = 2;
 const CODE_FLASH = 3;
 
 /** Bits of an extra update. */

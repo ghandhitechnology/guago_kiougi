@@ -5,18 +5,24 @@
  * ends with the economy's invariant check, which includes the conduct ledger.
  */
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   type Character,
+  CLUB_EXP_FOR_NOTICE,
   catchUp,
   DAY_MS,
+  DEMERITS,
   HOUR_MS,
+  MERIT_TALLY_DAILY,
   MINUTE_MS,
   POOL,
   poolTerms,
 } from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { clubActivity } from "../club-activity.ts";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
+import type { ExecutorOptions } from "../economy/executor.ts";
 import { createEconomy } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { LiveClock } from "./clock.ts";
@@ -40,10 +46,22 @@ beforeEach(async () => {
   await db.pool.query("truncate accounts, server_state, notebook cascade");
 });
 afterEach(async () => {
+  for (const p of pools.splice(0)) await p.pool.end();
   expect((await checkInvariants(db)).violations).toEqual([]);
 });
 
-async function world() {
+/** Extra connection pools a test opened, closed after it. */
+const pools: Db[] = [];
+
+async function world(
+  o: {
+    listen?: (id: string, name: string) => void;
+    testEvents?: boolean;
+    secret?: string;
+    hooks?: ExecutorOptions["hooks"];
+  } = {},
+) {
+  const lines: string[] = [];
   const clock = new LiveClock({ realMs: 0, gameMs: T0, rate: 1 }, () => 0);
   const page = new PageClock(db, clock);
   await page.load(1);
@@ -51,11 +69,34 @@ async function world() {
   const economy = createEconomy(db, {
     now: () => clock.date(),
     page: page.live,
-    onApplied: (id, name, r) => live?.onApplied(id, name, r),
+    onApplied: (id, name, r) => {
+      o.listen?.(id, name);
+      live?.onApplied(id, name, r);
+    },
+    ...(o.hooks ? { hooks: o.hooks } : {}),
   });
-  live = createLive(db, { clock, page, economy, world: () => undefined, log: () => {} });
+  live = createLive(db, {
+    clock,
+    page,
+    economy,
+    world: () => ({ sendTo() {}, notify() {}, system: (l) => void lines.push(l.key) }),
+    log: () => {},
+    ...(o.testEvents ? { testEvents: true } : {}),
+    ...(o.secret ? { adminSecret: o.secret } : {}),
+  });
+  page.log = () => {};
   await page.tick();
-  return { clock, page, economy, live };
+  return { clock, page, economy, live, lines };
+}
+
+/**
+ * Another server process on the same database: its own connection pool and executor, so its
+ * operations race the first one's at the database's locks, not in one process's lane.
+ */
+function rival(w: World) {
+  const other = createDb(TEST_DATABASE_URL);
+  pools.push(other);
+  return createEconomy(other, { now: () => w.clock.date(), page: w.page.live }).executor;
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -137,9 +178,13 @@ describe("수행평가 board", () => {
     const quest = `daily:${day}:0`;
     await complete(w, c.id, quest);
 
+    // Three processes, two claims each: they meet at the database's character lock.
+    const executors = [w.economy.executor, rival(w), rival(w)];
     const results = await Promise.all(
-      Array.from({ length: 6 }, () =>
-        w.economy.executor.execute(c.id, randomUUID(), "quest.claim", { quest }),
+      Array.from({ length: 6 }, (_, i) =>
+        (executors[i % 3] as typeof w.economy.executor).execute(c.id, randomUUID(), "quest.claim", {
+          quest,
+        }),
       ),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(1);
@@ -225,7 +270,7 @@ describe("벌점 and 상점", () => {
     expect((await row(c.id)).demerits).toBe(3);
     await w.live.events.revive(c.id, friend.id);
     expect((await row(c.id)).demerits).toBe(2);
-    for (let i = 0; i < 3; i++) await w.live.events.cleaning(c.id);
+    for (let i = 0; i < 3; i++) await w.live.events.revive(c.id, friend.id);
     let r = await row(c.id);
     expect([r.demerits, r.merits]).toEqual([0, 4]);
     const wallet = await db.pool.query("select merit_points from wallets where character_id = $1", [
@@ -234,8 +279,11 @@ describe("벌점 and 상점", () => {
     // Four 상점 against three 벌점 left: one spare in the wallet.
     expect(wallet.rows[0].merit_points).toBe("1");
 
-    // Ten patrol catches at once: +2 each, sent home exactly once on reaching 20.
-    await Promise.all(Array.from({ length: 10 }, () => w.live.events.patrolCaught(c.id)));
+    // Ten patrol catches at once from two server processes: +2 each, home exactly once at 20.
+    const other = await world();
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => (i % 2 ? other : w).live.events.patrolCaught(c.id)),
+    );
     r = await row(c.id);
     expect([r.demerits, r.expulsions, r.patrol_catches]).toEqual([0, 1, 10]);
     expect(r.titles).toEqual(expect.arrayContaining(["went-home", "caught"]));
@@ -264,8 +312,7 @@ describe("자습 pool", () => {
     await w.live.left(c.id, "world", "s1", false);
     const started = (await row(c.id)).pool_started_at;
     expect(started).not.toBeNull();
-    // The same logout again is the same operation; a replaced seat is no logout at all.
-    await w.live.left(c.id, "world", "s1", false);
+    // A replaced seat is no logout at all.
     await w.live.left(c.id, "world", "s0", true);
     expect((await row(c.id)).pool_started_at).toEqual(started);
 
@@ -296,9 +343,415 @@ describe("자습 pool", () => {
     await w.live.joined(c, "world", "a");
     await w.live.left(c.id, "world", "a", false);
     expect((await row(c.id)).pool_place).toBe("dorm");
-    w.clock.step(HOUR_MS);
+    // Straight back in: no sleep, no 숙면.
+    w.clock.step(5 * MINUTE_MS);
     await w.live.joined(c, "world", "b");
+    expect((await row(c.id)).rested_until).toBeNull();
+    await w.live.left(c.id, "world", "b", false);
+    // A night's sleep: the full thirty minutes.
+    w.clock.step(7 * HOUR_MS);
+    await w.live.joined(c, "world", "c");
     const r = await row(c.id);
     expect(new Date(r.rested_until).getTime()).toBe(w.clock.now() + 30 * MINUTE_MS);
+  });
+});
+
+describe("operation ids", () => {
+  it("a replayed id is not heard again by the listeners", async () => {
+    const heard: string[] = [];
+    const w = await world({ listen: (_id, name) => heard.push(name) });
+    const c = await character(w);
+    await w.live.board.ensure(c.id);
+    const day = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    const quest = `weekly:${Math.floor((day + 3) / 7)}:0`;
+    await complete(w, c.id, quest);
+    clubActivity.take();
+    heard.length = 0;
+    const first = await w.economy.executor.execute(c.id, "claim-once", "quest.claim", { quest });
+    expect(first.ok).toBe(true);
+    for (let i = 0; i < 5; i++) {
+      const again = await w.economy.executor.execute(c.id, "claim-once", "quest.claim", { quest });
+      expect(again).toEqual(first);
+    }
+    expect(heard.filter((n) => n === "quest.claim")).toHaveLength(1);
+    expect(clubActivity.take().get(c.id)).toBe(CLUB_EXP_FOR_NOTICE.weekly);
+  });
+});
+
+describe("admin route", () => {
+  /** One request through the route as Node would hand it over. */
+  async function call(
+    w: World,
+    body: unknown,
+    o: { from?: string; headers?: Record<string, string> } = {},
+  ): Promise<{ status: number; body: string }> {
+    const req = Object.assign(new EventEmitter(), {
+      url: "/admin/live",
+      method: "POST",
+      headers: o.headers ?? {},
+      socket: { remoteAddress: o.from ?? "127.0.0.1" },
+      destroy() {},
+    });
+    return new Promise((resolve) => {
+      const res = {
+        statusCode: 200,
+        setHeader() {},
+        end(text = "") {
+          resolve({ status: res.statusCode, body: String(text) });
+        },
+      };
+      w.live.adminRoute(req as never, res as never, () => resolve({ status: -1, body: "" }));
+      req.emit("data", Buffer.from(JSON.stringify(body)));
+      req.emit("end");
+    });
+  }
+
+  it("takes only this machine's direct requests that carry the secret", async () => {
+    const w = await world({ secret: "s3cret" });
+    const bearer = { authorization: "Bearer s3cret" };
+    expect((await call(w, { cmd: "state" })).status).toBe(401);
+    expect(
+      (await call(w, { cmd: "state" }, { headers: { authorization: "Bearer nope" } })).status,
+    ).toBe(401);
+    expect((await call(w, { cmd: "state" }, { headers: bearer, from: "10.0.0.2" })).status).toBe(
+      404,
+    );
+    const proxied = { ...bearer, "x-forwarded-for": "203.0.113.9" };
+    expect((await call(w, { cmd: "state" }, { headers: proxied })).status).toBe(404);
+    expect((await call(w, { cmd: "state" }, { headers: bearer })).status).toBe(200);
+    // A live server only reads: the clock and the bosses stay where they are.
+    const before = w.clock.now();
+    for (const cmd of [
+      { cmd: "step", by: "1w" },
+      { cmd: "rate", rate: 9 },
+      { cmd: "free", boss: "pythagoreans" },
+      { cmd: "flush" },
+    ]) {
+      expect((await call(w, cmd, { headers: bearer })).status).toBe(400);
+    }
+    expect([w.clock.now(), w.clock.rate]).toEqual([before, 1]);
+    // A test server moves the clock with the same secret.
+    const t = await world({ secret: "s3cret", testEvents: true });
+    expect((await call(t, { cmd: "step", by: "1w" }, { headers: bearer })).status).toBe(200);
+    // No secret configured: the route is off.
+    const off = await world();
+    expect((await call(off, { cmd: "state" }, { headers: bearer })).status).toBe(404);
+  });
+});
+
+describe("개근상", () => {
+  it("a full daily board, claimed one notice at a time, counts toward the streak", async () => {
+    const w = await world();
+    const c = await character(w);
+    const day0 = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    for (const [n, day] of [day0, day0 + 1].entries()) {
+      await w.live.board.ensure(c.id);
+      for (let i = 0; i < 5; i++) {
+        const quest = `daily:${day}:${i}`;
+        await complete(w, c.id, quest);
+        const r = await w.economy.executor.execute(c.id, randomUUID(), "quest.claim", { quest });
+        expect(r.ok).toBe(true);
+      }
+      await until(async () => (await row(c.id)).board_streak === n + 1);
+      expect((await row(c.id)).board_streak_day).toBe(day);
+      w.clock.step(DAY_MS);
+    }
+  });
+});
+
+/** Waits for background work to land (the streak runs after the claim commits). */
+async function until(check: () => Promise<boolean>, ms = 3000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > end) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+describe("week turnover", () => {
+  /**
+   * Three players earn 상점 and one eats, then the clock jumps two board weeks. The turnover is
+   * cut at its k-th step (a fault that never returns: the process died there), or a paying
+   * transaction fails, and a fresh server takes over the same database.
+   */
+  async function scenario(crash: { at?: number; tx?: boolean }) {
+    await db.pool.query("truncate accounts, server_state, notebook cascade");
+    let calls = 0;
+    let hit = false;
+    const hooks: ExecutorOptions["hooks"] = {
+      beforeCommit(op) {
+        if (crash.tx && op.opId.startsWith("floor-leader:") && !hit) {
+          hit = true;
+          throw new Error("killed inside the transaction");
+        }
+      },
+    };
+    const a = await world({ hooks });
+    const [x, y, z] = [await character(a), await character(a), await character(a)];
+    for (const [c, n] of [
+      [x, 3],
+      [y, 2],
+      [z, 1],
+    ] as const) {
+      for (let i = 0; i < n; i++) await a.live.events.revive(c.id, c === x ? y.id : x.id);
+    }
+    expect(await a.live.events.eat(z.id)).toBe("ok");
+    a.clock.step(12 * DAY_MS);
+    await a.page.saveClock(a.clock.state);
+    a.page.fault = () => {
+      if (crash.at !== undefined && calls++ === crash.at) {
+        hit = true;
+        return new Promise<void>(() => {});
+      }
+    };
+    void a.page.tick();
+    await new Promise((r) => setTimeout(r, 300));
+    // A new process on the same database.
+    const b = await world();
+    return { hit, ids: [x.id, y.id, z.id], lines: [...a.lines, ...b.lines], b };
+  }
+
+  async function paidOnce(lines: string[], b: World): Promise<void> {
+    const rows = await db.pool.query("select week, character_id, paid from floor_leaders");
+    expect(rows.rows.length).toBeGreaterThan(0);
+    for (const r of rows.rows) {
+      expect(r.paid).toBe(true);
+      const paid = await db.pool.query(
+        "select count(*)::int as n from conduct_ledger where character_id = $1 and operation_id = $2 and reason = 'floor-leader'",
+        [r.character_id, `floor-leader:${r.week}`],
+      );
+      expect(paid.rows[0].n).toBe(1);
+    }
+    const all = await db.pool.query(
+      "select count(*)::int as n from conduct_ledger where reason = 'floor-leader'",
+    );
+    expect(all.rows[0].n).toBe(rows.rows.length);
+    const state = await db.pool.query("select last_day, last_week from server_state");
+    const now = b.clock.now();
+    expect(state.rows[0]).toEqual({
+      last_day: Math.floor((now + 4 * HOUR_MS) / DAY_MS),
+      last_week: Math.floor((Math.floor((now + 4 * HOUR_MS) / DAY_MS) + 3) / 7),
+    });
+    expect(lines).toContain("daily-reset");
+  }
+
+  it("pays every 층장 once and runs the day, wherever a crash cuts it", async () => {
+    let k = 0;
+    for (; ; k++) {
+      const run = await scenario({ at: k });
+      await paidOnce(run.lines, run.b);
+      const week1 = await db.pool.query(
+        "select character_id from floor_leaders where week = (select min(week) from floor_leaders) order by rank",
+      );
+      expect(week1.rows.map((r) => r.character_id)).toEqual(run.ids);
+      const titles = (await row(run.ids[2] as string)).titles as string[];
+      expect(titles.filter((t) => t === "ate-it-all")).toHaveLength(1);
+      if (!run.hit) break;
+    }
+    // Every step of two week turnovers and a day was cut at least once.
+    expect(k).toBeGreaterThan(8);
+  }, 120_000);
+
+  it("pays every 층장 once when a paying transaction fails", async () => {
+    const run = await scenario({ tx: true });
+    expect(run.hit).toBe(true);
+    await paidOnce(run.lines, run.b);
+  });
+});
+
+describe("상점 farming", () => {
+  const tally = async (id: string) =>
+    (
+      await db.pool.query(
+        "select coalesce(sum(n), 0)::int as n from weekly_tally where character_id = $1 and kind = 'merit'",
+        [id],
+      )
+    ).rows[0].n as number;
+
+  it("counts at most the daily cap of a reason toward 층장, and pays every point", async () => {
+    const w = await world();
+    const c = await character(w);
+    const friend = await character(w);
+    for (let i = 0; i < 9; i++) await w.live.events.revive(c.id, friend.id);
+    expect((await row(c.id)).merits).toBe(9);
+    expect(await tally(c.id)).toBe(MERIT_TALLY_DAILY.revive);
+    w.clock.step(DAY_MS);
+    await w.live.events.revive(c.id, friend.id);
+    expect(await tally(c.id)).toBe(MERIT_TALLY_DAILY.revive + 1);
+  });
+
+  it("pays a 도움 between the same two players once a day", async () => {
+    const w = await world();
+    const poster = await character(w, 1);
+    const helper = await character(w, 30);
+    const help = async () => {
+      const posted = await w.live.board.post(poster.id, "help-revive");
+      if ("refused" in posted) throw new Error(posted.refused);
+      expect(posted.result.ok).toBe(true);
+      expect(await w.live.board.take(helper.id, posted.notice)).toMatchObject({ ok: true });
+      w.live.progress.help(helper.id, helpQuestId(posted.notice), posted.notice);
+      await w.live.progress.flush(helper.id);
+      expect((await w.live.board.quest(helper.id, helpQuestId(posted.notice)))?.state).toBe(
+        "claimed",
+      );
+    };
+    await help();
+    await help();
+    expect((await row(helper.id)).merits).toBe(1);
+    expect(await ledgerCount(helper.id, "merit.help")).toBe(1);
+    w.clock.step(DAY_MS);
+    await help();
+    expect((await row(helper.id)).merits).toBe(2);
+  });
+
+  it("never counts a 층장's own +5 toward the next 층장", async () => {
+    const w = await world();
+    const c = await character(w);
+    const friend = await character(w);
+    await w.live.events.revive(c.id, friend.id);
+    w.clock.step(5 * DAY_MS);
+    await w.page.tick();
+    w.clock.step(7 * DAY_MS);
+    await w.page.tick();
+    const weeks = await db.pool.query("select week from floor_leaders where character_id = $1", [
+      c.id,
+    ]);
+    expect(weeks.rows).toHaveLength(1);
+    expect((await row(c.id)).merits).toBe(1 + 5);
+  });
+});
+
+describe("도움 notices", () => {
+  it("a helper can give a notice back: it opens again, unpaid, and they are free", async () => {
+    const w = await world();
+    const poster = await character(w, 1);
+    const other = await character(w, 2);
+    const helper = await character(w, 30);
+    const next = await character(w, 30);
+    const posted = await w.live.board.post(poster.id, "help-revive");
+    if ("refused" in posted) throw new Error(posted.refused);
+    expect(await w.live.board.take(helper.id, posted.notice)).toMatchObject({ ok: true });
+    expect(await w.live.board.drop(helper.id, posted.notice)).toMatchObject({ ok: true });
+    expect((await w.live.board.quest(helper.id, helpQuestId(posted.notice)))?.state).toBe(
+      "claimed",
+    );
+    expect((await w.live.board.notice(posted.notice))?.state).toBe("open");
+    // The helper may not take it back, someone else may, and the first helper is free for another.
+    expect(await w.live.board.take(helper.id, posted.notice)).toMatchObject({
+      ok: false,
+      error: "help_gone",
+    });
+    expect(await w.live.board.take(next.id, posted.notice)).toMatchObject({ ok: true });
+    const second = await w.live.board.post(other.id, "help-revive");
+    if ("refused" in second) throw new Error(second.refused);
+    expect(await w.live.board.take(helper.id, second.notice)).toMatchObject({ ok: true });
+    expect((await row(helper.id)).merits).toBe(0);
+  });
+});
+
+describe("sessions", () => {
+  const logout = (session: string) => ({
+    session,
+    place: "hub" as const,
+    measured: null,
+    floorLeader: false,
+  });
+
+  it("one logout raced from two processes under its id starts one pool", async () => {
+    const w = await world();
+    const c = await character(w);
+    expect(
+      (await w.economy.executor.execute(c.id, "login:s1", "live.login", { session: "s1" })).ok,
+    ).toBe(true);
+    const [a, b] = await Promise.all([
+      w.economy.executor.execute(c.id, "logout:s1", "live.logout", logout("s1")),
+      rival(w).execute(c.id, "logout:s1", "live.logout", logout("s1")),
+    ]);
+    expect(a).toEqual(b);
+    expect(a.ok).toBe(true);
+    const ops = await db.pool.query(
+      "select count(*)::int as n from operations where character_id = $1 and op_id = 'logout:s1'",
+      [c.id],
+    );
+    expect(ops.rows[0].n).toBe(1);
+  });
+
+  it("an old session's logout that lands after the new login starts no pool", async () => {
+    const w = await world();
+    const c = await character(w);
+    await w.live.joined(c, "world", "old");
+    // A new login on another process finishes while the old seat's leave is still on its way.
+    expect((await rival(w).execute(c.id, "login:new", "live.login", { session: "new" })).ok).toBe(
+      true,
+    );
+    w.clock.step(HOUR_MS);
+    await w.live.left(c.id, "world", "old", false);
+    expect((await row(c.id)).pool_started_at).toBeNull();
+  });
+});
+
+describe("board rows", () => {
+  it("are removed a week after they come down; story chapters stay", async () => {
+    const w = await world();
+    const c = await character(w);
+    await w.live.board.ensure(c.id);
+    const day = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    w.clock.step(3 * DAY_MS);
+    await w.live.board.ensure(c.id);
+    w.clock.step(6 * DAY_MS);
+    await w.live.board.sweep();
+    const ids = (
+      await db.pool.query("select quest_id from quest_progress where character_id = $1", [c.id])
+    ).rows.map((r) => r.quest_id as string);
+    expect(ids.some((id) => id.startsWith(`daily:${day}:`))).toBe(false);
+    expect(ids.some((id) => id.startsWith(`daily:${day + 3}:`))).toBe(true);
+    expect(ids.some((id) => id.startsWith("story:"))).toBe(true);
+  });
+});
+
+describe("청소 당번", () => {
+  it("is a daily notice that pays its 상점 once, when it is done", async () => {
+    const w = await world();
+    const c = await character(w);
+    w.live.events.cleaning(c.id);
+    await w.live.progress.flush(c.id);
+    expect((await row(c.id)).merits).toBe(0);
+    await w.live.board.ensure(c.id);
+    const day = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    const chore = await w.live.board.quest(c.id, `chore:${day}:cleaning`);
+    expect(chore?.offer.slots?.place).toBeTruthy();
+    for (let i = 0; i < 3; i++) {
+      w.live.events.cleaning(c.id);
+      await w.live.progress.flush(c.id);
+    }
+    expect((await w.live.board.quest(c.id, `chore:${day}:cleaning`))?.state).toBe("claimed");
+    expect((await row(c.id)).merits).toBe(1);
+    expect(await ledgerCount(c.id, "merit.cleaning")).toBe(1);
+  });
+});
+
+describe("chat strikes", () => {
+  it("book their 벌점 once per strike id, retried from anywhere, however late", async () => {
+    const w = await world();
+    const other = await world();
+    const c = await character(w);
+    const tries = await Promise.all([
+      w.live.events.chatStrike(c.id, "41"),
+      other.live.events.chatStrike(c.id, "41"),
+      w.live.events.chatStrike(c.id, "41"),
+    ]);
+    expect(tries).toEqual([true, true, true]);
+    expect((await row(c.id)).demerits).toBe(DEMERITS.chat);
+    // Two hours on, past the operation ids' retention, the same strike still counts once.
+    w.clock.step(2 * HOUR_MS);
+    expect(await w.live.events.chatStrike(c.id, "41")).toBe(true);
+    expect((await row(c.id)).demerits).toBe(DEMERITS.chat);
+    expect(await w.live.events.chatStrike(c.id, "42")).toBe(true);
+    expect((await row(c.id)).demerits).toBe(2 * DEMERITS.chat);
+    const rows = await db.pool.query(
+      "select operation_id from conduct_ledger where character_id = $1 order by id",
+      [c.id],
+    );
+    expect(rows.rows.map((r) => r.operation_id)).toEqual(["chat-strike:41", "chat-strike:42"]);
   });
 });

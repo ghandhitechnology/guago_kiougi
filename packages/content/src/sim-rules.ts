@@ -39,7 +39,6 @@ import { BOOKS, type BookDef, TOOLS, toolById } from "./books.ts";
 import {
   type ClassId,
   forecast,
-  MOMENTUM,
   momentumCollisionShare,
   momentumDamage,
   PROLIFERATION,

@@ -2,7 +2,6 @@ import { overlapsSolid } from "../collision.ts";
 import { PARTY_RANGE } from "../combat.ts";
 import { slide, snap } from "../movement.ts";
 import { blast, hitMonster, selfStatus, stampHit } from "./damage.ts";
-import { removeMonster } from "./monsters.ts";
 import { Kind, StatusOrder, type StatusPick, type Weapon } from "./rules.ts";
 import {
   type Effect,
@@ -11,7 +10,6 @@ import {
   FxKind,
   type Minion,
   MODE_AUTO,
-  Mode,
   type Monster,
   type Player,
 } from "./world.ts";

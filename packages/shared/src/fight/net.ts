@@ -18,7 +18,7 @@ import {
   WirePlayer,
   writeFx,
 } from "./wire.ts";
-import { type Effect, Ev, type FightWorld, FxKind, Gone, HitFlag, type Player } from "./world.ts";
+import { type Effect, Ev, type FightWorld, FxKind, Gone, type Player } from "./world.ts";
 
 const CELL_PX = SNAP_CELL_TILES * TILE_SIZE;
 /** An entity counts as in the next cell once it is this far past the edge (as the schema views). */
