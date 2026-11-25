@@ -158,7 +158,7 @@ function forest(k: number): Pic {
     return [w / 2 + Math.cos(a) * 54 * d, h / 2 + Math.sin(a) * 27 * d] as const;
   }).sort((p, q) => p[1] - q[1]);
   spots.forEach(([x, y], i) => {
-    if (i > [3, 6, 11, 11, 11][k]!) return;
+    if (i > ([3, 6, 11, 11, 11][k] as number)) return;
     const tall = i % 3 === 0 && k >= 2;
     const grid = (tall ? TREE : SAPLING).join("\n");
     put(pic, grid, x - 2, y - (tall ? 6 : 4) + (k === 4 && i % 2 ? -1 : 0));
