@@ -17,6 +17,7 @@ import {
   monsterKindIndex,
   type Patrol,
   patrolPose,
+  raidBoss,
   sees,
   simRules,
 } from "@guago/content";
@@ -74,7 +75,9 @@ import {
   PlayerState,
   POS_SCALE,
   RECONNECT_SECONDS,
+  REPLAY_MESSAGE,
   REVIVE_MESSAGE,
+  replayMessage,
   reviveMessage,
   SNAPSHOT_MESSAGE,
   sameModifiers,
@@ -109,6 +112,8 @@ import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { parties } from "./parties.ts";
 import { places } from "./places.ts";
+import { raids } from "./raid/current.ts";
+import { mayReplay, noteReplay } from "./raid/replay.ts";
 import { type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
 import {
@@ -452,6 +457,22 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       if (!pawn?.buckets.revive.take() || !target) return;
       this.between.push({ t: "revive", player: pawn.player.id, target: target.player.id });
     });
+    // 복습: a boss the server freed, again, alone, in a private copy of its arena (raid/replay.ts).
+    this.onMessage(REPLAY_MESSAGE, replayMessage, (client, boss) => {
+      const pawn = this.pawns.get(client.sessionId);
+      const def = raidBoss(boss);
+      const target = def && builtMap(def.map);
+      const now = Date.now();
+      if (!pawn || pawn.leaving || this.owner || !def || !target || !mayReplay(def)) return;
+      if (now - pawn.lastInteract < INTERACT_COOLDOWN_MS) return;
+      pawn.lastInteract = now;
+      noteReplay(pawn.character.id, this.def.id);
+      const arrive = spawnPlace(target, def.entrance);
+      background(
+        "replay",
+        this.carry(pawn, "replay", def.map, arrive, undefined, { boss: def.id }),
+      );
+    });
     if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
     // Patches and snapshots go out right after each step, so each is exactly one tick of the world.
@@ -572,10 +593,15 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const p = w.players[index];
       return p?.joined ? this.pawns.get(p.id) : undefined;
     };
+    let dealt = 0;
     for (let i = 0; i < w.eventCount; i++) {
       const e = w.events[i];
       if (!e) continue;
       switch (e.type) {
+        case Ev.Hit:
+          // The server's damage, which raid phases are sized from (PLAN §10 HP calibration).
+          if (e.a >= 0) dealt += e.d;
+          break;
         case Ev.Credit: {
           const pawn = of(e.a);
           const kind = w.rules.monsters[e.d];
@@ -608,6 +634,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
           break;
       }
     }
+    raids()?.dealt(dealt);
     for (const g of w.grants) {
       const pawn = this.pawns.get(g.player.id);
       const item = (g.drop.payload as Drop).item;
@@ -1262,6 +1289,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     mapId: string,
     arrive: { x: number; y: number; facing: Facing },
     roomId?: string,
+    /** A private copy made for the character (a 복습, raid/replay.ts). */
+    instance?: { boss: string },
   ): Promise<void> {
     const { client } = pawn;
     const id = client.sessionId;
@@ -1284,9 +1313,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     if (!this.clients.includes(client)) return;
     let seating: Awaited<ReturnType<typeof channels.seat>> | undefined;
     try {
-      seating = roomId
-        ? await channels.seatIn(mapId, roomId, auth, { facing: arrive.facing })
-        : await channels.seat(mapId, auth, { facing: arrive.facing });
+      seating = instance
+        ? await channels.instance(mapId, auth, { facing: arrive.facing }, instance)
+        : roomId
+          ? await channels.seatIn(mapId, roomId, auth, { facing: arrive.facing })
+          : await channels.seat(mapId, auth, { facing: arrive.facing });
     } catch (error) {
       console.error(`seating ${id} in ${mapId} failed: ${String(error)}`);
     }

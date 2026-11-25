@@ -870,6 +870,15 @@ export function createLive(db: Db, o: LiveOptions) {
     bossCleared(characterId: string, bossId: string): void {
       progress.mark(characterId, "bosses", bossId);
     },
+    /**
+     * A raid board's title (PLAN §10: boards grant titles only), once: the 상장 and the
+     * principal's line when it is new. Resolves whether the title is held now.
+     */
+    async raidTitle(characterId: string, awardId: string): Promise<boolean> {
+      const r = await run(characterId, `award:${awardId}`, "live.award", { award: awardId });
+      if (r.ok && r.outcome.award) await award(characterId, String(r.outcome.award));
+      return r.ok;
+    },
   };
 
   // WorldRoom requests ----------------------------------------------------------------------

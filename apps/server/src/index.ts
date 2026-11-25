@@ -20,6 +20,8 @@ import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
 import { fightLoadoutChanged, provideFightServices } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
+import { provideRaids } from "./raid/current.ts";
+import { RaidHub } from "./raid/hub.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
@@ -59,6 +61,16 @@ const live = createLive(db, {
   adminSecret: config.serverSecret,
 });
 provideLive(live);
+// The bosses: one pool per boss across every channel of its arena (PLAN §10 raid).
+const raidHub = new RaidHub({
+  db,
+  clock,
+  page,
+  executor: economy.executor,
+  live: () => live.events,
+  notify: (id, change) => worldRoom()?.notify(id, change),
+});
+provideRaids(raidHub);
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
 const adminReads = createDb(config.databaseUrl, { max: 2, statementTimeoutMs: 30_000 });
 const admin = await createModerationStack({
@@ -113,6 +125,7 @@ provideFightServices({ modes: dbModes(db) });
 installShutdown(server);
 onShutdown("grants", () => economy.grants.flush());
 onShutdown("quest progress", () => live.stop());
+onShutdown("raid", () => raidHub.stop());
 onShutdown("chat log", () => chatLog.flush());
 onShutdown("database", () => db.pool.end());
 onShutdown("admin reads", () => adminReads.pool.end());
@@ -122,6 +135,7 @@ await server.listen(config.port);
 await matchMaker.createRoom(WORLD_ROOM, {});
 economy.grants.start();
 await live.start();
+await raidHub.start();
 startLedgerMaintenance(db, () => clock.now());
 startListingSweeper(
   db,

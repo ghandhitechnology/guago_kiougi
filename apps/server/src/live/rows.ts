@@ -23,6 +23,10 @@ export interface LiveRows {
   tallyDay?: number;
   /** Whether conduct rows were already booked under this operation id. */
   conductKey?: string;
+  /** The character's `raid_participants` row of this raid phase, locked (raid/ops.ts). */
+  raid?: { raid: string; phase: number };
+  /** Whether the character has a `boss_clears` row for this boss, locked. */
+  cleared?: string;
 }
 
 export interface HelpNoticeRow {
@@ -51,6 +55,10 @@ export interface LiveLoaded {
   daily: ReadonlyMap<string, number>;
   /** Conduct rows exist under the `conductKey` asked for. */
   keyed: boolean;
+  /** The raid phase row asked for: absent, or its tier (null while the phase runs) and payment. */
+  raid: { tier: number | null; paid: boolean } | null;
+  /** A `boss_clears` row exists for the boss asked for. */
+  cleared: boolean;
 }
 
 export const NO_LIVE: LiveLoaded = {
@@ -61,6 +69,8 @@ export const NO_LIVE: LiveLoaded = {
   leader: null,
   daily: new Map(),
   keyed: false,
+  raid: null,
+  cleared: false,
 };
 
 /** Living-world columns an operation sets on the character. */
@@ -106,6 +116,10 @@ export interface LiveWrite {
   leaderPaid?: number;
   /** `merit_daily` counts to add to. */
   daily?: readonly { day: number; key: string; n: number }[];
+  /** Marks the character's row of this raid phase paid. */
+  raidPaid?: { raid: string; phase: number };
+  /** A 복습 cleared for the first time: its `boss_clears` row. */
+  cleared?: string;
 }
 
 export async function loadLive(
@@ -160,7 +174,24 @@ export async function loadLive(
       where character_id = ${characterId} and operation_id = ${want.conductKey} limit 1`);
     keyed = rows.length > 0;
   }
-  return { kills, notice, posted, helping, leader, daily, keyed };
+  let raid: LiveLoaded["raid"] = null;
+  if (want.raid) {
+    const { rows } = await q.execute(sql`
+      select tier, paid from raid_participants
+      where raid_id = ${want.raid.raid} and phase = ${want.raid.phase}
+        and character_id = ${characterId}
+      for update`);
+    const r = rows[0];
+    if (r) raid = { tier: r.tier == null ? null : Number(r.tier), paid: r.paid === true };
+  }
+  let cleared = false;
+  if (want.cleared !== undefined) {
+    const { rows } = await q.execute(sql`
+      select 1 from boss_clears where character_id = ${characterId} and boss_id = ${want.cleared}
+      for update`);
+    cleared = rows.length > 0;
+  }
+  return { kills, notice, posted, helping, leader, daily, keyed, raid, cleared };
 }
 
 export function noticeFromDb(r: Record<string, unknown>): HelpNoticeRow {
@@ -279,6 +310,16 @@ export async function writeLive(
     await q.execute(sql`
       update floor_leaders set paid = true
       where week = ${w.leaderPaid} and character_id = ${characterId}`);
+  }
+  if (w.raidPaid) {
+    await q.execute(sql`
+      update raid_participants set paid = true
+      where raid_id = ${w.raidPaid.raid} and phase = ${w.raidPaid.phase}
+        and character_id = ${characterId}`);
+  }
+  if (w.cleared !== undefined) {
+    await q.execute(sql`
+      insert into boss_clears (character_id, boss_id) values (${characterId}, ${w.cleared})`);
   }
   if (w.notice && "insert" in w.notice) {
     const n = w.notice.insert;

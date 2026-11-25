@@ -5,7 +5,10 @@
  * lifecycle (`LIFECYCLES[0].bosses`) and the narrative's `BOSSES`.
  */
 
-import { type RaidRank, Rank } from "@guago/shared";
+import { MAJORS, type RaidRank, type Random, Rank } from "@guago/shared";
+import { BOOKS, type BookDef, TOOLS } from "./books.ts";
+import type { ClassId } from "./classes.ts";
+import { type Drop, rollDrops } from "./drops.ts";
 
 export interface RaidBossBody {
   readonly sprite: string;
@@ -128,3 +131,36 @@ export function raidBossOn(mapId: string): RaidBossDef | undefined {
 
 /** The PLAN rank a boss body's HP is figured at. */
 export const BOSS_BODY_RANK = Rank.FieldBoss;
+
+/**
+ * One personal loot roll from a boss (PLAN §10 rewards by tier): a boss-rank drop of the boss's
+ * Page at its level. An era boss's drops are bound (PLAN §13); the major sets the spotlight
+ * subject the 낱장 lean to.
+ */
+export function bossLoot(random: Random, def: RaidBossDef, major: string): Drop[] {
+  const books = bossLootBooks(def);
+  return rollDrops(random, {
+    source: {
+      kind: "monster",
+      fieldId: def.map,
+      monsterId: def.id,
+      rank: "boss",
+      ...(def.rank === "era" ? { era: true as const } : {}),
+    },
+    level: def.level,
+    rank: BOSS_BODY_RANK,
+    coin: 1,
+    dropMult: 1,
+    coinMult: 1,
+    books,
+    tools: TOOLS.filter((t) => books.some((b) => b.tool === t.id)),
+    spotlight: (MAJORS as readonly string[]).includes(major) ? (major as ClassId) : "math",
+  });
+}
+
+/** The books a boss's 낱장 can land on: its Page's. */
+export function bossLootBooks(_def: RaidBossDef): readonly BookDef[] {
+  return PAGE1_BOOKS;
+}
+
+const PAGE1_BOOKS = BOOKS.filter((b) => b.page === 1);

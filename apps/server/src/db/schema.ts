@@ -978,3 +978,105 @@ export const duelRecords = pgTable(
   },
   (t) => [check("duel_records_counts_check", sql`${t.won} >= 0 and ${t.won} <= ${t.played}`)],
 );
+
+// Bosses and the raid (PLAN §10 era boss raid rules, §19 persistence) ------------------------
+
+/**
+ * One boss standing on one Page's run (`id` = page, boss and the game ms its rift opened, so a
+ * test server's restarted Page fights it again): the phase, the persistent HP bar and the shield
+ * as last written (every 10 seconds and at each phase change), and when it was freed.
+ */
+export const raids = pgTable(
+  "raids",
+  {
+    id: text("id").primaryKey(),
+    page: integer("page").notNull(),
+    bossId: text("boss_id").notNull(),
+    phase: smallint("phase").notNull(),
+    hp: doublePrecision("hp").notNull(),
+    maxHp: doublePrecision("max_hp").notNull(),
+    shield: doublePrecision("shield").notNull(),
+    /** Game time the boss appeared, and the current phase began. */
+    startedAt: at("started_at").notNull(),
+    phaseStartedAt: at("phase_started_at").notNull(),
+    freedAt: at("freed_at"),
+    finalHitBy: uuid("final_hit_by").references(() => characters.id, { onDelete: "set null" }),
+    finalHitName: text("final_hit_name"),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check("raids_phase_check", sql`${t.phase} >= 1`),
+    check("raids_hp_check", sql`${t.hp} >= 0 and ${t.hp} <= ${t.maxHp}`),
+    check("raids_shield_check", sql`${t.shield} >= 0 and ${t.shield} <= 1`),
+  ],
+);
+
+/** Each phase a raid went through: its calibrated bar, what it was sized from, when it ran. */
+export const raidPhases = pgTable(
+  "raid_phases",
+  {
+    raidId: text("raid_id")
+      .notNull()
+      .references(() => raids.id, { onDelete: "cascade" }),
+    phase: smallint("phase").notNull(),
+    maxHp: doublePrecision("max_hp").notNull(),
+    /** The damage window the bar was calibrated from (`DamageWindow`). */
+    calibration: jsonb("calibration").notNull(),
+    startedAt: at("started_at").notNull(),
+    endedAt: at("ended_at"),
+  },
+  (t) => [primaryKey({ columns: [t.raidId, t.phase] })],
+);
+
+/**
+ * What one character did in one phase, across every channel of the arena (PLAN §10 tiers). The
+ * counts grow by batched writes; `tier` is set when the phase ends, and `paid` in the transaction
+ * that pays it, so a phase's reward goes out once per character whatever crashes or retries.
+ */
+export const raidParticipants = pgTable(
+  "raid_participants",
+  {
+    raidId: text("raid_id")
+      .notNull()
+      .references(() => raids.id, { onDelete: "cascade" }),
+    phase: smallint("phase").notNull(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    damage: doublePrecision("damage").notNull().default(0),
+    /** Page ms of active fighting. */
+    activeMs: doublePrecision("active_ms").notNull().default(0),
+    objectives: integer("objectives").notNull().default(0),
+    support: integer("support").notNull().default(0),
+    tier: smallint("tier"),
+    paid: boolean("paid").notNull().default(false),
+  },
+  (t) => [
+    primaryKey({ columns: [t.raidId, t.phase, t.characterId] }),
+    index("raid_participants_unpaid_idx").on(t.raidId, t.phase).where(sql`not ${t.paid}`),
+  ],
+);
+
+/**
+ * The server's measured damage per Page hour (PLAN §10 HP calibration): everything its players
+ * dealt, what went into raid bosses, and how long a raid boss stood open in that hour.
+ */
+export const raidDamage = pgTable("raid_damage", {
+  hour: bigint("hour", { mode: "number" }).primaryKey(),
+  total: doublePrecision("total").notNull().default(0),
+  boss: doublePrecision("boss").notNull().default(0),
+  standingMs: doublePrecision("standing_ms").notNull().default(0),
+});
+
+/** A boss's 복습 cleared by a character: its first-clear reward went out with this row. */
+export const bossClears = pgTable(
+  "boss_clears",
+  {
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    bossId: text("boss_id").notNull(),
+    clearedAt: at("cleared_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.characterId, t.bossId] })],
+);
