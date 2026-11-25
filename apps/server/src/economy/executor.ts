@@ -254,6 +254,11 @@ function plan(
       if (before.def !== row.def || before.kind !== row.kind) {
         throw new ContractError(`item ${row.id} changed what it is`);
       }
+      // Binding and the re-trade cooldown only ever tighten (PLAN §13).
+      const sooner = (row.tradableAt?.getTime() ?? 0) < (before.tradableAt?.getTime() ?? 0);
+      if ((before.bound && !row.bound) || sooner) {
+        throw new ContractError(`item ${row.id} would come free to trade`);
+      }
       updates.push(row);
     } else if (made.has(row.id)) {
       inserts.push(row);
@@ -543,7 +548,7 @@ async function write(
       update items i set
         grade = u.grade, level = u.level, exp = u.exp, pilgi = u.pilgi,
         pilgi_fail_streak = u.fails, evolved = u.evolved, slot = u.slot,
-        listing_id = u.listing, updated_at = now()
+        listing_id = u.listing, bound = u.bound, tradable_at = u.tradable, updated_at = now()
       from unnest(
         ${sql.param(u.map((r) => r.id))}::uuid[],
         ${sql.param(u.map((r) => r.grade))}::smallint[],
@@ -553,8 +558,10 @@ async function write(
         ${sql.param(u.map((r) => r.pilgiFails))}::integer[],
         ${sql.param(u.map((r) => r.evolved))}::boolean[],
         ${sql.param(u.map((r) => r.slot))}::smallint[],
-        ${sql.param(u.map((r) => r.listing))}::uuid[]
-      ) as u(id, grade, level, exp, pilgi, fails, evolved, slot, listing)
+        ${sql.param(u.map((r) => r.listing))}::uuid[],
+        ${sql.param(u.map((r) => r.bound))}::boolean[],
+        ${sql.param(u.map((r) => r.tradableAt?.toISOString() ?? null))}::timestamptz[]
+      ) as u(id, grade, level, exp, pilgi, fails, evolved, slot, listing, bound, tradable)
       where i.id = u.id and i.owner_id = ${c}`);
     if (done.rowCount !== u.length) throw new ContractError("updated items went missing");
   }

@@ -7,8 +7,9 @@
  * characters and listings from the tables themselves.
  */
 import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Drop, VENDING } from "@guago/content";
+import { bookById, type Drop, VENDING } from "@guago/content";
 import {
   bindCost,
   directTax,
@@ -31,6 +32,7 @@ import type { ExecResult, ExecutorOptions } from "../economy/executor.ts";
 import { createEconomy, type Economy } from "../economy/index.ts";
 import { compactLedger, rollUpDays } from "../economy/ledger.ts";
 import { ITEM_COLUMNS, itemFromDb } from "../economy/rows.ts";
+import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { sweepListings } from "./board.ts";
 import { searchTrades } from "./log.ts";
 import { type CommitOffer, printOf, type TradeCommitRequest } from "./ops.ts";
@@ -40,16 +42,22 @@ const PAGE = 1;
 /** Repetitions of each racing scenario. */
 const REPS = 20;
 
+/**
+ * Which way each race went, appended to the file `RACE_TALLY` names when set: the order a race
+ * lands in is not up to the test, so it is counted, not asserted.
+ */
+function tally(line: string): void {
+  if (process.env.RACE_TALLY) appendFileSync(process.env.RACE_TALLY, `${line}\n`);
+}
+
 let db: Db;
 /** One pool per racer, as one per server process. */
 let pools: Db[] = [];
 let seq = 0;
 
 beforeAll(() => {
-  db = createDb(
-    process.env.TEST_DATABASE_URL ?? "postgres://guago:guago@127.0.0.1:54329/guago_test",
-  );
-  pools = [0, 1, 2].map(() => createDb(process.env.TEST_DATABASE_URL as string));
+  db = createDb(TEST_DATABASE_URL);
+  pools = [0, 1, 2].map(() => createDb(TEST_DATABASE_URL));
 });
 afterAll(async () => {
   await Promise.all([db, ...pools].map((d) => d.pool.end()));
@@ -317,6 +325,7 @@ describe("매점 게시판 under racing requests", () => {
       expect(oks(results)).toBe(1);
       for (const r of results) if (!r.ok) expect(r.error).toBe("listing_closed");
       const winner = buyers[results.findIndex((r) => r.ok)];
+      tally(`6 buyers: buyer ${results.findIndex((r) => r.ok)} won`);
       expect(await ownerOf(item)).toBe(winner);
       expect(await pinecones(seller)).toBe(sellerBefore + price - saleTax(price));
       expectConserved(before, await census(), true);
@@ -373,6 +382,7 @@ describe("매점 게시판 under racing requests", () => {
       ]);
       expect(oks([bought, cancelled])).toBe(1);
       expect(fail(bought) ?? fail(cancelled)).toBe("listing_closed");
+      tally(`buy vs cancel: ${bought.ok ? "buy" : "cancel"} first`);
       expect(await ownerOf(item)).toBe(bought.ok ? buyer : seller);
       expect((await ids(seller)).includes(item)).toBe(!bought.ok);
       expectConserved(before, await census(), true);
@@ -416,8 +426,7 @@ describe("매점 게시판 under racing requests", () => {
       }
       expectConserved(before, await census(), true);
     }
-    // Both orders should have come up; if not the test still checked whichever did.
-    expect(sold).toBeGreaterThanOrEqual(0);
+    tally(`buy vs expiry: sold ${sold}, expired ${REPS - sold}`);
   });
 
   it(`cancel racing expiry: returned once (${REPS} rounds)`, async () => {
@@ -526,6 +535,14 @@ describe("매점 게시판 under racing requests", () => {
         error: "item_missing",
       });
     }
+    const copies = [item, await book(eco, seller), await book(eco, seller)] as [
+      string,
+      string,
+      string,
+    ];
+    expect(
+      await eco.executor.execute(seller, randomUUID(), "forge", { items: copies }),
+    ).toMatchObject({ error: "item_missing" });
     const snapshot = await eco.ops.snapshot(seller);
     expect(snapshot?.items.some((i) => i.id === item)).toBe(false);
   });
@@ -691,6 +708,7 @@ describe("direct trade commits under racing requests", () => {
       const mine = results.map((r) => r.get(a) as ExecResult);
       expect(oks(mine)).toBe(1);
       expect(mine.find((r) => !r.ok)).toMatchObject({ error: "trade_item_gone" });
+      tally(`same item in two trades: ${mine[0]?.ok ? "first" : "second"} won`);
       expect([b, c]).toContain(await ownerOf(item));
       expectConserved(before, await census(), true);
     }
@@ -798,7 +816,7 @@ describe("direct trade commits under racing requests", () => {
         }
         expectConserved(before, await census());
       }
-      expect(traded).toBeLessThanOrEqual(REPS);
+      tally(`offered while ${s.name}: trade first ${traded}, other first ${REPS - traded}`);
     });
   }
 
@@ -1106,6 +1124,102 @@ async function opened(
   return asked.session;
 }
 
+// Binding and the cooldown follow value ------------------------------------------------------
+
+describe("binding and the re-trade cooldown travel with the value", () => {
+  const flags = async (item: string) =>
+    (await db.pool.query("select bound, tradable_at from items where id = $1", [item])).rows[0] as {
+      bound: boolean;
+      tradable_at: Date | null;
+    };
+  /** Hands `items` from `from` to `to` in a trade, which starts their cooldown. */
+  async function receive(eco: Economy, from: string, to: string, items: string[]) {
+    const r = await trade(eco, from, await commitOf({ [from]: { items }, [to]: {} }));
+    expect(r.get(from)?.ok).toBe(true);
+  }
+  const eraTool = async (eco: Economy, id: string, tool: string): Promise<string> => {
+    const before = new Set(await ids(id, "tool"));
+    const r = await eco.executor.execute(id, randomUUID(), "grant", {
+      exp: 0,
+      drops: [{ item: { kind: "tool", tool }, source: { ...SOURCE, rank: "boss", era: true } }],
+    });
+    expect(r.ok).toBe(true);
+    return (await ids(id, "tool")).find((t) => !before.has(t)) as string;
+  };
+
+  it("제련 with a bound kit copy makes a bound copy, whichever copy survives", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const kit = (
+      await db.pool.query("select id from items where owner_id = $1 and def_id = 'wangdo'", [a])
+    ).rows[0].id as string;
+    expect((await eco.executor.execute(a, randomUUID(), "unequip", { item: kit })).ok).toBe(true);
+    const [c1, c2] = [await book(eco, a, "wangdo"), await book(eco, a, "wangdo")];
+    await fund(eco, a, { pinecone: forgeFee(0, PAGE) });
+    // Equal copies: the first named survives, an unbound one.
+    const forged = await eco.executor.execute(a, randomUUID(), "forge", { items: [c1, kit, c2] });
+    expect(forged).toMatchObject({ ok: true, outcome: { item: c1 } });
+    expect((await flags(c1)).bound).toBe(true);
+    const out = await trade(eco, a, await commitOf({ [a]: { items: [c1] }, [b]: {} }));
+    expect(out.get(a)).toMatchObject({ error: "trade_item_bound" });
+  });
+
+  it("제련 with copies still cooling down makes a copy that cools down as long", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const [r1, r2] = [await book(eco, a), await book(eco, a)];
+    await receive(eco, a, b, [r1, r2]);
+    const own = await book(eco, b);
+    await fund(eco, b, { pinecone: forgeFee(0, PAGE) + 100 });
+    const cooling = (await flags(r2)).tradable_at;
+    expect(cooling).not.toBeNull();
+    const forged = await eco.executor.execute(b, randomUUID(), "forge", { items: [own, r1, r2] });
+    expect(forged).toMatchObject({ ok: true, outcome: { item: own } });
+    expect((await flags(own)).tradable_at).toEqual(cooling);
+    expect(await list(eco, b, { item: own, unitPrice: "100" })).toMatchObject({
+      error: "trade_item_cooldown",
+    });
+  });
+
+  it("merging a bound or cooling tool into a free one carries the binding and the cooldown", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const [free] = (await tools(eco, a, 1)) as [string];
+    const era = await eraTool(eco, a, "compass");
+    expect((await flags(era)).bound).toBe(true);
+    const merged = await eco.executor.execute(a, randomUUID(), "merge", { into: free, from: era });
+    expect(merged.ok).toBe(true);
+    expect((await flags(free)).bound).toBe(true);
+    // A received tool merged into an own one: the own one now waits out the cooldown.
+    const [given] = (await tools(eco, a, 1)) as [string];
+    await receive(eco, a, b, [given]);
+    const [mine] = (await tools(eco, b, 1)) as [string];
+    const cooling = (await flags(given)).tradable_at;
+    expect(cooling).not.toBeNull();
+    expect(
+      (await eco.executor.execute(b, randomUUID(), "merge", { into: mine, from: given })).ok,
+    ).toBe(true);
+    expect((await flags(mine)).tradable_at).toEqual(cooling);
+    const out = await trade(eco, b, await commitOf({ [b]: { items: [mine] }, [a]: {} }));
+    expect(out.get(b)).toMatchObject({ error: "trade_item_cooldown" });
+  });
+
+  it("an evolution made with a bound tool is bound", async () => {
+    const eco = economy();
+    const a = await student(eco);
+    const def = "sequence";
+    const item = await book(eco, a, def);
+    const tool = await eraTool(eco, a, bookById(def).tool);
+    // A veteran's state, set directly: 3학년, a 심화서 at level 100, its tool at level 5.
+    await db.pool.query("update characters set level = 250, tier = 4 where id = $1", [a]);
+    await db.pool.query("update items set grade = 2, level = 100 where id = $1", [item]);
+    await db.pool.query("update items set level = 5 where id = $1", [tool]);
+    const evolved = await eco.executor.execute(a, randomUUID(), "evolve", { item, tool });
+    expect(evolved.ok).toBe(true);
+    expect((await flags(item)).bound).toBe(true);
+  });
+});
+
 describe("direct trade windows", () => {
   it(`both confirming at the same instant commits once (${REPS} rounds)`, async () => {
     const eco = economy();
@@ -1180,6 +1294,7 @@ describe("direct trade windows", () => {
       if (rep % 2) racing.reverse();
       await Promise.all(racing.map((start) => start()));
       const done = w.last(b, "done");
+      tally(`offer vs confirm: ${done ? "confirm" : "change"} first`);
       if (done) {
         // The confirm went first: both copies, as confirmed, for the 1000.
         expect(await ownerOf(cheap)).toBe(b);
