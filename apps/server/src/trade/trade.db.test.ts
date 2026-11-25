@@ -281,7 +281,7 @@ async function commitOf(offers: Record<string, Offer>): Promise<TradeCommitReque
 const tradeId = () => `trade:${randomUUID()}:0`;
 
 function trade(eco: Economy, as: string, req: TradeCommitRequest, opId = tradeId()) {
-  return eco.executor.executeAll(as, opId, "trade.commit", req);
+  return eco.executor.executeAll(as, opId, "trade.commit", req).then((o) => o.results);
 }
 
 function list(
@@ -677,11 +677,14 @@ describe("매점 게시판 under racing requests", () => {
     const [a, b] = racers(2);
     // Two sweepers see the same three; each expiry runs under one id, so the second reads the
     // first one's result back instead of returning anything again.
+    const told: string[] = [];
+    const tell = (id: string) => told.push(id);
     const swept = await Promise.all([
-      sweepListings(db, (a as Economy).executor),
-      sweepListings(db, (b as Economy).executor),
+      sweepListings(db, (a as Economy).executor, undefined, tell),
+      sweepListings(db, (b as Economy).executor, undefined, tell),
     ]);
-    expect(swept[0] + swept[1]).toBeGreaterThanOrEqual(3);
+    expect(swept[0] + swept[1]).toBe(3);
+    expect(told).toEqual([seller, seller, seller]);
     expect(await stack(seller, "ink")).toBe(30);
     expectConserved(before, await census(), true);
   });

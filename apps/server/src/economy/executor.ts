@@ -779,6 +779,12 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     return result;
   }
 
+  /** Every party's result, and whether it was read back from the id's record. */
+  interface Outcome {
+    results: Map<string, ExecResult>;
+    replayed: boolean;
+  }
+
   interface Ran {
     /** Each recorded party's result. Only the initiator's on an unrecorded refusal. */
     results: Map<string, ExecResult>;
@@ -961,7 +967,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     name: K,
     request: Requests[K],
     on: { tx?: Queryable } = {},
-  ): Promise<Map<string, ExecResult>> {
+  ): Promise<Outcome> {
     if (name === "grant") {
       const bad = checkGrant(request as GrantRequest);
       if (bad) throw new ContractError(`grant has a bad ${bad}`);
@@ -972,7 +978,10 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     const others = (await def.others(on.tx ?? db, request, characterId)).filter(
       (id) => id !== characterId,
     );
-    if (on.tx) return (await run(on.tx, op, request, hash, others)).results;
+    if (on.tx) {
+      const out = await run(on.tx, op, request, hash, others);
+      return { results: out.results, replayed: out.replayed };
+    }
     return inLanes([characterId, ...others], () => transact(op, request, hash, others));
   }
 
@@ -988,7 +997,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     request: Requests[K],
     on: { tx?: Queryable } = {},
   ): Promise<ExecResult> {
-    const results = await runAll(characterId, opId, name, request, on);
+    const { results } = await runAll(characterId, opId, name, request, on);
     return results.get(characterId) as ExecResult;
   }
 
@@ -997,10 +1006,12 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     request: Requests[K],
     hash: string,
     others: readonly string[],
-  ): Promise<Map<string, ExecResult>> {
+  ): Promise<Outcome> {
     const { characterId, opId, name } = op;
-    const alone = (error: OpError) =>
-      new Map<string, ExecResult>([[characterId, { id: opId, op: name, ok: false, error }]]);
+    const alone = (error: OpError): Outcome => ({
+      results: new Map([[characterId, { id: opId, op: name, ok: false, error }]]),
+      replayed: false,
+    });
     for (let attempt = 0; ; attempt++) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash, others));
@@ -1013,7 +1024,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
             if (id !== characterId && !DEFS[name].quiet) notifyChange(id, result.change);
           }
         }
-        return out.results;
+        return { results: out.results, replayed: out.replayed };
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);
         // Reachable past the character lock only if a double above 2^53 rounded an

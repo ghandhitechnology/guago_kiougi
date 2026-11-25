@@ -359,10 +359,10 @@ export function createTrades({
     }
     const request: TradeCommitRequest = { parties, offers };
     const opId = `trade:${w.id}:${w.version}`;
-    let results: Awaited<ReturnType<typeof executor.executeAll>> | undefined;
+    let results: Awaited<ReturnType<typeof executor.executeAll>>["results"] | undefined;
     for (let attempt = 0; results === undefined; attempt++) {
       try {
-        results = await executor.executeAll(last, opId, "trade.commit", request);
+        results = (await executor.executeAll(last, opId, "trade.commit", request)).results;
       } catch (error) {
         const delay = COMMIT_RETRIES_MS[attempt];
         if (!isTransient(error) || delay === undefined) {
