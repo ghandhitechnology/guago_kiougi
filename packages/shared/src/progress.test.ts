@@ -19,6 +19,7 @@ import {
   repeatShare,
   resetStats,
   restedMult,
+  restedSeconds,
   statResetCost,
   tierAt,
 } from "./progress.ts";
@@ -57,20 +58,34 @@ describe("자습 pool", () => {
   it("fills at its share for up to 8 hours", () => {
     const fill = poolFill(rate, 20 * 3600, "field");
     expect(fill.seconds).toBe(8 * 3600);
-    expect(fill.exp).toBeCloseTo(100 * POOL.share * 8 * 3600, 6);
-    expect(poolFill(rate, 3600, "dorm").exp).toBeCloseTo(100 * POOL.share * 3600, 6);
+    expect(fill.exp).toBe(Math.floor(100 * POOL.share * 8 * 3600));
+    expect(poolFill(rate, 3600, "dorm").exp).toBe(Math.floor(100 * POOL.share * 3600));
   });
 
   it("fills at its larger share for up to 10 hours in the 자습실, plus the 층장 hour", () => {
     const fill = poolFill(rate, 20 * 3600, "study-hall", true);
     expect(fill.seconds).toBe(11 * 3600);
-    expect(fill.pinecone).toBeCloseTo(10 * POOL.studyHallShare * 11 * 3600, 6);
+    expect(fill.pinecone).toBe(Math.floor(10 * POOL.studyHallShare * 11 * 3600));
+  });
+
+  it("holds whole units only; the fraction of each is not paid", () => {
+    const fill = poolFill(
+      { exp: 7.3, pinecone: 0.37, sheets: 0.0013, ink: 0.011 },
+      12_245.8,
+      "hub",
+      false,
+      1.9,
+    );
+    for (const v of [fill.exp, fill.pinecone, fill.sheets, fill.ink])
+      expect(Number.isInteger(v)).toBe(true);
+    expect(fill.exp).toBe(Math.floor(7.3 * POOL.share * 12_245.8 * 1.9));
+    expect(fill.sheets).toBe(Math.floor(0.0013 * POOL.share * 12_245.8));
   });
 
   it("applies catch-up to pool EXP only", () => {
     const fill = poolFill(rate, 3600, "hub", false, 3);
-    expect(fill.exp).toBeCloseTo(100 * POOL.share * 3600 * 3, 6);
-    expect(fill.pinecone).toBeCloseTo(10 * POOL.share * 3600, 6);
+    expect(fill.exp).toBe(Math.floor(100 * POOL.share * 3600 * 3));
+    expect(fill.pinecone).toBe(Math.floor(10 * POOL.share * 3600));
   });
 
   it("takes the best ten-minute window by EXP", () => {
@@ -119,6 +134,15 @@ describe("EXP modifiers", () => {
     expect(drowsyMult(7199)).toBe(1);
     expect(drowsyMult(7200)).toBe(0.9);
   });
+
+  it("earns 숙면 by sleep: nothing under an hour, all thirty minutes from six", () => {
+    expect(restedSeconds(0)).toBe(0);
+    expect(restedSeconds(3599)).toBe(0);
+    expect(restedSeconds(3600)).toBe(0);
+    expect(restedSeconds(3.5 * 3600)).toBe(900);
+    expect(restedSeconds(6 * 3600)).toBe(1800);
+    expect(restedSeconds(20 * 3600)).toBe(1800);
+  });
 });
 
 describe("수행평가", () => {
@@ -129,16 +153,31 @@ describe("수행평가", () => {
   it("pays in same-level kills, so a notice keeps its worth through a Page", () => {
     for (const level of [5, 50, 95]) {
       const daily = questReward("daily", level);
+      expect(daily.exp).toBe(Math.floor(monsterEXP(level, 1) * QUEST_REWARD.daily.kills));
       expect(daily.exp / expToNext(level)).toBeCloseTo(
         QUEST_REWARD.daily.kills / killsPerLevel(level),
-        9,
+        4,
       );
       expect(daily.pinecone).toBe(Math.round(monsterCoin(level, 1) * QUEST_REWARD.daily.kills));
     }
-    expect(questReward("repeat", 40, 2).exp).toBeCloseTo(
-      monsterEXP(40, 1) * QUEST_REWARD.repeat.kills * 0.6,
-      6,
+    expect(questReward("repeat", 40, 2).exp).toBe(
+      Math.floor(monsterEXP(40, 1) * QUEST_REWARD.repeat.kills * 0.6),
     );
+  });
+
+  it("pays whole EXP whatever the falloff and catch-up", () => {
+    for (const [level, player, mult] of [
+      [1, 1, 1],
+      [37, 80, 1],
+      [12, 12, 5.72],
+      [99, 140, 1],
+    ] as const) {
+      const r = questReward("daily", level, 0, player, mult);
+      expect(Number.isInteger(r.exp)).toBe(true);
+      expect(Number.isInteger(r.pinecone)).toBe(true);
+    }
+    // The page-run's daily at level 1 paid 4604.818…; it now pays 4604.
+    expect(questReward("daily", 1).exp).toBe(4604);
   });
 
   it("books rewards under the cadence", () => {

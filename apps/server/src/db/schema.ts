@@ -120,6 +120,8 @@ export const characters = pgTable(
     /** Full daily boards in a row, ending on board day `board_streak_day` (개근상). */
     boardStreak: integer("board_streak").notNull().default(0),
     boardStreakDay: integer("board_streak_day"),
+    /** The world session that logged in last; a logout from an older one starts no pool. */
+    liveSession: text("live_session"),
     /** Bumped by every applied item or currency operation; change notices carry it. */
     rev: bigint("rev", { mode: "number" }).notNull().default(0),
     createdAt: at("created_at").notNull().defaultNow(),
@@ -849,6 +851,26 @@ export const weeklyTally = pgTable(
   ],
 );
 
+/**
+ * Per board day counts against the anti-farming caps: 상점 counted toward the 층장 tally by
+ * reason (`revive`, `help`, …), and 도움 notices paid per poster (`help:<poster id>`).
+ */
+export const meritDaily = pgTable(
+  "merit_daily",
+  {
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    day: integer("day").notNull(),
+    key: text("key").notNull(),
+    n: integer("n").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.characterId, t.day, t.key] }),
+    check("merit_daily_n_check", sql`${t.n} >= 0`),
+  ],
+);
+
 /** The week's five 층장 (PLAN §11), chosen from the week before. */
 export const floorLeaders = pgTable(
   "floor_leaders",
@@ -858,6 +880,8 @@ export const floorLeaders = pgTable(
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
     rank: smallint("rank").notNull(),
+    /** The +5 상점 went out: the turnover pays each row once, whatever it was doing on a crash. */
+    paid: boolean("paid").notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.week, t.characterId] })],
 );

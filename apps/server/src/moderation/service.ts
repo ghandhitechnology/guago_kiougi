@@ -432,7 +432,7 @@ export function createModeration(deps: ModerationDeps) {
           ok: true,
           after: async () => {
             deps.system({ key: "moderation.strike" }, found.sender_id);
-            await live()?.events.chatStrike(found.sender_id);
+            await live()?.events.chatStrike(found.sender_id, String(strike.id));
           },
         };
       }),

@@ -1,5 +1,5 @@
 {
-  "id": "3034f81f-31d8-4935-be05-3b6d1b38fe35",
+  "id": "68b9da29-4846-4204-8647-fe9b39922bb2",
   "prevId": "66dfa6ad-e5fe-4d95-b4b9-abe8d926b620",
   "version": "7",
   "dialect": "postgresql",
@@ -581,6 +581,12 @@
         "board_streak_day": {
           "name": "board_streak_day",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "live_session": {
+          "name": "live_session",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -1741,7 +1747,7 @@
       "checkConstraints": {
         "economy_ledger_amount_check": {
           "name": "economy_ledger_amount_check",
-          "value": "\"economy_ledger\".\"amount\" <> 0 or \"economy_ledger\".\"coalesced\""
+          "value": "\"economy_ledger\".\"amount\" <> 0"
         },
         "economy_ledger_coalesced_check": {
           "name": "economy_ledger_coalesced_check",
@@ -1775,6 +1781,13 @@
           "type": "smallint",
           "primaryKey": false,
           "notNull": true
+        },
+        "paid": {
+          "name": "paid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -2566,28 +2579,6 @@
           "method": "btree",
           "with": {}
         },
-        "listings_price_idx": {
-          "name": "listings_price_idx",
-          "columns": [
-            {
-              "expression": "unit_price",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"listings\".\"state\" = 'live'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "listings_category_idx": {
           "name": "listings_category_idx",
           "columns": [
@@ -2876,6 +2867,63 @@
         "materials_def_check": {
           "name": "materials_def_check",
           "value": "\"materials\".\"def_id\" ~ '^(ink|binding|(sheet|snack):[a-z0-9-]{1,40})$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.merit_daily": {
+      "name": "merit_daily",
+      "schema": "",
+      "columns": {
+        "character_id": {
+          "name": "character_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n": {
+          "name": "n",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "merit_daily_character_id_characters_id_fk": {
+          "name": "merit_daily_character_id_characters_id_fk",
+          "tableFrom": "merit_daily",
+          "tableTo": "characters",
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "merit_daily_character_id_day_key_pk": {
+          "name": "merit_daily_character_id_day_key_pk",
+          "columns": ["character_id", "day", "key"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "merit_daily_n_check": {
+          "name": "merit_daily_n_check",
+          "value": "\"merit_daily\".\"n\" >= 0"
         }
       },
       "isRLSEnabled": false
@@ -3621,13 +3669,6 @@
           "notNull": true,
           "default": "now()"
         },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
         "from_id": {
           "name": "from_id",
           "type": "uuid",
@@ -3780,21 +3821,6 @@
           "method": "btree",
           "with": {}
         },
-        "trade_log_recorded_idx": {
-          "name": "trade_log_recorded_idx",
-          "columns": [
-            {
-              "expression": "recorded_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "trade_log_items_idx": {
           "name": "trade_log_items_idx",
           "columns": [
@@ -3866,126 +3892,6 @@
         "trade_log_board_check": {
           "name": "trade_log_board_check",
           "value": "(\"trade_log\".\"kind\" = 'board') = (\"trade_log\".\"listing_id\" is not null and \"trade_log\".\"def_id\" is not null and \"trade_log\".\"grade\" is not null and \"trade_log\".\"qty\" > 0 and \"trade_log\".\"unit_price\" > 0)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.trade_pairs": {
-      "name": "trade_pairs",
-      "schema": "",
-      "columns": {
-        "day": {
-          "name": "day",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "a": {
-          "name": "a",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "b": {
-          "name": "b",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "trades": {
-          "name": "trades",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "a_sent": {
-          "name": "a_sent",
-          "type": "numeric(40, 0)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "b_sent": {
-          "name": "b_sent",
-          "type": "numeric(40, 0)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "items": {
-          "name": "items",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tax": {
-          "name": "tax",
-          "type": "numeric(40, 0)",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "trade_pairs_a_idx": {
-          "name": "trade_pairs_a_idx",
-          "columns": [
-            {
-              "expression": "a",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "day",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "trade_pairs_b_idx": {
-          "name": "trade_pairs_b_idx",
-          "columns": [
-            {
-              "expression": "b",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "day",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "trade_pairs_day_a_b_kind_pk": {
-          "name": "trade_pairs_day_a_b_kind_pk",
-          "columns": ["day", "a", "b", "kind"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "trade_pairs_order_check": {
-          "name": "trade_pairs_order_check",
-          "value": "\"trade_pairs\".\"a\" < \"trade_pairs\".\"b\""
         }
       },
       "isRLSEnabled": false
