@@ -203,6 +203,11 @@ export interface SongSource {
   readonly sections?: Readonly<Record<number, string>>;
   /** Frame to jump back to after the last one; `false` plays once. */
   readonly loop: number | false;
+  /**
+   * Named parts, first and last frame. Playing a part loops those frames; switching parts waits
+   * for the next bar line. A boss's phases are parts of one song.
+   */
+  readonly parts?: Readonly<Record<string, readonly [number, number]>>;
   readonly reverb?: { readonly time: number; readonly damp?: number; readonly level?: number };
   /** Echo time in beats, feedback 0..0.9. */
   readonly echo?: { readonly beats: number; readonly feedback: number; readonly damp?: number };

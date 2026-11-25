@@ -19,9 +19,9 @@ describe("effect parameters", () => {
   it("rejects values that would sound wrong instead of failing loudly", () => {
     expect(() => parseEffect("t", { ...tone, layers: [] })).toThrow(EffectError);
     const layer = tone.layers[0] as EffectSource["layers"][number];
-    expect(() => parseEffect("t", { ...tone, layers: [layer, layer, layer, layer] })).toThrow(
-      EffectError,
-    );
+    const four = [layer, layer, layer, layer];
+    expect(() => parseEffect("t", { ...tone, category: "hit", layers: four })).toThrow(EffectError);
+    expect(() => parseEffect("t", { ...tone, layers: four })).not.toThrow();
     expect(() => parseEffect("t", { ...tone, layers: [{ ...layer, duty: 1.5 }] })).toThrow(
       EffectError,
     );

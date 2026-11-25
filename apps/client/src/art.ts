@@ -7,23 +7,54 @@ const files = import.meta.glob<string>("../../../packages/art/dist/*.{png,json}"
   import: "default",
   eager: true,
 });
+const fontFiles = import.meta.glob<string>("../../../packages/art/dist/fonts/*.{png,xml}", {
+  query: "?url",
+  import: "default",
+  eager: true,
+});
 
-function url(name: string): string {
-  const hit = Object.entries(files).find(([path]) => path.endsWith(`/${name}`));
+function url(name: string, from: Readonly<Record<string, string>> = files): string {
+  const hit = Object.entries(from).find(([path]) => path.endsWith(`/${name}`));
   if (!hit) throw new Error(`art build output has no ${name}; run pnpm art:build`);
   return hit[1];
 }
 
 const META = "art";
 
-/** Queues the metadata, then every atlas it lists, on the scene's loader. */
-export function loadArt(scene: Phaser.Scene): void {
-  scene.load.json(META, url("art.json"));
-  scene.load.once(`filecomplete-json-${META}`, (_key: string, _type: string, meta: ArtMetadata) => {
+export interface ArtLoad {
+  /** Atlases to load; every atlas the metadata lists when left out. */
+  readonly atlases?: readonly string[];
+  /** Also load the bitmap fonts. */
+  readonly fonts?: boolean;
+}
+
+/**
+ * Queues the metadata, then the atlases (and fonts) it lists, on the scene's loader. Anything
+ * already loaded by an earlier scene is skipped, so scenes can each ask for what they need.
+ */
+export function loadArt(scene: Phaser.Scene, what: ArtLoad = {}): void {
+  const queue = (meta: ArtMetadata): void => {
     for (const atlas of meta.atlases) {
+      if (what.atlases && !what.atlases.includes(atlas)) continue;
+      if (scene.textures.exists(atlas)) continue;
       scene.load.atlas(atlas, url(`${atlas}.png`), url(`${atlas}.json`));
     }
-  });
+    if (!what.fonts) return;
+    for (const [key, font] of Object.entries(meta.fonts)) {
+      if (scene.cache.bitmapFont.exists(key)) continue;
+      const file = (path: string) => url(path.split("/").pop() ?? path, fontFiles);
+      scene.load.bitmapFont(key, file(font.image), file(font.data));
+    }
+  };
+  const cached = scene.cache.json.get(META) as ArtMetadata | undefined;
+  if (cached) {
+    queue(cached);
+    return;
+  }
+  scene.load.json(META, url("art.json"));
+  scene.load.once(`filecomplete-json-${META}`, (_key: string, _type: string, meta: ArtMetadata) =>
+    queue(meta),
+  );
 }
 
 export function artMeta(scene: Phaser.Scene): ArtMetadata {
@@ -50,12 +81,18 @@ export const SHADOW_LAYER = "shadow";
 /** Frame of a look texture holding its ground shadow alone. */
 export const SHADOW_FRAME = "shadow";
 
-/** Creates every sprite animation the metadata lists. */
+/**
+ * Creates the animations of every sprite whose atlas is loaded. Animations that already exist
+ * are kept, so a later scene can call this again after loading more atlases.
+ */
 export function createSpriteAnims(scene: Phaser.Scene, meta: ArtMetadata): void {
   for (const [name, sprite] of Object.entries(meta.sprites)) {
+    if (!scene.textures.exists(sprite.atlas)) continue;
     for (const [anim, a] of Object.entries(sprite.anims)) {
+      const key = spriteAnim(name, anim);
+      if (scene.anims.exists(key)) continue;
       scene.anims.create({
-        key: spriteAnim(name, anim),
+        key,
         frames: a.frames.map((frame) => ({ key: sprite.atlas, frame })),
         frameRate: a.fps,
         repeat: a.loop ? -1 : 0,
