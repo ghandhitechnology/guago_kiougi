@@ -1640,7 +1640,8 @@ export class Effects {
     const exists = this.ctx.scene.anims.exists(key);
     const looping = exists && this.loops.get(key) === true;
     if (looping && holdMs <= 0) return null;
-    if (then && this.loops.get(then) === true && holdMs <= 0) then = null;
+    // Only one loop is ever held: a loop after a loop would never end.
+    if (then && this.loops.get(then) === true && (holdMs <= 0 || looping)) then = null;
     const p = this.pieces.take(layer);
     const s = show(p, cat.atlas(sprite), cat.frame(sprite), null);
     s.setAlpha(alpha).setScale(scale);
