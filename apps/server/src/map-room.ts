@@ -29,6 +29,13 @@ const MAX_MESSAGES_PER_SECOND = 120;
 const LOG_EVERY_MS = 30_000;
 /** Ticks the loop will run back to back to catch up after a stall before it lets time go. */
 const MAX_CATCH_UP = 3;
+/**
+ * The loop wakes this often and steps whenever a tick is due. A 50 ms interval timer drifts late
+ * by a millisecond or so each time and then has to double-step, so patches would leave up to a
+ * whole tick behind their stamp and clients drawing 100 ms in the past would run dry. Polling
+ * keeps every tick within a few milliseconds of its time.
+ */
+const POLL_MS = 5;
 
 interface Seat {
   readonly state: InstanceType<typeof PlayerState>;
@@ -55,6 +62,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   private readonly seats = new Map<string, Seat>();
   private readonly monsters = new Map<number, InstanceType<typeof MonsterState>>();
   private acc = 0;
+  private lastLoop = 0;
 
   /** The map this room runs. */
   protected mapDef(): MapDef {
@@ -76,7 +84,8 @@ export class MapRoom extends Room<{ state: MapState }> {
     });
 
     // Patches go out right after each step, so every patch is exactly one tick of the world.
-    this.setTimestep((dt) => this.loop(dt), TICK_MS);
+    this.lastLoop = performance.now();
+    this.setTimestep(() => this.loop(), POLL_MS);
     this.patchRate = 0;
     this.clock.setInterval(() => {
       if (this.clients.length > 0)
@@ -145,9 +154,12 @@ export class MapRoom extends Room<{ state: MapState }> {
     };
   }
 
-  private loop(dt: number): void {
-    const start = performance.now();
-    this.acc = Math.min(this.acc + dt, TICK_MS * MAX_CATCH_UP);
+  private loop(): void {
+    const now = performance.now();
+    this.acc = Math.min(this.acc + now - this.lastLoop, TICK_MS * MAX_CATCH_UP);
+    this.lastLoop = now;
+    if (this.acc < TICK_MS) return;
+    const start = now;
     let ticks = 0;
     while (this.acc >= TICK_MS) {
       this.acc -= TICK_MS;
