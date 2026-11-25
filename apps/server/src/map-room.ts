@@ -143,6 +143,8 @@ const VITALS_EVERY_MS = 500;
  * game clock with no signal, so the room asks; a kit is rebuilt only when a value changed.
  */
 const LIVE_EVERY_MS = 2_000;
+/** Ticks out of full auto before the living world hears that full auto stopped (5 minutes). */
+const AUTO_OFF_TICKS = 6000;
 /**
  * A socket whose player went through a door is closed if still open after this: the client takes
  * its new seat at once, and an old connection kept open counts for nothing anyway.
@@ -229,6 +231,8 @@ interface Pawn {
   readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
   /** Counts loadout reads, so an older read that lands late is dropped. */
   loadGen: number;
+  /** Tick from which leaving full auto is reported, or -1. */
+  autoOffAt: number;
   /** What it fights with; replaced when an operation changes it. */
   loadout: Loadout;
   /** The living world's multipliers its kit was built with. */
@@ -474,6 +478,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   /** A closed map spawns nothing; a changed modifier rebuilds that player's kit. */
   private readLive(): void {
+    this.settleAutoOff();
     const l = live();
     this.world.director.paused = !(l?.isOpen(this.mapId) ?? true);
     if (!l) return;
@@ -492,9 +497,28 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     return withModifiers(kit, pawn.mods);
   }
 
-  /** A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. */
+  /**
+   * A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. Leaving full
+   * auto counts only once the body has stayed out of it for `AUTO_OFF_TICKS` (checked with the
+   * living world, `readLive`), so a toggle and back does not restart the clock.
+   */
   private tellMode(pawn: Pawn): void {
-    live()?.events.autoHunting(pawn.character.id, pawn.player.mode === Mode.Auto);
+    if (pawn.player.mode === Mode.Auto) {
+      pawn.autoOffAt = -1;
+      live()?.events.autoHunting(pawn.character.id, true);
+    } else if (pawn.autoOffAt < 0) {
+      pawn.autoOffAt = this.world.tick + AUTO_OFF_TICKS;
+    }
+  }
+
+  /** Bodies out of full auto long enough: now the living world hears it. */
+  private settleAutoOff(): void {
+    const l = live();
+    for (const pawn of this.pawns.values()) {
+      if (pawn.autoOffAt < 0 || this.world.tick < pawn.autoOffAt) continue;
+      pawn.autoOffAt = -1;
+      if (pawn.player.mode !== Mode.Auto) l?.events.autoHunting(pawn.character.id, false);
+    }
   }
 
   /** The step's events the living world counts (notices, 상점 and 벌점); it buffers them all. */
@@ -795,6 +819,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       queue: new InputQueue(),
       player,
       loadGen: 0,
+      autoOffAt: -1,
       loadout,
       mods,
       expCarry: 0,
