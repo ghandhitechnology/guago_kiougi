@@ -705,7 +705,7 @@ export default [
     name: "boss-pythagoreans-drain",
     group: "page1-bosses",
     size: [W, H],
-    palette: silhouette(palette, "ink.deep", lone),
+    palette: silhouette(palette, "ink.deep"),
     frames: { drain: frames.idle5 as string },
     anim: { drain: { frames: ["drain"], fps: 1 } },
   }),

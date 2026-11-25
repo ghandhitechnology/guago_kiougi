@@ -545,7 +545,7 @@ export default [
     name: "boss-zeno-drain",
     group: "page1-bosses",
     size: [W, H],
-    palette: silhouette(palette, "ink.deep", lone),
+    palette: silhouette(palette, "ink.deep"),
     frames: { drain: frames.idle0 as string },
     anim: { drain: { frames: ["drain"], fps: 1 } },
   }),

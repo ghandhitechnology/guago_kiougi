@@ -246,7 +246,8 @@ export class Parts {
 /**
  * Folds stray single pixels left where pieces overlap into their surroundings: a pixel with no
  * same-character neighbour (8 directions) takes the character most of its neighbours have, and
- * on the silhouette edge it takes one of `deep` (the outline characters) instead. Characters in
+ * on the silhouette edge it takes one of `deep` (the outline characters) instead, or is cleared
+ * when none is next to it. Characters in
  * `keep` (eyes, glints) are left alone.
  */
 export function clean(p: Pic, keep: string, deep: string): Pic {
@@ -271,7 +272,7 @@ export function clean(p: Pic, keep: string, deep: string): Pic {
           (n) => n === undefined || n === ".",
         );
         const ranked = [...around].sort((a, b) => b[1] - a[1]).map(([c]) => c);
-        const next = edge ? (ranked.find((c) => deep.includes(c)) ?? deep[0]) : ranked[0];
+        const next = edge ? (ranked.find((c) => deep.includes(c)) ?? ".") : (ranked[0] ?? ".");
         if (next && next !== ch) {
           p.set(x, y, next);
           changed = true;
