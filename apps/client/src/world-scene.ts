@@ -372,10 +372,9 @@ export class WorldScene extends Phaser.Scene {
     this.onPatch(room.state);
 
     if (map.id !== before) {
-      const channel = seating.channel > 1 ? ` ${t("world.channel", { n: seating.channel })}` : "";
-      worldUi.placeBanner(`${map.name}${channel}`);
       emitWorld({ t: "place", map: map.id, name: map.name, channel: seating.channel });
     }
+    // The HUD drops the place's name in as a banner and keeps it under the minimap.
     this.showPlace();
     if (seat.via) playWorld("door.close", { volume: 0.5 });
     this.holding = false;
@@ -603,18 +602,21 @@ export class WorldScene extends Phaser.Scene {
     const room = map.zones.find((z) => z.kind === "room" && zones.includes(z.id));
     if (room?.id === this.roomZone) return;
     this.roomZone = room?.id;
+    // Walking into a named room inside the map shows the room's name.
     this.showPlace();
-    // Arriving shows the map's name; walking into a room inside it shows the room's.
-    if (room && room.kind === "room" && room.name !== map.name) worldUi.placeBanner(room.name);
   }
 
-  /** Where the HUD says the player is: the map, and the room inside it. */
+  /** Where the HUD says the player is: the map with its channel past the first, and the room. */
   private showPlace(): void {
-    const map = this.here?.map;
-    if (!map) return;
+    const here = this.here;
+    if (!here) return;
+    const { map } = here;
     const room = map.zones.find((z) => z.kind === "room" && z.id === this.roomZone);
-    const name = room?.kind === "room" && room.name !== map.name ? room.name : undefined;
-    hud.set({ place: { map: map.id, name: map.name, ...(name ? { room: name } : {}) } });
+    const inRoom = room?.kind === "room" && room.name !== map.name ? room.name : undefined;
+    const channel = here.channel > 1 ? ` ${t("world.channel", { n: here.channel })}` : "";
+    hud.set({
+      place: { map: map.id, name: `${map.name}${channel}`, ...(inRoom ? { room: inRoom } : {}) },
+    });
   }
 
   /** A cast member speaks: a bubble for everyone near, unless it answers our own interact. */
