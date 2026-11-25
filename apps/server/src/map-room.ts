@@ -36,7 +36,6 @@ import {
   PLAYER_RADIUS,
   type Player,
   PlayerState,
-  POS_SCALE,
   RECONNECT_SECONDS,
   REVIVE_MESSAGE,
   reviveMessage,
@@ -48,7 +47,6 @@ import {
 } from "@guago/shared";
 import { grants } from "./economy/grants.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
-import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
 import { mapOptionAllowed } from "./room-maps.ts";
@@ -101,7 +99,7 @@ class Bucket {
 interface Pawn {
   readonly slot: string;
   readonly state: InstanceType<typeof PlayerState>;
-  readonly viewer: Viewer;
+  readonly view: StateView;
   readonly net: NetViewer;
   readonly queue: InputQueue;
   readonly player: Player;
@@ -112,8 +110,6 @@ interface Pawn {
   /** EXP below one, carried to the next grant: grants take whole numbers. */
   expCarry: number;
 }
-
-const wire = (px: number) => Math.round(px * POS_SCALE);
 
 let loadouts: Loadouts = starterLoadouts;
 
@@ -166,7 +162,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   private map!: FightMap;
   private world!: FightWorld;
   private net!: FightNet;
-  private grid!: InterestGrid;
+  /** Bodies entering or leaving a client's view, for metrics: only on joins and leaves. */
+  private viewChanges = 0;
   private metrics!: RoomMetrics;
   private readonly pawns = new Map<string, Pawn>();
   private readonly bySlot = new Map<number, Pawn>();
@@ -193,7 +190,6 @@ export class MapRoom extends Room<{ state: MapState }> {
     const field = fieldOf(this.mapId, process.env.GUAGO_FIELD);
     this.world = createFight(this.map, simRules(), field, seed);
     this.net = new FightNet(this.world);
-    this.grid = new InterestGrid(this.world.width, this.world.height);
     this.metrics = new RoomMetrics(this.roomId, this.mapId);
     this.seats = new RoomSeats(this.mapId, (id) => this.placeOf(id));
     this.state.map = this.mapId;
@@ -360,21 +356,19 @@ export class MapRoom extends Room<{ state: MapState }> {
     player.exp = loadout.exp;
     player.rebuild = kitAt;
     state.sid = id;
-    state.seq = 0;
     dressPlayer(state, character);
     this.syncOwn(state, player);
 
     const view = new StateView();
     client.view = view;
     view.add(state, OWNER_TAG);
-    const viewer: Viewer = { view, cell: undefined };
     const net = newViewer();
     net.player = player;
     this.net.viewers.add(net);
     const pawn: Pawn = {
       slot,
       state,
-      viewer,
+      view,
       net,
       queue: new InputQueue(),
       player,
@@ -390,8 +384,14 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.pawns.set(id, pawn);
     this.bySlot.set(Number(slot), pawn);
     fighting.set(character.id, { room: this, pawn });
-    const cell = this.grid.place(state, player.x, player.y);
-    this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
+    // Who is here is small and rare, so every client holds every seated player's identity;
+    // the bodies themselves move in the snapshot.
+    for (const other of this.pawns.values()) {
+      if (other === pawn) continue;
+      view.add(other.state);
+      if (!other.view.has(state)) other.view.add(state);
+      this.viewChanges += 2;
+    }
     this.countBytes(client);
     places.enter(character.id, {
       mapId: this.mapId,
@@ -438,8 +438,11 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (pawn) {
       this.handOverExp(pawn);
       if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
-      this.grid.watch(pawn.viewer, undefined);
-      this.grid.remove(pawn.state);
+      for (const other of this.pawns.values()) {
+        if (other === pawn || !other.view.has(pawn.state)) continue;
+        other.view.remove(pawn.state);
+        this.viewChanges++;
+      }
       pawn.state.sid = "";
       this.pawns.delete(id);
       this.bySlot.delete(Number(pawn.slot));
@@ -525,19 +528,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.metrics.players = this.pawns.size;
     this.metrics.clients = this.clients.length;
     this.metrics.monsters = this.world.director.alive;
-    this.metrics.viewChanges = this.grid.changes;
+    this.metrics.viewChanges = this.viewChanges;
   }
 
   private syncOwn(state: InstanceType<typeof PlayerState>, p: Player): void {
-    state.x = wire(p.x);
-    state.y = wire(p.y);
-    state.facing = p.facing;
-    state.seq = p.seq;
     state.speed = p.kit.speed;
-    state.hp = p.hp;
     state.maxHp = p.kit.maxHp;
-    state.shield = p.shield;
-    state.exp = p.exp;
+    state.exp = Math.floor(p.exp);
     state.level = p.level;
     state.mode = p.mode;
     state.down = p.downAt >= 0 ? p.downAt + 1 : 0;
@@ -549,13 +546,8 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
   }
 
-  /** Mirrors each player into its synced body and moves bodies between identity views. */
+  /** Mirrors each player into its own synced body. */
   private sync(): void {
-    for (const pawn of this.pawns.values()) {
-      const p = pawn.player;
-      this.syncOwn(pawn.state, p);
-      const cell = this.grid.place(pawn.state, p.x, p.y);
-      if (cell !== undefined) this.grid.watch(pawn.viewer, cell);
-    }
+    for (const pawn of this.pawns.values()) this.syncOwn(pawn.state, pawn.player);
   }
 }

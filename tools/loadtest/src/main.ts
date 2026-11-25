@@ -20,6 +20,7 @@ import {
   TICK_MS,
   TILE_SIZE,
   WirePlayer,
+  type WireSelf,
 } from "@guago/shared";
 import { signIn } from "./account.ts";
 import { startNetsim } from "./netsim.ts";
@@ -120,9 +121,10 @@ class Bot {
     this.auto = auto;
     room.reconnection.enabled = false;
     room.onMessage("*", () => {});
+    const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
       if (this.measuring) this.stats.snapshots++;
-      this.reader.read(bytes, NULL_SINK);
+      this.reader.read(bytes, sink);
     });
     const events = room.connection.events;
     const onmessage = events.onmessage;
@@ -138,13 +140,16 @@ class Bot {
     return this.reader.broken;
   }
 
+  private map: ReturnType<typeof mapById>;
+  private speed = 60;
+
   private onPatch(state: MapState): void {
     if (this.reader.cols === 1 && state.map) {
-      const map = mapById(state.map);
-      if (map) {
+      this.map = mapById(state.map);
+      if (this.map) {
         const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((map.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((map.collision.h * TILE_SIZE) / cell);
+        this.reader.cols = Math.ceil((this.map.collision.w * TILE_SIZE) / cell);
+        this.reader.rows = Math.ceil((this.map.collision.h * TILE_SIZE) / cell);
       }
     }
     let me = this.slot === undefined ? undefined : state.players.get(this.slot);
@@ -160,15 +165,19 @@ class Bot {
     this.down = me.down > 0;
     if (this.down && !this.wasDown && this.measuring) this.stats.downs++;
     this.wasDown = this.down;
+    this.speed = me.speed || this.speed;
+    if (this.predictor) this.predictor.speed = this.speed;
+  }
+
+  /** The server's word on the own body, from the snapshot's Self record. */
+  private onSelf(me: WireSelf): void {
     const body = { x: me.x / POS_SCALE, y: me.y / POS_SCALE, facing: me.facing as Facing };
-    const map = mapById(state.map);
     if (!this.predictor) {
-      if (!map) return;
-      this.predictor = new Predictor(map, body, me.speed || 60);
+      if (!this.map) return;
+      this.predictor = new Predictor(this.map, body, this.speed);
       this.seen = { x: me.x, y: me.y, seq: me.seq };
       return;
     }
-    this.predictor.speed = me.speed || this.predictor.speed;
     if (me.x === this.seen.x && me.y === this.seen.y && me.seq === this.seen.seq) return;
     this.seen = { x: me.x, y: me.y, seq: me.seq };
     // In full auto the server walks the body; the browser follows it instead of predicting.
@@ -303,6 +312,7 @@ interface RoomReport {
     eventsPerSecond: number;
     fxPerSecond: number;
     bytesByPart: Record<string, number>;
+    worstByPart: Record<string, number>;
     downs: number;
     revives: number;
     wakes: number;
