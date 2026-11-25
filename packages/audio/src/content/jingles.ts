@@ -4,8 +4,8 @@ import { jeonjik, levelUp, liberation, rareDrop } from "./music/jingles.ts";
 import { wakeup } from "./music/wakeup.ts";
 
 /**
- * Short pieces that play over the music, like effects: rendered once to a stereo buffer, they
- * duck the music by `duck` dB while they sound.
+ * Short pieces that play over the music, like effects. They stream from the worker on a deck of
+ * their own and duck the music by `duck` dB while they sound. `bank` is kept for tools.
  */
 export interface JingleSource {
   readonly song: SongSource;

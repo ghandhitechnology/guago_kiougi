@@ -12,7 +12,7 @@ export type ToWorker =
       readonly type: "start";
       readonly deck: number;
       readonly gen: number;
-      readonly kind: "song" | "bed";
+      readonly kind: "song" | "bed" | "jingle";
       readonly id: string;
       readonly seed: number;
       readonly part?: string;
@@ -45,6 +45,8 @@ export interface CueMeta {
   readonly max: number;
   readonly loop: boolean;
   readonly jingle: boolean;
+  /** A jingle's length in seconds, for how long it ducks the music. */
+  readonly seconds?: number;
   readonly duck?: EffectSource["duck"];
   readonly streak?: EffectSource["streak"];
 }

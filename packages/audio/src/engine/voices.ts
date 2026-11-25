@@ -8,7 +8,7 @@
 
 export const MAX_VOICES = 8;
 const MAX_LOOPS = 4;
-const GROUP_CAP: Readonly<Record<string, number>> = { hit: 6, jingle: 2 };
+const GROUP_CAP: Readonly<Record<string, number>> = { hit: 6 };
 const STEAL_FADE = 0.012;
 
 export interface PlayOptions {
@@ -26,7 +26,7 @@ export interface VoiceOptions extends PlayOptions {
   /** Playback rate multiplier, replacing the random variation. */
   readonly rate?: number;
   readonly priority?: number;
-  /** Voices of a group share a cap below the eight: `hit`, `jingle`. */
+  /** Voices of a group share a cap below the eight: `hit`. */
   readonly group?: string;
 }
 

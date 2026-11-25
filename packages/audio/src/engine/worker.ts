@@ -8,7 +8,6 @@ import { BEDS, EFFECTS, JINGLES, SONGS } from "../content/index.ts";
 import { type Bank, bankOf, type EffectSource, parseEffect } from "../sfx/format.ts";
 import { renderEffect } from "../sfx/render.ts";
 import { compileSong } from "../tracker/compile.ts";
-import { renderJingle } from "../tracker/jingle.ts";
 import { SongPlayer } from "../tracker/player.ts";
 import type { CueMeta, FromWorker, ToWorker } from "./protocol.ts";
 
@@ -39,7 +38,9 @@ function catalog(): Record<string, CueMeta> {
       ...(fx.streak ? { streak: fx.streak } : {}),
     };
   }
-  for (const [id, j] of Object.entries(JINGLES))
+  for (const [id, j] of Object.entries(JINGLES)) {
+    const song = compileSong(id, j.song);
+    const rows = song.frames.reduce((n, f) => n + f.rows, 0);
     cues[id] = {
       bank: j.bank,
       vary: 0,
@@ -47,8 +48,10 @@ function catalog(): Record<string, CueMeta> {
       max: 1,
       loop: false,
       jingle: true,
+      seconds: (rows * 60) / (j.song.bpm * j.song.rowsPerBeat),
       duck: { depth: j.duck, release: 1.5 },
     };
+  }
   return cues;
 }
 
@@ -71,10 +74,7 @@ function send(message: FromWorker, transfer: Transferable[] = []): void {
 function render(id: string): void {
   if (done.has(id)) return;
   done.add(id);
-  const jingle = JINGLES[id as keyof typeof JINGLES];
-  const variants = jingle
-    ? renderJingle(id, jingle.song, sampleRate)
-    : renderEffect(id, EFFECTS[id] as EffectSource, sampleRate).variants;
+  const variants = renderEffect(id, EFFECTS[id] as EffectSource, sampleRate).variants;
   send(
     { type: "sound", id, variants },
     variants.map((v) => v.buffer),
@@ -92,7 +92,6 @@ function next(): void {
 function enqueue(bank: Bank): void {
   const idle = queue.length === 0;
   for (const [id, source] of Object.entries(EFFECTS)) if (bankOf(source) === bank) queue.push(id);
-  for (const [id, j] of Object.entries(JINGLES)) if (j.bank === bank) queue.push(id);
   if (idle) setTimeout(next, 0);
 }
 
@@ -114,11 +113,12 @@ scope.onmessage = (e) => {
         enqueue(m.bank);
         break;
       case "render":
-        if (m.id in EFFECTS || m.id in JINGLES) render(m.id);
+        if (m.id in EFFECTS) render(m.id);
         break;
       case "start": {
-        if (m.kind === "song") {
-          const source = SONGS[m.id as keyof typeof SONGS];
+        if (m.kind === "song" || m.kind === "jingle") {
+          const source =
+            m.kind === "jingle" ? JINGLES[m.id]?.song : SONGS[m.id as keyof typeof SONGS];
           if (!source) throw new Error(`unknown song ${m.id}`);
           const song = compileSong(m.id, source);
           decks.set(m.deck, {

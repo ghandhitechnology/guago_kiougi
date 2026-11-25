@@ -59,7 +59,7 @@ export class Deck {
   }
 
   start(
-    kind: "song" | "bed",
+    kind: "song" | "bed" | "jingle",
     id: string,
     fade: number,
     stems: Readonly<Record<string, number>>,

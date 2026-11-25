@@ -65,7 +65,6 @@ const GESTURES = ["pointerdown", "pointerup", "touchend", "keydown", "mousedown"
 const DEFAULT_VOLUMES: Record<Bus, number> = { master: 1, music: 0.8, effects: 1, ambient: 0.8 };
 /** Seconds a sound asked for before its samples exist may still start late. */
 const WAIT_EFFECT = 0.3;
-const WAIT_JINGLE = 2.5;
 /** Shortest gap between two plays of one cue: own, others'. */
 const CUE_GAP_OWN = 0.03;
 const CUE_GAP_OTHER = 0.12;
@@ -79,6 +78,8 @@ interface Graph {
   readonly analyser: AnalyserNode;
   readonly music: [Deck, Deck];
   readonly ambient: [Deck, Deck];
+  /** Jingles stream over the music on their own deck, so they hold no buffers. */
+  readonly jingle: Deck;
   readonly voices: Voices;
   readonly worker: Worker;
   readonly timer: ReturnType<typeof setInterval>;
@@ -196,9 +197,10 @@ export class GameAudio {
 
   /**
    * Plays any sound the content or the story names: an effect id (`sfx.reaction.combustion`), a
-   * jingle (`jingle.level-up`) or a story cue (`whistle`, `page-flutter`). Other players' sounds
-   * (`own: false`) fade with distance and are spaced out. Returns a handle to stop or move it, or
-   * null when the sound was dropped or is still being rendered.
+   * jingle (`jingle.level-up`, streamed over the ducked music) or a story cue (`whistle`,
+   * `page-flutter`). Other players' sounds (`own: false`) fade with distance and are spaced out.
+   * Returns a handle to stop or move an effect; null for a jingle, a dropped sound or one still
+   * being rendered.
    */
   cue(name: string, o: CueOptions = {}): Sound | null {
     const g = this.graph();
@@ -223,11 +225,15 @@ export class GameAudio {
       this.streaks.set(id, { at: now, step });
       pitch += meta.streak.steps[step] ?? 0;
     }
+    if (meta.jingle) {
+      g.jingle.start("jingle", id, 0, {});
+      if (meta.duck) this.duck(meta.duck.depth, meta.seconds ?? 2, meta.duck.release);
+      return null;
+    }
     return this.start(id, meta, {
       ...placed,
       pitch,
       ...(own ? {} : { priority: Math.max(0, meta.priority - 1) }),
-      ...(meta.jingle ? { group: "jingle" } : {}),
     });
   }
 
@@ -335,7 +341,7 @@ export class GameAudio {
     catalog: (): ReadonlyMap<string, CueMeta> => this.catalog,
     stats: () => {
       const g = this.g;
-      const decks = g ? [...g.music, ...g.ambient] : [];
+      const decks = g ? [...g.music, ...g.ambient, g.jingle] : [];
       let bytes = 0;
       for (const list of this.buffers.values())
         for (const b of list) bytes += b.length * b.numberOfChannels * 4;
@@ -410,7 +416,7 @@ export class GameAudio {
     if (!buffers) {
       const list = this.waiting.get(id) ?? [];
       if (list.length === 0) g.worker.postMessage({ type: "render", id } satisfies ToWorker);
-      list.push({ o, until: g.ctx.currentTime + (meta.jingle ? WAIT_JINGLE : WAIT_EFFECT) });
+      list.push({ o, until: g.ctx.currentTime + WAIT_EFFECT });
       this.waiting.set(id, list);
       return null;
     }
@@ -503,7 +509,8 @@ export class GameAudio {
       new Deck(ctx, buses.ambient, 2, post),
       new Deck(ctx, buses.ambient, 3, post),
     ];
-    const decks = [...music, ...ambient];
+    const jingle = new Deck(ctx, buses.effects, 4, post);
+    const decks = [...music, ...ambient, jingle];
     worker.onmessage = (e: MessageEvent<FromWorker>) => {
       const m = e.data;
       switch (m.type) {
@@ -520,9 +527,7 @@ export class GameAudio {
             });
             return b;
           };
-          const buffers = meta?.jingle
-            ? [toBuffer(m.variants)]
-            : m.variants.map((v) => toBuffer([v]));
+          const buffers = m.variants.map((v) => toBuffer([v]));
           this.buffers.set(m.id, buffers);
           const waiting = this.waiting.get(m.id);
           this.waiting.delete(m.id);
@@ -547,7 +552,7 @@ export class GameAudio {
       for (const d of decks) d.pump();
     }, 100);
     const voices = new Voices(ctx, buses.effects);
-    this.g = { ctx, buses, duck, analyser, music, ambient, voices, worker, timer };
+    this.g = { ctx, buses, duck, analyser, music, ambient, jingle, voices, worker, timer };
     return this.g;
   }
 
