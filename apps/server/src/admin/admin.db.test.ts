@@ -8,7 +8,7 @@ import { request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
-import { API, CLOSE_BANNED, WORLD_ROOM } from "@guago/shared";
+import { API, CLOSE_BANNED, ENTER_PATH, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGameServer } from "../app.ts";
@@ -20,8 +20,10 @@ import { provideLive } from "../live/current.ts";
 import type { Live } from "../live/index.ts";
 import { studentLooks } from "../looks.ts";
 import { evictAccount } from "../seats.ts";
+import { executorFees } from "../social/fees.ts";
+import { createSocial } from "../social/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
-import { joinMap } from "../test/enter.ts";
+import { enter, joinMap, sdk as mapSdk } from "../test/enter.ts";
 import { call, cookieHeader, type Jar, remember, waitFor, within } from "../test/http.ts";
 import { createModerationStack, type ModerationStack } from "./index.ts";
 
@@ -119,13 +121,22 @@ let owner: Awaited<ReturnType<typeof adminSession>>;
 beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
   const economy = createEconomy(db);
-  stack = await createModerationStack({ db, executor: economy.executor, secret: "test" });
+  const social = createSocial(db, {
+    fees: executorFees(db, economy.executor),
+    jackets: () => ["navy"],
+  });
+  stack = await createModerationStack({
+    db,
+    executor: economy.executor,
+    secret: "test",
+    clubs: { vacate: (id, on) => social.vacate(id, on), announce: social.announce },
+  });
   auth = createAuthService({ db, gate: stack.moderation.gate, onSessionsRevoked: evictAccount });
   server = createGameServer(
     auth,
     SETTINGS,
     studentLooks,
-    { filter: stack.filter },
+    { filter: stack.filter, social },
     { ops: economy.ops, routes: economy.routes(auth) },
   );
   const port = await freePort();
@@ -146,6 +157,33 @@ afterAll(async () => {
 });
 
 describe("a ban", () => {
+  it("holds by the account's status alone, sessions untouched", async () => {
+    const p = await player("gated1");
+    await db.execute(sql`update accounts set status = 'banned' where id = ${p.accountId}`);
+    expect((await call(base, API.me, { jar: p.jar, ip: p.ip })).status).toBe(401);
+    expect((await enter(base, p.jar)).status).toBe(401);
+    await expect(sdk(p.jar).joinOrCreate(WORLD_ROOM)).rejects.toBeDefined();
+    const login = await call(base, API.login, {
+      body: { loginId: "gated1", password: "ban test pass" },
+      ip: p.ip,
+    });
+    expect(login.body.error).toBe("account_banned");
+    await db.execute(sql`update accounts set status = 'active' where id = ${p.accountId}`);
+  });
+
+  it("refuses a seat reserved before it, as a door's handoff holds one", async () => {
+    for (const action of ["ban", "kick"] as const) {
+      const p = await player(`handoff${action}`);
+      const { seating } = await enter(base, p.jar);
+      expect(seating).toBeDefined();
+      const body = action === "ban" ? { reason: "이동 중", minutes: 60 } : { reason: "이동 중" };
+      expect((await owner.send(`/players/${p.accountId}/${action}`, body)).status).toBe(200);
+      await expect(
+        mapSdk(base, p.jar).consumeSeatReservation(seating?.seat as never),
+      ).rejects.toBeDefined();
+    }
+  });
+
   it("closes live seats and holds against login, the old cookie, a second tab and the reconnection", async () => {
     const p = await player("banned1");
     const world = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
@@ -166,7 +204,7 @@ describe("a ban", () => {
     const banned = await owner.send(`/players/${p.accountId}/ban`, {
       reason: "욕설 반복",
       minutes: null,
-      ip: true,
+      ip: "signup",
     });
     expect(banned.status).toBe(200);
     expect(await within(mapClosed, 3000, "the map seat to close")).toBe(CLOSE_BANNED);
@@ -180,6 +218,8 @@ describe("a ban", () => {
       ip: "10.2.9.1",
     });
     expect(login.body.error).toBe("account_banned");
+    // The right password: the owner is told why, with the narrative's key.
+    expect(login.body.ban).toEqual({ key: "moderation.banned-permanent", reason: "욕설 반복" });
     // The IP hashes it came from take no new accounts or logins.
     const fresh = await call(base, API.signup, {
       body: { loginId: "banned1alt", password: "ban test pass", ageConfirmed: true },
@@ -199,7 +239,7 @@ describe("a ban", () => {
 
   it("ends by itself at its end time", async () => {
     const p = await player("banned2");
-    await owner.send(`/players/${p.accountId}/ban`, { reason: "도배", minutes: 60, ip: false });
+    await owner.send(`/players/${p.accountId}/ban`, { reason: "도배", minutes: 60 });
     await db.execute(sql`
       update account_bans set starts_at = now() - interval '2 hours', ends_at = now() - interval '1 hour'
       where account_id = ${p.accountId}`);
@@ -295,6 +335,9 @@ describe("a grant", () => {
   });
 });
 
+/** Drizzle wraps the database's own error, which names the trigger's refusal. */
+const APPEND_ONLY = { cause: { message: "admin_actions is append-only" } };
+
 describe("the audit log", () => {
   const count = async (action: string, t: string) => {
     const { rows } = await db.execute(
@@ -325,7 +368,12 @@ describe("the audit log", () => {
     // A strike lands once with one row and one 벌점 call; a second strike of the line adds neither.
     const struck: string[] = [];
     provideLive({
-      events: { chatStrike: async (id: string) => void struck.push(id) },
+      events: {
+        chatStrike: async (id: string) => {
+          struck.push(id);
+          return true;
+        },
+      },
     } as unknown as Live);
     await db.execute(sql`
       insert into chat_log (channel, sender_id, target, body, masked, at)
@@ -343,10 +391,88 @@ describe("the audit log", () => {
     expect(await count("strike", `character:${p.characterId}`)).toBe(1);
   });
 
-  it("refuses every change and removal", async () => {
-    await expect(db.execute(sql`update admin_actions set reason = 'x'`)).rejects.toThrow();
-    await expect(db.execute(sql`delete from admin_actions`)).rejects.toThrow();
-    await expect(db.execute(sql`truncate admin_actions`)).rejects.toThrow();
+  it("refuses every change and removal of a row through the server's own role", async () => {
+    // A row of its own, so the row-level trigger has something to fire on.
+    await owner.send("/players?q=audit-probe");
+    const { rows } = await db.execute(
+      sql`select id, detail from admin_actions where action = 'player.search' order by id desc limit 1`,
+    );
+    const id = Number(rows[0]?.id);
+    expect(rows[0]?.detail).toEqual({ q: "audit-probe" });
+    await expect(
+      db.execute(sql`update admin_actions set reason = 'x' where id = ${id}`),
+    ).rejects.toMatchObject(APPEND_ONLY);
+    await expect(db.execute(sql`delete from admin_actions where id = ${id}`)).rejects.toMatchObject(
+      APPEND_ONLY,
+    );
+    await expect(db.execute(sql`truncate admin_actions`)).rejects.toMatchObject(APPEND_ONLY);
+    const after = await db.execute(sql`select reason from admin_actions where id = ${id}`);
+    expect(after.rows).toEqual([{ reason: null }]);
+  });
+
+  it("records what a player was told, the reads of their data, and the command line", async () => {
+    const p = await player("audited2");
+    await owner.send(`/players/${p.accountId}`);
+    await owner.send(`/players/${p.accountId}/partners`);
+    await owner.send(`/players/${p.accountId}/mute`, { reason: "내부 메모", minutes: 10 });
+    const rows = await db.execute(sql`
+      select action, target, detail, ip_hash from admin_actions
+      where target in (${`account:${p.accountId}`}, ${`character:${p.characterId}`})
+      order by id`);
+    expect(rows.rows.map((r) => r.action)).toEqual(["player.read", "trades.read", "mute"]);
+    expect(rows.rows[2]?.detail).toMatchObject({ told: "내부 메모" });
+    expect(rows.rows.every((r) => typeof r.ip_hash === "string")).toBe(true);
+    // The command line has no session: its row names the machine user, with no address.
+    const id = await stack.auth.create("cli_probe", "cli probe password", "moderator", "andy");
+    const cli = await db.execute(
+      sql`select action, detail, ip_hash from admin_actions where admin_id = ${id}`,
+    );
+    expect(cli.rows).toEqual([
+      {
+        action: "cli.create",
+        detail: { via: "cli", operator: "andy", role: "moderator" },
+        ip_hash: null,
+      },
+    ]);
+  });
+
+  it("retries a strike's 벌점 until the living world takes it", async () => {
+    const p = await player("struck2");
+    let answer = false;
+    const calls: string[] = [];
+    provideLive({
+      events: {
+        chatStrike: async (_id: string, strikeId: string) => {
+          calls.push(strikeId);
+          return answer;
+        },
+      },
+    } as unknown as Live);
+    try {
+      await db.execute(sql`
+        insert into chat_log (channel, sender_id, target, body, masked, at)
+        values ('world', ${p.characterId}, null, '병신', true, now())`);
+      const { rows } = await db.execute(
+        sql`select id, at from chat_log where sender_id = ${p.characterId}`,
+      );
+      const line = { id: Number(rows[0]?.id), at: new Date(rows[0]?.at as string).toISOString() };
+      expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).status).toBe(200);
+      const pending = async () =>
+        (
+          await db.execute(
+            sql`select demerit_at from filter_strikes where character_id = ${p.characterId}`,
+          )
+        ).rows[0]?.demerit_at;
+      expect(await pending()).toBeNull();
+      answer = true;
+      await stack.sweep();
+      expect(await pending()).not.toBeNull();
+      await stack.sweep();
+      expect(calls.length).toBe(2);
+      expect(new Set(calls).size).toBe(1);
+    } finally {
+      provideLive(undefined);
+    }
   });
 });
 
@@ -355,6 +481,13 @@ describe("the admin API", () => {
     for (const path of ["/admin/api/me", "/admin/api/players", "/admin/"]) {
       expect((await fetch(`${base}${path}`)).status).toBe(404);
     }
+    // The living world's control route moved to the loopback metrics port: not here.
+    const live = await fetch(`${base}/admin/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cmd: "state" }),
+    });
+    expect(live.status).toBe(404);
     const login = await fetch(`${base}/admin/api/login`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: admin },
@@ -416,5 +549,199 @@ describe("the admin API", () => {
     });
     // No Origin on a state change: refused.
     expect(post.status).toBe(403);
+  });
+});
+
+/** Sends one world request and waits for its one answer: `done` data or the refusal code. */
+async function ask(room: Room, type: string, req: Record<string, unknown>) {
+  const n = Math.floor(Math.random() * 1e9);
+  return within(
+    new Promise<string>((resolve) => {
+      room.onMessage(WORLD_MESSAGES.refused, (r: { n?: number; code: string }) => {
+        if (r.n === n) resolve(r.code);
+      });
+      room.onMessage(WORLD_MESSAGES.done, (r: { n?: number }) => {
+        if (r.n === n) resolve("done");
+      });
+      room.onMessage(WORLD_MESSAGES.chat, (r: { n?: number }) => {
+        if (r.n === n) resolve("sent");
+      });
+      room.send(type, { ...req, n });
+    }),
+    5000,
+    type,
+  );
+}
+
+const quiet = (room: Room) => {
+  for (const t of [WORLD_MESSAGES.presence, WORLD_MESSAGES.system, "social", "live", "change"]) {
+    room.onMessage(t, () => {});
+  }
+};
+
+describe("a mute", () => {
+  const EMBLEM = { shape: "shield", shapeColor: "navy", symbol: "atom", symbolColor: "gold" };
+
+  it("holds on every text other players see, from an admin or the filter", async () => {
+    const p = await player("muted1");
+    const other = await player("muted1b");
+    const room = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
+    const otherRoom = await sdk(other.jar).joinOrCreate(WORLD_ROOM);
+    quiet(room);
+    quiet(otherRoom);
+    otherRoom.onMessage(WORLD_MESSAGES.chat, () => {});
+    const texts: [string, Record<string, unknown>][] = [
+      ["board.post", { cat: "chat", text: "골드 싸게 팝니다" }],
+      ["board.pin", { text: "공지 아님" }],
+      ["club.notice", { text: "공지" }],
+      [
+        "club.create",
+        { op: "found-0001", name: "도배동아리", joinRule: "open", jacket: "navy", emblem: EMBLEM },
+      ],
+    ];
+
+    await owner.send(`/players/${p.accountId}/mute`, { reason: "도배", minutes: 60 });
+    for (const [type, req] of texts)
+      expect([type, await ask(room, type, req)]).toEqual([type, "muted"]);
+    await owner.send(`/players/${p.accountId}/unmute`, { reason: "해제" });
+    expect(await ask(room, "board.post", texts[0]?.[1] ?? {})).toBe("done");
+
+    // Two masked lines within ten minutes: the filter's own mute covers the same paths.
+    const swear = { ch: "whisper", to: "muted1b", text: "시발 진짜" };
+    expect(await ask(room, WORLD_MESSAGES.chat, swear)).toBe("sent");
+    expect(await ask(room, WORLD_MESSAGES.chat, swear)).toBe("sent");
+    expect(await ask(room, "board.post", { cat: "trade", text: "또 팝니다" })).toBe("muted");
+    expect(await ask(room, "club.notice", { text: "공지" })).toBe("muted");
+    await room.leave();
+    await otherRoom.leave();
+  });
+
+  it("leaves a post an admin can read and take down, audited", async () => {
+    const p = await player("poster1");
+    const room = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
+    quiet(room);
+    expect(await ask(room, "board.post", { cat: "chat", text: "현질 하실 분 연락" })).toBe("done");
+    const listed = await owner.send("/posts");
+    const post = (listed.body.board as { id: number; body: string }[]).find(
+      (b) => b.body === "현질 하실 분 연락",
+    );
+    expect(post).toBeDefined();
+    expect(
+      (await owner.send(`/posts/board/${post?.id}/remove`, { reason: "현금 거래" })).status,
+    ).toBe(200);
+    const left = await db.execute(sql`select 1 from board_posts where id = ${post?.id}`);
+    expect(left.rows).toEqual([]);
+    const audit = await db.execute(
+      sql`select detail from admin_actions where action = 'post.remove' and target = ${`character:${p.characterId}`}`,
+    );
+    expect(audit.rows[0]?.detail).toMatchObject({ body: "현질 하실 분 연락" });
+    await room.leave();
+  });
+});
+
+describe("an IP ban", () => {
+  const login = (loginId: string, ip: string) =>
+    call(base, API.login, { body: { loginId, password: "ban test pass" }, ip });
+  const enterFrom = (jar: Jar, ip: string) =>
+    fetch(base + ENTER_PATH, {
+      method: "POST",
+      headers: {
+        cookie: cookieHeader(jar),
+        "content-type": "application/json",
+        "x-forwarded-for": ip,
+      },
+      body: "{}",
+    }).then((r) => r.status);
+
+  it("refuses new accounts from the address, and every account there only when asked", async () => {
+    const p = await player("ipban1");
+    const q = await player("ipban2");
+    // One dormitory, one address: q comes in from p's address too.
+    const qJar: Jar = {};
+    expect(remember(qJar, await login("ipban2", p.ip)).status).toBe(200);
+    const preview = await owner.send(`/players/${p.accountId}/ip-preview`);
+    expect(preview.body.preview).toEqual({ addresses: 1, otherAccounts: 1 });
+
+    await owner.send(`/players/${p.accountId}/ban`, {
+      reason: "도배",
+      minutes: null,
+      ip: "signup",
+    });
+    const fresh = { loginId: "ipban3", password: "ban test pass", ageConfirmed: true };
+    expect((await call(base, API.signup, { body: fresh, ip: p.ip })).body.error).toBe(
+      "account_banned",
+    );
+    expect(remember(qJar, await login("ipban2", p.ip)).status).toBe(200);
+    expect(await enterFrom(qJar, p.ip)).toBe(200);
+    expect(q.accountId).not.toBe(p.accountId);
+
+    await owner.send(`/players/${p.accountId}/unban`, { reason: "범위 변경" });
+    await owner.send(`/players/${p.accountId}/ban`, { reason: "도배", minutes: null, ip: "all" });
+    expect((await login("ipban2", p.ip)).body.error).toBe("account_banned");
+    expect(await enterFrom(qJar, p.ip)).toBe(403);
+    expect(await enterFrom(qJar, "10.4.4.4")).toBe(200);
+    await owner.send(`/players/${p.accountId}/unban`, { reason: "해제" });
+  });
+
+  it("reaches only the addresses of the last 30 days", async () => {
+    const p = await player("ipban4");
+    expect((await login("ipban4", "10.5.5.5")).status).toBe(200);
+    const count = async () =>
+      (
+        (await owner.send(`/players/${p.accountId}/ip-preview`)).body.preview as {
+          addresses: number;
+        }
+      ).addresses;
+    expect(await count()).toBe(2);
+    await db.execute(sql`
+      update account_ips set last_seen = now() - interval '40 days', first_seen = now() - interval '40 days'
+      where account_id = ${p.accountId} and ip_hash <> (select signup_ip_hash from accounts where id = ${p.accountId})`);
+    expect(await count()).toBe(1);
+  });
+});
+
+describe("admin limits behind a proxy", () => {
+  const attempt = (url: string, password: string, user: string) =>
+    fetch(`${url}/admin/api/login`, {
+      method: "POST",
+      headers: { origin: admin, "content-type": "application/json", "tailscale-user-login": user },
+      body: JSON.stringify({ loginId: "proxied", password }),
+    }).then((r) => r.status);
+
+  it("key on the person the trusted proxy names, and ignore the header otherwise", async () => {
+    await stack.auth.create("proxied", "proxied admin password", "moderator");
+    const port = await freePort();
+    // A second listener that trusts a proxy on this machine, as behind `tailscale serve`.
+    const host = `127.0.0.1:${port}`;
+    const trusted = await stack.listen({
+      host: "127.0.0.1",
+      port,
+      origin: admin,
+      trustProxy: true,
+    });
+    const url = `http://${host}`;
+    try {
+      for (let i = 0; i < 6; i++) await attempt(url, "wrong", "mallory@example.com");
+      expect(await attempt(url, "wrong", "mallory@example.com")).toBe(429);
+      expect(await attempt(url, "proxied admin password", "alice@example.com")).toBe(200);
+
+      // Without trust, the header is the client's own word: one address, one counter.
+      for (let i = 0; i < 6; i++) await attempt(admin, "wrong", `m${i}@example.com`);
+      expect(await attempt(admin, "proxied admin password", "alice@example.com")).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => trusted.close(() => resolve()));
+    }
+  });
+});
+
+describe("the invariant check", () => {
+  it("runs once for any number of callers, and fresh at most once a minute", async () => {
+    const all = await Promise.all(
+      Array.from({ length: 10 }, () => owner.send("/economy/check?fresh=1")),
+    );
+    const runs = new Set(all.map((r) => (r.body.check as { at: string }).at));
+    expect(runs.size).toBe(1);
+    const again = await owner.send("/economy/check?fresh=1");
+    expect((again.body.check as { at: string }).at).toBe([...runs][0]);
   });
 });

@@ -13,9 +13,11 @@
  * refused at `add` and never joins a batch. What is still in memory when the process dies is lost,
  * like an unsaved position (PLAN §19).
  */
+
 import { randomUUID } from "node:crypto";
 import { type Drop, ledgerKey } from "@guago/content";
 import type { ChangeNotice } from "@guago/shared";
+import { background } from "../background.ts";
 import { describeError } from "../db/index.ts";
 import { type Executor, isTransient } from "./executor.ts";
 import { checkDrop, checkGrant, type GrantRequest } from "./ops.ts";
@@ -121,7 +123,7 @@ export class GrantBuffer {
 
   /** Flushes every `ms`; returns the stop. */
   start(ms = GRANT_FLUSH_MS): () => void {
-    const timer = setInterval(() => void this.flush(), ms);
+    const timer = setInterval(() => background("grant flush", this.flush()), ms);
     timer.unref();
     return () => clearInterval(timer);
   }
@@ -142,11 +144,16 @@ export class GrantBuffer {
 
   private serial(characterId: string): Promise<void> {
     const before = this.running.get(characterId) ?? Promise.resolve();
-    const next = before.then(() => this.send(characterId));
+    // A failed send must neither block the next one nor surface as an unhandled rejection.
+    const next = before.then(
+      () => this.send(characterId),
+      () => this.send(characterId),
+    );
     this.running.set(characterId, next);
-    void next.finally(() => {
+    const clear = () => {
       if (this.running.get(characterId) === next) this.running.delete(characterId);
-    });
+    };
+    void next.then(clear, clear);
     return next;
   }
 

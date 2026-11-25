@@ -3,6 +3,7 @@ import {
   deviceSource,
   HashBusy,
   hashSecret,
+  ipKey,
   MAX_HASH_WAITING,
   MAX_HASHING,
   newDeviceToken,
@@ -30,5 +31,14 @@ describe("device cookie", () => {
     expect(deviceSource(token, "sora_01", "other key")).toBeNull();
     expect(deviceSource(`${token}x`, "sora_01", "key")).toBeNull();
     expect(deviceSource(undefined, "sora_01", "key")).toBeNull();
+  });
+});
+
+describe("ipKey", () => {
+  it("counts an IPv6 address by its /64 and an IPv4-mapped one as IPv4", () => {
+    expect(ipKey("2001:db8:1:2:aaaa::1")).toBe(ipKey("2001:0db8:0001:0002:bbbb:cccc:dddd:eeee"));
+    expect(ipKey("2001:db8:1:2::1")).not.toBe(ipKey("2001:db8:1:3::1"));
+    expect(ipKey("::ffff:10.0.0.1")).toBe("10.0.0.1");
+    expect(ipKey("10.0.0.1")).toBe("10.0.0.1");
   });
 });

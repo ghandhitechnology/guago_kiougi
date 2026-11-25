@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { mapById } from "@guago/content";
+import { mapById, snapshotReaderForMap } from "@guago/content";
 import {
   ENTER_PATH,
   encodeInput,
@@ -15,11 +15,9 @@ import {
   Q,
   REVIVE_MESSAGE,
   type Seating,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   TICK_MS,
-  TILE_SIZE,
   WirePlayer,
   type WireSelf,
 } from "@guago/shared";
@@ -62,7 +60,7 @@ const HUNT = 170;
 
 class CrowdBot {
   private predictor: Predictor | undefined;
-  private readonly reader = new SnapshotReader();
+  private readonly reader: SnapshotReader;
   private seen = { x: -1, y: -1, seq: -1 };
   private slot: string | undefined;
   private follow = -1;
@@ -81,11 +79,7 @@ class CrowdBot {
     this.room = room;
     // Sized before the first snapshot: every message is a delta against the one before.
     this.map = mapById(mapId);
-    if (this.map) {
-      const cell = SNAP_CELL_TILES * TILE_SIZE;
-      this.reader.cols = Math.ceil((this.map.collision.w * TILE_SIZE) / cell);
-      this.reader.rows = Math.ceil((this.map.collision.h * TILE_SIZE) / cell);
-    }
+    this.reader = snapshotReaderForMap(mapId);
     this.ring = 50 + ((index * 37) % 100);
     this.side = index % 2 === 0 ? 1 : -1;
     this.angle = index * 2.399963;

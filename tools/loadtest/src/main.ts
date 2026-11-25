@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { mapById } from "@guago/content";
+import { mapById, snapshotReaderForMap } from "@guago/content";
 import {
   type Collidable,
   type Doorway,
@@ -19,15 +19,15 @@ import {
   portalAt,
   Q,
   type Seating,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   shutDoors,
   TICK_MS,
   TILE_SIZE,
   WirePlayer,
   type WireSelf,
 } from "@guago/shared";
+import { Abuser } from "./abuse.ts";
 import { signIn } from "./account.ts";
 import { startNetsim } from "./netsim.ts";
 
@@ -46,6 +46,8 @@ import { startNetsim } from "./netsim.ts";
  *   … --auto 0.5          share of bots in full auto
  *   … --latency 150 --jitter 30 --loss 0.01   every bot through a simulated mobile link
  *   … --out report.txt    also write the report to a file
+ *   … --abusers 4         accounts that hoard entry tickets and leave sockets at the yard door
+ *                         while the bots join; the report says which channel each bot got
  *
  * Bots enter through `POST /api/enter` like the browser. A channel holds 60 players (PLAN §10):
  * to put more in one room, run the server with MAP_CHANNEL_SEATS raised. Bots never walk through
@@ -72,6 +74,7 @@ const { values } = parseArgs({
     monsters: { type: "string" },
     metrics: { type: "string" },
     out: { type: "string" },
+    abusers: { type: "string", default: "0" },
   },
 });
 
@@ -117,7 +120,8 @@ class Bot {
     downs: 0,
   };
   private predictor: Predictor | undefined;
-  private readonly reader = new SnapshotReader();
+  /** Made from the room's map on the first snapshot, as the browser does. */
+  private reader: SnapshotReader | undefined;
   private seen = { x: -1, y: -1, seq: -1 };
   private slot: string | undefined;
   private dir: readonly [number, number] = [0, 0];
@@ -140,6 +144,7 @@ class Bot {
     const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
       if (this.measuring) this.stats.snapshots++;
+      this.reader ??= snapshotReaderForMap(room.state.map);
       this.reader.read(bytes, sink);
     });
     const events = room.connection.events;
@@ -153,7 +158,7 @@ class Bot {
   }
 
   get broken(): number {
-    return this.reader.broken;
+    return this.reader?.broken ?? 0;
   }
 
   /** The room's walls as the server has them (doors to unbuilt maps shut), and its doors. */
@@ -162,15 +167,12 @@ class Bot {
   private speed = 60;
 
   private onPatch(state: MapState): void {
-    if (this.reader.cols === 1 && state.map) {
+    if (!this.map && state.map) {
       const def = mapById(state.map);
       if (def) {
         const portals = "portals" in def ? def.portals : [];
         this.doors = portals;
         this.map = { collision: shutDoors(def.collision, portals) };
-        const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((def.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((def.collision.h * TILE_SIZE) / cell);
       }
     }
     let me = this.slot === undefined ? undefined : state.players.get(this.slot);
@@ -224,7 +226,7 @@ class Bot {
     let best = Number.POSITIVE_INFINITY;
     let mx = 0;
     let my = 0;
-    for (const m of this.reader.members.values()) {
+    for (const m of this.reader?.members.values() ?? []) {
       if (m.kind >= WirePlayer) continue;
       const dx = m.qx / Q - px;
       const dy = m.qy / Q - py;
@@ -314,8 +316,20 @@ const quantile = (xs: number[], q: number) => {
 };
 const fixed = (v: number, d = 1) => v.toFixed(d);
 
+const ABUSERS = Number(values.abusers);
+const abusers: Abuser[] = [];
+for (let i = 0; i < ABUSERS; i++) {
+  const cookie = await signIn(`http://${target.host}`, "ab", i + 1);
+  const a = new Abuser(`http://${target.host}`, url, cookie, choice);
+  abusers.push(a);
+  void a.run();
+}
+if (ABUSERS > 0) await new Promise((r) => setTimeout(r, 3000));
+
 console.log(`signing in and joining ${BOTS} bots at ${url}`);
 const bots: Bot[] = [];
+/** Which channel each bot was seated in. */
+const channelsOf: number[] = [];
 for (let i = 0; i < BOTS; i++) {
   const cookie = await signIn(`http://${target.host}`, values.accounts, i + 1);
   for (let attempt = 1; ; attempt++) {
@@ -326,7 +340,8 @@ for (let i = 0; i < BOTS; i++) {
         body: JSON.stringify(choice),
       });
       if (!res.ok) throw new Error(`enter answered ${res.status}`);
-      const { seat } = (await res.json()) as Seating;
+      const { seat, channel } = (await res.json()) as Seating;
+      channelsOf.push(channel);
       const client = new Client(url, { headers: { cookie } });
       const room = await client.consumeSeatReservation(seat, MapState);
       bots.push(new Bot(room, i < Math.round(BOTS * AUTO)));
@@ -336,6 +351,18 @@ for (let i = 0; i < BOTS; i++) {
     }
   }
 }
+
+const abuse = abusers.length
+  ? `${abusers.length} abusers made ${abusers.reduce((a, b) => a + b.tickets, 0)} entry requests and ${abusers.reduce((a, b) => a + b.cycles, 0)} door hops while the bots joined`
+  : "";
+await Promise.all(abusers.map((a) => a.stop()));
+const tally = new Map<number, number>();
+for (const c of channelsOf) tally.set(c, (tally.get(c) ?? 0) + 1);
+const seatedIn = [...tally]
+  .sort((a, b) => a[0] - b[0])
+  .map(([c, k]) => `channel ${c}: ${k}`)
+  .join(", ");
+console.log(`bots seated in ${seatedIn}${abuse ? `; ${abuse}` : ""}`);
 
 // One clock drives every bot at 20 Hz, catching up by whole ticks so the input rate stays exact.
 let n = 0;

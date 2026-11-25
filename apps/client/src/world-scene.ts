@@ -1,6 +1,6 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { type BuiltMap, mapById, narrative } from "@guago/content";
+import { type BuiltMap, narrative, snapshotReaderForMap } from "@guago/content";
 import {
   type Caught,
   type DoorRattle,
@@ -18,9 +18,8 @@ import {
   PLAYER_RADIUS,
   POS_SCALE,
   portalAt,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   type SnapshotSink,
   shutDoorAhead,
   TILE_SIZE,
@@ -130,7 +129,7 @@ export class WorldScene extends Phaser.Scene {
   private keys!: KeyboardMove;
   private readonly clock = new ServerClock();
   /** The fight snapshot as this client holds it (`fight/wire.ts`), one per room joined. */
-  private reader = new SnapshotReader();
+  private reader: SnapshotReader | undefined;
   /** Reads snapshots until the fight view is up: only the own body matters then. */
   private readonly early: SnapshotSink = { ...NULL_SINK, self: (me) => this.onSelf(me) };
   /** Waiting for the first Self record of a room just joined. */
@@ -242,14 +241,9 @@ export class WorldScene extends Phaser.Scene {
     const { room, seating } = seat;
     this.room = room;
     this.live = true;
-    // A door is a new room: a new reader, which reads every snapshot from the first, in order.
-    this.reader = new SnapshotReader();
-    const def = mapById(seating.map);
-    if (def) {
-      const cell = SNAP_CELL_TILES * TILE_SIZE;
-      this.reader.cols = Math.ceil((def.collision.w * TILE_SIZE) / cell);
-      this.reader.rows = Math.ceil((def.collision.h * TILE_SIZE) / cell);
-    }
+    // A door is a new room: a new reader, sized for its map, which reads every snapshot from the
+    // first, in order.
+    this.reader = snapshotReaderForMap(seating.map);
     room.onStateChange((state) => {
       if (this.room === room) this.onPatch(state);
     });
@@ -288,7 +282,7 @@ export class WorldScene extends Phaser.Scene {
       this.live = true;
       this.self?.resync();
       this.clock.reset();
-      this.reader.reset();
+      this.reader?.reset();
     });
     void this.enterMap(seat);
     return () => {
@@ -385,7 +379,9 @@ export class WorldScene extends Phaser.Scene {
     this.self = self;
     this.drawn = undefined;
     // Every body in the room comes from its fight snapshots; the HUD's bars and books follow it.
-    const fight = FightView.attach(this, view, room, this.reader, {
+    const reader = this.reader;
+    if (!reader) return;
+    const fight = FightView.attach(this, view, room, reader, {
       self: () => this.drawn,
       mover: self,
       onSelf: (s) => this.onSelf(s),
@@ -444,7 +440,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** Resolves with the player's own body once the fight snapshot carries it (its Self record). */
   private ownBody(_room: Room<unknown, MapState>): Promise<WireSelf | undefined> {
-    if (this.reader.hasSelf) return Promise.resolve({ ...this.reader.me });
+    if (this.reader?.hasSelf) return Promise.resolve({ ...this.reader.me });
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.selfWaiters = this.selfWaiters.filter((w) => w !== done);
@@ -562,9 +558,11 @@ export class WorldScene extends Phaser.Scene {
   private onSnapshot(room: Room<unknown, MapState>, bytes: Uint8Array): void {
     // Through a door the old map stays drawn until the new one is up: its fight reads nothing more.
     const here = this.here;
+    const reader = this.reader;
+    if (!reader) return;
     if (here?.room === room) here.fight.read(bytes);
-    else this.reader.read(bytes, this.early);
-    this.clock.observe(this.reader.tick, performance.now());
+    else reader.read(bytes, this.early);
+    this.clock.observe(reader.tick, performance.now());
   }
 
   /** The server's word on the own body: prediction reconciles, and a patrol's catch lands. */

@@ -9,9 +9,11 @@
  * that failed on the connection is retried under the same id and applies once. One the rules or
  * the database refuse is logged whole and dropped.
  */
+
 import { randomUUID } from "node:crypto";
 import { boardDay } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { background } from "../background.ts";
 import type { Db } from "../db/index.ts";
 import { describeError } from "../db/index.ts";
 import { type ExecResult, type Executor, isTransient } from "../economy/executor.ts";
@@ -142,7 +144,7 @@ export class ProgressBuffer {
   }
 
   start(ms = PROGRESS_FLUSH_MS): () => void {
-    const timer = setInterval(() => void this.flush(), ms);
+    const timer = setInterval(() => background("progress flush", this.flush()), ms);
     timer.unref();
     return () => clearInterval(timer);
   }
@@ -161,11 +163,16 @@ export class ProgressBuffer {
 
   private serial(characterId: string): Promise<void> {
     const before = this.running.get(characterId) ?? Promise.resolve();
-    const next = before.then(() => this.send(characterId));
+    // A failed send must neither block the next one nor surface as an unhandled rejection.
+    const next = before.then(
+      () => this.send(characterId),
+      () => this.send(characterId),
+    );
     this.running.set(characterId, next);
-    void next.finally(() => {
+    const clear = () => {
       if (this.running.get(characterId) === next) this.running.delete(characterId);
-    });
+    };
+    void next.then(clear, clear);
     return next;
   }
 

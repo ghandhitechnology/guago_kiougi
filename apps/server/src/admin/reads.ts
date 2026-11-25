@@ -6,9 +6,8 @@ import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
 import { type AuditReport, checkInvariants, dailyTotals } from "../economy/audit.ts";
 import { livePage } from "../economy/executor.ts";
-import { LEDGER_RAW_DAYS } from "../economy/ledger.ts";
 import { readInventory } from "../economy/reads.ts";
-import { adminMutes } from "../moderation/mutes.ts";
+import { mutes as muteStore } from "../moderation/mutes.ts";
 import { searchTrades, type TradeSearch, tradePartners } from "../trade/log.ts";
 
 const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
@@ -68,11 +67,18 @@ export interface ChatQuery {
   limit?: number;
 }
 
-/** The invariant check reads whole tables; one run serves every page view for this long. */
-const CHECK_TTL_MS = 60_000;
+/** How far back the trade partners table reaches (per trade for 90 days, then daily totals). */
+const PARTNER_DAYS = 365;
+
+/**
+ * The invariant check reads whole tables. One run at a time serves every caller; a result is
+ * shown for ten minutes, and asking for a fresh one starts a new run at most once a minute.
+ */
+const CHECK_TTL_MS = 10 * 60_000;
+const FRESH_EVERY_MS = 60_000;
 
 export function createReads(db: Db) {
-  let checked: { at: number; report: Promise<AuditReport> } | undefined;
+  let checked: { at: number; report: Promise<AuditReport>; done: boolean } | undefined;
 
   async function namesOf(ids: string[]): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
@@ -205,7 +211,7 @@ export function createReads(db: Db) {
         ).rows;
       }
       const now = Date.now();
-      const muteEnd = characterId ? adminMutes.until(characterId, now) : 0;
+      const muteEnd = characterId ? muteStore.adminUntil(characterId, now) : 0;
       return {
         ...player,
         ageConfirmed: Boolean(r.age_confirmed),
@@ -386,19 +392,68 @@ export function createReads(db: Db) {
       return { from, to, rows: await dailyTotals(db, { from, to }) };
     },
 
+    /** Live 대자보 posts and every club notice, newest first, with their authors. */
+    async posts() {
+      const board = await db.execute(sql`
+        select p.id, p.category, p.body, p.pinned, p.created_at, p.expires_at, p.author_id,
+          c.name, c.account_id
+        from board_posts p join characters c on c.id = p.author_id
+        where p.expires_at > now()
+        order by p.id desc limit 300`);
+      const notices = await db.execute(sql`
+        select n.id, n.club_id, k.name as club, n.body, n.created_at, n.author_id,
+          c.name, c.account_id
+        from club_notices n join clubs k on k.id = n.club_id
+        join characters c on c.id = n.author_id
+        order by n.id desc limit 300`);
+      const author = (r: Record<string, unknown>) => ({
+        authorId: r.author_id as string,
+        author: r.name as string,
+        account: r.account_id as string,
+      });
+      return {
+        board: board.rows.map((r) => ({
+          id: Number(r.id),
+          category: r.category as string,
+          body: r.body as string,
+          pinned: Boolean(r.pinned),
+          at: iso(r.created_at) as string,
+          expiresAt: iso(r.expires_at) as string,
+          ...author(r),
+        })),
+        notices: notices.rows.map((r) => ({
+          id: Number(r.id),
+          clubId: Number(r.club_id),
+          club: r.club as string,
+          body: r.body as string,
+          at: iso(r.created_at) as string,
+          ...author(r),
+        })),
+      };
+    },
+
     /**
      * The game-wide audit (wallets equal their ledgers, every item made once, nothing created
      * outside the ledger): has anything been duplicated. Cached for a minute.
      */
     async invariants(fresh = false) {
       const now = Date.now();
-      if (fresh || !checked || now - checked.at > CHECK_TTL_MS) {
-        checked = { at: now, report: checkInvariants(db) };
-        checked.report.catch(() => (checked = undefined));
+      const last = checked;
+      const due = !last || (last.done && now - last.at > (fresh ? FRESH_EVERY_MS : CHECK_TTL_MS));
+      if (due) {
+        const run = { at: now, report: checkInvariants(db), done: false };
+        checked = run;
+        run.report.then(
+          () => (run.done = true),
+          () => {
+            if (checked === run) checked = undefined;
+          },
+        );
       }
-      const report = await checked.report;
+      const current = checked as { at: number; report: Promise<AuditReport> };
+      const report = await current.report;
       return {
-        at: new Date(checked?.at ?? now).toISOString(),
+        at: new Date(current.at).toISOString(),
         ok: report.ok,
         failed: [...new Set(report.violations.map((v) => v.check))],
         violations: report.violations.slice(0, 50),
@@ -418,10 +473,13 @@ export function createReads(db: Db) {
       }));
     },
 
-    /** Who this character trades with over the ledger's 90 days: mules and real-money patterns. */
+    /**
+     * Who this character traded with in the last year: mules and real-money patterns. Each
+     * trade is kept 90 days; past that the log's per-pair daily totals answer, whole days.
+     */
     async partners(characterId: string) {
       const to = new Date();
-      const from = new Date(to.getTime() - LEDGER_RAW_DAYS * 86_400_000);
+      const from = new Date(to.getTime() - PARTNER_DAYS * 86_400_000);
       const rows = await tradePartners(db, characterId, from, to);
       const names = await namesOf(rows.map((r) => r.partner));
       return rows.map((r) => ({ ...r, name: names.get(r.partner) ?? null }));
