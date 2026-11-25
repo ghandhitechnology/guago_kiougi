@@ -6,11 +6,17 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type AuthContext, ServerError } from "@colyseus/core";
-import { ENTER_PATH, type Seating } from "@guago/shared";
+import { ENTER_PATH, type Entry, type Seating } from "@guago/shared";
 import { channels } from "./channels.ts";
 import { describeError } from "./db/index.ts";
 import { live } from "./live/current.ts";
-import { authenticateJoin, characterAfterMoves, placeCharacter } from "./seats.ts";
+import {
+  admitPage,
+  authenticateJoin,
+  characterAfterMoves,
+  placeCharacter,
+  presentedGen,
+} from "./seats.ts";
 import { belongsOn, builtMap, spawnPlace } from "./world-maps.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
@@ -27,12 +33,15 @@ const MAX_BODY = 512;
  */
 export const mapOptionAllowed = () => process.env.ALLOW_MAP_OPTION === "1";
 
-interface DevChoice {
+interface EntryBody {
+  /** The page's generation from its last entry, when it has one. */
+  readonly gen?: number;
+  /** Development only: the map to be seated on, and monsters for a channel it opens. */
   readonly map?: string;
   readonly monsters?: number;
 }
 
-function readChoice(req: IncomingMessage): Promise<DevChoice> {
+function readBody(req: IncomingMessage): Promise<EntryBody> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -47,7 +56,9 @@ function readChoice(req: IncomingMessage): Promise<DevChoice> {
           unknown
         >;
         const monsters = v.monsters;
+        const gen = presentedGen(v.gen);
         resolve({
+          ...(gen === undefined ? {} : { gen }),
           ...(typeof v.map === "string" ? { map: v.map } : {}),
           ...(Number.isInteger(monsters) && (monsters as number) >= 0 && (monsters as number) <= 300
             ? { monsters: monsters as number }
@@ -93,14 +104,16 @@ export function enterRoute(): Middleware {
     for (const [k, v] of Object.entries(req.headers)) {
       if (typeof v === "string") headers.set(k, v);
     }
-    // Read or drained either way, so the socket can be reused.
-    const choice = mapOptionAllowed() ? await readChoice(req) : {};
-    if (!mapOptionAllowed()) req.resume();
+    const body = await readBody(req);
+    const choice = mapOptionAllowed() ? body : {};
     const auth = await authenticateJoin({ headers, req } as AuthContext);
     // Development and load tests enter as fast as their scripts walk; players are limited.
     if (!mapOptionAllowed() && !take(auth.accountId)) {
       return send(res, 429, { error: "rate_limited" });
     }
+    // A page that a newer page of the account replaced never takes the seat back.
+    const gen = await admitPage(auth.accountId, body.gen);
+    if (gen === "replaced") return send(res, 409, { error: "replaced" });
     let character = await characterAfterMoves(auth.accountId, auth.characterId);
     if (!character) return send(res, 403, { error: "forbidden" });
     const chosen = choice.map ? builtMap(choice.map) : undefined;
@@ -118,7 +131,7 @@ export function enterRoute(): Middleware {
       auth,
       choice.monsters ? { monsters: choice.monsters } : {},
     );
-    send(res, 200, seating);
+    send(res, 200, { ...seating, gen } satisfies Entry);
   }
 
   return (req, res, next) => {

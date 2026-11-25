@@ -231,6 +231,15 @@ export interface Seating {
   readonly seat: SeatTicket;
 }
 
+/**
+ * `ENTER_PATH`'s answer: the seat, and the page's generation. The page presents it when it enters
+ * again (`{ gen }` in the request body and in its WorldRoom join options); a page that presents
+ * one older than the account's newest page is answered 409 `replaced`, which is final for it.
+ */
+export interface Entry extends Seating {
+  readonly gen: number;
+}
+
 /** The player walked through a door: the server saved them on the other side. */
 export interface Transfer extends Seating {
   /** The portal they went through, in the map they are leaving. */

@@ -11,6 +11,7 @@ import {
   API,
   CLOSE_MAP_CHANGED,
   CLOSE_SESSION_REPLACED,
+  type Entry,
   encodeInput,
   INPUT_MESSAGE,
   MAP_MESSAGES,
@@ -512,6 +513,34 @@ describe("a seat is good only where the character belongs", () => {
     there.onMessage("*", () => {});
     expect(seating.map).toBe("gaseolgwan-stairs");
     await there.leave();
+  });
+});
+
+describe("two pages of one account", () => {
+  it("keep a replaced page replaced, even when it never heard so", async () => {
+    const { jar, id } = await player("twotabs");
+    // The first page enters and plays; then its connection is gone for a while.
+    const first = (await enter(base, jar)).seating as Entry;
+    const a = await sdk(base, jar).consumeSeatReservation(first.seat, MapState);
+    a.onMessage("*", () => {});
+    a.reconnection.enabled = false;
+    const yard = matchMaker.getLocalRoomById(a.roomId) as MapRoom;
+    (yard.clients[0]?.ref as { terminate(): void } | undefined)?.terminate();
+    await waitFor(() => yard.clients.length === 0);
+    // A second page loads meanwhile: it presents nothing and takes the seat.
+    const second = (await enter(base, jar)).seating as Entry;
+    expect(second.gen).toBeGreaterThan(first.gen);
+    const b = await sdk(base, jar).consumeSeatReservation(second.seat, MapState);
+    b.onMessage("*", () => {});
+    // The first page comes back and asks again with its own generation: it was replaced.
+    expect((await enter(base, jar, { gen: first.gen })).status).toBe(409);
+    await expect(sdk(base, jar).joinOrCreate(WORLD_ROOM, { gen: first.gen })).rejects.toMatchObject(
+      { code: 409 },
+    );
+    // The second page keeps its seat.
+    expect(await whereIs(id)).toEqual(["campus-yard"]);
+    expect(b.connection.isOpen).toBe(true);
+    await b.leave();
   });
 });
 

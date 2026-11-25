@@ -68,6 +68,7 @@ import {
   WORLD_ROOM,
   whisperTarget,
 } from "@guago/shared";
+import { pageGen } from "./page-gen.ts";
 
 export type WorldStatus =
   /** Joining, or waiting to join again after the room closed. */
@@ -519,7 +520,8 @@ export function connectWorld(
       setStatus("connecting");
       let joined: Room;
       try {
-        joined = await client.joinOrCreate(WORLD_ROOM);
+        const gen = pageGen.get();
+        joined = await client.joinOrCreate(WORLD_ROOM, gen === undefined ? {} : { gen });
       } catch (error) {
         const code = (error as { code?: unknown }).code;
         const final = code === 401 || code === 403 ? "signedOut" : code === 409 ? "replaced" : null;

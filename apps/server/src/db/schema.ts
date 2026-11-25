@@ -37,6 +37,11 @@ export const accounts = pgTable(
     signupIpHash: text("signup_ip_hash").notNull(),
     createdAt: at("created_at").notNull().defaultNow(),
     lastLoginAt: at("last_login_at"),
+    /**
+     * The newest page of the account to enter the world (PLAN §19 single session): a page that
+     * presents an older one was replaced, even if it never heard so.
+     */
+    entryGeneration: integer("entry_generation").notNull().default(0),
   },
   (t) => [
     index("accounts_signup_ip_idx").on(t.signupIpHash, t.createdAt),

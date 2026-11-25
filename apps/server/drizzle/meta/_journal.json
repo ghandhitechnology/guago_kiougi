@@ -99,6 +99,13 @@
       "when": 1795620615639,
       "tag": "0013_raid_bosses",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795625761171,
+      "tag": "0014_entry_generation",
+      "breakpoints": true
     }
   ]
 }
