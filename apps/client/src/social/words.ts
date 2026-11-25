@@ -12,6 +12,14 @@ const SYSTEM = new Map(narrative.NARRATIVE.system.map((m) => [m.id, m]));
 
 type Params = Readonly<Record<string, string | number>>;
 
+const TERMS = new Map((narrative.NARRATIVE.terms ?? []).map((x) => [`${x.kind}:${x.id}`, x.name]));
+
+/** A narrative term's name (an emote, a board section, a rank, a join rule), or the id. */
+export function term(kind: string, id: string): string {
+  const key = TERMS.get(`${kind}:${id}`);
+  return (key && KO[key]) || id;
+}
+
 /** A narrative line by its system message id (or text key), filled; undefined until written. */
 export function line(id: string, params: Params = {}): string | undefined {
   const msg = SYSTEM.get(id);

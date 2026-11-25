@@ -18,7 +18,7 @@ import type { Ctx } from "../ui/widget.ts";
 import type { WorldLink } from "../world-link.ts";
 import { ask } from "./act.ts";
 import { openSheet } from "./sheet.ts";
-import { line, refusal, timeLeft } from "./words.ts";
+import { line, refusal, term, timeLeft } from "./words.ts";
 
 /** Paper for each category: 파티 모집 on blue, 거래 on yellow, 동아리 홍보 on pink, 잡담 on white. */
 const PAPER: Readonly<Record<BoardCategory, string>> = {
@@ -104,7 +104,7 @@ export class Board {
     // The category cards, taped along the top edge of the frame.
     let cx = fx + 10;
     for (const cat of BOARD_CATEGORIES) {
-      const label = new Label(scene, 0, 0, t(`board.cat.${cat}`), {
+      const label = new Label(scene, 0, 0, term("board", cat), {
         font: "galmuri11-bold",
         color: "ink.dark",
       });
@@ -273,7 +273,7 @@ export class Board {
       });
     });
     if (shown.length === 0) {
-      const said = line(`social.empty.board.${this.cat}`) ?? line("social.empty.board");
+      const said = line(`social.board.empty-${this.cat}`);
       if (said) {
         const label = new Label(this.scene, this.cork.x + 20, this.cork.y + 20, said, {
           font: "galmuri11",
@@ -371,7 +371,7 @@ export class Board {
   private write(): void {
     const cat = this.cat;
     openSheet(this.scene, {
-      title: t(`board.cat.${cat}`),
+      title: term("board", cat),
       w: 300,
       h: 96,
       depth: 920,
@@ -404,7 +404,10 @@ export class Board {
         panel.add([count.obj, field, go]);
         const post = async () => {
           const text = field.value.trim();
-          if (!text) return field.reject();
+          if (!text) {
+            field.reject();
+            return;
+          }
           const r = await this.link.request("board.post", { cat, text });
           if (!r.ok) {
             sound("error");
@@ -413,6 +416,8 @@ export class Board {
             return;
           }
           sound("stamp");
+          const said = line("social.board.posted");
+          if (said) toast(said);
           sheet.close();
           if (this.cat === cat) {
             this.posts = [r.data.post, ...this.posts.filter((p) => p.id !== r.data.post.id)];

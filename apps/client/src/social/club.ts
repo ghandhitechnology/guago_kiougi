@@ -29,7 +29,7 @@ import { openJacketEditor } from "./jacket-editor.ts";
 import { majorIcon, presencePin, text, verbs } from "./rows.ts";
 import { Segments } from "./segments.ts";
 import { openSheet } from "./sheet.ts";
-import { line } from "./words.ts";
+import { line, term } from "./words.ts";
 
 /** What the club page hands to other screens. */
 export interface ClubActions {
@@ -248,7 +248,7 @@ class ClubPage {
         text(into, 24 + n.width, 5, t("social.level", { n: c.level }), "stone.dark", "galmuri9");
         const right = text(into, 0, 5, `${c.members}/${CLUB_SIZE}`, "stone.dark", "galmuri9");
         right.at(rw - 6 - right.width, 5);
-        const rule = text(into, 0, 5, t(`club.rule.${c.joinRule}`), "stone.light", "galmuri9");
+        const rule = text(into, 0, 5, term("join", c.joinRule), "stone.light", "galmuri9");
         rule.at(rw - 6 - right.width - 10 - rule.width, 5);
         row.zone(0, 0, rw, ROW, () => this.open(c));
       },
@@ -305,8 +305,8 @@ class ClubPage {
     this.root.add(name.obj);
     const rows: [string, string][] = [
       [t("social.level", { n: c.level }), `${c.members}/${CLUB_SIZE}`],
-      [t("club.rank.leader"), c.leader.name],
-      [t("club.rule"), t(`club.rule.${c.joinRule}`)],
+      [term("rank", "leader"), c.leader.name],
+      [t("club.rule"), term("join", c.joinRule)],
     ];
     rows.forEach(([k, v], i) => {
       const y = 46 + i * 16;
@@ -398,13 +398,17 @@ class ClubPage {
     this.list = undefined;
     switch (this.section) {
       case "members":
-        return this.members(club, body);
+        this.members(club, body);
+        return;
       case "notices":
-        return this.notices(club, body);
+        this.notices(club, body);
+        return;
       case "jacket":
-        return this.jacket(club, body);
+        this.jacket(club, body);
+        return;
       case "manage":
-        return this.manage(club, body);
+        this.manage(club, body);
+        return;
     }
   }
 
@@ -430,7 +434,7 @@ class ClubPage {
       draw: (into, rw, _h, row) => {
         const online = link.presence.has(m.id);
         presencePin(into, 5, 6, online);
-        const r = text(into, 14, 5, t(`club.rank.${m.rank}`), RANK_COLOR[m.rank], "galmuri9");
+        const r = text(into, 14, 5, term("rank", m.rank), RANK_COLOR[m.rank], "galmuri9");
         majorIcon(into, 18 + Math.max(18, r.width), 1, m.major);
         const nx = 38 + Math.max(18, r.width);
         const n = text(into, nx, 4, m.name, online ? "ink.dark" : "stone.dark");
@@ -538,7 +542,10 @@ class ClubPage {
       top = 26;
       const post = async () => {
         const text = field.value.trim();
-        if (!text) return field.reject();
+        if (!text) {
+          field.reject();
+          return;
+        }
         const r = await ask(link, "club.notice", { text });
         if (r.ok) field.value = "";
         else field.reject();
@@ -641,7 +648,10 @@ class ClubPage {
     body.add([field, go]);
     const invite = async () => {
       const name = field.value.trim();
-      if (!name) return field.reject();
+      if (!name) {
+        field.reject();
+        return;
+      }
       const r = await ask(link, "club.invite", { name });
       if (r.ok) field.value = "";
       else field.reject();
@@ -652,7 +662,7 @@ class ClubPage {
         new Label(scene, 8, y + 3, t("club.rule"), { font: "galmuri9", color: "stone.dark" }).obj,
       );
       const rules = new Segments(ctx, 64, y, {
-        items: JOIN_RULES.map((r) => ({ id: r, label: t(`club.rule.${r}`) })),
+        items: JOIN_RULES.map((r) => ({ id: r, label: term("join", r) })),
         selected: club.joinRule,
         onChange: (id) => void ask(link, "club.settings", { joinRule: id as JoinRule }),
       });

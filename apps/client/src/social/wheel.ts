@@ -8,6 +8,7 @@ import { Label } from "../ui/text.ts";
 import { worldView } from "../world/view.ts";
 import type { WorldLink } from "../world-link.ts";
 import { ask } from "./act.ts";
+import { term } from "./words.ts";
 
 /** The desktop key held to open the wheel: a physical key, so it stays put on any layout. */
 export const EMOTE_KEY = "KeyT";
@@ -211,7 +212,7 @@ export class EmoteWheel {
     this.slots[this.hot]?.back.setFrame("wheel-slot/idle");
     this.hot = i;
     const slot = this.slots[i];
-    const word = slot ? t(`emote.name.${slot.id}` as Parameters<typeof t>[0]) : "";
+    const word = slot ? term("emote", slot.id) : "";
     slot?.back.setFrame("wheel-slot/hot");
     if (slot) sound("hover");
     const y = RADIUS + SLOT / 2 + 4;

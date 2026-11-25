@@ -12,6 +12,7 @@ import { Board } from "./board.ts";
 import { type CardTarget, PlayerCard } from "./card.ts";
 import { clubTab } from "./club.ts";
 import { friendsTab } from "./friends.ts";
+import { watchNews } from "./news.ts";
 import { PartyFrames } from "./party-frames.ts";
 import { openReport } from "./report.ts";
 import { Slips } from "./slips.ts";
@@ -91,6 +92,7 @@ export function startSocialUi(
 
   const slips = new Slips(scene);
   const offSlips = watchInvites(link, slips);
+  const offNews = watchNews(link);
   const wheel = new EmoteWheel(scene, link);
 
   return {
@@ -120,6 +122,7 @@ export function startSocialUi(
     destroy() {
       unfight();
       offSlips();
+      offNews();
       if (worldView.onNameTap) worldView.onNameTap = undefined;
       opts.hud.onLeftColumn = undefined;
       card.destroy();
@@ -200,7 +203,7 @@ function watchInvites(link: WorldLink, slips: Slips): () => void {
       }
       case "friend":
         if (!friends.has(e.f.id) && requestsOut.has(e.f.id)) {
-          const sub = line("social.friend.accepted", { name: e.f.name });
+          const sub = line("social.friend.accepted", { player: e.f.name });
           slips.push({
             key: `friend-ok:${e.f.id}`,
             icon: "menu/friends",

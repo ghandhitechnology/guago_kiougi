@@ -34,7 +34,7 @@ import {
 } from "./emblem.ts";
 import { Segments } from "./segments.ts";
 import { openSheet } from "./sheet.ts";
-import { amount, line, refusal } from "./words.ts";
+import { amount, line, refusal, term } from "./words.ts";
 
 const CELL = 15;
 const STEP = 17;
@@ -237,7 +237,7 @@ export function openJacketEditor(
         y += 36;
         row(t("club.rule"));
         const rules = new Segments(ctx, x0, y, {
-          items: JOIN_RULES.map((r) => ({ id: r, label: t(`club.rule.${r}`) })),
+          items: JOIN_RULES.map((r) => ({ id: r, label: term("join", r) })),
           selected: joinRule,
           onChange: (id) => {
             joinRule = id as JoinRule;
@@ -345,7 +345,7 @@ export function openJacketEditor(
           }
           return;
         }
-        const said = line(club ? "social.club.saved" : "social.club.founded", { name });
+        const said = club ? undefined : line("social.club.created", { club: name });
         if (said) toast(said);
         sheet.seal({ x: hangX + 64, y: hangY + 6 });
       }

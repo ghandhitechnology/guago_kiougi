@@ -9,7 +9,7 @@ import { Label } from "../ui/text.ts";
 import { TextField } from "../ui/textfield.ts";
 import type { WorldLink } from "../world-link.ts";
 import { openSheet } from "./sheet.ts";
-import { line, refusal } from "./words.ts";
+import { line, refusal, term } from "./words.ts";
 
 /**
  * 신고 (PLAN §12): the reported player's name, a category ringed in red pen, an optional note,
@@ -50,7 +50,7 @@ export function openReport(
         rowH: 15,
         rows: REPORT_CATEGORIES.map((c, i) => ({
           draw: (into, _w, _h, row) => {
-            const label = new Label(scene, 6, 3, t(`report.cat.${c}`), {
+            const label = new Label(scene, 6, 3, term("report", c), {
               font: "galmuri11",
               color: "ink.dark",
             });
@@ -93,7 +93,7 @@ export function openReport(
           toast(refusal(r.code));
           return;
         }
-        const said = line("social.report.sent", { name: target.name });
+        const said = line("social.report.received");
         if (said) toast(said);
         sheet.seal();
       }

@@ -295,7 +295,16 @@ export class PlayerCard {
     if (!blocked && !friend && !asked) {
       out.push({
         label: t("social.friend"),
-        run: () => void ask(link, "friend.request", { name }),
+        run: () =>
+          void ask(
+            link,
+            "friend.request",
+            { name },
+            {
+              id: "social.friend.request-sent",
+              params: { player: name },
+            },
+          ),
         closes: false,
       });
     }
@@ -307,7 +316,16 @@ export class PlayerCard {
     if (!blocked && who.online && !inMine && leads && (party?.members.length ?? 1) < PARTY_MAX) {
       out.push({
         label: t("social.party"),
-        run: () => void ask(link, "party.invite", { name }),
+        run: () =>
+          void ask(
+            link,
+            "party.invite",
+            { name },
+            {
+              id: "social.party.invite-sent",
+              params: { player: name },
+            },
+          ),
         closes: false,
       });
     }
@@ -315,7 +333,16 @@ export class PlayerCard {
     if (!blocked && rank && clubMay(rank, "invite") && !who.club) {
       out.push({
         label: t("social.club"),
-        run: () => void ask(link, "club.invite", { name }),
+        run: () =>
+          void ask(
+            link,
+            "club.invite",
+            { name },
+            {
+              id: "social.club.invite-sent",
+              params: { player: name },
+            },
+          ),
         closes: false,
       });
     }
