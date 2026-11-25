@@ -155,7 +155,7 @@ const home: Cutscene = {
   id: "expel-home",
   map: "home",
   cast: ["player", "parent"],
-  marks: ["door", "table", "fridge", "desk", "sink"],
+  marks: ["door", "table", "fridge"],
   steps: [
     music("home"),
     fx("fade-in"),
