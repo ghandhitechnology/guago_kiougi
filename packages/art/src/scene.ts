@@ -309,7 +309,8 @@ function shaft(rays: NonNullable<Light["rays"]>, x: number, y: number, seed: num
   const a = Math.atan2(y + 0.5 - rays.at[1], x + 0.5 - rays.at[0]);
   const p = (seed % 97) * 0.37;
   const wave =
-    0.6 * Math.sin(rays.count * a + p) + 0.4 * Math.sin(Math.round(rays.count * 1.618) * a + p * 2.3);
+    0.6 * Math.sin(rays.count * a + p) +
+    0.4 * Math.sin(Math.round(rays.count * 1.618) * a + p * 2.3);
   return 1 + rays.amount * wave;
 }
 

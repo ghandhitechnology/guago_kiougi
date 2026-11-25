@@ -239,9 +239,18 @@ function oliveCrown(stir: number): string {
       for (let x = 1; x < OL_W - 2; x++) {
         const h = (x * 73 + y * 151 + i * 29) % 17;
         const at = c.at(x, y);
-        if (at === mid && h < 4) c.put(Pic.of(h < 2 ? "xx" : "x.\n.x").swap("x", leafMid), x, y, { onto: mid, whole: true });
-        else if (at === "N" && h < 3) c.put(Pic.of(h < 1 ? "xx" : ".x\nx.").swap("x", leafDark), x, y, { onto: "N", whole: true });
-        else if (at === "v" && h < 3) c.put(Pic.of("xx").swap("x", "K"), x, y, { onto: "v", whole: true });
+        if (at === mid && h < 4)
+          c.put(Pic.of(h < 2 ? "xx" : "x.\n.x").swap("x", leafMid), x, y, {
+            onto: mid,
+            whole: true,
+          });
+        else if (at === "N" && h < 3)
+          c.put(Pic.of(h < 1 ? "xx" : ".x\nx.").swap("x", leafDark), x, y, {
+            onto: "N",
+            whole: true,
+          });
+        else if (at === "v" && h < 3)
+          c.put(Pic.of("xx").swap("x", "K"), x, y, { onto: "v", whole: true });
       }
     }
     for (let y = 0; y < OL_H; y++) {

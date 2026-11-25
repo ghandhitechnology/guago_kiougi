@@ -242,7 +242,9 @@ function page(w: number, h: number, size: number, pose: Pose): string {
   const at = (u: number, v: number): V3 => {
     const x = (u - 0.5) * w;
     const y = (v - 0.5) * h;
-    const z = pose.bow * w * ((u - 0.5) ** 2 * 4 - 0.33) + pose.curl * h * Math.max(0, u - v - 0.4) ** 2 * 3;
+    const z =
+      pose.bow * w * ((u - 0.5) ** 2 * 4 - 0.33) +
+      pose.curl * h * Math.max(0, u - v - 0.4) ** 2 * 3;
     return rotZ(rotX(rotY([x, y, z], pose.turn), pose.tip), pose.spin);
   };
   const c = (size - 1) / 2;
@@ -260,7 +262,11 @@ function page(w: number, h: number, size: number, pose: Pose): string {
       const dv = at(u, v + 0.01);
       const a: V3 = [du[0] - p[0], du[1] - p[1], du[2] - p[2]];
       const b: V3 = [dv[0] - p[0], dv[1] - p[1], dv[2] - p[2]];
-      const n: V3 = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      const n: V3 = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+      ];
       const len = Math.hypot(...n) || 1;
       const front = n[2] >= 0;
       const s = front ? 1 : -1;
@@ -280,8 +286,7 @@ function page(w: number, h: number, size: number, pose: Pose): string {
             : 0;
       let ch = "vepP"[tone] as string;
       if (front && col === 2 && w >= 8) ch = tone >= 2 ? "r" : "R";
-      else if (front && row % 3 === 2 && col >= 3 && col < w - 1)
-        ch = tone >= 2 ? "n" : "N";
+      else if (front && row % 3 === 2 && col >= 3 && col < w - 1) ch = tone >= 2 ? "n" : "N";
       const sx = Math.round(c + p[0]);
       const sy = Math.round(c + p[1]);
       if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
@@ -300,7 +305,8 @@ function page(w: number, h: number, size: number, pose: Pose): string {
     for (let x = 0; x < size; x++) {
       const ch = pic.at(x, y) as string;
       if (ch === "." || !(ch in darker)) continue;
-      if (pic.at(x + 1, y) === "." || pic.at(x, y + 1) === ".") edged.set(x, y, darker[ch] as string);
+      if (pic.at(x + 1, y) === "." || pic.at(x, y + 1) === ".")
+        edged.set(x, y, darker[ch] as string);
     }
   }
   return smooth(edged).toString();
