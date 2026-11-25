@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
 import { mapById, snapshotReaderForMap } from "@guago/content";
 import {
+  AIM_MESSAGE,
   type Collidable,
   type Doorway,
   ENTER_PATH,
@@ -24,12 +25,14 @@ import {
   shutDoors,
   TICK_MS,
   TILE_SIZE,
+  type WireBoss,
   WirePlayer,
   type WireSelf,
 } from "@guago/shared";
 import { Abuser } from "./abuse.ts";
 import { signIn } from "./account.ts";
 import { startNetsim } from "./netsim.ts";
+import { RaidPlay } from "./raid-play.ts";
 
 /**
  * Headless players that fight (PLAN §19 budgets, §26 capacity). N bots sign in, join the map the
@@ -50,6 +53,8 @@ import { startNetsim } from "./netsim.ts";
  *   … --out report.txt    also write the report to a file
  *   … --abusers 4         accounts that hoard entry tickets and leave sockets at the yard door
  *                         while the bots join; the report says which channel each bot got
+ *   … --objectives 0.3    on a boss arena, share of 반자동 bots that play the fight's mechanic
+ *                         (raid-play.ts): diagonals, circles, zones, the block on the ice
  *
  * Bots enter through `POST /api/enter` like the browser. A channel holds 60 players (PLAN §10):
  * to put more in one room, run the server with MAP_CHANNEL_SEATS raised. Bots never walk through
@@ -78,6 +83,7 @@ const { values } = parseArgs({
     metrics: { type: "string" },
     out: { type: "string" },
     abusers: { type: "string", default: "0" },
+    objectives: { type: "string", default: "0" },
   },
 });
 
@@ -138,13 +144,25 @@ class Bot {
   measuring = false;
   readonly room: Room<unknown, MapState>;
   readonly auto: boolean;
+  /** Plays the boss fight's mechanic (`--objectives`), once the map is known. */
+  private play: RaidPlay | undefined;
+  private readonly plays: number;
+  private boss: WireBoss | null = null;
+  private aimed = "";
 
-  constructor(room: Room<unknown, MapState>, auto: boolean) {
+  constructor(room: Room<unknown, MapState>, auto: boolean, plays = -1) {
     this.room = room;
     this.auto = auto;
+    this.plays = plays;
     room.reconnection.enabled = false;
     room.onMessage("*", () => {});
-    const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
+    const sink = {
+      ...NULL_SINK,
+      self: (me: WireSelf) => this.onSelf(me),
+      boss: (b: WireBoss) => {
+        this.boss = { ...b };
+      },
+    };
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
       if (this.measuring) this.stats.snapshots++;
       this.reader ??= snapshotReaderForMap(room.state.map);
@@ -220,12 +238,36 @@ class Bot {
     }
   }
 
+  /** Walks to the boss mechanic's spot and aims where it says; false when there is none now. */
+  private playMechanic(px: number, py: number): boolean {
+    if (this.plays < 0 || !this.room.state.map) return false;
+    if (!this.play && RaidPlay.plays(this.room.state.map))
+      this.play = new RaidPlay(this.room.state.map, this.plays);
+    const goal = this.play?.goal(this.boss, this.reader?.members ?? new Map(), px, py);
+    const aim = goal?.aim ? `${Math.round(goal.aim.x - px)},${Math.round(goal.aim.y - py)}` : "";
+    if (aim !== this.aimed) {
+      this.aimed = aim;
+      this.room.send(AIM_MESSAGE, aim ? aim.split(",").map(Number) : []);
+    }
+    if (!goal) return false;
+    const dx = goal.x - px;
+    const dy = goal.y - py;
+    const d = Math.hypot(dx, dy);
+    this.dir =
+      d <= Math.max(1, goal.near)
+        ? [0, 0]
+        : [Math.round((dx / d) * MOVE_MAX), Math.round((dy / d) * MOVE_MAX)];
+    this.until = 0;
+    return true;
+  }
+
   /** 반자동 play: close on the nearest monster, hold a distance, circle; wander when alone. */
   private think(n: number): void {
     const p = this.predictor;
     if (!p) return;
     const px = p.body.x;
     const py = p.body.y;
+    if (this.playMechanic(px, py)) return;
     let best = Number.POSITIVE_INFINITY;
     let mx = 0;
     let my = 0;
@@ -298,7 +340,7 @@ class Bot {
 
   tick(n: number): void {
     if (this.auto || !this.predictor || this.down) return;
-    if (n % 4 === 0) this.think(n);
+    if (n % 4 === 0 || this.plays >= 0) this.think(n);
     // A door would take the bot to another map: turn back instead.
     const map = this.map;
     const next = map && moveBody(map, this.predictor.body, this.dir[0], this.dir[1], this.speed);
@@ -347,7 +389,10 @@ for (let i = 0; i < BOTS; i++) {
       channelsOf.push(channel);
       const client = new Client(url, { headers: { cookie } });
       const room = await client.consumeSeatReservation(seat, MapState);
-      bots.push(new Bot(room, i < Math.round(BOTS * AUTO)));
+      const auto = i < Math.round(BOTS * AUTO);
+      // The last `--objectives` share of the bots play the boss fight's mechanic.
+      const plays = i >= BOTS - Math.round(BOTS * Number(values.objectives)) && !auto ? i : -1;
+      bots.push(new Bot(room, auto, plays));
       break;
     } catch (err) {
       if (attempt === 3) throw err;
