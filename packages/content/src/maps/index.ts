@@ -1,4 +1,5 @@
 import { type BuildResult, buildMap } from "./build.ts";
+import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
@@ -13,7 +14,7 @@ export * from "./props.ts";
 export * from "./stamp.ts";
 
 /** Every map written in the map format, in contact-sheet order. */
-export const MAP_SOURCES: readonly MapSource[] = [campusYard];
+export const MAP_SOURCES: readonly MapSource[] = [campusYard, campusField];
 
 /**
  * Maps that portals may lead to before they are built. A portal to one of these is declared,
@@ -30,7 +31,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "saebyeok",
   "agora",
   "eco-park",
-  "campus-field",
 ]);
 
 /** Builds every map. */

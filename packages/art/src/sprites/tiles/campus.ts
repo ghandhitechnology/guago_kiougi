@@ -707,4 +707,51 @@ const lawnField = terrain({
   },
 });
 
-export default [lawnPath, lawnWalk, lawnField, walkDirt];
+/**
+ * The basketball court nobody uses: green urethane gone patchy, cracks with weeds in them. The
+ * lawn's lip throws its shadow onto the court.
+ */
+const courtSpeck = P(`
+  N.
+  .N
+`);
+const courtCrack = P(`
+  NN..
+  ..NN
+`);
+const lawnCourt = terrain({
+  name: "lawn-court",
+  upper: "grass",
+  lower: "court",
+  themes: ["campus", "campus-night", "field-night"],
+  palette,
+  lone,
+  ...lawnPictures(LAWN_RIM("N", ["e", "E"]), 2),
+  base: [
+    tileOf("B", [[4, 5, courtSpeck]]),
+    tileOf("B", [[10, 10, courtCrack]]),
+    tileOf("B", []),
+    tileOf("B", [
+      [2, 12, courtSpeck],
+      [11, 3, courtSpeck],
+    ]),
+  ],
+  fill: LAWN_MARKS.slice(1).map(lawnTile),
+  tones: LAWN_TONES,
+  decals: {
+    ...LAWN_DECALS,
+    weeds: {
+      on: "lower",
+      density: 0.05,
+      grid: `
+        .NN.....
+        ..NNN...
+        ...hhG..
+        ...GGG..
+        ...GG...
+      `,
+    },
+  },
+});
+
+export default [lawnPath, lawnWalk, lawnField, walkDirt, lawnCourt];
