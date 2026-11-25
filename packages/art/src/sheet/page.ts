@@ -310,13 +310,23 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
   ctx2d(target).putImageData(new ImageData(new Uint8ClampedArray(img.data), img.w, img.h), 0, 0);
 }
 
+/**
+ * The sheet is heavy with every section open. `?only=scenes,combat` shows those sections alone
+ * (maps, scenes, palette, combat, portraits, sprites, rigs, terrain, ui) and `?scenes=a,b` picks
+ * which scenes play.
+ */
+const query = new URLSearchParams(location.search);
+const only = query.get("only")?.split(",") ?? null;
+const want = (name: string): boolean => !only || only.includes(name);
+const sceneNames = query.get("scenes")?.split(",") ?? null;
+
 // Maps --------------------------------------------------------------------------------------
 
 /**
  * Each built map whole at ×1, a screen at ×3 around every spawn and the landmark (playing), and
  * the overlay of what the server sees: collision, portals, spawns, interactables and zones.
  */
-{
+if (want("maps")) {
   const s = section("maps", "maps");
   const ids: string[] = await (await fetch("dist/maps/index.json")).json();
   const maps: BuiltMap[] = await Promise.all(
@@ -377,9 +387,9 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
 
 // Scenes ------------------------------------------------------------------------------------
 
-{
+if (want("scenes")) {
   const s = section("scenes", "scenes");
-  const views = SCENES.map((def) => {
+  const views = SCENES.filter((def) => !sceneNames || sceneNames.includes(def.name)).map((def) => {
     const box = el("article");
     box.id = def.name;
     box.append(el("h3", "name", def.name));
@@ -411,7 +421,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
 
 // Palette -----------------------------------------------------------------------------------
 
-{
+if (want("palette")) {
   const s = section("palette", "해솔 64");
   for (const [name, ramp] of Object.entries(meta.palette.ramps)) {
     const r = row(s);
@@ -444,7 +454,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
  * night and sunlit Greek dirt. Effects meant for additive blending say `add`; the sheet draws
  * them plainly, as the palette-locked art is.
  */
-{
+if (want("combat")) {
   const ground = (set: string, theme: string): HTMLCanvasElement | string => {
     const index = meta.tilesets[set]?.masks[0]?.[0];
     if (index === undefined || !atlases.has(`tiles-${theme}`)) return "checker";
@@ -492,7 +502,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
  * The cast review: every portrait's neutral face at ×1, then ×3, with the speaker's name, and
  * every expression playing at ×3.
  */
-{
+if (want("portraits")) {
   const s = section("portraits", "portraits");
   const names: Record<string, string> = await (await fetch("speakers.json")).json();
   const list = Object.entries(meta.sprites).filter(([, sp]) => sp.atlas === "portraits");
@@ -524,7 +534,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
 
 // Sprites -----------------------------------------------------------------------------------
 
-{
+if (want("sprites")) {
   const s = section("sprites", "sprites");
   for (const [name, sp] of Object.entries(meta.sprites)) {
     if (sp.atlas === "ui" || sp.atlas.startsWith("combat")) continue;
@@ -581,7 +591,7 @@ function composite(
   return c;
 }
 
-{
+if (want("rigs")) {
   const s = section("rigs", "rigs");
   for (const [rigName, rig] of Object.entries(meta.rigs)) {
     for (const [lookName, look] of Object.entries(rig.looks)) {
@@ -624,7 +634,7 @@ function composite(
 
 // Terrain -----------------------------------------------------------------------------------
 
-{
+if (want("terrain")) {
   const s = section("terrain", "terrain");
   const grid = sampleGrid();
   const { tile } = meta.tileGrid;
@@ -707,6 +717,6 @@ function composite(
   }
 }
 
-await uiSections();
+if (want("ui")) await uiSections();
 requestAnimationFrame(tick);
 document.body.dataset.ready = "1";
