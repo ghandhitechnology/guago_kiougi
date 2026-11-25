@@ -52,34 +52,54 @@ export async function authenticateJoin(ctx: AuthContext): Promise<RoomAuth> {
   return { accountId: me.account.id, characterId: character.id, tokenHash };
 }
 
-// One seat per account, across rooms ---------------------------------------------------------
+// One seat per account and slot, across rooms ------------------------------------------------
+
+/** A client holds one map seat and one world seat at a time (PLAN §19 runtime topology). */
+export type SeatSlot = "map" | "world";
 
 interface Live {
   evict: () => void;
   released: Promise<void>;
+  tokenHash: string;
 }
 
-const live = new Map<string, Live>();
+const live = new Map<string, Map<SeatSlot, Live>>();
 
-/** Closes the account's seat wherever it is, after a new login, a logout or a recovery. */
+/** Closes every seat of the account, after a new login, a logout or a recovery. */
 export function evictAccount(accountId: string): void {
-  live.get(accountId)?.evict();
+  for (const seat of live.get(accountId)?.values() ?? []) seat.evict();
 }
 
 const EVICT_WAIT_MS = 5000;
 
-async function claim(accountId: string, evict: () => void): Promise<() => void> {
+/**
+ * Takes the account's seat in `slot`, closing the one there before it. A seat held by another
+ * session in any slot is closed too, so a second login never shares the account with the first.
+ */
+async function claim(
+  accountId: string,
+  slot: SeatSlot,
+  tokenHash: string,
+  evict: () => void,
+): Promise<() => void> {
   let release!: () => void;
-  const mine: Live = { evict, released: new Promise((r) => (release = r)) };
-  const previous = live.get(accountId);
-  live.set(accountId, mine);
-  if (previous) {
-    previous.evict();
+  const mine: Live = { evict, released: new Promise((r) => (release = r)), tokenHash };
+  const seats = live.get(accountId) ?? new Map<SeatSlot, Live>();
+  live.set(accountId, seats);
+  const previous = [...seats].filter(([s, l]) => s === slot || l.tokenHash !== tokenHash);
+  seats.set(slot, mine);
+  for (const [, seat] of previous) seat.evict();
+  if (previous.length > 0) {
     // The old seat saves its place on the way out; load only after that write lands.
-    await Promise.race([previous.released, new Promise((r) => setTimeout(r, EVICT_WAIT_MS))]);
+    await Promise.race([
+      Promise.all(previous.map(([, seat]) => seat.released)),
+      new Promise((r) => setTimeout(r, EVICT_WAIT_MS)),
+    ]);
   }
+  const mySeats = seats;
   return () => {
-    if (live.get(accountId) === mine) live.delete(accountId);
+    if (mySeats.get(slot) === mine) mySeats.delete(slot);
+    if (mySeats.size === 0 && live.get(accountId) === mySeats) live.delete(accountId);
     release();
   };
 }
@@ -113,10 +133,17 @@ export class RoomSeats {
 
   private mapId: string;
   private place: (sessionId: string) => Place | undefined;
+  private slot: SeatSlot;
 
-  constructor(mapId: string, place: (sessionId: string) => Place | undefined) {
+  /** The WorldRoom passes no map and a `place` that finds nothing, so it never saves. */
+  constructor(
+    mapId: string,
+    place: (sessionId: string) => Place | undefined,
+    slot: SeatSlot = "map",
+  ) {
     this.mapId = mapId;
     this.place = place;
+    this.slot = slot;
   }
 
   /** Takes the account's seat (closing an older one) and loads the character fresh. */
@@ -129,7 +156,7 @@ export class RoomSeats {
       evicted: false,
       release: () => {},
     };
-    seat.release = await claim(accountId, () => this.evict(seat));
+    seat.release = await claim(accountId, this.slot, tokenHash, () => this.evict(seat));
     try {
       const { auth } = use();
       // The session was checked at matchmaking; a logout or recovery since then voids the seat.

@@ -11,6 +11,7 @@ A browser pixel-art online RPG. `docs/PLAN.md` is the source of truth: read the 
 ## Commands
 - `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm test`
 - `pnpm dev` builds the art, then runs the game server on :2567 and the client on http://localhost:5173. `pnpm build` builds the art and the client into `apps/client/dist`. The server has no build step: Node runs its TypeScript directly (`pnpm --filter @guago/server start`)
+- `pnpm loadtest --bots 80 --seconds 60 --url ws://localhost:2567` runs signed-in headless bots that walk like players and prints tick time, bytes per client and prediction error; add `--latency 150 --jitter 30 --loss 0.01` for a mobile link. `pnpm netsim --port 2602 --target localhost:2567` puts the same link in front of a server for browser testing (point Vite's `GAME_SERVER_URL` at it)
 - `pnpm art:build` compiles and checks all art into `packages/art/dist`. `pnpm art:sheet` serves the contact sheet; `pnpm art:sheet --png <dir>` writes it as PNGs
 
 ## Art

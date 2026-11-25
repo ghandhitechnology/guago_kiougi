@@ -12,24 +12,39 @@ import {
   qedDamage,
   signatureStrength,
 } from "./classes.ts";
-import { rollDrops } from "./drops.ts";
-import { fieldPopulation, PAGE1_FIELDS, spawnLevel, spawnRate, wavePhase } from "./fields.ts";
+import { dropLedger, rollDrops } from "./drops.ts";
+import {
+  FIELD_PACING,
+  fieldPopulation,
+  PAGE1_FIELDS,
+  refill,
+  refillCap,
+  regionCount,
+  regionLevels,
+  spawnLevel,
+  wavePhase,
+} from "./fields.ts";
 import { zenoDamage } from "./monsters.ts";
+
+const must = <A>(b: { readonly attack: A | null }): A => {
+  if (!b.attack) throw new Error("book has no attack");
+  return b.attack;
+};
 
 const bare: AttackContext = { bookLevel: 1, tools: [], cooldownMult: 1, durationMult: 1 };
 
 describe("resolveAttack", () => {
   it("adds level steps up to the book's level", () => {
-    expect(resolveAttack(WANGDO.attack, WANGDO.levels, bare).attack.count).toBe(3);
-    const at50 = resolveAttack(WANGDO.attack, WANGDO.levels, { ...bare, bookLevel: 50 });
+    expect(resolveAttack(must(WANGDO), WANGDO.levels, bare).attack.count).toBe(3);
+    const at50 = resolveAttack(must(WANGDO), WANGDO.levels, { ...bare, bookLevel: 50 });
     expect(at50.attack.count).toBe(6);
     expect(at50.attack.orbitRadius).toBe(32);
-    const at100 = resolveAttack(WANGDO.attack, WANGDO.levels, { ...bare, bookLevel: 100 });
+    const at100 = resolveAttack(must(WANGDO), WANGDO.levels, { ...bare, bookLevel: 100 });
     expect(at100.attack.count).toBe(8);
   });
 
   it("applies tools by stat and 암기력 to cooldown and duration", () => {
-    const r = resolveAttack(WANGDO.attack, [], {
+    const r = resolveAttack(must(WANGDO), [], {
       ...bare,
       tools: [{ def: toolById("compass"), level: 5 }],
       cooldownMult: 0.8,
@@ -43,16 +58,16 @@ describe("resolveAttack", () => {
 
   it("adds chain jumps and minion cap as counts, only to their own kinds", () => {
     const battery = { def: toolById("battery"), level: 3 };
-    expect(resolveAttack(EM_LAB.attack, [], { ...bare, tools: [battery] }).attack.jumps).toBe(6);
+    expect(resolveAttack(must(EM_LAB), [], { ...bare, tools: [battery] }).attack.jumps).toBe(6);
     const scope = { def: toolById("microscope"), level: 2 };
-    expect(resolveAttack(CAMPING_BIO.attack, [], { ...bare, tools: [scope] }).attack.cap).toBe(6);
-    expect(resolveAttack(WANGDO.attack, [], { ...bare, tools: [battery] }).attack).toEqual(
-      WANGDO.attack,
+    expect(resolveAttack(must(CAMPING_BIO), [], { ...bare, tools: [scope] }).attack.cap).toBe(6);
+    expect(resolveAttack(must(WANGDO), [], { ...bare, tools: [battery] }).attack).toEqual(
+      must(WANGDO),
     );
   });
 
   it("shortens telegraphs but keeps the base delay for 예보", () => {
-    const r = resolveAttack(ROUND_EARTH.attack, [], {
+    const r = resolveAttack(must(ROUND_EARTH), [], {
       ...bare,
       tools: [{ def: toolById("seismometer"), level: 5 }],
     });
@@ -61,7 +76,7 @@ describe("resolveAttack", () => {
   });
 
   it("returns status multipliers for status tools", () => {
-    const r = resolveAttack(WANGDO.attack, [], {
+    const r = resolveAttack(must(WANGDO), [], {
       ...bare,
       durationMult: 1.2,
       tools: [
@@ -69,8 +84,8 @@ describe("resolveAttack", () => {
         { def: toolById("alcohol-lamp"), level: 2 },
       ],
     });
-    expect(r.statusDuration).toBeCloseTo(1.8, 9);
-    expect(r.dot.burn).toBeCloseTo(1.3, 9);
+    expect(r.mods.statusDuration).toBeCloseTo(1.8, 9);
+    expect(r.mods.burn).toBeCloseTo(1.3, 9);
   });
 });
 
@@ -103,8 +118,8 @@ describe("class signatures", () => {
   });
 
   it("finds reactions in either order", () => {
-    expect(findReaction(["flammable"], "burn")?.name).toBe("연소");
-    expect(findReaction(["acid", "slow"], "metal")?.name).toBe("부식");
+    expect(findReaction(["flammable"], "burn")?.id).toBe("combustion");
+    expect(findReaction(["acid", "slow"], "metal")?.id).toBe("corrosion");
     expect(findReaction(["burn"], "acid")).toBeUndefined();
   });
 
@@ -143,41 +158,55 @@ describe("field pacing", () => {
     expect(fieldPopulation(40)).toBe(150);
   });
 
-  it("spawns only during a surge", () => {
+  it("refills kill for kill during a surge, up to a cap that grows with players", () => {
     expect(wavePhase(10)).toBe("surge");
     expect(wavePhase(55)).toBe("lull");
     expect(wavePhase(62)).toBe("surge");
-    expect(spawnRate(1, "surge")).toBe(1.5);
-    expect(spawnRate(3, "lull")).toBe(0);
+    const cap = FIELD_PACING.refillBase + FIELD_PACING.refillPerPlayer;
+    expect(refillCap(1, "surge")).toBe(cap);
+    expect(refillCap(3, "lull")).toBe(0);
+    expect(refill(1, "surge", 1)).toBe(1);
+    expect(refill(1, "surge", 100)).toBe(cap);
+    expect(refill(1, "lull", 1)).toBe(0);
   });
 
-  it("spawns near the players' level inside the field", () => {
+  it("cuts a field into regions of levels, deeper is higher", () => {
     const field = PAGE1_FIELDS[0];
     if (!field) throw new Error("no field");
-    expect(spawnLevel(field, 10, 0)).toBe(8);
-    expect(spawnLevel(field, 10, 0.999)).toBe(12);
-    expect(spawnLevel(field, 1, 0)).toBe(1);
-    expect(spawnLevel(field, 40, 0.5)).toBe(25);
+    expect(regionCount(field)).toBe(5);
+    expect(regionLevels(field, 0)).toEqual({ min: 1, max: 5 });
+    expect(regionLevels(field, 4)).toEqual({ min: 21, max: 25 });
+    expect(regionLevels(field, 9)).toEqual({ min: 21, max: 25 });
+    expect(spawnLevel(field, 1, 0)).toBe(6);
+    expect(spawnLevel(field, 1, 0.999)).toBe(10);
   });
 });
 
 describe("drops", () => {
   const roll = {
-    source: { kind: "monster", fieldId: "f", monsterId: "odap", rank: "elite" },
+    source: { kind: "monster", fieldId: "f", monsterId: "odap", rank: "boss" },
     level: 10,
     rank: 12,
     coin: 1,
     dropMult: 1,
     coinMult: 1,
     books: BOOKS,
+    tools: [],
     spotlight: "math",
   } as const;
 
-  it("always pays coin and gives an elite pages, the same for the same seed", () => {
+  it("always pays coin and gives a boss pages, the same for the same seed", () => {
     const a = rollDrops(new Random(9), roll);
     const b = rollDrops(new Random(9), roll);
     expect(a).toEqual(b);
     expect(a[0]?.item).toEqual({ kind: "coin", amount: Math.round(2 * 10 ** 0.1 * 12 ** 0.8) });
     expect(a[1]?.item.kind).toBe("page");
+    const first = a[0];
+    if (!first) throw new Error("no drop");
+    expect(dropLedger(first)).toEqual({
+      currency: "pinecone",
+      amount: Math.round(2 * 10 ** 0.1 * 12 ** 0.8),
+      key: "drop.boss.odap.f",
+    });
   });
 });

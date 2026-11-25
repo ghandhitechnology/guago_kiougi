@@ -1,8 +1,10 @@
 import { type ControlMode, MODE_BONUS } from "@guago/shared";
+import type { TextKey } from "./narrative/schema.ts";
+import { termKey } from "./narrative/study.ts";
 
 export interface ModeDef {
   readonly id: ControlMode;
-  readonly name: string;
+  readonly name: TextKey;
   /** What the server drives for the player in this mode. */
   readonly auto: { readonly move: boolean; readonly books: boolean; readonly skills: boolean };
   readonly bonus: number;
@@ -13,28 +15,28 @@ export interface ModeDef {
 export const MODES: readonly ModeDef[] = [
   {
     id: "auto",
-    name: "완전 자동",
+    name: termKey("mode", "auto"),
     auto: { move: true, books: true, skills: true },
     bonus: MODE_BONUS.auto,
     icon: "mode/auto",
   },
   {
     id: "semi",
-    name: "반자동",
+    name: termKey("mode", "semi"),
     auto: { move: false, books: true, skills: true },
     bonus: MODE_BONUS.semi,
     icon: "mode/semi",
   },
   {
     id: "skill",
-    name: "스킬 수동",
+    name: termKey("mode", "skill"),
     auto: { move: true, books: true, skills: false },
     bonus: MODE_BONUS.skill,
     icon: "mode/skill",
   },
   {
     id: "manual",
-    name: "완전 수동",
+    name: termKey("mode", "manual"),
     auto: { move: false, books: false, skills: false },
     bonus: MODE_BONUS.manual,
     icon: "mode/manual",

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { ART_ROOT, compileAll } from "./compile.ts";
-import { writeOutput } from "./emit.ts";
+import { metadata, writeOutput } from "./emit.ts";
+import { buildMaps } from "./maps.ts";
 
 export const DIST = join(ART_ROOT, "dist");
 
@@ -20,3 +21,11 @@ for (const f of fonts) {
     `${f.name.padEnd(16)} ${f.meta.chars} chars  png ${kb(f.png.length)}  xml ${kb(Buffer.byteLength(f.xml))}`,
   );
 }
+const built = buildMaps(DIST, metadata(art, atlases, fonts));
+if (built.problems.length > 0) {
+  const n = built.problems.length;
+  console.error(`\nmap checks found ${n} problem${n === 1 ? "" : "s"}:\n`);
+  for (const p of built.problems) console.error(`  ${p}`);
+  process.exit(1);
+}
+for (const m of built.maps) console.log(`map ${m.id.padEnd(12)} ${m.w}×${m.h}  ${m.name}`);

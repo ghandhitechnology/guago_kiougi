@@ -1,23 +1,26 @@
 /**
- * Scenes: one game screen composed only from the built atlases and art.json, for judging art in
- * context. A small seed for the real map format. Every placed thing names its layer by the list
- * it sits in, drawn back to front:
- *
- * 1. `sky` and `backdrop`: what lies past the map edge, shown through void cells.
- * 2. Terrain: the ASCII `ground` grid with its dual-grid tiles, tones and scattered decals.
- * 3. `details`: hand-placed ground art (field lines, cracks, puddles, fallen needles).
- * 4. `edges`: dual-grid overlays around marked cells, like a rift's torn border.
- * 5. `shadows`: ground shadows, plus every object's own; the ground under them drops one step.
- * 6. `objects`: props, monsters and characters, sorted by their feet.
- * 7. `overhead`: what characters walk behind: canopies, eaves, capitals.
- * 8. `lights`: stepped bands of other themes, brightest inside, with ragged edges.
- * 9. `atmosphere`: small animated sprites over everything: moths, drifting needles, motes.
+ * Draws scenes and maps from the built atlases and art.json alone, for judging art in context.
+ * The layered format itself (terrain, backdrop, details, edges, shadows, sorted objects,
+ * overhead, lights, atmosphere, emitters) lives in `@guago/content`, where maps are written in
+ * it; review scenes here are written in the same format at one screen.
  *
  * Night and lamp light are painted, not blended: a light is a palette theme, a shadow is one ramp
  * step. Monsters and characters never take a theme, so they read the same everywhere. Things
  * name atlas sprites only, so redrawn art shows up by itself. Browser-safe: the contact sheet
- * page and the static sheet both run this file.
+ * page and the static sheet both run this file, so it imports types only.
  */
+import type {
+  Actor,
+  Doll,
+  Emitter,
+  FramePick,
+  Light,
+  Placement,
+  Prop,
+  SceneDef,
+  ShadowShape,
+  Vec,
+} from "@guago/content";
 import {
   dualMask,
   hash2,
@@ -27,131 +30,33 @@ import {
   valueNoise,
 } from "./dualgrid.ts";
 
+export type {
+  Actor,
+  Cell,
+  Decal,
+  Doll,
+  Edge,
+  Emitter,
+  Light,
+  Prop,
+  SceneDef,
+  ShadowShape,
+} from "@guago/content";
+
 export const SCREEN = { w: 480, h: 270 } as const;
 const TILE = 16;
-/** Cells across and down: the screen rounded up to whole cells. */
+/** Cells across and down of a scene without a size: the screen rounded up to whole cells. */
 export const SCENE_CELLS = { w: SCREEN.w / TILE, h: Math.ceil(SCREEN.h / TILE) } as const;
-
-type Vec = readonly [number, number];
-type Dir = "down" | "up" | "side";
-
-export interface Cell {
-  /** A terrain id, the `upper` or `lower` of a pair like `grass` or `walk`; null is void. */
-  readonly terrain: string | null;
-  /** Overrides the scene theme for this cell, like `greece` across a rift. */
-  readonly theme?: string;
-}
-
-/**
- * How a thing picks its frame: by name, or by animation and index. With `play` the animation
- * runs from `index` over time; the static sheet shows time zero.
- */
-interface FramePick {
-  readonly frame?: string;
-  readonly anim?: string;
-  readonly index?: number;
-  readonly play?: boolean;
-}
-
-interface Placement extends FramePick {
-  /** The art's anchor (its feet) in screen pixels. */
-  readonly at: Vec;
-  readonly flip?: boolean;
-  /** Draws copies this many times, each one frame width further right. */
-  readonly repeat?: number;
-  /**
-   * Moves from `at` to `to` over `period` seconds, then starts again, offset by `phase`
-   * seconds. For things being carried somewhere: pages pulled into a rift, scraps lifting off.
-   */
-  readonly drift?: { readonly to: Vec; readonly period: number; readonly phase?: number };
-}
-
-/** Environment art. Takes the pass theme unless `raw`. */
-export interface Prop extends Placement {
-  readonly prop: string;
-  readonly raw?: boolean;
-}
-/** A monster sprite in the master palette. `shadow` names a frame for sprites without one. */
-export interface Actor extends Placement {
-  readonly actor: string;
-  readonly shadow?: string;
-}
-/** A paper-doll character. A layer named `shadow` is drawn as its ground shadow. */
-export interface Doll extends Placement {
-  readonly rig: string;
-  readonly look?: string;
-  readonly dir?: Dir;
-}
-/** A terrain decal frame like `campus-lawn/needles`, at its top left, in its cell's theme. */
-export interface Decal {
-  readonly decal: string;
-  readonly at: Vec;
-}
-
-/**
- * Painted light: stepped bands of themes, brightest first, falling off into the scene theme.
- * Every band edge is broken by low-frequency noise, so no light ends on a clean curve. One shape
- * per light:
- *
- * - `at` and `r`: an ellipse, its bands evenly spaced out to `r`.
- * - `spill`: a trapezoid falling from a lit window or door, narrow at the top, wide below.
- * - `region`: the ground around cells whose legend character is in `region`, each band reaching
- *   the next distance in `reach` (pixels).
- */
-export interface Light {
-  readonly bands: readonly string[];
-  readonly at?: Vec;
-  readonly r?: Vec;
-  readonly spill?: {
-    readonly top: readonly [x0: number, x1: number, y: number];
-    readonly bottom: readonly [x0: number, x1: number, y: number];
-  };
-  readonly region?: string;
-  readonly reach?: readonly number[];
-  /** Pixels of edge noise. Defaults to 3. */
-  readonly ragged?: number;
-  /**
-   * Shafts for a `region` light: seen from `at`, its reach swells by up to `amount` (a
-   * fraction) in some directions and shrinks in others, about `count` times around, so the light
-   * falls in tongues instead of rings.
-   */
-  readonly rays?: { readonly at: Vec; readonly count: number; readonly amount: number };
-  readonly pulse?: { readonly amount: number; readonly period: number };
-}
-
-/** Overlay tiles drawn around the cells whose legend character is in `inside`. */
-export interface Edge {
-  /** One overlay, or several cycled at `fps` for a pulse. */
-  readonly overlay: string | readonly string[];
-  readonly fps?: number;
-  readonly inside: string;
-}
-
-export interface SceneDef {
-  readonly name: string;
-  readonly seed: number;
-  /** Theme for terrain and props. */
-  readonly theme: string;
-  /** Palette name filling the screen before anything else. */
-  readonly sky?: string;
-  readonly legend: Readonly<Record<string, Cell>>;
-  /** `SCENE_CELLS.w × SCENE_CELLS.h` characters. */
-  readonly ground: string;
-  readonly backdrop?: readonly Prop[];
-  readonly details?: readonly (Decal | Prop)[];
-  readonly edges?: readonly Edge[];
-  readonly shadows?: readonly Prop[];
-  readonly objects: readonly (Prop | Actor | Doll)[];
-  readonly overhead?: readonly Prop[];
-  readonly lights?: readonly Light[];
-  readonly atmosphere?: readonly (Prop | Actor)[];
-}
 
 export function scene(def: SceneDef): SceneDef {
   return def;
 }
 
-// Inputs: the parts of art.json and the atlases a scene reads. -------------------------------
+/**
+ * An actor drawn at a whole-number scale about its anchor, like an elite at the client's double
+ * size. Review scenes only: the map format does not carry a scale yet.
+ */
+export type ScaledActor = Actor & { readonly scale?: number };
 
 interface Rect {
   readonly x: number;
@@ -159,6 +64,16 @@ interface Rect {
   readonly w: number;
   readonly h: number;
 }
+
+/** Cells across and down, and the pixel size of the whole scene. */
+export function sceneSize(def: SceneDef): { cells: Vec; px: Vec } {
+  if (!def.size) return { cells: [SCENE_CELLS.w, SCENE_CELLS.h], px: [SCREEN.w, SCREEN.h] };
+  const [w, h] = def.size;
+  return { cells: [w, h], px: [w * TILE, h * TILE] };
+}
+
+// Inputs: the parts of art.json and the atlases a scene reads. -------------------------------
+
 export interface AtlasFrame {
   readonly frame: Rect;
   readonly spriteSourceSize: Rect;
@@ -242,17 +157,22 @@ function toMap(rec: Table<string> | undefined): ColorMap {
   return new Map(Object.entries(rec ?? {}).map(([a, b]) => [hexKey(a), hexKey(b)]));
 }
 
+/** A canvas over a window of the world: drawing takes world pixels, `ox, oy` is its corner. */
 class Canvas implements Pixels {
   readonly w: number;
   readonly h: number;
+  readonly ox: number;
+  readonly oy: number;
   readonly data: Uint8ClampedArray;
-  constructor(w: number, h: number) {
+  constructor(w: number, h: number, ox = 0, oy = 0) {
     this.w = w;
     this.h = h;
+    this.ox = ox;
+    this.oy = oy;
     this.data = new Uint8ClampedArray(w * h * 4);
   }
 
-  /** Copies opaque pixels of a source rect, recoloured, mirrored and clipped as asked. */
+  /** Copies opaque pixels of a source rect to world (dx, dy), recoloured, mirrored, clipped. */
   blit(
     src: Pixels,
     from: Rect,
@@ -262,15 +182,18 @@ class Canvas implements Pixels {
     flip = false,
     clip?: Rect,
   ): void {
-    const x0 = clip ? Math.max(0, clip.x) : 0;
-    const y0 = clip ? Math.max(0, clip.y) : 0;
-    const x1 = clip ? Math.min(this.w, clip.x + clip.w) : this.w;
-    const y1 = clip ? Math.min(this.h, clip.y + clip.h) : this.h;
+    const lx = dx - this.ox;
+    const ly = dy - this.oy;
+    if (lx >= this.w || ly >= this.h || lx + from.w <= 0 || ly + from.h <= 0) return;
+    const x0 = clip ? Math.max(0, clip.x - this.ox) : 0;
+    const y0 = clip ? Math.max(0, clip.y - this.oy) : 0;
+    const x1 = clip ? Math.min(this.w, clip.x - this.ox + clip.w) : this.w;
+    const y1 = clip ? Math.min(this.h, clip.y - this.oy + clip.h) : this.h;
     for (let y = 0; y < from.h; y++) {
-      const ty = dy + y;
+      const ty = ly + y;
       if (ty < y0 || ty >= y1) continue;
       for (let x = 0; x < from.w; x++) {
-        const tx = dx + (flip ? from.w - 1 - x : x);
+        const tx = lx + (flip ? from.w - 1 - x : x);
         if (tx < x0 || tx >= x1) continue;
         const s = ((from.y + y) * src.w + from.x + x) * 4;
         if ((src.data[s + 3] as number) === 0) continue;
@@ -314,6 +237,12 @@ function shaft(rays: NonNullable<Light["rays"]>, x: number, y: number, seed: num
   return 1 + rays.amount * wave;
 }
 
+/** A distance field over a window of the world. */
+interface Field {
+  readonly rect: Rect;
+  readonly d: Float32Array;
+}
+
 /**
  * Band per pixel for one light: 0 is the brightest band, `bands.length` is unlit. `field` is
  * the region's distance field when the light has a region.
@@ -324,21 +253,27 @@ function bandAt(
   x: number,
   y: number,
   seed: number,
-  field: Float32Array | null,
+  field: Field | null,
 ): number {
   const n = light.bands.length;
   const swell = light.pulse
     ? 1 + light.pulse.amount * Math.sin((2 * Math.PI * t) / light.pulse.period)
     : 1;
-  const wobble = ragged(x, y, light.ragged ?? 3, seed);
   if (field && light.reach) {
+    const { rect, d } = field;
+    const fx = x - rect.x;
+    const fy = y - rect.y;
+    if (fx < 0 || fy < 0 || fx >= rect.w || fy >= rect.h) return n;
+    const dist = d[fy * rect.w + fx] as number;
     // Each band's edge has its own noise, so the bands interleave instead of nesting as contours.
-    const d = field[y * SCREEN.w + x] as number;
     const amount = light.ragged ?? 3;
     const reach = swell * (light.rays ? shaft(light.rays, x, y, seed) : 1);
-    const k = light.reach.findIndex((r, i) => d + ragged(x, y, amount, seed + i * 31) < r * reach);
+    const k = light.reach.findIndex(
+      (r, i) => dist + ragged(x, y, amount, seed + i * 31) < r * reach,
+    );
     return k < 0 ? n : k;
   }
+  const wobble = ragged(x, y, light.ragged ?? 3, seed);
   let f: number;
   let scale: number;
   if (light.spill) {
@@ -360,43 +295,98 @@ function bandAt(
   return k < 0 ? 0 : Math.min(n, k);
 }
 
-/** Pixel distance to the nearest cell whose legend character is in `chars`, about Euclidean. */
-function regionField(cells: readonly GroundCell[], chars: string): Float32Array {
-  const { w, h } = SCREEN;
+/** The world rectangle a light can reach, generously, before clipping to the scene. */
+function lightBounds(light: Light, field: Field | null): Rect | null {
+  const pad = (light.ragged ?? 3) + 2;
+  const swell = 1 + (light.pulse?.amount ?? 0);
+  if (field) return field.rect;
+  if (light.spill) {
+    const { top, bottom } = light.spill;
+    const x0 = Math.min(top[0], bottom[0]) - pad;
+    const x1 = Math.max(top[1], bottom[1]) + pad;
+    return { x: x0, y: top[2], w: x1 - x0, h: bottom[2] - top[2] + pad };
+  }
+  if (light.at && light.r) {
+    const rx = light.r[0] * swell + pad;
+    const ry = light.r[1] * swell + pad;
+    return {
+      x: Math.floor(light.at[0] - rx),
+      y: Math.floor(light.at[1] - ry),
+      w: Math.ceil(rx * 2),
+      h: Math.ceil(ry * 2),
+    };
+  }
+  return null;
+}
+
+/**
+ * Pixel distance to the nearest cell whose legend character is in `chars`, about Euclidean,
+ * over the region's cells grown by `margin` pixels.
+ */
+function regionField(ctx: Ctx, chars: string, margin: number): Field | null {
+  const [W, H] = ctx.cells.size;
+  let cx0 = W;
+  let cy0 = H;
+  let cx1 = -1;
+  let cy1 = -1;
+  ctx.cells.list.forEach((c, i) => {
+    if (!chars.includes(c.char)) return;
+    const x = i % W;
+    const y = (i - x) / W;
+    cx0 = Math.min(cx0, x);
+    cy0 = Math.min(cy0, y);
+    cx1 = Math.max(cx1, x);
+    cy1 = Math.max(cy1, y);
+  });
+  if (cx1 < 0) return null;
+  const [pw, ph] = ctx.size;
+  const x0 = Math.max(0, cx0 * TILE - margin);
+  const y0 = Math.max(0, cy0 * TILE - margin);
+  const x1 = Math.min(pw, (cx1 + 1) * TILE + margin);
+  const y1 = Math.min(ph, (cy1 + 1) * TILE + margin);
+  const rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   const big = 1e6;
-  const d = new Float32Array(w * h).fill(big);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const c = cells[Math.floor(y / TILE) * SCENE_CELLS.w + Math.floor(x / TILE)];
-      if (c && chars.includes(c.char)) d[y * w + x] = 0;
+  const d = new Float32Array(rect.w * rect.h).fill(big);
+  for (let y = 0; y < rect.h; y++) {
+    for (let x = 0; x < rect.w; x++) {
+      const c = cellAt(ctx, Math.floor((x + x0) / TILE), Math.floor((y + y0) / TILE));
+      if (chars.includes(c.char)) d[y * rect.w + x] = 0;
     }
   }
   // Two-pass chamfer, weights 1 and √2.
+  const { w, h } = rect;
   const at = (x: number, y: number) =>
     x < 0 || y < 0 || x >= w || y >= h ? big : (d[y * w + x] as number);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
-      const v = Math.min(
+      d[y * w + x] = Math.min(
         at(x, y),
         at(x - 1, y) + 1,
         at(x, y - 1) + 1,
         at(x - 1, y - 1) + 1.41,
         at(x + 1, y - 1) + 1.41,
       );
-      d[y * w + x] = v;
     }
   for (let y = h - 1; y >= 0; y--)
     for (let x = w - 1; x >= 0; x--) {
-      const v = Math.min(
+      d[y * w + x] = Math.min(
         at(x, y),
         at(x + 1, y) + 1,
         at(x, y + 1) + 1,
         at(x + 1, y + 1) + 1.41,
         at(x - 1, y + 1) + 1.41,
       );
-      d[y * w + x] = v;
     }
-  return d;
+  return { rect, d };
+}
+
+/** Whether two rectangles overlap; the overlap, or null. */
+function intersect(a: Rect, b: Rect): Rect | null {
+  const x0 = Math.max(a.x, b.x);
+  const y0 = Math.max(a.y, b.y);
+  const x1 = Math.min(a.x + a.w, b.x + b.w);
+  const y1 = Math.min(a.y + a.h, b.y + b.h);
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
 }
 
 // Rendering ----------------------------------------------------------------------------------
@@ -411,15 +401,19 @@ interface GroundCell {
   readonly theme: string | null;
 }
 
-function parseGround(def: SceneDef): GroundCell[] {
-  const rows = def.ground
-    .split("\n")
+interface Cells {
+  readonly size: Vec;
+  readonly list: readonly GroundCell[];
+}
+
+function parseGround(def: SceneDef): Cells {
+  const rows = (typeof def.ground === "string" ? def.ground.split("\n") : [...def.ground])
     .map((r) => r.trim())
     .filter((r) => r.length > 0);
-  const { w, h } = SCENE_CELLS;
+  const [w, h] = sceneSize(def).cells;
   const where = `scene ${def.name}`;
   if (rows.length !== h) throw new Error(`${where}: ground has ${rows.length} rows, not ${h}`);
-  const cells: GroundCell[] = [];
+  const list: GroundCell[] = [];
   rows.forEach((row, y) => {
     const chars = [...row];
     if (chars.length !== w)
@@ -427,40 +421,70 @@ function parseGround(def: SceneDef): GroundCell[] {
     for (const ch of chars) {
       const cell = def.legend[ch];
       if (!cell) throw new Error(`${where}: "${ch}" in row ${y + 1} is not in the legend`);
-      cells.push({ char: ch, terrain: cell.terrain, theme: cell.theme ?? null });
+      list.push({ char: ch, terrain: cell.terrain, theme: cell.theme ?? null });
     }
   });
-  return cells;
+  return { size: [w, h], list };
+}
+
+/** Per scene definition, what does not change between frames. */
+interface Prepared {
+  readonly cells: Cells;
+  readonly fields: Map<Light, Field | null>;
+}
+const prepared = new WeakMap<SceneDef, Prepared>();
+
+function prepare(def: SceneDef): Prepared {
+  let p = prepared.get(def);
+  if (!p) {
+    p = { cells: parseGround(def), fields: new Map() };
+    prepared.set(def, p);
+  }
+  return p;
 }
 
 /**
- * Renders a scene at one game screen, at `time` seconds. `atlases` holds every atlas by name,
- * tile atlases as `tiles-<theme>`. Missing art is skipped and reported in `warnings`.
+ * Renders a scene or map at `time` seconds: the whole of it, or the window `view` (world
+ * pixels). `atlases` holds every atlas by name, tile atlases as `tiles-<theme>`. Missing art is
+ * skipped and reported in `warnings`.
  */
 export function renderScene(
   def: SceneDef,
   meta: SceneMeta,
   atlases: ReadonlyMap<string, SceneAtlas>,
   time = 0,
+  view?: Rect,
 ): SceneImage {
   const warnings: string[] = [];
-  const cells = parseGround(def);
-  const ctx = { def, meta, atlases, cells, time, warnings };
-  const out = renderPass(ctx, def.theme);
+  const pre = prepare(def);
+  const size = sceneSize(def).px;
+  const win = view ?? { x: 0, y: 0, w: size[0], h: size[1] };
+  const ctx: Ctx = { def, meta, atlases, cells: pre.cells, size, time, warnings };
+  const out = renderPass(ctx, def.theme, win);
   const lights = def.lights ?? [];
   if (lights.length > 0) {
     // Per pixel the brightest light wins, measured as the fraction of its bands still ahead.
     const pick: (string | null)[] = new Array(out.w * out.h).fill(null);
     const level = new Float32Array(out.w * out.h);
     lights.forEach((l, li) => {
-      const field = l.region ? regionField(cells, l.region) : null;
+      let field = pre.fields.get(l);
+      if (field === undefined) {
+        const far = Math.max(0, ...(l.reach ?? [0]));
+        const margin = Math.ceil(far * (1 + (l.rays?.amount ?? 0)) * (1 + (l.pulse?.amount ?? 0)));
+        field = l.region ? regionField(ctx, l.region, margin + (l.ragged ?? 3) + 2) : null;
+        pre.fields.set(l, field);
+      }
+      if (l.region && !field) return;
+      const bounds = lightBounds(l, field);
+      const area = bounds ? intersect(bounds, win) : null;
+      if (!area) return;
       const n = l.bands.length;
-      for (let y = 0; y < out.h; y++) {
-        for (let x = 0; x < out.w; x++) {
+      for (let y = area.y; y < area.y + area.h; y++) {
+        for (let x = area.x; x < area.x + area.w; x++) {
           const k = bandAt(l, time, x, y, def.seed + li * 17, field);
           if (k >= n) continue;
           const v = (n - k) / n;
-          const i = y * out.w + x;
+          const i = (y - win.y) * out.w + (x - win.x);
           if (v > (level[i] as number)) {
             level[i] = v;
             pick[i] = l.bands[k] as string;
@@ -468,16 +492,37 @@ export function renderScene(
         }
       }
     });
+    // One pass per theme, over the part of the window that theme lights.
+    const boxes = new Map<string, [number, number, number, number]>();
+    pick.forEach((theme, i) => {
+      if (!theme) return;
+      const x = i % out.w;
+      const y = (i - x) / out.w;
+      const b = boxes.get(theme);
+      if (!b) boxes.set(theme, [x, y, x, y]);
+      else {
+        b[0] = Math.min(b[0], x);
+        b[1] = Math.min(b[1], y);
+        b[2] = Math.max(b[2], x);
+        b[3] = Math.max(b[3], y);
+      }
+    });
     const passes = new Map<string, Canvas>();
-    for (const theme of new Set(pick)) {
-      if (theme) passes.set(theme, renderPass({ ...ctx, warnings: [] }, theme));
+    for (const [theme, [x0, y0, x1, y1]] of boxes) {
+      const rect = { x: win.x + x0, y: win.y + y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+      passes.set(theme, renderPass({ ...ctx, warnings: [] }, theme, rect));
     }
     pick.forEach((theme, i) => {
       const pass = theme ? passes.get(theme) : undefined;
-      if (pass) out.data.set(pass.data.subarray(i * 4, i * 4 + 4), i * 4);
+      if (!pass) return;
+      const x = (i % out.w) + win.x - pass.ox;
+      const y = Math.floor(i / out.w) + win.y - pass.oy;
+      const s = (y * pass.w + x) * 4;
+      out.data.set(pass.data.subarray(s, s + 4), i * 4);
     });
   }
   for (const a of def.atmosphere ?? []) drawThing(ctx, out, a, NO_MAP);
+  for (const e of def.emitters ?? []) drawEmitter(ctx, out, e);
   return { w: out.w, h: out.h, data: out.data, warnings: [...new Set(warnings)] };
 }
 
@@ -485,9 +530,18 @@ interface Ctx {
   readonly def: SceneDef;
   readonly meta: SceneMeta;
   readonly atlases: ReadonlyMap<string, SceneAtlas>;
-  readonly cells: readonly GroundCell[];
+  readonly cells: Cells;
+  /** The whole scene in pixels. */
+  readonly size: Vec;
   readonly time: number;
   readonly warnings: string[];
+}
+
+function cellAt(ctx: Ctx, x: number, y: number): GroundCell {
+  const [W, H] = ctx.cells.size;
+  return ctx.cells.list[
+    Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))
+  ] as GroundCell;
 }
 
 const QUADS: readonly Vec[] = [
@@ -516,11 +570,12 @@ function pickFrame(
   pick: FramePick,
   prefix: string,
   skip: string | null,
+  time = ctx.time,
 ): string | undefined {
   if (pick.frame && frames.includes(`${prefix}${pick.frame}`)) return `${prefix}${pick.frame}`;
   const anim = pick.anim ? anims[pick.anim] : undefined;
   if (anim && anim.frames.length > 0) {
-    const step = pick.play ? Math.floor(ctx.time * anim.fps) : 0;
+    const step = pick.play ? Math.floor(time * anim.fps) : 0;
     return anim.frames[((pick.index ?? 0) + step) % anim.frames.length];
   }
   if (pick.frame || pick.anim)
@@ -528,7 +583,7 @@ function pickFrame(
   return frames.find((f) => f !== skip) ?? frames[0];
 }
 
-/** Draws a frame with its anchor at `at`, restoring trimmed offsets. */
+/** Draws a frame with its anchor at `at`, restoring trimmed offsets, at a whole-number scale. */
 function place(
   target: Canvas,
   found: { atlas: SceneAtlas; f: AtlasFrame },
@@ -536,11 +591,36 @@ function place(
   at: Vec,
   map: ColorMap,
   flip: boolean,
+  scale = 1,
 ): void {
   const { f, atlas } = found;
-  const left = flip ? at[0] - (f.sourceSize.w - 1 - origin[0]) : at[0] - origin[0];
   const sx = flip ? f.sourceSize.w - f.spriteSourceSize.x - f.frame.w : f.spriteSourceSize.x;
-  target.blit(atlas, f.frame, left + sx, at[1] - origin[1] + f.spriteSourceSize.y, map, flip);
+  const ox = flip ? f.sourceSize.w - 1 - origin[0] : origin[0];
+  if (scale === 1) {
+    target.blit(
+      atlas,
+      f.frame,
+      at[0] - ox + sx,
+      at[1] - origin[1] + f.spriteSourceSize.y,
+      map,
+      flip,
+    );
+    return;
+  }
+  // Each source pixel becomes a scale×scale block; the anchor pixel's bottom-centre stays put.
+  const left = at[0] - ox * scale - Math.floor((scale - 1) / 2);
+  const top = at[1] - origin[1] * scale - (scale - 1);
+  for (let y = 0; y < f.frame.h; y++) {
+    for (let x = 0; x < f.frame.w; x++) {
+      const px = flip ? f.frame.w - 1 - x : x;
+      const one: Rect = { x: f.frame.x + px, y: f.frame.y + y, w: 1, h: 1 };
+      for (let k = 0; k < scale * scale; k++) {
+        const dx = left + (sx + x) * scale + (k % scale);
+        const dy = top + (f.spriteSourceSize.y + y) * scale + Math.floor(k / scale);
+        target.blit(atlas, one, dx, dy, map);
+      }
+    }
+  }
 }
 
 /** Draws a prop or actor (or its shadow into a mask), repeated as asked. */
@@ -575,8 +655,10 @@ function drawThing(
   const found = key ? frameOf(ctx, atlas, key) : undefined;
   if (!found) return;
   const [ax, ay] = placeAt(t, ctx.time);
+  const scale = "scale" in t ? ((t as ScaledActor).scale ?? 1) : 1;
   for (let k = 0; k < (t.repeat ?? 1); k++) {
-    place(out, found, origin, [ax + k * found.f.sourceSize.w, ay], map, t.flip ?? false);
+    const at: Vec = [ax + k * found.f.sourceSize.w, ay];
+    place(out, found, origin, at, map, t.flip ?? false, scale);
   }
 }
 
@@ -588,12 +670,81 @@ function placeAt(p: Placement, t: number): Vec {
   return [Math.round(p.at[0] + (to[0] - p.at[0]) * f), Math.round(p.at[1] + (to[1] - p.at[1]) * f)];
 }
 
-function renderPass(ctx: Ctx, passTheme: string): Canvas {
-  const { def, meta, cells, warnings } = ctx;
-  const out = new Canvas(SCREEN.w, SCREEN.h);
-  const { w: W, h: H } = SCENE_CELLS;
-  const cellAt = (x: number, y: number) =>
-    cells[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))] as GroundCell;
+/**
+ * Draws an emitter's particles at the scene's time. Particle k is born every `life` seconds,
+ * offset by k / count of a life, at a hashed point in the area of that birth.
+ */
+function drawEmitter(ctx: Ctx, out: Canvas, e: Emitter): void {
+  const sp = ctx.meta.sprites[e.sprite];
+  if (!sp) {
+    ctx.warnings.push(`no sprite ${e.sprite}`);
+    return;
+  }
+  const anims = Object.keys(sp.anims);
+  const animName = e.anim ?? anims[0];
+  for (let k = 0; k < e.count; k++) {
+    const offset = ((k + (hash2(k, 7, ctx.def.seed) % 1000) / 1000) / e.count) * e.life;
+    const t = ctx.time + offset;
+    const birth = Math.floor(t / e.life);
+    const age = t - birth * e.life;
+    const h = hash2(k, birth, ctx.def.seed + 5);
+    const bx = e.area.x + ((h % 1000) / 1000) * e.area.w;
+    const by = e.area.y + (((h >>> 10) % 1000) / 1000) * e.area.h;
+    let x = bx + e.velocity[0] * age;
+    let y = by + e.velocity[1] * age;
+    if (e.toward) {
+      const f = (age / e.life) ** 2;
+      x += (e.toward[0] - x) * f;
+      y += (e.toward[1] - y) * f;
+    }
+    const key = pickFrame(
+      ctx,
+      e.sprite,
+      sp.frames,
+      sp.anims,
+      { ...(animName ? { anim: animName } : {}), play: true, index: h % 7 },
+      `${e.sprite}/`,
+      sp.shadow,
+      age,
+    );
+    const found = key ? frameOf(ctx, sp.atlas, key) : undefined;
+    if (found) place(out, found, sp.origin, [Math.round(x), Math.round(y)], NO_MAP, (h & 1) === 1);
+  }
+}
+
+/** Fills a polygon into a mask canvas. */
+function fillPoly(target: Canvas, shape: ShadowShape): void {
+  const pts = shape.poly;
+  if (pts.length < 3) return;
+  const ys = pts.map((p) => p[1]);
+  const y0 = Math.max(target.oy, Math.floor(Math.min(...ys)));
+  const y1 = Math.min(target.oy + target.h, Math.ceil(Math.max(...ys)));
+  for (let y = y0; y < y1; y++) {
+    const cy = y + 0.5;
+    const xs: number[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i] as Vec;
+      const b = pts[(i + 1) % pts.length] as Vec;
+      if (a[1] <= cy === b[1] <= cy) continue;
+      xs.push(a[0] + ((cy - a[1]) / (b[1] - a[1])) * (b[0] - a[0]));
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const xa = Math.max(target.ox, Math.round(xs[k] as number));
+      const xb = Math.min(target.ox + target.w, Math.round(xs[k + 1] as number));
+      for (let x = xa; x < xb; x++) {
+        const d = ((y - target.oy) * target.w + (x - target.ox)) * 4;
+        target.data[d + 3] = 255;
+      }
+    }
+  }
+}
+
+function renderPass(ctx: Ctx, passTheme: string, view: Rect, groundOnly = false): Canvas {
+  const { def, meta, warnings } = ctx;
+  const out = new Canvas(view.w, view.h, view.x, view.y);
+  const [W, H] = ctx.cells.size;
+  const at = (x: number, y: number) => cellAt(ctx, x, y);
   const themeOf = (c: GroundCell) => c.theme ?? passTheme;
   const pairs = Object.values(meta.tilesets);
   const { tile, margin, spacing, columns } = meta.tileGrid;
@@ -610,6 +761,11 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
   };
   const propMap = toMap(meta.recolor[passTheme]);
   const raw = (p: Prop) => (p.raw ? NO_MAP : propMap);
+  // Display tiles touching the view.
+  const i0 = Math.max(0, Math.floor((view.x + 8) / TILE));
+  const j0 = Math.max(0, Math.floor((view.y + 8) / TILE));
+  const i1 = Math.min(W, Math.floor((view.x + view.w + 8) / TILE));
+  const j1 = Math.min(H, Math.floor((view.y + view.h + 8) / TILE));
 
   // 1. Sky and backdrop.
   if (def.sky) {
@@ -673,15 +829,15 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
     const grid: TerrainGrid = {
       w: W,
       h: H,
-      cells: cells.map((c) => (edge.inside.includes(c.char) ? 1 : 0)),
+      cells: ctx.cells.list.map((c) => (edge.inside.includes(c.char) ? 1 : 0)),
     };
     return [{ edge, o, shapes: o.shapes, grid }];
   });
   const sideA = new Canvas(TILE, TILE);
   const sideB = new Canvas(TILE, TILE);
-  for (let j = 0; j <= H; j++) {
-    for (let i = 0; i <= W; i++) {
-      const corners = [cellAt(i - 1, j - 1), cellAt(i, j - 1), cellAt(i - 1, j), cellAt(i, j)];
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const corners = [at(i - 1, j - 1), at(i, j - 1), at(i - 1, j), at(i, j)];
       const px = i * TILE - TILE / 2;
       const py = j * TILE - TILE / 2;
       const cut = corners.some((c) => c.terrain === null)
@@ -711,10 +867,10 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
       drawCell(sideA, i, j, side(false), 0, 0);
       drawCell(sideB, i, j, side(true), 0, 0);
       for (let y = 0; y < TILE; y++) {
-        const ty = py + y;
+        const ty = py + y - out.oy;
         if (ty < 0 || ty >= out.h) continue;
         for (let x = 0; x < TILE; x++) {
-          const tx = px + x;
+          const tx = px + x - out.ox;
           if (tx < 0 || tx >= out.w) continue;
           const bit =
             (Number.parseInt(hex[(y * TILE + x) >> 2] as string, 16) >> (3 - (x & 3))) & 1;
@@ -731,19 +887,22 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
   const only = (id: string): TerrainGrid => ({
     w: W,
     h: H,
-    cells: cells.map((c) => (c.terrain === id ? 1 : 0)),
+    cells: ctx.cells.list.map((c) => (c.terrain === id ? 1 : 0)),
   });
-  const ids = [...new Set(cells.map((c) => c.terrain))].filter((t): t is string => t !== null);
+  const ids = [...new Set(ctx.cells.list.map((c) => c.terrain))].filter(
+    (t): t is string => t !== null,
+  );
   for (const id of ids) {
     const side = (p: (typeof pairs)[number]) =>
       p.upper === id ? "upper" : p.lower === id ? "lower" : null;
     const toned = pairs.find((p) => p.tones.some((t) => t.on === side(p)));
+    const grid = only(id);
     for (const tone of toned?.tones.filter((t) => t.on === side(toned)) ?? []) {
-      const picks = pickTone(only(id), 1, { ...tone, on: "upper" }, def.seed);
-      for (let j = 0; j <= H; j++) {
-        for (let i = 0; i <= W; i++) {
+      const picks = pickTone(grid, 1, { ...tone, on: "upper" }, def.seed);
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
           const index = picks[j * (W + 1) + i] as number;
-          const atlas = index >= 0 ? tiles(themeOf(cellAt(i, j))) : undefined;
+          const atlas = index >= 0 ? tiles(themeOf(at(i, j))) : undefined;
           if (atlas) out.blit(atlas, tileRect(index), i * TILE - 8, j * TILE - 8);
         }
       }
@@ -752,14 +911,14 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
     if (!decorated) continue;
     const rules = decorated.decals.filter((d) => d.on === side(decorated));
     const placed = scatterDecals(
-      only(id),
+      grid,
       1,
       rules.map((d) => ({ on: "upper" as const, density: d.density, w: d.w, h: d.h })),
       def.seed,
     );
     for (const d of placed) {
       const rule = rules[d.decal];
-      const atlas = tiles(themeOf(cellAt(Math.floor(d.x / TILE), Math.floor(d.y / TILE))));
+      const atlas = tiles(themeOf(at(Math.floor(d.x / TILE), Math.floor(d.y / TILE))));
       const f = rule && atlas?.frames[rule.frame];
       if (atlas && f) out.blit(atlas, f.frame, d.x, d.y);
     }
@@ -768,7 +927,7 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
   // 3. Ground details.
   for (const d of def.details ?? []) {
     if ("decal" in d) {
-      const theme = themeOf(cellAt(Math.floor(d.at[0] / TILE), Math.floor(d.at[1] / TILE)));
+      const theme = themeOf(at(Math.floor(d.at[0] / TILE), Math.floor(d.at[1] / TILE)));
       const found = frameOf(ctx, `tiles-${theme}`, d.decal);
       if (found) out.blit(found.atlas, found.f.frame, d.at[0], d.at[1]);
     } else drawThing(ctx, out, d, raw(d));
@@ -787,12 +946,12 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
     const inside: TerrainGrid = {
       w: W,
       h: H,
-      cells: cells.map((c) => (edge.inside.includes(c.char) ? 1 : 0)),
+      cells: ctx.cells.list.map((c) => (edge.inside.includes(c.char) ? 1 : 0)),
     };
-    for (let j = 0; j <= H; j++) {
-      for (let i = 0; i <= W; i++) {
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
         // Edges are ground art: none where the ground ends at the void.
-        const corners = [cellAt(i - 1, j - 1), cellAt(i, j - 1), cellAt(i - 1, j), cellAt(i, j)];
+        const corners = [at(i - 1, j - 1), at(i, j - 1), at(i - 1, j), at(i, j)];
         if (corners.some((c) => c.terrain === null)) continue;
         const list = o.masks[dualMask(inside, 1, i, j)] ?? [];
         const index = list[hash2(i, j, def.seed + 11) % Math.max(1, list.length)];
@@ -801,36 +960,53 @@ function renderPass(ctx: Ctx, passTheme: string): Canvas {
     }
   }
 
+  if (groundOnly) return out;
+
   // 5. Shadows: one mask from the shadow layer and every object's own shadow, then the ground
-  // under it one ramp step darker.
-  const mask = new Canvas(SCREEN.w, SCREEN.h);
-  for (const s of def.shadows ?? []) drawThing(ctx, mask, s, NO_MAP);
+  // under it one ramp step darker, or painted in the scene's shade theme.
+  const mask = new Canvas(out.w, out.h, out.ox, out.oy);
+  for (const s of def.shadows ?? []) {
+    if ("poly" in s) fillPoly(mask, s);
+    else drawThing(ctx, mask, s, NO_MAP);
+  }
   const sorted: { y: number; x: number; draw: () => void }[] = [];
   for (const o of def.objects) {
     if (!("rig" in o)) {
       drawThing(ctx, mask, o, NO_MAP, true);
       const map = "prop" in o ? raw(o) : NO_MAP;
-      sorted.push({ y: o.at[1], x: o.at[0], draw: () => drawThing(ctx, out, o, map) });
+      sorted.push({ y: o.sort ?? o.at[1], x: o.at[0], draw: () => drawThing(ctx, out, o, map) });
       continue;
     }
     const doll = composeDoll(ctx, o);
     if (!doll) continue;
-    const at: Vec = o.at;
-    if (doll.shadow) place(mask, doll.shadow, doll.origin, at, NO_MAP, o.flip ?? false);
+    const atFeet: Vec = o.at;
+    if (doll.shadow) place(mask, doll.shadow, doll.origin, atFeet, NO_MAP, o.flip ?? false);
     sorted.push({
-      y: at[1],
-      x: at[0],
+      y: o.sort ?? atFeet[1],
+      x: atFeet[0],
       draw: () => {
         const { img, origin } = doll;
         const flip = o.flip ?? false;
-        const left = flip ? at[0] - (img.w - 1 - origin[0]) : at[0] - origin[0];
-        out.blit(img, { x: 0, y: 0, w: img.w, h: img.h }, left, at[1] - origin[1], NO_MAP, flip);
+        const left = flip ? atFeet[0] - (img.w - 1 - origin[0]) : atFeet[0] - origin[0];
+        out.blit(
+          img,
+          { x: 0, y: 0, w: img.w, h: img.h },
+          left,
+          atFeet[1] - origin[1],
+          NO_MAP,
+          flip,
+        );
       },
     });
   }
   const shade = toMap(meta.shade);
+  const shaded = def.shade ? renderPass({ ...ctx, warnings: [] }, def.shade, view, true) : null;
   for (let i = 0; i < mask.data.length; i += 4) {
     if (mask.data[i + 3] === 0) continue;
+    if (shaded && (shaded.data[i + 3] as number) > 0) {
+      out.data.set(shaded.data.subarray(i, i + 4), i);
+      continue;
+    }
     const rgb =
       ((out.data[i] as number) << 16) |
       ((out.data[i + 1] as number) << 8) |

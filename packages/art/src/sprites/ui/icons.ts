@@ -566,12 +566,12 @@ const emblem = sprite({
       ),
       4,
     ),
-    /** 물리: a horseshoe magnet. */
+    /** 물리: a horseshoe magnet, in the class's plum (red is kept for enemy danger). */
     physics: patch(
-      "X",
-      "R",
-      "r",
-      "x",
+      "6",
+      "9",
+      "8",
+      "7",
       stack("ww...ww", "ww...ww", "ww...ww", "ww...ww", "www.www", ".wwwww.", "..www.."),
       4,
     ),
