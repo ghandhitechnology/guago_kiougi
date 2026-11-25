@@ -247,12 +247,8 @@ function paper(k: number): Pic {
     );
     return pic;
   }
-  const pieces = [
-    "qqqq\nqWWq\nqWrq\nqqqq",
-    "qqqq\nqWWq\nqrWq\nqqqq",
-    "qqqq\nqrWq\nqWcq\nqqqq",
-    "qqqq\nqWrq\nqccq\nqqqq",
-  ];
+  // Torn scraps, each a different shape with a stroke of the red X still on it.
+  const pieces = ["WWW.\nWrWS\n.SSS", ".WWW\nWWrS\nWSS.", "WW..\nWrWW\nSSSS", ".WW.\nWWrW\n.SSS"];
   const d = k === 1 ? 5 : 9;
   [
     [-1, -1],
@@ -281,7 +277,7 @@ function paper(k: number): Pic {
 
 const deathPaper = sprite({
   ...fx,
-  lone: "Wcr*',",
+  lone: "WcSr*',",
   name: "fx-death-paper",
   size: [25, 25],
   origin: [12, 12],
