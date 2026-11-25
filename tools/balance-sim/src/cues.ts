@@ -5,6 +5,7 @@
  *   pnpm art:build && pnpm --filter @guago/balance-sim cues
  */
 import { existsSync, readFileSync } from "node:fs";
+import { hasCue } from "@guago/audio/cues";
 import { checkCombatContent, combatCues } from "@guago/content";
 
 const problems = checkCombatContent();
@@ -33,4 +34,7 @@ if (existsSync(artPath)) {
 } else {
   console.log("\nRun pnpm art:build to check art");
 }
-console.log(`\nSound cues, none recorded yet (${sounds.length}):\n  ${sounds.join(", ")}`);
+const unheard = sounds.filter((id) => !hasCue(id));
+console.log(
+  `\nSound cues the audio library lacks (${unheard.length} of ${sounds.length}):\n  ${unheard.join(", ")}`,
+);
