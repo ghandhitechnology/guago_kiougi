@@ -11,6 +11,7 @@ import type { ChatSink } from "./chat/log.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { enterRoute } from "./enter.ts";
+import type { Live } from "./live/index.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
 import type { Social } from "./social/index.ts";
@@ -27,19 +28,32 @@ export function createGameServer(
   settings: HttpSettings,
   looks: () => LookOptions,
   chat: { filter?: ChatFilter; log?: ChatSink; social?: Social } = {},
-  economy: { ops?: OpHandler; routes?: readonly ApiRoute[]; grants?: GrantBuffer } = {},
+  economy: {
+    ops?: OpHandler;
+    routes?: readonly ApiRoute[];
+    grants?: GrantBuffer;
+    live?: Live;
+  } = {},
   world: { channelSeats?: number; emptyGraceSeconds?: number } = {},
 ) {
-  const { grants } = economy;
+  const { grants, live } = economy;
   provideGrants(grants);
   // A character's pending combat credit lands before their seat is freed, so the next login
-  // reads it.
+  // reads it; then the living world ends the session (the 자습 pool starts at logout).
   provideSeatServices({
     auth,
     ...settings,
-    ...(grants ? { onLeave: (id: string) => grants.flush(id) } : {}),
+    onLeave: async (id, slot, sessionId, replaced) => {
+      await grants?.flush(id);
+      await live?.left(id, slot, sessionId, replaced);
+    },
+    ...(live ? { onJoin: live.joined } : {}),
   });
-  provideWorldServices({ ...chat, ...(economy.ops ? { ops: economy.ops } : {}) });
+  provideWorldServices({
+    ...chat,
+    ...(economy.ops ? { ops: economy.ops } : {}),
+    ...(live ? { handlers: live.handlers } : {}),
+  });
   if (world.channelSeats !== undefined) channels.seats = world.channelSeats;
   if (world.emptyGraceSeconds !== undefined) channels.graceSeconds = world.emptyGraceSeconds;
   const api = createApiHandler(auth, settings, looks, economy.routes);
@@ -58,12 +72,13 @@ export function createGameServer(
   return defineServer({
     transport: new WebSocketTransport(),
     rooms: {
-      [MAP_ROOM]: defineRoom(MapRoom).filterBy(["map"]),
+      [MAP_ROOM]: defineRoom(MapRoom),
       [WORLD_ROOM]: defineRoom(WorldRoom),
     },
     express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
       app.disable("x-powered-by");
       app.use(enter);
+      if (live) app.use(live.adminRoute);
       app.use(api);
     },
     greet: false,

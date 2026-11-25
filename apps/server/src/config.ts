@@ -44,6 +44,10 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       MAP_SEATS,
       positiveInt(env.MAP_CHANNEL_SEATS, CHANNEL_SEATS, "MAP_CHANNEL_SEATS"),
     ),
+    /** Server clock rate on a fresh database (PLAN §25 M4: a time-compressed test server). */
+    liveClockRate: positiveInt(env.LIVE_CLOCK_RATE, 1, "LIVE_CLOCK_RATE"),
+    /** Lets `POST /admin/live` inject combat and navigation events and restart the Page. */
+    liveTestEvents: env.LIVE_TEST_EVENTS === "1",
   };
 }
 

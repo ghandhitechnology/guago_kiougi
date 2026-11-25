@@ -23,8 +23,18 @@ interface Services {
   auth: AuthService;
   clientOrigin: string;
   secureCookies: boolean;
-  /** Runs when a character leaves a room, before its seat is freed: pending grants land. */
-  onLeave?: (characterId: string) => Promise<void>;
+  /**
+   * Runs when a character leaves a room, before its seat is freed: pending grants land.
+   * `replaced` is true when a newer session of the account already holds this slot.
+   */
+  onLeave?: (
+    characterId: string,
+    slot: SeatSlot,
+    sessionId: string,
+    replaced: boolean,
+  ) => Promise<void>;
+  /** Runs once a character holds its seat (the living world starts its session on the world seat). */
+  onJoin?: (character: Character, slot: SeatSlot, sessionId: string) => Promise<void>;
 }
 
 let services: Services | undefined;
@@ -98,7 +108,7 @@ async function claim(
   slot: SeatSlot,
   tokenHash: string,
   evict: () => void,
-): Promise<() => void> {
+): Promise<{ release: () => void; current: () => boolean }> {
   let release!: () => void;
   const mine: Live = { evict, released: new Promise((r) => (release = r)), tokenHash };
   const seats = live.get(accountId) ?? new Map<SeatSlot, Live>();
@@ -114,10 +124,13 @@ async function claim(
     ]);
   }
   const mySeats = seats;
-  return () => {
-    if (mySeats.get(slot) === mine) mySeats.delete(slot);
-    if (mySeats.size === 0 && live.get(accountId) === mySeats) live.delete(accountId);
-    release();
+  return {
+    release: () => {
+      if (mySeats.get(slot) === mine) mySeats.delete(slot);
+      if (mySeats.size === 0 && live.get(accountId) === mySeats) live.delete(accountId);
+      release();
+    },
+    current: () => live.get(accountId)?.get(slot) === mine,
   };
 }
 
@@ -137,6 +150,8 @@ interface Seat {
   /** The last write of its place; writes run one after another, never two at once. */
   writes: Promise<void>;
   release: () => void;
+  /** False once a newer session of the account holds the slot. */
+  current: () => boolean;
   reconnection?: Reconnection | undefined;
 }
 
@@ -178,8 +193,14 @@ export class RoomSeats {
       moving: false,
       writes: Promise.resolve(),
       release: () => {},
+      current: () => true,
     };
-    seat.release = await claim(accountId, this.slot, tokenHash, () => this.evict(seat));
+    ({ release: seat.release, current: seat.current } = await claim(
+      accountId,
+      this.slot,
+      tokenHash,
+      () => this.evict(seat),
+    ));
     try {
       const { auth } = use();
       // The session was checked at matchmaking; a logout or recovery since then voids the seat.
@@ -193,6 +214,9 @@ export class RoomSeats {
       seat.characterId = character.id;
       seat.saved = here ? { x: character.x, y: character.y } : { x: -1, y: -1 };
       this.seats.set(client.sessionId, seat);
+      await use()
+        .onJoin?.(character, this.slot, client.sessionId)
+        .catch((error) => console.error(`join hook failed: ${describeError(error)}`));
       return character;
     } catch (error) {
       seat.release();
@@ -233,7 +257,7 @@ export class RoomSeats {
     try {
       await this.save(client.sessionId, seat);
       await use()
-        .onLeave?.(seat.characterId)
+        .onLeave?.(seat.characterId, this.slot, client.sessionId, !seat.current())
         .catch((error) => console.error(`leave hook failed: ${describeError(error)}`));
     } finally {
       seat.release();

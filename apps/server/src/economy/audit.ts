@@ -93,6 +93,20 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
       when 'book' then (${sql.param(TIERS.map((t) => t.books))}::int[])[c.tier + 1]
       else (${sql.param(TIERS.map((t) => t.tools))}::int[])[c.tier + 1] end`,
 
+  // 벌점 held and lifetime 상점 are the sums of the conduct ledger (PLAN §11).
+  conduct_equals_ledger: sql`
+    with l as (
+      select character_id,
+        coalesce(sum(amount) filter (where kind = 'demerit'), 0) as demerits,
+        coalesce(sum(amount) filter (where kind = 'merit'), 0) as merits
+      from conduct_ledger group by 1
+    )
+    select c.id as character_id,
+      '벌점 ' || c.demerits::text || ' vs ' || coalesce(l.demerits, 0)::text
+        || ', 상점 ' || c.merits::text || ' vs ' || coalesce(l.merits, 0)::text as detail
+    from characters c left join l on l.character_id = c.id
+    where c.demerits <> coalesce(l.demerits, 0) or c.merits <> coalesce(l.merits, 0)`,
+
   // Every ledger entry belongs to a recorded operation (within the retention window).
   ledger_has_operation: sql`
     select distinct l.character_id, 'entry of unrecorded operation ' || l.operation_id as detail

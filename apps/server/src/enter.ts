@@ -96,7 +96,10 @@ export function enterRoute(): Middleware {
     const choice = mapOptionAllowed() ? await readChoice(req) : {};
     if (!mapOptionAllowed()) req.resume();
     const auth = await authenticateJoin({ headers } as AuthContext);
-    if (!take(auth.accountId)) return send(res, 429, { error: "rate_limited" });
+    // Development and load tests enter as fast as their scripts walk; players are limited.
+    if (!mapOptionAllowed() && !take(auth.accountId)) {
+      return send(res, 429, { error: "rate_limited" });
+    }
     const character = await characterAfterMoves(auth.accountId, auth.characterId);
     if (!character) return send(res, 403, { error: "forbidden" });
     const chosen = choice.map ? builtMap(choice.map) : undefined;
