@@ -75,7 +75,12 @@ describe("staging", () => {
       const map = stageMapOf(maps, s.map);
       expect(map, id).toBeDefined();
       const staging = stagingOf(id);
-      for (const mark of [staging.start, ...Object.values(staging.enter)]) {
+      const cuts = Object.entries(staging.cuts ?? {}).flatMap(([at, spots]) => [
+        at,
+        ...Object.values(spots).map((p) => p.at),
+      ]);
+      const entered = Object.values(staging.enter).map((e) => (typeof e === "string" ? e : e.at));
+      for (const mark of [staging.start, ...entered, ...cuts]) {
         if (mark && mark !== "@player") expect(map?.marks[mark], `${id} ${mark}`).toBeDefined();
       }
     }

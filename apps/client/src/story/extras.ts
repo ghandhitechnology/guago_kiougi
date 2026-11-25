@@ -5,10 +5,11 @@
  */
 import type { ArtMetadata } from "@guago/art";
 import type * as Phaser from "phaser";
-import { composeLook, lookAnim, lookTexture } from "../art.ts";
+import { composeLook, lookAnim, lookTexture, spriteAnim } from "../art.ts";
 import type { Stage } from "./stage.ts";
 
 const RIG = "student";
+const PODIUM = "gym-podium";
 
 /** A student at (x, y), facing `dir`, in a pose. */
 function student(
@@ -86,6 +87,15 @@ function assembly(stage: Stage): Phaser.GameObjects.Sprite[] {
   const at = map.marks.rows;
   if (!at) return [];
   const out: Phaser.GameObjects.Sprite[] = [];
+  // The podium the 교장 speaks from, just in front of where the scene stands him.
+  const stageMark = map.marks.stage;
+  const podium = stageMark && meta.sprites[PODIUM];
+  if (stageMark && podium && stage.host.scene.textures.exists(podium.atlas)) {
+    const s = stage.host.scene.add.sprite(stageMark.x, stageMark.y + 22, podium.atlas);
+    s.play(spriteAnim(PODIUM, "idle"));
+    stage.host.view.addEntity(s, { shadow: false });
+    out.push(s);
+  }
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 11; c++) {
       const x = at.x + (c - 5) * 32 + (((r * 7 + c * 3) % 3) - 1);

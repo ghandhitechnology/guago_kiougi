@@ -14,6 +14,7 @@ import {
   narrative,
   OPENING_SCENES,
   resumeIndex,
+  type Spot,
   sceneById,
   settle,
   stagingOf,
@@ -223,13 +224,15 @@ export class SceneRunner {
         now.at[id] ?? earlier.reduce<string | undefined>((m, s) => s.at[id] ?? m, undefined);
       const spot = this.map.npcs.find((n) => n.speaker === id);
       const enter = staging.enter[id];
-      let p = mark ? this.map.marks[mark] : undefined;
+      // Where the scene last had them, else where its staging stands them, else their own spot
+      // on the map, else beside the player.
+      let p = mark ? this.map.marks[mark] : this.cutSpot(id, from);
+      if (!p && enter && enter !== "@player") p = this.spot(enter);
       if (!p && spot) p = { x: spot.x, y: spot.y };
       if (!p && enter === "@player" && me) {
         beside++;
         p = { x: me.x + (beside % 2 ? 18 : -18) * Math.ceil(beside / 2), y: me.y + 4 };
       }
-      if (!p && enter) p = this.map.marks[enter];
       if (!p) continue;
       const dir = now.facing[id] ?? spot?.facing ?? "down";
       const actor = this.stage.actor(this.scene.id, id, p.x, p.y, dir);
@@ -249,6 +252,39 @@ export class SceneRunner {
     }
     if (now.dark) await this.host.curtain.close(0);
     this.offers = [...now.offers];
+  }
+
+  /** A mark, or a spot beside one, as a point. */
+  private spot(at: string | Spot): { x: number; y: number } | undefined {
+    if (typeof at === "string") return this.map.marks[at];
+    const m = this.map.marks[at.at];
+    return m && { x: m.x + at.dx, y: m.y + at.dy };
+  }
+
+  /** Where the last fade-in before step `upTo` cut `id` to, if it did. */
+  private cutSpot(id: string, upTo: number): { x: number; y: number } | undefined {
+    const cuts = stagingOf(this.scene.id).cuts;
+    if (!cuts) return undefined;
+    for (let i = Math.min(upTo, this.scene.steps.length) - 1; i >= 0; i--) {
+      const s = this.scene.steps[i] as Step;
+      if (s.do !== "fx" || s.fx !== "fade-in" || !s.at || !cuts[s.at]) continue;
+      const at = cuts[s.at]?.[id];
+      return at && this.spot(at);
+    }
+    return undefined;
+  }
+
+  /** A fade-in's cut: the cast it lists stand at their spots, turned to the player. */
+  private cut(mark: string): void {
+    const spots = stagingOf(this.scene.id).cuts?.[mark];
+    const me = this.at(mark);
+    for (const [id, at] of Object.entries(spots ?? {})) {
+      const a = this.stage.actors.get(id);
+      const p = this.spot(at);
+      if (!a || !p) continue;
+      a.place(p.x, p.y);
+      if (me) a.face(dirToward(p.x, p.y, me.x, me.y + 24, "down"));
+    }
   }
 
   private fxContext() {
@@ -336,6 +372,7 @@ export class SceneRunner {
         // A fade-in at a mark is a cut: the player stands there when it lifts.
         if (step.fx === "fade-in" && step.at) {
           this.host.send({ t: "walk", run: this.run, to: step.at, ms: 0 });
+          this.cut(step.at);
           const p = this.at(step.at);
           if (p) {
             this.host.takeCamera(true);
@@ -362,7 +399,7 @@ export class SceneRunner {
         this.host.send({ t: "reach", run: this.run, step: index });
         return this.sleep(1400);
       case "play":
-        await this.playStep(step);
+        await this.playStep(step, index);
         return;
       case "offer":
         this.offers.push(step);
@@ -379,7 +416,7 @@ export class SceneRunner {
   }
 
   /** Control back to the player until the server says the condition is met. */
-  private async playStep(step: Extract<Step, { do: "play" }>): Promise<void> {
+  private async playStep(step: Extract<Step, { do: "play" }>, index: number): Promise<void> {
     await this.waitWalks();
     const queued = this.cues.indexOf(step.until);
     if (queued >= 0) {
@@ -398,6 +435,8 @@ export class SceneRunner {
     this.host.followServer(false);
     this.host.facePlayer(undefined);
     this.hold(false);
+    // The body is the player's now; a mode that walks it heads where the play waits.
+    this.host.send({ t: "reach", run: this.run, step: index });
     if (step.prompt) {
       const where = step.at ?? (step.prompt === "move" ? undefined : "player");
       this.promptAt = this.promptPoint(where, step.prompt);

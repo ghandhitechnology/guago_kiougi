@@ -35,7 +35,6 @@ import {
   INTERACT_REACH_PX,
   type Interaction,
   MINUTE_MS,
-  PLAYER_SPEED,
   type SceneCue,
   type SceneEnd,
   type SceneStart,
@@ -78,6 +77,11 @@ export interface StoryRoom {
   bodyOf(sessionId: string): { x: number; y: number } | undefined;
   /** The body's control mode walks it (완전 자동, 스킬 수동), not the player's keys. */
   autoWalks(sessionId: string): boolean;
+  /**
+   * Where a body its mode walks goes when it has nothing to fight: a spot it walks to and stands
+   * at, or its own wandering again with undefined.
+   */
+  holdGoal(sessionId: string, at: { x: number; y: number } | undefined): void;
   /** Walks a body to a spot over `ms` (0 puts it there), the room's own way. */
   walkBody(sessionId: string, x: number, y: number, ms: number): void;
   sendOn(sessionId: string, to: Destination): void;
@@ -98,8 +102,10 @@ interface Run {
   met: number;
   /** `system` steps whose effect has landed. */
   readonly reached: Set<number>;
-  /** Where the body stood, and for how many story ticks, while a `near:` waits. */
-  still: { x: number; y: number; n: number } | undefined;
+  /** Where the scene has the body stand while it holds the keys. */
+  stand: { x: number; y: number } | undefined;
+  /** The client reached the next `play`: the player has the body until it is met. */
+  atPlay: boolean;
 }
 
 interface Showing {
@@ -113,8 +119,6 @@ interface Showing {
 
 /** Feet this close to a mark meet a `near:` step. */
 const NEAR_PX = 24;
-/** Story ticks (two fight ticks each) a body its mode walks stands idle before it walks on. */
-const IDLE_WALK_TICKS = 15;
 /** A shared scene ends when every viewer is done, or after its length and this much more. */
 const SHARED_SLACK = 1.5;
 const SHARED_EXTRA_MS = 8000;
@@ -353,7 +357,8 @@ class Director {
       kind,
       met: Math.min(from, playSteps(scene).length),
       reached: new Set(),
-      still: undefined,
+      stand: room.bodyOf(sessionId),
+      atPlay: false,
     };
     this.runs.set(run.id, run);
     this.bySession.set(sessionId, run.id);
@@ -374,6 +379,7 @@ class Director {
     if (!run) return;
     this.runs.delete(id);
     if (this.bySession.get(run.sessionId) === id) this.bySession.delete(run.sessionId);
+    run.room.holdGoal(run.sessionId, undefined);
     run.room.tell(run.sessionId, STORY_MESSAGES.end, { run: id } satisfies SceneEnd);
   }
 
@@ -391,6 +397,8 @@ class Director {
   private meet(run: Run, until: string): void {
     if (this.next(run) !== until) return;
     run.met++;
+    run.atPlay = false;
+    run.stand = run.room.bodyOf(run.sessionId);
     run.room.tell(run.sessionId, STORY_MESSAGES.cue, { run: run.id, until } satisfies SceneCue);
     if (run.kind === "opening") {
       const p = this.store;
@@ -407,14 +415,12 @@ class Director {
       if (run.room !== room) continue;
       const until = this.next(run);
       if (!until) continue;
+      this.steer(run);
       if (until.startsWith("near:")) {
         const at = markOf(room.mapDef, until.slice(5));
         const body = room.bodyOf(run.sessionId);
-        if (!at || !body) continue;
-        if (Math.hypot(body.x - at.x, body.y - at.y) <= NEAR_PX) {
-          run.still = undefined;
+        if (at && body && Math.hypot(body.x - at.x, body.y - at.y) <= NEAR_PX)
           this.meet(run, until);
-        } else if (room.autoWalks(run.sessionId)) this.walkIdle(run, body, at);
       } else if (until.startsWith("home-minute:")) {
         if (this.homeMinutes(run.characterId) >= Number(until.slice(12))) this.meet(run, until);
       }
@@ -422,18 +428,25 @@ class Director {
   }
 
   /**
-   * A body its mode walks has nothing to walk to once a fight is over: when it has stood still a
-   * moment while the scene waits for it at a mark, it walks there.
+   * In a private copy, a body its mode walks goes where the scene wants it rather than wandering:
+   * where the scene stood it while it holds the keys, the mark a `near:` or `interact:` waits at
+   * once the player has the body, and its own way in a fight.
    */
-  private walkIdle(run: Run, body: { x: number; y: number }, at: { x: number; y: number }) {
-    const s = run.still;
-    if (!s || Math.hypot(s.x - body.x, s.y - body.y) > 1) {
-      run.still = { x: body.x, y: body.y, n: 0 };
+  private steer(run: Run): void {
+    const { room } = run;
+    if (!room.owner || !room.autoWalks(run.sessionId)) return;
+    if (!run.atPlay) {
+      room.holdGoal(run.sessionId, run.stand);
       return;
     }
-    if (++s.n !== IDLE_WALK_TICKS) return;
-    const ms = (Math.hypot(at.x - body.x, at.y - body.y) / PLAYER_SPEED) * SECOND_MS;
-    run.room.walkBody(run.sessionId, at.x, at.y, ms);
+    const step = playCondition(run.scene, run.met);
+    const until = step?.until ?? "";
+    const mark = until.startsWith("near:")
+      ? until.slice(5)
+      : until.startsWith("interact:")
+        ? step?.at
+        : undefined;
+    room.holdGoal(run.sessionId, markOf(room.mapDef, mark));
   }
 
   /** Whole minutes of 명령퇴사 served (the home scene's `home-minute:<n>`). */
@@ -513,6 +526,11 @@ class Director {
     }
     if (req.t === "reach") {
       const step = run.scene.steps[req.step];
+      // The client reached the `play` the scene waits on: the body is the player's now.
+      if (step?.do === "play") {
+        if (step.until === this.next(run)) run.atPlay = true;
+        return;
+      }
       if (step?.do !== "system" || run.reached.has(req.step)) return;
       run.reached.add(req.step);
       SYSTEM_EFFECTS[step.message]?.(characterId);
@@ -547,6 +565,7 @@ class Director {
     // A fade-in's cut stands the player just in front of the spot.
     const fade = run.scene.steps.some((s) => s.do === "fx" && s.fx === "fade-in" && s.at === to);
     if (fade) y += 24;
+    run.stand = { x, y };
     run.room.walkBody(run.sessionId, x, y, ms);
   }
 
@@ -555,6 +574,7 @@ class Director {
     this.runs.delete(run.id);
     if (this.bySession.get(run.sessionId) === run.id) this.bySession.delete(run.sessionId);
     const { room, sessionId, characterId } = run;
+    room.holdGoal(sessionId, undefined);
     switch (run.kind) {
       case "opening":
         return this.nextBeat(room, sessionId, characterId);

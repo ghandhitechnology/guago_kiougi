@@ -39,6 +39,7 @@ import {
   type FightMap,
   FightNet,
   type FightWorld,
+  GOAL_HELD,
   gainExp,
   type Halt,
   hurtPlayer,
@@ -1342,6 +1343,18 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
   autoWalks(sessionId: string): boolean {
     const p = this.pawns.get(sessionId)?.player;
     return !!p && MODE_AUTO[p.mode].move;
+  }
+
+  holdGoal(sessionId: string, at: { x: number; y: number } | undefined): void {
+    const p = this.pawns.get(sessionId)?.player;
+    if (!p) return;
+    if (!at) {
+      if (p.aiGoalUntil === GOAL_HELD) p.aiGoalUntil = 0;
+      return;
+    }
+    p.aiGoalX = at.x;
+    p.aiGoalY = at.y;
+    p.aiGoalUntil = GOAL_HELD;
   }
 
   /** A scene walks a body to a spot: straight there over `ms`, its own inputs set aside. */

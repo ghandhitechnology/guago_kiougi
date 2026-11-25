@@ -248,8 +248,19 @@ export function autoPlay(w: FightWorld, p: Player, drive: boolean, dodge: boolea
 
 const goalOut = { x: 0, y: 0 };
 
+/**
+ * `Player.aiGoalUntil` for a goal the room holds (a story scene's mark): walked to and stood at,
+ * never re-picked, until the room lets it go.
+ */
+export const GOAL_HELD = -1;
+
 /** Where to walk when no monster is close: a friend to revive, its own drops, else a hunt. */
 function calmGoal(w: FightWorld, p: Player): { x: number; y: number } | null {
+  if (p.aiGoalUntil === GOAL_HELD) {
+    goalOut.x = p.aiGoalX;
+    goalOut.y = p.aiGoalY;
+    return goalOut;
+  }
   let best = 140 * 140;
   let found = false;
   for (const q of w.players) {

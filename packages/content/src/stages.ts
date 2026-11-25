@@ -39,6 +39,13 @@ export function stageMapOf(maps: readonly BuiltMap[], place: string): BuiltMap |
   );
 }
 
+/** A spot beside a mark, in pixels from it. */
+export interface Spot {
+  readonly at: string;
+  readonly dx: number;
+  readonly dy: number;
+}
+
 export interface Staging {
   /** Mark the player is put at when the scene opens its map (an opening beat, a replay). */
   readonly start?: string;
@@ -53,7 +60,12 @@ export interface Staging {
    * on the map; `@player` stands them beside the player. Monsters come with the effects that
    * bring them (`odap-surge`, `golem-rise`).
    */
-  readonly enter: Readonly<Record<string, string>>;
+  readonly enter: Readonly<Record<string, string | Spot>>;
+  /**
+   * A fade-in at a mark is a cut to a new shot: these cast members stand at their spots when it
+   * lifts, by the mark faded in at.
+   */
+  readonly cuts?: Readonly<Record<string, Readonly<Record<string, Spot>>>>;
 }
 
 const personal = (o: Partial<Staging> = {}): Staging => ({
@@ -85,7 +97,18 @@ const STAGING: Readonly<Record<string, Staging>> = {
       "senior-physics": "@player",
     },
   }),
-  "opening-b7": personal({ instance: true, start: "rows" }),
+  // The 교장 on the stage behind the podium, not behind the stage's back row; 0조 at the board.
+  "opening-b7": personal({
+    instance: true,
+    start: "rows",
+    enter: { principal: { at: "stage", dx: 0, dy: 16 } },
+    cuts: {
+      board: {
+        hyunwoo: { at: "board", dx: -30, dy: 34 },
+        garam: { at: "board", dx: 30, dy: 30 },
+      },
+    },
+  }),
   "opening-b8": personal({ instance: true, start: "field-edge" }),
   "p1-pythagoreans-freed": {
     shared: true,

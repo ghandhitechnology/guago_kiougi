@@ -28,6 +28,8 @@ const FX_SPRITES: Partial<Record<narrative.Effect, readonly string[]>> = {
 /** The rig the room fills are drawn with (`extras.ts`). */
 const FILL_RIG = "student";
 const FILLED = new Set(["opening-b1", "opening-b7"]);
+/** Props a room fill stands up (`extras.ts`): the assembly's podium. */
+const FILL_SPRITES: Readonly<Record<string, readonly string[]>> = { "opening-b7": ["gym-podium"] };
 
 export function storyAtlases(meta: ArtMetadata, map: BuiltMap): string[] {
   const out = new Set<string>();
@@ -41,6 +43,7 @@ export function storyAtlases(meta: ArtMetadata, map: BuiltMap): string[] {
       add(art?.kind === "rig" ? meta.rigs[art.art]?.atlas : meta.sprites[art?.art ?? ""]?.atlas);
     }
     if (FILLED.has(scene.id)) add(meta.rigs[FILL_RIG]?.atlas);
+    for (const name of FILL_SPRITES[scene.id] ?? []) add(meta.sprites[name]?.atlas);
     for (const step of scene.steps) {
       if (step.do !== "fx") continue;
       for (const name of FX_SPRITES[step.fx] ?? []) add(meta.sprites[name]?.atlas);
