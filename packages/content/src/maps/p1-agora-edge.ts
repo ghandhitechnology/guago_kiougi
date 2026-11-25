@@ -383,7 +383,7 @@ function city(): Placed {
       const road = x + w > 48 && x < 56 && row < 60;
       if (!road)
         objects.push({
-          prop: "townhouse",
+          prop: "edge-house",
           frame,
           at: [Math.round((x + w / 2) * T), row * T + ((k * 7) % 3) * 4],
           raw: true,
@@ -421,7 +421,7 @@ function city(): Placed {
       [80, 1],
     ] as const)
       objects.push({
-        prop: "townhouse",
+        prop: "edge-house",
         frame: (["b", "h", "f", "d", "a", "c"] as const)[(y + shift * 3) % 6] as string,
         at: [col * T + shift * 6, (y + shift) * T + 6],
         raw: true,
@@ -633,7 +633,7 @@ const map: MapSource = {
     // Smoke off every furnace, leaning east.
     ...[...FURNACES, [60, 41] as Vec].map(
       ([tx, ty], i): Prop => ({
-        prop: "smoke",
+        prop: "foundry-smoke",
         anim: "rise",
         play: true,
         index: i,

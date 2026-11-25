@@ -933,7 +933,7 @@ const one = (
 
 export default [
   sprite({
-    name: "townhouse",
+    name: "edge-house",
     size: [HW, HH],
     palette,
     lone: "SBl",
@@ -1030,7 +1030,7 @@ export default [
   }),
   one("crane-big-top", [CW, CH], bigCraneTop(), { outline: false }),
   sprite({
-    name: "smoke",
+    name: "foundry-smoke",
     size: [34, 70],
     origin: [9, 69],
     palette,
