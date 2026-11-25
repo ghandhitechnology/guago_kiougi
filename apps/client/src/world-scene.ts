@@ -74,6 +74,13 @@ const RATTLE_COOLDOWN_MS = 1200;
 const HEAR_PX = 220;
 /** A door this close starts loading the map behind it. */
 const NEAR_DOOR_PX = 56;
+/**
+ * In a field only this many students nearest the player wear name plates, chosen this often, and
+ * none standing so close that their plates would cover the player.
+ */
+const NAMED_IN_FIELD = 4;
+const NAMED_CLEAR_PX = 32;
+const NAMED_EVERY_MS = 500;
 /** Development only: `?cold` turns that off, to time a door whose map loads behind the curtain. */
 const PREFETCH = !(import.meta.env.DEV && new URLSearchParams(location.search).has("cold"));
 const KO = narrative.NARRATIVE.ko;
@@ -754,33 +761,70 @@ export class WorldScene extends Phaser.Scene {
     const seen = this.seenPlates;
     seen.clear();
     // In a field the player's own plate would lie under their feet where the hits land; the ring
-    // there marks them instead.
+    // there marks them instead. A crowd's plates would bury the fight, so only the students
+    // nearest the player wear theirs, chosen again twice a second so plates do not flicker.
     const field = here.map.zones.some((z) => z.kind === "monsters");
+    const now = performance.now();
+    if (field && now - this.namedAt > NAMED_EVERY_MS) {
+      this.namedAt = now;
+      this.pickNamed(here);
+    }
     here.fight.forEachStudent((slot, x, y, self) => {
       const p = players.get(String(slot));
-      if (!p?.sid || (self && field)) return;
+      if (!p?.sid) return;
       seen.add(p.sid);
+      if (!self) {
+        const dot = worldView.others.get(p.sid);
+        if (dot) {
+          dot.x = x;
+          dot.y = y;
+        } else worldView.others.set(p.sid, { kind: "player", x, y, name: p.name });
+      }
+      const named = self ? !field : !field || this.named.has(p.sid);
+      if (!named) {
+        if (this.plates.delete(p.sid)) this.overlays.remove(p.sid);
+        return;
+      }
       if (!this.plates.has(p.sid)) {
         this.plates.add(p.sid);
         const name = self ? (this.entry?.character.name ?? p.name) : p.name;
         this.overlays.plate(p.sid, name, self ? "self" : "player");
-        if (!self) worldView.others.set(p.sid, { kind: "player", x, y, name: p.name });
       }
       this.overlays.move(p.sid, x, y);
-      const dot = self ? undefined : worldView.others.get(p.sid);
-      if (dot) {
-        dot.x = x;
-        dot.y = y;
-      }
     });
     for (const sid of this.plates) {
       if (seen.has(sid)) continue;
       this.plates.delete(sid);
       this.overlays.remove(sid);
-      worldView.others.delete(sid);
+    }
+    for (const sid of worldView.others.keys()) {
+      if (!seen.has(sid) && worldView.others.get(sid)?.kind === "player")
+        worldView.others.delete(sid);
     }
   }
 
+  /** The students nearest the player in a field, who keep their name plates. */
+  private pickNamed(here: Here): void {
+    const me = this.drawn;
+    const near = this.nearScratch;
+    near.length = 0;
+    const players = here.room.state.players;
+    here.fight.forEachStudent((slot, x, y, self) => {
+      const sid = players.get(String(slot))?.sid;
+      if (self || !sid || !me) return;
+      const d = Math.hypot(x - me.x, y - me.y);
+      if (d > NAMED_CLEAR_PX) near.push({ sid, d });
+    });
+    near.sort((a, b) => a.d - b.d);
+    this.named.clear();
+    for (let i = 0; i < Math.min(NAMED_IN_FIELD, near.length); i++) {
+      this.named.add((near[i] as { sid: string }).sid);
+    }
+  }
+
+  private readonly named = new Set<string>();
+  private namedAt = 0;
+  private readonly nearScratch: { sid: string; d: number }[] = [];
   private readonly seenPlates = new Set<string>();
 
   /** Doors as the prediction meets them: the curtain starts on the step in. */
