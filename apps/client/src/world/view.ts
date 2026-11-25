@@ -44,6 +44,8 @@ class WorldView {
   selfSid: string | undefined;
   /** Nameplates, bubbles and the prompt, while the world scene runs. */
   overlays: WorldOverlays | undefined;
+  /** Someone's nameplate tapped or clicked, by session or speaker id; chat whispers players. */
+  onNameTap: ((id: string, name: string, kind: EntityKind) => void) | undefined;
   private readonly listeners = new Set<(map: MapView | undefined) => void>();
 
   /** The world scene started on a map. */

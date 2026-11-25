@@ -93,6 +93,8 @@ export class ChatPanel {
   private shown = true;
   private sending = false;
   private whisperTo: string | undefined;
+  /** Who whispered last: the 귓속말 tab answers them when no one else is picked. */
+  private replyTo: string | undefined;
   private readonly unlisten: () => void;
 
   constructor(scene: Phaser.Scene, link: WorldLink, layout: ChatLayout) {
@@ -196,12 +198,24 @@ export class ChatPanel {
       if (e.type === "chat" && e.line.ch === "near" && e.line.from.sid) {
         worldView.overlays?.say(e.line.from.sid, e.line.text);
       }
+      if (e.type === "chat" && e.line.ch === "whisper" && e.line.from.id !== link.me) {
+        this.replyTo = e.line.from.name;
+        if (this.log.active === "whisper" && !this.whisperTo) {
+          this.whisperTo = this.replyTo;
+          this.refreshPrefix();
+        }
+      }
       if (e.type === "status" && e.status === "reconnecting")
         this.log.note(t("chat.status.reconnecting"), "system");
       if (e.type === "status" && e.status === "replaced")
         this.log.note(t("chat.status.replaced"), "system");
     });
+    // A player's nameplate clicked in the world starts a whisper to them.
+    worldView.onNameTap = (_id, name, kind) => {
+      if (kind === "player") this.open(name);
+    };
     this.root.once(Phaser.GameObjects.Events.DESTROY, () => {
+      worldView.onNameTap = undefined;
       unbubble();
       this.unlisten();
       this.log.dispose();
@@ -229,7 +243,7 @@ export class ChatPanel {
     if (whisperTo) {
       this.whisperTo = whisperTo;
       this.log.setActive("whisper");
-    }
+    } else if (this.log.active === "whisper") this.whisperTo ??= this.replyTo;
     if (!this.shown) this.unfold(false);
     if (this.typing) {
       this.field.focusField();
@@ -261,7 +275,7 @@ export class ChatPanel {
   private pickTab(tab: Tab): void {
     if (tab === this.log.active) return;
     sound("tab");
-    if (tab !== "whisper") this.whisperTo = undefined;
+    this.whisperTo = tab === "whisper" ? (this.whisperTo ?? this.replyTo) : undefined;
     this.scroll = 0;
     this.log.setActive(tab);
     this.refreshPrefix();
@@ -276,6 +290,7 @@ export class ChatPanel {
     this.prefix.set(text);
     const pw = Math.min(70, this.prefix.width + 6);
     this.field.setX(PAD + pw);
+    this.field.setBoxWidth(W - PAD * 2 - pw);
     this.prefix.color(
       tab === "whisper" ? "plum.pale" : tab === "world" ? "navy.pale" : "stone.light",
     );

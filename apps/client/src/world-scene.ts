@@ -182,8 +182,17 @@ export class WorldScene extends Phaser.Scene {
       seated.add(p.sid);
       // Everyone wears their own look; a body whose look has not synced yet wears the default
       // until it arrives, then is dressed again.
-      const look = p.look?.body
-        ? normalizeLook(this.meta, { ...p.look, accessories: [...p.look.accessories] })
+      // Schema fields are accessors, so a spread would drop them: read each one.
+      const l = p.look;
+      const look = l?.body
+        ? normalizeLook(this.meta, {
+            body: l.body,
+            hair: l.hair,
+            hairColor: l.hairColor,
+            face: l.face,
+            uniform: l.uniform,
+            accessories: [...l.accessories],
+          })
         : undefined;
       const lookId = look ? dollLook(look) : this.look;
       let r = this.players.get(p.sid);

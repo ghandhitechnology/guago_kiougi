@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
-import { Label, wrap } from "../ui/text.ts";
-import { sliceOf } from "../ui/theme.ts";
+import { Label, measure, wrap } from "../ui/text.ts";
+import { paint, sliceOf } from "../ui/theme.ts";
+import { worldView } from "./view.ts";
 
 /**
  * What floats over the world: nameplates under everyone's feet, speech bubbles over their heads,
@@ -45,8 +46,6 @@ export class WorldOverlays {
   private prompt: Phaser.GameObjects.Image | undefined;
   private promptAt = { x: 0, y: 0 };
   private clock = 0;
-  /** A plate tapped or clicked: whisper to them, talk to them. */
-  onPlateTap: ((id: string, name: string, kind: PlateKind) => void) | undefined;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -66,7 +65,7 @@ export class WorldOverlays {
       const root = this.scene.add.container(0, 0, [back, label.obj]).setDepth(DEPTH);
       if (kind !== "self") {
         back.setInteractive({ useHandCursor: true });
-        back.on("pointerup", () => this.onPlateTap?.(id, p?.label.obj.text ?? name, kind));
+        back.on("pointerup", () => worldView.onNameTap?.(id, p?.label.obj.text ?? name, kind));
       }
       p = { root, back, label, x: 0, y: 0 };
       this.plates.set(id, p);
@@ -101,19 +100,33 @@ export class WorldOverlays {
     const p = this.plates.get(id);
     if (!p) return;
     const lines = wrap(this.scene, "galmuri9", text, BUBBLE_MAX_W - 10).slice(0, 4);
-    const label = new Label(this.scene, 5, 4, lines.join("\n"), {
-      font: "galmuri9",
-      color: "ink.dark",
-      leading: 1,
+    // A word the filter took out is a strip of ink where it stood, as in the chat log.
+    const parts: Phaser.GameObjects.GameObject[] = [];
+    let textW = 0;
+    lines.forEach((line, row) => {
+      const y = 4 + row * 13;
+      let x = 5;
+      for (const run of line.match(/\*+|[^*]+/g) ?? []) {
+        if (run.startsWith("*")) {
+          const rw = measure(this.scene, "galmuri9", run);
+          parts.push(this.scene.add.rectangle(x, y + 2, rw, 7, paint("ink.light")).setOrigin(0));
+          x += rw + 1;
+          continue;
+        }
+        const label = new Label(this.scene, x, y, run, { font: "galmuri9", color: "ink.dark" });
+        parts.push(label.obj);
+        x += label.width + 1;
+      }
+      textW = Math.max(textW, x - 1 - 5);
     });
-    const w = label.width + 11;
+    const w = textW + 11;
     const h = lines.length * 13 + 5;
     const [l, r, t, b] = sliceOf("bubble");
     const back = this.scene.add.nineslice(0, 0, "ui", "bubble/idle", w, h, l, r, t, b).setOrigin(0);
     const tail = this.scene.add
       .image(Math.floor(w / 2) - 2, h - 1, "ui", "bubble-tail/idle")
       .setOrigin(0);
-    const root = this.scene.add.container(0, 0, [back, tail, label.obj]).setDepth(DEPTH + 1);
+    const root = this.scene.add.container(0, 0, [back, tail, ...parts]).setDepth(DEPTH + 1);
     const chars = [...text].length;
     const bubble: Bubble = {
       root,
