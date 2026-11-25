@@ -473,3 +473,41 @@ describe("a club invite to a player who blocked the inviter", () => {
     expect(codeOf(await social.clubs.invite(late, full, true))).toBe("invites_full");
   });
 });
+
+describe("removing a character who leads a club", () => {
+  const accountOf = async (id: string) =>
+    (await db.execute(sql`select account_id from characters where id = ${id}`)).rows[0]
+      ?.account_id as string;
+
+  it("hands the club to the senior 부짱 first, then lets the character go", async () => {
+    const leader = await character(CLUB_FOUND_LEVEL);
+    const id = await club(leader);
+    const [early, vice] = [await character(), await character()];
+    await social.clubs.join(early, id);
+    await social.clubs.join(vice, id);
+    await social.clubs.setRank(leader, vice, "vice");
+    // Deleting the 짱 as it stands fails: the club would be left without one.
+    const blocked = await db
+      .execute(sql`delete from accounts where id = ${await accountOf(leader)}`)
+      .catch((e: unknown) => e);
+    expect(pgErrorCode(blocked).constraint).toBe("clubs_leader_member_fk");
+
+    const account = await accountOf(leader);
+    await db.transaction(async (tx) => {
+      expect(await social.vacate(leader, { tx })).toMatchObject({ club: id, moved: [leader] });
+      await tx.execute(sql`delete from accounts where id = ${account}`);
+    });
+    const view = await social.clubs.view(id);
+    expect(view?.leader).toBe(vice);
+    expect(view?.members.map((m) => m.id).sort()).toEqual([early, vice].sort());
+  });
+
+  it("disbands a club whose 짱 is alone, and ignores a character in no club", async () => {
+    const leader = await character(CLUB_FOUND_LEVEL);
+    const id = await club(leader);
+    expect(await social.vacate(leader)).toMatchObject({ club: id, gone: true });
+    await db.execute(sql`delete from accounts where id = ${await accountOf(leader)}`);
+    expect(await social.clubs.view(id)).toBeNull();
+    expect(await social.vacate(await character())).toBeNull();
+  });
+});

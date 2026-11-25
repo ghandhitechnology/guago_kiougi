@@ -98,6 +98,7 @@ export class SocialHub<P extends Peer> {
   private readonly clubOnline = new Map<number, Set<string>>();
   private readonly timers: NodeJS.Timeout[] = [];
   private ticks = 0;
+  private readonly unlisten: () => void;
   private readonly handlers: { [K in SocialType]: Handler<P, K> };
 
   constructor(social: Social, room: SocialRoom<P>) {
@@ -107,10 +108,17 @@ export class SocialHub<P extends Peer> {
     this.timers.push(setInterval(() => this.tick(), VITALS_MS));
     this.timers.push(setInterval(() => void this.creditClubs(), CLUB_EXP_MS));
     for (const t of this.timers) t.unref();
+    // Changes made outside a request (moderation removing a character) reach members too.
+    this.unlisten = social.onClubChange((change) => {
+      this.clubChanged(change).catch((error: unknown) => {
+        console.error(`club change notice failed: ${describeError(error)}`);
+      });
+    });
   }
 
   dispose(): void {
     for (const t of this.timers) clearInterval(t);
+    this.unlisten();
   }
 
   // Lifecycle ------------------------------------------------------------------------------

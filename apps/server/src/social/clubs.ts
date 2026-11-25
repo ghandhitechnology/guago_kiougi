@@ -3,8 +3,11 @@
  * to one club take turns: a kick and a leave, a hand-over and a promotion, a disband and a join
  * each run one after the other, and the second sees what the first did. What no lock order can
  * promise, the schema does: one club per character (the key of `club_members`), the 짱 always a
- * member (a deferred foreign key), every capped list behind a counter CHECK, and a join into a
- * disbanded club fails its foreign key.
+ * member (a deferred foreign key), and every capped list behind a counter CHECK. A disbanded
+ * club keeps its row; every change finds it through `lockClub`, which takes live clubs only.
+ *
+ * Whatever removes a character (a ban that deletes it, account deletion) calls `vacate` first:
+ * the deferred key refuses to delete a 짱 and leave the club without one.
  */
 import { checkEmblem } from "@guago/content";
 import {
@@ -340,6 +343,41 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
       if (done instanceof Refuse) return done;
       if ("taken" in done) return new Refuse("target_in_club");
       if (take) await dropApplications(applicant, done.club);
+      return done;
+    },
+
+    /**
+     * Takes a character out of its club for good, before whatever removes the character. A 짱
+     * hands the club to the longest-serving 부짱, else the longest-serving 부원; a 짱 alone
+     * disbands it; anyone else just leaves. Pass `tx` to run inside the deleting transaction.
+     * Returns the change for the hub, or null when the character was in no club.
+     */
+    async vacate(characterId: string, on: { tx?: Tx } = {}): Promise<ClubChange | null> {
+      const work = async (tx: Tx): Promise<ClubChange | null> => {
+        let mine: Awaited<ReturnType<typeof lockMine>>;
+        try {
+          mine = await lockMine(tx, characterId);
+        } catch (error) {
+          if (error instanceof Refuse) return null;
+          throw error;
+        }
+        const { club, rank } = mine;
+        if (rank === "leader") {
+          const { rows } = await tx.execute(sql`
+            select character_id from club_members
+            where club_id = ${club.id} and character_id <> ${characterId}
+            order by (rank = 'vice') desc, joined_at, character_id limit 1`);
+          const heir = rows[0]?.character_id as string | undefined;
+          if (!heir) return disbandLocked(tx, club);
+          await tx.execute(sql`update clubs set leader_id = ${heir} where id = ${club.id}`);
+        }
+        await tx.execute(sql`
+          delete from club_members where character_id = ${characterId} and club_id = ${club.id}`);
+        return { club: club.id, moved: [characterId] };
+      };
+      if (on.tx) return work(on.tx);
+      const done = await transact(db, work);
+      if (done instanceof Refuse) throw done;
       return done;
     },
 

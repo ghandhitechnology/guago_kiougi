@@ -10,10 +10,11 @@ import type { ChatSink } from "../chat/log.ts";
 import type { Db } from "../db/index.ts";
 import { describeError } from "../db/index.ts";
 import { createBoard } from "./board.ts";
-import { createClubStore } from "./clubs.ts";
+import { type ClubChange, createClubStore } from "./clubs.ts";
 import type { FeePath } from "./fees.ts";
 import { createFriendStore } from "./friends.ts";
 import { createReports } from "./reports.ts";
+import type { Tx } from "./tx.ts";
 
 export type Cleaned = { ok: true; text: string } | { ok: false; code: RefusalCode };
 
@@ -60,6 +61,11 @@ export function createSocial(db: Db, options: SocialOptions) {
     now,
   });
   const reports = createReports(db, options.log, now);
+  const listeners = new Set<(change: ClubChange) => void>();
+  /** Tells the hub (online members, map rooms) about a club change made outside a request. */
+  const announce = (change: ClubChange) => {
+    for (const listener of listeners) listener(change);
+  };
 
   return {
     db,
@@ -69,6 +75,24 @@ export function createSocial(db: Db, options: SocialOptions) {
     reports,
     clean,
     now,
+
+    /**
+     * For whatever removes a character (moderation, account deletion): takes it out of its club,
+     * handing a 짱's club to the next rank or disbanding it when alone (`ClubStore.vacate`). Run
+     * inside the deleting transaction with `tx`, then `announce` the change after it commits;
+     * without `tx` this runs on its own and announces itself.
+     */
+    async vacate(characterId: string, on: { tx?: Tx } = {}): Promise<ClubChange | null> {
+      const change = await clubs.vacate(characterId, on);
+      if (change && !on.tx) announce(change);
+      return change;
+    },
+    announce,
+    /** The hub's subscription to club changes made outside a request. */
+    onClubChange(listener: (change: ClubChange) => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
 
     /** Drops lapsed friend requests, club invites and 대자보 posts. */
     async sweep(): Promise<void> {
