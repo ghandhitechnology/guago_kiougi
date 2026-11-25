@@ -34,6 +34,9 @@ const palette: Legend = {
   // weed flowers
   y: "gold.light",
   v: "plum.light",
+  // the hose
+  r: "red.mid",
+  R: "red.dark",
   // bugs
   j: "ink.deep",
   J: "ink.dark",
@@ -64,49 +67,83 @@ function oval(w: number, h: number, cx: number, cy: number, rx: number, ry: numb
 }
 
 /**
- * The water sculpture: three steel ribbons twisting up from a concrete drum in a round basin,
- * the basin's water gone green and furred, a tidemark of algae up the drum where it used to run.
+ * The water sculpture, as it is now: three steel ribbons twisting up out of a tall concrete
+ * drum, rust and algae run down them in streaks; the drum stained black where water used to
+ * sheet over it, a green tidemark round its foot; the basin dried to a cracked crust of dead
+ * algae with one stagnant green puddle left, leaves on it, and a garden hose someone dragged
+ * over the rim and left there.
  */
 function sculpture(): string {
-  const W = 64;
-  const H = 70;
+  const W = 100;
+  const H = 98;
   const pic = Pic.blank(W, H);
-  // The basin: a round concrete lip around green water.
-  const lip = lobes([{ x: 32, y: 56, rx: 30, ry: 13 }]);
-  const water = lobes([{ x: 32, y: 56, rx: 26, ry: 10 }]);
+  const cx = 50;
+  const lip = lobes([{ x: cx, y: 78, rx: 46, ry: 18 }]);
+  const floor = lobes([{ x: cx, y: 77, rx: 41, ry: 14 }]);
+  const puddle = lobes([
+    { x: cx + 14, y: 82, rx: 11, ry: 4 },
+    { x: cx + 6, y: 84, rx: 6, ry: 3 },
+  ]);
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
       if (!lip(x, y)) continue;
-      if (water(x, y))
-        pic.set(x, y, (x * 3 + y * 7) % 11 === 0 ? "q" : (x + y * 5) % 13 === 0 ? "h" : "G");
-      else pic.set(x, y, y < 54 ? "k" : y < 64 ? "K" : "M");
+      if (puddle(x, y)) pic.set(x, y, !puddle(x, y - 1) ? "q" : (x + y) % 6 === 0 ? "g" : "G");
+      else if (floor(x, y)) {
+        // Dead algae dried to a crust, cracked into plates.
+        const crack = (x * 3 + y * 7) % 17 === 0 || (x + y * 2) % 13 === 0;
+        pic.set(x, y, crack ? "b" : (x * 5 + y) % 9 < 3 ? "u" : "D");
+      } else pic.set(x, y, y < 76 ? "k" : y < 88 ? "K" : "M");
     }
-  // Scum at the water's edge.
-  for (let y = 0; y < H; y++)
-    for (let x = 0; x < W; x++)
-      if (water(x, y) && !water(x, y - 2) && (x + y) % 3 !== 0) pic.set(x, y, "g");
-  // The drum, its tidemark.
-  for (let y = 36; y < 56; y++)
-    for (let x = 25; x < 39; x++)
-      pic.set(x, y, x < 27 ? "k" : x > 36 ? "M" : y > 48 ? "D" : y > 46 ? "G" : "K");
-  for (let x = 25; x < 39; x++) pic.set(x, 35, "w").set(x, 36, "k");
-  // Three ribbons of steel twisting up out of the drum.
+  // The drum: tall, stained dark in long streaks from its top, green at its foot.
+  for (let y = 42; y < 80; y++)
+    for (let x = cx - 10; x < cx + 10; x++) {
+      const streak = (x * 7) % 5 === 0 && y < 70;
+      let ch = x < cx - 7 ? "k" : x > cx + 6 ? "M" : "K";
+      if (streak) ch = y < 55 ? "M" : "S";
+      if (y > 72) ch = y > 76 ? "D" : "G";
+      pic.set(x, y, ch);
+    }
+  for (let x = cx - 10; x < cx + 10; x++) pic.set(x, 41, "w").set(x, 42, "k");
+  // Three ribbons of steel, tall and thick, rust and algae down their undersides.
   for (let k = 0; k < 3; k++) {
-    for (let y = 2; y < 36; y++) {
-      const t = (36 - y) / 34;
-      const x = 32 + Math.sin(t * 5.2 + (k * Math.PI * 2) / 3) * (3 + t * 6);
-      const front = Math.cos(t * 5.2 + (k * Math.PI * 2) / 3) > 0;
+    for (let y = 2; y < 42; y++) {
+      const t = (42 - y) / 40;
+      const ang = t * 5.6 + (k * Math.PI * 2) / 3;
+      const x = cx + Math.sin(ang) * (4 + t * 9);
+      const front = Math.cos(ang) > 0;
       const xi = Math.round(x);
+      const rust = (y * 3 + k * 7) % 11 === 0 && !front;
       pic
-        .set(xi, y, front ? "i" : "I")
-        .set(xi + 1, y, front ? "w" : "K")
-        .set(xi + 2, y, front ? "K" : "M");
+        .set(xi - 1, y, front ? "i" : "I")
+        .set(xi, y, front ? "w" : "K")
+        .set(xi + 1, y, rust ? "u" : front ? "K" : "M")
+        .set(xi + 2, y, rust ? "b" : front ? "M" : "S");
     }
   }
-  // Algae streaks down the ribbons' low ends.
-  for (let y = 26; y < 36; y++)
-    for (let x = 20; x < 44; x++) if (pic.at(x, y) === "K" && (x + y) % 4 === 0) pic.set(x, y, "D");
-  return smooth(tidy(seal(pic, "d"), "G", "dq"), "d").toString();
+  for (let y = 30; y < 42; y++)
+    for (let x = cx - 14; x < cx + 14; x++)
+      if (pic.at(x, y) === "M" && (x + y) % 3 === 0) pic.set(x, y, "D");
+  // Leaves blown onto the crust.
+  for (const [lx, ly] of [
+    [22, 74],
+    [30, 82],
+    [70, 72],
+    [62, 88],
+    [36, 70],
+  ] as const)
+    pic.put("UU\nU.", lx, ly);
+  // The hose: coiled on the rim, dragged over it and left lying in the basin.
+  for (let a = 0; a < 6.3; a += 0.05) {
+    const hx = Math.round(84 + Math.cos(a) * 6);
+    const hy = Math.round(70 + Math.sin(a) * 3);
+    pic.set(hx, hy, "r").set(hx, hy + 1, "R");
+  }
+  for (let t = 0; t <= 1; t += 0.01) {
+    const hx = Math.round(78 - t * 24 + Math.sin(t * 9) * 3);
+    const hy = Math.round(71 + t * 12);
+    pic.set(hx, hy, "r").set(hx, hy + 1, "R");
+  }
+  return smooth(tidy(seal(pic, "d"), "D", "dqrRU"), "drR").toString();
 }
 
 /** A clump of weeds to the knee, a flower or two in it, leaning in the breeze. */
@@ -189,17 +226,44 @@ const DRAGONFLY = [
   `,
 ];
 
-/** Fresh turf laid in rolls at the gate, its seams still showing. Flat. */
+/**
+ * Fresh turf laid in rolls across the gate, the only thing anyone has done here: strips of new
+ * green with dark soil showing in the seams, their ends staggered, one roll not yet unrolled.
+ * Flat.
+ */
 function sod(): string {
-  const W = 48;
-  const H = 30;
+  const W = 52;
+  const H = 34;
   const pic = Pic.blank(W, H);
-  for (let y = 0; y < H; y++)
-    for (let x = 0; x < W; x++) {
-      const seam = y % 10 === 9 || (x + (Math.floor(y / 10) % 2) * 12) % 24 === 23;
-      const tuft = (x * 7 + y * 11) % 13 === 0;
-      pic.set(x, y, seam ? "q" : tuft ? "H" : "h");
-    }
+  for (let strip = 0; strip < 5; strip++) {
+    const y0 = strip * 6 + 1;
+    const start = (strip * 7) % 5;
+    const end = W - 3 - ((strip * 5) % 9);
+    for (let y = y0; y < y0 + 5; y++)
+      for (let x = start; x < end; x++) {
+        const tuft = (x * 7 + y * 11) % 9 === 0;
+        pic.set(x, y, y === y0 ? "H" : tuft ? "H" : y === y0 + 4 ? "g" : "h");
+      }
+    // Soil in the seam below, and at the strip's ragged ends.
+    for (let x = start; x < end; x++) pic.set(x, y0 + 5, (x + strip) % 4 === 0 ? "u" : "b");
+    pic
+      .set(end, y0 + 1, "b")
+      .set(end, y0 + 2, "b")
+      .set(start, y0 + 3, "b")
+      .set(start, y0 + 4, "b");
+  }
+  // The roll still waiting at the end of the last strip.
+  pic.put(
+    `
+      .gggg.
+      ghhhhg
+      ghbbhg
+      ghbbhg
+      .gggg.
+    `,
+    W - 8,
+    27,
+  );
   return smooth(pic).toString();
 }
 
@@ -214,16 +278,21 @@ const LILY = `
   ........GGG.
 `;
 
-/** A wisp of morning mist lying on the water, thin dithered streaks. Raw. */
+/** A bank of morning mist lying low over the water: a dithered veil, thick in the middle. Raw. */
 function mist(): string {
-  const W = 56;
-  const H = 7;
+  const W = 104;
+  const H = 14;
   const pic = Pic.blank(W, H);
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const body = 1 - Math.abs(y - 3) / 3.5 - Math.abs(x - 28) / 30;
-      if (body > 0.35 ? (x + y) % 2 === 0 : body > 0.12 && (x + y * 3) % 4 === 0)
-        pic.set(x, y, "w");
+      const body = 1 - Math.abs(y - 7) / 7.5 - Math.abs(x - 52) / 56 + Math.sin(x * 0.13) * 0.12;
+      const on =
+        body > 0.5
+          ? (x + y) % 2 === 0
+          : body > 0.28
+            ? (x + y) % 2 === 0 && (x * 3 + y) % 4 < 2
+            : body > 0.12 && (x + y * 3) % 6 === 0;
+      if (on) pic.set(x, y, body > 0.6 && (x + y) % 4 === 0 ? "w" : "k");
     }
   return pic.toString();
 }
@@ -241,9 +310,9 @@ const PLAQUE = `
 `;
 
 export default [
-  one("water-sculpture", [64, 70], sculpture(), {
-    lone: "q",
-    shadow: oval(64, 70, 34, 67, 30, 3),
+  one("water-sculpture", [100, 98], sculpture(), {
+    lone: "qUrR",
+    shadow: oval(100, 98, 52, 95, 46, 3.5),
   }),
   sprite({
     name: "weed-clump",
@@ -289,7 +358,7 @@ export default [
   }),
   sprite({
     name: "sod",
-    size: [48, 30],
+    size: [52, 34],
     origin: [0, 0],
     palette,
     outline: false,
@@ -306,10 +375,10 @@ export default [
   }),
   sprite({
     name: "mist",
-    size: [56, 7],
-    origin: [28, 3],
+    size: [104, 14],
+    origin: [52, 7],
     palette,
-    lone: "w",
+    lone: "wk",
     outline: false,
     frames: { still: mist() },
     anim: { idle: { frames: ["still"], fps: 1 } },
