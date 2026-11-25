@@ -29,6 +29,7 @@ import {
   type TerrainGrid,
   valueNoise,
 } from "./dualgrid.ts";
+import { drawOrder } from "./layer-order.ts";
 
 export type {
   Actor,
@@ -117,6 +118,7 @@ export interface SceneMeta {
       readonly parts: Table<string>;
       readonly slots?: Table<string>;
     }>;
+    readonly under?: Table<Table<string>>;
   }>;
   readonly tileGrid: {
     readonly tile: number;
@@ -1043,7 +1045,7 @@ function composeDoll(ctx: Ctx, o: Doll) {
     return part ? `${o.rig}/${layer}/${part}/${dir}/${frame}` : null;
   };
   const img = new Canvas(r.size[0], r.size[1]);
-  for (const layer of r.layers) {
+  for (const layer of drawOrder(r.layers, look.parts, (l, p) => r.under?.[l]?.[p])) {
     if (layer === "shadow") continue;
     const k = key(layer);
     const found = k ? frameOf(ctx, r.atlas, k) : undefined;

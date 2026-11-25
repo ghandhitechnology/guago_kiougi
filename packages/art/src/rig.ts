@@ -1,5 +1,6 @@
 import type { Anim, BonePose, Dir, Look, PartDef, Poses, RigDef, Vec } from "./format.ts";
 import { ArtError, checkLegend, parseGrid } from "./grid.ts";
+import { drawOrder } from "./layer-order.ts";
 import { type Indexed, indexed, stamp } from "./raster.ts";
 import { checkAnims, defaultOrigin } from "./sprite.ts";
 
@@ -8,6 +9,10 @@ export interface RigPart {
   readonly layer: string;
   readonly name: string;
   readonly frames: ReadonlyMap<string, Indexed>;
+  /** The layer it is drawn just below, when not its own (see `PartDef.under`). */
+  readonly under?: string;
+  /** Anchor name to its position per `down/walk0` key; keys where it is hidden are left out. */
+  readonly anchors: ReadonlyMap<string, ReadonlyMap<string, Vec>>;
 }
 
 export interface RigLook {
@@ -32,10 +37,12 @@ export interface CompiledRig {
   readonly parts: readonly RigPart[];
   readonly looks: readonly RigLook[];
   /**
-   * Every part option worn on the first look in place of that look's own: a check-only set, so
-   * whatever a player combines in the character creator has been checked on a neutral base.
+   * Every part option worn on the first look in place of that look's own (and with `probe:
+   * 'pairs'`, every two options of different layers together): a check-only set, so whatever a
+   * player combines in the character creator has been checked on a neutral base. Composited one
+   * at a time as they are read, since a pairs rig has hundreds.
    */
-  readonly probes: readonly RigLook[];
+  readonly probes: () => Iterable<RigLook>;
 }
 
 interface ParsedPose {
@@ -177,7 +184,29 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
         const dir = key.split("/")[0] as Dir;
         frames.set(key, drawPart(pieces, bones, dir, skeleton, def.size));
       }
-      parts.push({ layer, name: partName, frames });
+      const anchors = new Map<string, Map<string, Vec>>();
+      for (const [anchor, a] of Object.entries(partDef.anchors ?? {})) {
+        if (!(a.bone in def.bones)) {
+          throw new ArtError(`${where} › ${layer}.${partName}`, `anchor ${anchor} on unknown bone`);
+        }
+        const at = new Map<string, Vec>();
+        for (const [key, skeleton] of skeletons) {
+          const dir = key.split("/")[0] as Dir;
+          const s = skeleton.get(a.bone);
+          const own = a.poses?.[dir]?.[s?.pose ?? "rest"];
+          const p = own === undefined ? a.at[dir] : own;
+          if (!s || !p) continue;
+          at.set(key, [p[0] + s.offset[0], p[1] + s.offset[1]]);
+        }
+        anchors.set(anchor, at);
+      }
+      parts.push({
+        layer,
+        name: partName,
+        frames,
+        anchors,
+        ...(partDef.under === undefined ? {} : { under: partDef.under }),
+      });
     }
   }
 
@@ -190,12 +219,20 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
     }
     const frames = new Map<string, Indexed>();
     const checked = new Map<string, Indexed>();
+    const order = drawOrder(
+      def.layers,
+      look.parts,
+      (l, n) => parts.find((q) => q.layer === l && q.name === n)?.under,
+    );
+    const worn = order.map((layer) =>
+      parts.find((q) => q.layer === layer && q.name === look.parts[layer]),
+    );
     for (const key of skeletons.keys()) {
       const all = indexed(def.size[0], def.size[1]);
       const some = indexed(def.size[0], def.size[1]);
-      for (const layer of def.layers) {
-        const p = parts.find((q) => q.layer === layer && q.name === look.parts[layer]);
+      for (const p of worn) {
         if (!p) continue;
+        const layer = p.layer;
         const img = p.frames.get(key) as Indexed;
         stamp(all, img, 0, 0);
         if (!def.unchecked?.includes(layer)) stamp(some, img, 0, 0);
@@ -207,14 +244,32 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
   };
   const looks = Object.entries(def.looks).map(([lookName, look]) => compose(lookName, look));
 
+  for (const p of parts) {
+    if (p.under !== undefined && !def.layers.includes(p.under)) {
+      throw new ArtError(`${where} › ${p.layer}.${p.name}`, `under unknown layer "${p.under}"`);
+    }
+  }
   const base = Object.values(def.looks)[0];
-  const probes: RigLook[] = [];
-  if (base) {
-    for (const p of parts) {
-      if (base.parts[p.layer] === p.name || def.unchecked?.includes(p.layer)) continue;
-      probes.push(
-        compose(`${p.layer}.${p.name}`, { ...base, parts: { ...base.parts, [p.layer]: p.name } }),
-      );
+  const options = parts.filter(
+    (p) => base && base.parts[p.layer] !== p.name && !def.unchecked?.includes(p.layer),
+  );
+  function* probes(): Generator<RigLook> {
+    if (!base) return;
+    for (const p of options) {
+      yield compose(`${p.layer}.${p.name}`, {
+        ...base,
+        parts: { ...base.parts, [p.layer]: p.name },
+      });
+    }
+    if (def.probe !== "pairs") return;
+    for (const [i, p] of options.entries()) {
+      for (const q of options.slice(i + 1)) {
+        if (q.layer === p.layer) continue;
+        yield compose(`${p.layer}.${p.name}+${q.layer}.${q.name}`, {
+          ...base,
+          parts: { ...base.parts, [p.layer]: p.name, [q.layer]: q.name },
+        });
+      }
     }
   }
 

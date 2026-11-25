@@ -326,6 +326,26 @@ export function metadata(
             looks: Object.fromEntries(
               r.looks.map((l) => [l.name, { parts: l.parts, slots: l.slots }]),
             ),
+            under: Object.fromEntries(
+              r.layers
+                .map((l) => [
+                  l,
+                  Object.fromEntries(
+                    r.parts
+                      .filter((p) => p.layer === l && p.under !== undefined)
+                      .map((p) => [p.name, p.under as string]),
+                  ),
+                ])
+                .filter(([, byPart]) => Object.keys(byPart as object).length > 0),
+            ),
+            anchors: Object.fromEntries(
+              r.parts.flatMap((p) =>
+                [...p.anchors].map(([anchor, at]) => [
+                  `${p.layer}/${p.name}/${anchor}`,
+                  Object.fromEntries(at),
+                ]),
+              ),
+            ),
           },
         ]),
     ),

@@ -4,6 +4,7 @@
  * files), so what shows here is what the game will load.
  */
 
+import { drawOrder } from "../layer-order.ts";
 import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import { type BmFont, measure, parseBmFont, place } from "./bmfont.ts";
@@ -46,6 +47,7 @@ interface Meta {
       size: [number, number];
       layers: string[];
       looks: Record<string, { parts: Record<string, string>; slots: Record<string, string> }>;
+      under?: Record<string, Record<string, string>>;
     }
   >;
   fonts: Record<string, { image: string; data: string; tint: boolean }>;
@@ -183,7 +185,7 @@ class PageKit implements Kit {
     const c = canvas(r.size[0], r.size[1]);
     const ctx = ctx2d(c);
     const a = this.atlases.get(r.atlas);
-    for (const layer of r.layers) {
+    for (const layer of drawOrder(r.layers, look.parts, (l, p) => r.under?.[l]?.[p])) {
       const part = look.parts[layer];
       const f = part && a?.frames[`${rig}/${layer}/${part}/${key}`];
       if (layer === "shadow" || !a || !f) continue;

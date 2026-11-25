@@ -5,6 +5,7 @@
 
 import type { BuiltMap } from "@guago/content";
 import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
+import { drawOrder } from "../layer-order.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import { mapViews, overlay } from "./map-view.ts";
@@ -56,6 +57,7 @@ interface Meta {
       frames: string[];
       anims: Record<string, Anim>;
       looks: Record<string, { parts: Record<string, string>; slots: Record<string, string> }>;
+      under?: Record<string, Record<string, string>>;
     }
   >;
   tileGrid: { tile: number; margin: number; spacing: number; columns: number };
@@ -567,7 +569,7 @@ function composite(
   if (!rig) throw new Error(rigName);
   const c = canvas(rig.size[0], rig.size[1]);
   const ctx = ctx2d(c);
-  for (const layer of rig.layers) {
+  for (const layer of drawOrder(rig.layers, look.parts, (l, p) => rig.under?.[l]?.[p])) {
     const part = look.parts[layer];
     if (part) ctx.drawImage(frameImage(rig.atlas, `${rigName}/${layer}/${part}/${key}`), 0, 0);
   }
