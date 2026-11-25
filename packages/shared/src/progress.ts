@@ -127,7 +127,10 @@ export interface PoolFill extends Rate {
   readonly seconds: number;
 }
 
-/** What a pool holds after `offlineSeconds`. Sheets and 잉크 stay fractional until claimed. */
+/**
+ * What a pool holds after `offlineSeconds`, in whole units: what a claim would pay. The fraction
+ * below one unit of each is not paid (at most one EXP, 솔방울, 낱장 and 잉크 a pool).
+ */
 export function poolFill(
   rate: Rate,
   offlineSeconds: number,
@@ -139,10 +142,10 @@ export function poolFill(
   const seconds = Math.min(cap, Math.max(0, offlineSeconds));
   const k = share * seconds;
   return {
-    exp: rate.exp * k * catchUpMult,
-    pinecone: rate.pinecone * k,
-    sheets: rate.sheets * k,
-    ink: rate.ink * k,
+    exp: Math.floor(rate.exp * k * catchUpMult),
+    pinecone: Math.floor(rate.pinecone * k),
+    sheets: Math.floor(rate.sheets * k),
+    ink: Math.floor(rate.ink * k),
     seconds,
   };
 }
@@ -277,7 +280,10 @@ export function questReward(
   const r = QUEST_REWARD[cadence];
   const share = cadence === "repeat" ? repeatShare(completedToday) : 1;
   return {
-    exp: monsterEXP(level, 1) * r.kills * share * expFalloff(playerLevel, level) * catchUpMult,
+    // Whole EXP: the fraction of the last point is not paid.
+    exp: Math.floor(
+      monsterEXP(level, 1) * r.kills * share * expFalloff(playerLevel, level) * catchUpMult,
+    ),
     pinecone: Math.round(monsterCoin(level, 1) * r.kills * share),
     ink: r.ink,
     binding: r.binding,
