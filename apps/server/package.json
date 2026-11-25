@@ -3,18 +3,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/index.ts",
-    "start": "node src/index.ts",
+    "dev": "NODE_ENV=development node --env-file-if-exists=../../.env --watch src/index.ts",
+    "start": "node --env-file-if-exists=../../.env src/index.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6"
+    "@colyseus/sdk": "0.18.10",
+    "@types/node": "^26.6.6",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11"
   },
   "dependencies": {
     "@colyseus/core": "0.18.29",
     "@colyseus/schema": "5.0.51",
     "@colyseus/ws-transport": "0.18.5",
     "@guago/content": "workspace:*",
-    "@guago/shared": "workspace:*"
+    "@guago/shared": "workspace:*",
+    "@node-rs/argon2": "2.2.2",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1"
   }
 }
