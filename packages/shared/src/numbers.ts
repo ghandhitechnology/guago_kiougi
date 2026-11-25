@@ -49,8 +49,6 @@ export function bookExpToNext(level: number): number {
 export const BookGrade = { Textbook: 0, Reference: 1, Advanced: 2, Major: 3, Original: 4 } as const;
 export type BookGrade = (typeof BookGrade)[keyof typeof BookGrade];
 
-export const GRADE_NAMES: readonly string[] = ["교과서", "참고서", "심화서", "전공서", "원서"];
-
 /** Damage multiplier per grade, indexed by `BookGrade` (PLAN §8). */
 export const GRADE_MULTIPLIER: readonly number[] = [1, 1.5, 2.2, 3.3, 5];
 
