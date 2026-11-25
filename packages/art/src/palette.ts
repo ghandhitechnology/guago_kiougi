@@ -630,6 +630,44 @@ const GREECE = theme("greece", {
   "clay.pale": "gold.pale",
 });
 
+// Page 1 hunting fields ---------------------------------------------------------------------------
+
+/**
+ * Shade on Greek ground under a high sun: dust cools to a lilac grey instead of browning, dry
+ * grass drops into olive shadow, marble to its vein, the sea one step deeper. Painted from the
+ * raw colours, so it serves every Greek field whatever its own theme.
+ */
+const GREECE_SHADE = theme("greece-shade", {
+  "wood.pale": "stone.light",
+  "wood.light": "stone.vein",
+  "wood.mid": "stone.mid",
+  "wood.dark": "stone.dark",
+  "clay.pale": "stone.pale",
+  "clay.dust": "stone.vein",
+  "clay.light": "clay.mid",
+  "clay.mid": "clay.dark",
+  "grass.bright": "olive.light",
+  "grass.pale": "olive.light",
+  "grass.light": "olive.mid",
+  "grass.soft": "olive.dark",
+  "grass.mid": "olive.dark",
+  "grass.dark": "olive.deep",
+  "olive.light": "olive.mid",
+  "olive.mid": "olive.dark",
+  "olive.dark": "olive.deep",
+  "stone.bright": "stone.light",
+  "stone.pale": "stone.vein",
+  "stone.lamp": "stone.vein",
+  "stone.light": "stone.mid",
+  "stone.vein": "stone.mid",
+  "stone.mid": "stone.dark",
+  "stone.dark": "ink.mid",
+  "sea.pale": "sea.light",
+  "sea.light": "sea.mid",
+  "sea.mid": "sea.dark",
+  "sea.dark": "sea.deep",
+});
+
 /** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
 export const THEMES: readonly Theme[] = [
   theme("campus", {}),
@@ -646,6 +684,8 @@ export const THEMES: readonly Theme[] = [
   GOLDEN_SUN,
   GOLDEN_WARM,
   GOLDEN_SHADE,
+  // Page 1 hunting fields
+  GREECE_SHADE,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */
