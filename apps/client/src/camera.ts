@@ -1,8 +1,13 @@
 import { Facing, INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
 import type * as Phaser from "phaser";
 
-/** How far the view leans ahead of the player in the way they face, in pixels. */
-const LOOK_X = 14;
+/**
+ * How far the view leans ahead of the player in the way they face, in pixels. Sideways it is
+ * held small: the server only sends what stands within its interest reach of the player
+ * (apps/server/src/interest.ts), and the screen's edge plus this lean plus half a sprite must stay
+ * inside that reach, or things pop in on screen.
+ */
+const LOOK_X = 8;
 const LOOK_Y = 10;
 /** Time constant of the lean easing in, in ms. */
 const LEAN_MS = 320;

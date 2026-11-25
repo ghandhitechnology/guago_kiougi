@@ -1,7 +1,8 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { LAWN, mapSize } from "@guago/content";
+import { LAWN } from "@guago/content";
 import {
+  type Collidable,
   encodeInput,
   type Facing,
   INPUT_MESSAGE,
@@ -21,9 +22,9 @@ import {
   lookTexture,
 } from "./art.ts";
 import { CameraRig } from "./camera.ts";
+import { devMap, drawDevMap } from "./dev-map.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
-import { Footsteps } from "./footsteps.ts";
 import { drawGround } from "./ground.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
@@ -50,7 +51,6 @@ export class WorldScene extends Phaser.Scene {
   private look!: string;
   private camera!: CameraRig;
   private keys!: KeyboardMove;
-  private footsteps!: Footsteps;
   private readonly clock = new ServerClock();
   private readonly monsters = new Map<string, Remote<MonsterActor>>();
   private readonly players = new Map<string, Remote<PlayerActor>>();
@@ -59,6 +59,8 @@ export class WorldScene extends Phaser.Scene {
   private selfId: string | undefined;
   private live = false;
   private lastTime: number | undefined;
+  /** The walls the own player is predicted against: the lawn, or a built map in development. */
+  private walls: Collidable = LAWN;
   /** Who is playing, handed over by the front end; absent when the scene runs on its own. */
   private entry: WorldEntry | undefined;
   /** The player's own look, composited from the character; others wear the default for now. */
@@ -85,23 +87,28 @@ export class WorldScene extends Phaser.Scene {
       composeDoll(this, this.meta, look);
       this.selfLook = dollLook(look);
     }
-    drawGround(this, this.meta, LAWN);
-    drawProps(this, this.meta, LAWN);
-    this.footsteps = new Footsteps(this, this.meta, LAWN);
-
-    const { w, h } = mapSize(LAWN);
+    const dev = devMap();
+    if (dev) {
+      this.walls = dev;
+      void drawDevMap(this, this.meta, dev);
+    } else {
+      drawGround(this, this.meta, LAWN);
+      drawProps(this, this.meta, LAWN);
+    }
+    const { w, h } = this.walls.collision;
+    const spawn = dev ? (dev.spawns.main ?? LAWN.spawn) : LAWN.spawn;
     this.camera = new CameraRig(this.cameras.main, w * TILE_SIZE, h * TILE_SIZE);
-    this.camera.jumpTo(LAWN.spawn.x, LAWN.spawn.y - CHEST_PX);
+    this.camera.jumpTo(spawn.x, spawn.y - CHEST_PX);
     this.keys = new KeyboardMove();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.keys.dispose());
 
-    void stayConnected((room) => this.attach(room));
+    void stayConnected((room) => this.attach(room), undefined, dev ? { map: dev.id } : {});
   }
 
   private attach(room: Room<unknown, MapState>): () => void {
     this.selfId = room.sessionId;
     this.live = true;
-    this.self = new SelfMover(LAWN, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
+    this.self = new SelfMover(this.walls, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
     room.onStateChange((state) => this.onPatch(state));
     room.onDrop(() => {
       this.live = false;
@@ -160,7 +167,6 @@ export class WorldScene extends Phaser.Scene {
 
   private playerActor(look = this.look): PlayerActor {
     const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
-    actor.onStep = (x, y) => this.footsteps.step(x, y);
     return actor;
   }
 
