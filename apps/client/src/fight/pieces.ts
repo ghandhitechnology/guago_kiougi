@@ -133,6 +133,34 @@ export function show(
 }
 
 /**
+ * Puts a piece's frame pivot (the art's origin) on (x, y), on whole pixels, at the piece's
+ * scale. A ground piece hangs from its top edge instead, with the pivot still on (x, y): the
+ * view sorts ground pieces with the bodies by `y`, and the top edge keeps a pool or a crack
+ * under everyone standing on it.
+ */
+export function place(p: Piece, x: number, y: number): void {
+  const s = p.s;
+  const f = s.frame;
+  const px = f.customPivot ? f.pivotX : 0.5;
+  const py = f.customPivot ? f.pivotY : 0.5;
+  if (p.layer === Layer.Ground) {
+    if (s.originX !== px || s.originY !== 0) s.setOrigin(px, 0);
+    s.setPosition(Math.round(x), Math.round(y) - Math.round(py * f.realHeight * s.scaleY));
+  } else {
+    if (s.originX !== px || s.originY !== py) s.setOrigin(px, py);
+    s.setPosition(Math.round(x), Math.round(y));
+  }
+}
+
+/**
+ * A playing animation sets each new frame's origin to its pivot; a ground piece that was placed
+ * hangs from its top edge again (see `place`).
+ */
+export function hang(p: Piece): void {
+  if (p.layer === Layer.Ground && p.s.originY !== 0) p.s.setOrigin(p.s.originX, 0);
+}
+
+/**
  * Shows only the first `w` × `h` pixels of a piece's frame: the last, partial tile of a beam,
  * bolt or lane is cut short, never squeezed. A full frame drops the crop.
  */

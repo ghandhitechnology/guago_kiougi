@@ -10,17 +10,21 @@
  *
  * Drawing rules, from the effects artist: art is shown at ×1, or ×2 for an elite, never at a
  * fractional scale; anything drawn in aims or round is never turned, only beams and bolts are;
- * the last partial tile of a beam, bolt or lane is cropped, never squeezed; drawn art is never
- * tinted (only the old fallbacks are); a looping animation never ends on its own, so every
- * one-shot that plays one says how long it holds.
+ * the last partial tile of a beam or bolt is cropped, never squeezed, and a lane, 예보 or fault
+ * is laid from tiles drawn in sixteen aims with quarter tiles for the rest; every piece sits on
+ * its frame's pivot from the art; drawn art is never tinted (only the old fallbacks are); a
+ * looping animation never ends on its own, so every one-shot that plays one says how long it
+ * holds.
  */
+import type { ArtMetadata } from "@guago/art";
 import { BurstKind, FxKind, type WireFx } from "@guago/shared";
 import * as Phaser from "phaser";
+import type { TelegraphOptions } from "../render/index.ts";
 import type { Bodies, Body } from "./bodies.ts";
 import { type BookArt, COMBAT } from "./catalog.ts";
 import type { FightContext } from "./context.ts";
 import { Bit } from "./particles.ts";
-import { crop, Layer, type Piece, Pieces, show } from "./pieces.ts";
+import { crop, hang, Layer, type Piece, Pieces, place, show } from "./pieces.ts";
 
 /** Chains, follow-ups and marks stay drawn this long, ticks (the step's FLASH_TICKS). */
 const FLASH = 6;
@@ -30,14 +34,141 @@ const PREDICT_MS = 320;
 const MAX_PIECES = 32;
 /** Ms per tick of the fight step. */
 const TICK_MS = 50;
-/** A line within this of horizontal or vertical is laid from the drawn strips, radians. */
-const AXIS_SLACK = (12 * Math.PI) / 180;
-/** Gap between the hazard dots of a monster's charge lane, px. */
-const TELL_GAP = 7;
 /** Strength of the light a monster's tell throws: low enough that its stripes stay readable. */
 const TELL_LIGHT = 0.5;
-/** Biggest enemy circle drawn at ×1 from `tele-circle`; up to twice that it is drawn at ×2. */
-const CIRCLE_R1 = 33;
+/** Half the width a monster's charge lane is drawn for, px (the server's radius 6 + 2). */
+const LANE_HALF = 8;
+/**
+ * Pieces one laid line may use: a start cap, its tiles, the quarter tile and the end cap. The
+ * 예보 uses the first run of an effect's pieces and its fault the next.
+ */
+const LINE_SLOTS = 24;
+/** Length along the line of one tile of each line strip, px (the art's canvas is wider). */
+const LINE_TILE: Readonly<Record<string, number>> = {
+  "tele-line": 12,
+  "fx-forecast": 16,
+  "fx-fault": 16,
+  "evo-plate-tectonics": 16,
+};
+/** How far the two drawings of 실험 보고서's spray reach, px: `fan` and the wider `wide`. */
+const SPRAY_REACH = 60;
+const WIDE_REACH = 72;
+const NONE: readonly string[] = [];
+
+/**
+ * One animation of a line strip in its sixteen aims (index = aim): the frames of a whole tile,
+ * of an odd tile (the second variant where one is drawn), of the quarter tiles (`part[aim][q - 1]`)
+ * and of the strip's end cap.
+ */
+interface LineAnim {
+  readonly fps: number;
+  readonly loop: boolean;
+  readonly full: readonly (readonly string[])[];
+  readonly odd: readonly (readonly string[])[];
+  readonly part: readonly (readonly (readonly string[])[])[];
+  readonly cap: readonly (readonly string[])[];
+}
+
+/** A line strip and its `-end` cap, by animation name (`charge`, `warn`, `open`, `grind` …). */
+interface LineArt {
+  readonly atlas: string;
+  readonly capAtlas: string;
+  readonly tile: number;
+  readonly anims: ReadonlyMap<string, LineAnim>;
+  /** Seconds its first animation and the one after it take, when neither loops (open, close). */
+  readonly secs: number;
+}
+
+/**
+ * Art drawn once per radius, sorted by radius: the frames of the first animation (`fill`,
+ * `warn`) and of the second (`fire`, `break`) for each.
+ */
+interface Radii {
+  readonly r: readonly number[];
+  readonly first: readonly (readonly string[])[];
+  readonly second: readonly (readonly string[])[];
+  readonly secondFps: number;
+}
+
+function clamp01(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
+
+/** Index of the smallest radius at or above `r`, or the largest. */
+function above(radii: readonly number[], r: number): number {
+  for (let i = 0; i < radii.length; i++) if ((radii[i] as number) >= r - 1e-6) return i;
+  return Math.max(0, radii.length - 1);
+}
+
+/** Index of the radius nearest `r`. */
+function nearestRadius(radii: readonly number[], r: number): number {
+  let best = 0;
+  for (let i = 1; i < radii.length; i++)
+    if (Math.abs((radii[i] as number) - r) < Math.abs((radii[best] as number) - r)) best = i;
+  return best;
+}
+
+/** A line strip's animations in sixteen aims, from the art metadata, or null if not drawn. */
+function lineArt(meta: ArtMetadata, name: string, tile: number): LineArt | null {
+  const sp = meta.sprites[name];
+  const cap = meta.sprites[`${name}-end`];
+  if (!sp || !cap) return null;
+  const framesOf = (k: string): readonly string[] => sp.anims[k]?.frames ?? NONE;
+  const anims = new Map<string, LineAnim>();
+  for (const key of Object.keys(sp.anims)) {
+    const m = /^([a-z]+)0$/.exec(key);
+    const base = m?.[1];
+    const def = sp.anims[key];
+    if (!base || !def) continue;
+    const full: (readonly string[])[] = [];
+    const odd: (readonly string[])[] = [];
+    const part: (readonly string[])[][] = [];
+    const caps: (readonly string[])[] = [];
+    for (let d = 0; d < 16; d++) {
+      const f = framesOf(`${base}${d}`);
+      const v = framesOf(`${base}${d}v1`);
+      full.push(f);
+      odd.push(v.length > 0 ? v : f);
+      const quarters: (readonly string[])[] = [];
+      for (let q = 1; q <= 3; q++) {
+        const pf = framesOf(`${base}${d}q${q}`);
+        quarters.push(pf.length > 0 ? pf : f);
+      }
+      part.push(quarters);
+      caps.push(cap.anims[`${base}${d}`]?.frames ?? NONE);
+    }
+    anims.set(base, { fps: Math.max(1, def.fps), loop: def.loop, full, odd, part, cap: caps });
+  }
+  let secs = 0;
+  for (const set of anims.values()) {
+    if (set.loop) {
+      secs = 0;
+      break;
+    }
+    secs += (set.full[0]?.length ?? 0) / set.fps;
+  }
+  return { atlas: sp.atlas, capAtlas: cap.atlas, tile, anims, secs };
+}
+
+/** A sprite drawn per radius (`fill24`, `fire24` …), sorted by radius, or null if not drawn. */
+function radii(meta: ArtMetadata, name: string, first: string, second: string): Radii | null {
+  const sp = meta.sprites[name];
+  if (!sp) return null;
+  const found: number[] = [];
+  const pattern = new RegExp(`^${first}(\\d+)$`);
+  for (const key of Object.keys(sp.anims)) {
+    const m = pattern.exec(key);
+    if (m && sp.anims[`${second}${m[1]}`]) found.push(Number(m[1]));
+  }
+  if (found.length === 0) return null;
+  found.sort((x, y) => x - y);
+  return {
+    r: found,
+    first: found.map((r) => sp.anims[`${first}${r}`]?.frames ?? NONE),
+    second: found.map((r) => sp.anims[`${second}${r}`]?.frames ?? NONE),
+    secondFps: Math.max(1, sp.anims[`${second}${found[0]}`]?.fps ?? 15),
+  };
+}
 
 export class Active {
   fx = 0;
@@ -117,15 +248,6 @@ export function dir16(angle: number): number {
   return ((Math.round(angle / (Math.PI / 8)) % 16) + 16) % 16;
 }
 
-/**
- * The right-angle turn that lays a horizontal strip along a line within 12° of horizontal or
- * vertical (right-angle turns keep every pixel), or NaN for a line that needs dots.
- */
-export function axisTurn(angle: number): number {
-  const q = Math.round(angle / (Math.PI / 2));
-  return Math.abs(angle - q * (Math.PI / 2)) <= AXIS_SLACK ? q * (Math.PI / 2) : Number.NaN;
-}
-
 export interface EffectHooks {
   /** A body by entity id, for anchors and chains. */
   body(id: number): Body | undefined;
@@ -161,6 +283,17 @@ export class Effects {
   private readonly loops = new Map<string, boolean>();
   /** The size a per-radius frame is drawn for (`r32`, `out48`), or NaN. */
   private readonly sizes = new Map<string, number>();
+  /** The four line strips drawn in sixteen aims, by sprite. */
+  private readonly lines = new Map<string, LineArt>();
+  /** A monster's circle and the player's circular 예보, per radius. */
+  private readonly circle: Radii | null;
+  private readonly ring: Radii | null;
+  /** The light each tell throws, made once: a lane at ×1 and ×2, a circle per drawn radius. */
+  private readonly laneLight: TelegraphOptions;
+  private readonly laneLight2: TelegraphOptions;
+  private readonly circleLights: TelegraphOptions[];
+  /** Full animation keys (`atk-vent/erupt`) by sprite and name, so a frame builds no strings. */
+  private readonly keys = new Map<string, Map<string, string>>();
 
   constructor(ctx: FightContext, bodies: Bodies, hooks: EffectHooks) {
     this.ctx = ctx;
@@ -176,6 +309,36 @@ export class Effects {
         this.sizes.set(f, m ? Number(m[1]) : Number.NaN);
       }
     }
+    const meta = ctx.cat.meta;
+    for (const [name, tile] of Object.entries(LINE_TILE)) {
+      const line = lineArt(meta, name, tile);
+      if (line) this.lines.set(name, line);
+    }
+    this.circle = radii(meta, "tele-circle", "fill", "fire");
+    this.ring = radii(meta, "fx-forecast-ring", "warn", "break");
+    const laneTile = LINE_TILE["tele-line"] ?? 12;
+    this.laneLight = { color: this.tellColor, radius: laneTile / 2 + 6, intensity: TELL_LIGHT };
+    this.laneLight2 = { color: this.tellColor, radius: laneTile + 8, intensity: TELL_LIGHT };
+    this.circleLights = (this.circle?.r ?? []).map((r) => ({
+      color: this.tellColor,
+      radius: r + 8,
+      intensity: TELL_LIGHT,
+    }));
+  }
+
+  /** The full key of a sprite's animation, built the first time it is asked for. */
+  private key(sprite: string, anim: string): string {
+    let byName = this.keys.get(sprite);
+    if (!byName) {
+      byName = new Map();
+      this.keys.set(sprite, byName);
+    }
+    let k = byName.get(anim);
+    if (k === undefined) {
+      k = `${sprite}/${anim}`;
+      byName.set(anim, k);
+    }
+    return k;
   }
 
   get count(): number {
@@ -530,7 +693,7 @@ export class Effects {
   // Kinds ----------------------------------------------------------------------------------
 
   /**
-   * The animation a moving body plays, chosen once: one of sixteen turned drawings by heading,
+   * The animation a moving body plays, chosen once: one of sixteen drawn aims by heading,
    * a rock's specimen, the next of several loops (acid then base, Na, He, Fe), or for art made of
    * single frames (the 수열 digits) the next frame, marked with `#`.
    */
@@ -540,6 +703,9 @@ export class Effects {
     if (!sp) return "";
     const anims = sp.anims;
     if (anims.d0) return `${name}/d${dir16(a.angle)}`;
+    // 프린키피아's tome flies with its ribbon trailing opposite its heading; a bounce comes as a
+    // new record, so the aim changes at each one.
+    if (anims.fly0) return `${name}/fly${dir16(a.angle)}`;
     const keys = Object.keys(anims);
     if (name === "fx-rock" || name === "evo-rock-cycle")
       return `${name}/${keys[a.variant % Math.max(1, keys.length)]}`;
@@ -585,13 +751,13 @@ export class Effects {
       show(rim, COMBAT, cat.frame("fx-pickup"), null);
       rim.s.setBlendMode(Phaser.BlendModes.NORMAL);
       rim.s.setTint(this.tellColor).setAlpha(0.55 + 0.25 * Math.sin(this.ctx.now * 0.03));
-      rim.s.setPosition(Math.round(x), Math.round(y));
+      place(rim, x, y);
     }
     const p = this.piece(a, enemy ? 1 : 0);
     const s = show(p, cat.atlas(name), still ? a.key.slice(1) : cat.frame(name), anim, false);
     s.setVisible(true).setAlpha(a.alpha);
     if (art?.turns) s.setRotation(a.angle);
-    s.setPosition(Math.round(x), Math.round(y - (enemy ? 2 : 4)));
+    place(p, x, y - (enemy ? 2 : 4));
     if (fallback && art && !enemy) s.setTint(art.color);
     // Smear: two ghosts behind anything fast, untinted: the art already carries its colour.
     if (!enemy && a.speed >= 6) {
@@ -601,9 +767,10 @@ export class Effects {
         gs.setVisible(true)
           .setAlpha(a.alpha * (g === 1 ? 0.45 : 0.2))
           .setRotation(s.rotation);
-        gs.setPosition(
-          Math.round(x - Math.cos(a.angle) * a.speed * 0.25 * g),
-          Math.round(y - 4 - Math.sin(a.angle) * a.speed * 0.25 * g),
+        place(
+          gp,
+          x - Math.cos(a.angle) * a.speed * 0.25 * g,
+          y - 4 - Math.sin(a.angle) * a.speed * 0.25 * g,
         );
         if (fallback && art) gs.setTint(art.color);
       }
@@ -642,7 +809,7 @@ export class Effects {
       false,
     );
     s.setVisible(true).setAlpha(a.alpha);
-    s.setPosition(Math.round(x), Math.round(y - z - 3));
+    place(p, x, y - z - 3);
     if (body === "fx-book" && art) s.setTint(art.color);
     // Its shadow on the ground, small at the top of the arc and full as it lands.
     const sh = this.piece(a, 1);
@@ -657,10 +824,8 @@ export class Effects {
     } else {
       show(sh, "effects", cat.frame("shadow-s"), null);
     }
-    sh.s
-      .setVisible(true)
-      .setAlpha(0.8 * a.alpha)
-      .setPosition(Math.round(x), Math.round(y));
+    sh.s.setVisible(true).setAlpha(0.8 * a.alpha);
+    place(sh, x, y);
     return false;
   }
 
@@ -708,18 +873,14 @@ export class Effects {
         if (bob && extra) show(p, cat.atlas(extra), `${extra}/bob`, null);
         else show(p, cat.atlas(body), frame, null);
         p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2));
-        p.s.setPosition(
-          Math.round(px + Math.cos(ang) * r * f),
-          Math.round(py + Math.sin(ang) * r * f * 0.7),
-        );
+        place(p, px + Math.cos(ang) * r * f, py + Math.sin(ang) * r * f * 0.7);
       }
       this.hideFrom(a, beads + 2);
       if (extra && cat.meta.sprites[extra]?.anims.turn) {
         const dial = this.piece(a, MAX_PIECES - 1, Layer.Ground);
         const frame = this.frameAt(extra, "turn", (t * TICK_MS) / 1000);
         show(dial, cat.atlas(extra), frame, null);
-        const oy = cat.meta.sprites[extra]?.origin[1] ?? 0;
-        dial.s.setOrigin(0.5, 0).setPosition(Math.round(tmp.x), Math.round(tmp.y - oy));
+        place(dial, tmp.x, tmp.y);
         dial.s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2));
       }
       return false;
@@ -734,10 +895,17 @@ export class Effects {
       const p = this.piece(a, i);
       const s = show(p, cat.atlas(body), cat.frame(body), anim, false);
       s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2));
-      s.setPosition(Math.round(x), Math.round(y));
+      place(p, x, y);
       if (body === "fx-book" && art) s.setTint(art.color);
     }
     this.hideFrom(a, n);
+    // 집단 면역: a ring of links turns on the ground under each member the antibodies guard.
+    if (cat.meta.sprites[body]?.anims.ring) {
+      const ring = this.piece(a, MAX_PIECES - 1, Layer.Ground);
+      show(ring, cat.atlas(body), this.frameAt(body, "ring", (t * TICK_MS) / 1000), null);
+      place(ring, tmp.x, tmp.y);
+      ring.s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2));
+    }
     return false;
   }
 
@@ -763,7 +931,6 @@ export class Effects {
     const sp = cat.meta.sprites[seg];
     const step = sp?.size[0] ?? 16;
     const h = sp?.size[1] ?? 15;
-    const originY = (sp?.origin[1] ?? h / 2) / h;
     const n = Math.min(MAX_PIECES - 3, Math.ceil(reach / step));
     const cos = Math.cos(a.angle);
     const sin = Math.sin(a.angle);
@@ -780,9 +947,10 @@ export class Effects {
         false,
       );
       s.setVisible(true).setAlpha(a.alpha * fade);
-      s.setOrigin(0, originY).setRotation(a.angle);
+      s.setRotation(a.angle);
       crop(p, left, h);
-      s.setPosition(Math.round(ox + cos * i * step), Math.round(oy + sin * i * step));
+      // The segment's pivot is its start on the beam's axis.
+      place(p, ox + cos * i * step, oy + sin * i * step);
       lx = ox + cos * (i * step + left);
       ly = oy + sin * (i * step + left);
     }
@@ -792,17 +960,13 @@ export class Effects {
     const head = this.piece(a, 1);
     if (graph && cat.has("fx-graph-origin")) {
       show(origin, COMBAT, cat.frame("fx-graph-origin"), "fx-graph-origin/hold", false);
-      origin.s
-        .setVisible(true)
-        .setAlpha(a.alpha * fade)
-        .setPosition(Math.round(ox), Math.round(oy));
+      origin.s.setVisible(true).setAlpha(a.alpha * fade);
+      place(origin, ox, oy);
     } else origin.s.setVisible(false);
     if (graph && cat.has("fx-graph-head")) {
       show(head, COMBAT, cat.frame("fx-graph-head"), "fx-graph-head/pulse", false);
-      head.s
-        .setVisible(n > 0)
-        .setAlpha(a.alpha * fade)
-        .setPosition(Math.round(lx), Math.round(ly));
+      head.s.setVisible(n > 0).setAlpha(a.alpha * fade);
+      place(head, lx, ly);
     } else head.s.setVisible(false);
     return false;
   }
@@ -843,10 +1007,8 @@ export class Effects {
       if (used >= MAX_PIECES - 1) break;
       const np = this.piece(a, used++);
       show(np, cat.atlas(node), cat.frame(node), nodeAnim, false);
-      np.s
-        .setVisible(true)
-        .setAlpha(a.alpha * fade)
-        .setPosition(Math.round(ex), Math.round(ey));
+      np.s.setVisible(true).setAlpha(a.alpha * fade);
+      place(np, ex, ey);
     }
     this.hideFrom(a, used);
     return false;
@@ -916,19 +1078,15 @@ export class Effects {
           frames[flick % Math.max(1, frames.length)] ?? this.ctx.cat.frame(sprite),
           null,
         );
-        if (diagonal) {
-          // The 45° drawing runs from (3, 3) towards its far corner, 3 px of bolt either side.
-          p.s.setOrigin(3 / 26, 3 / 26);
-          crop(p, part + 6, part + 6);
-        } else {
-          p.s.setOrigin(0, 6 / 13);
-          crop(p, part, 13);
-        }
+        // Each drawing's pivot is where its run starts: the 45° one runs from (3, 3) towards its
+        // far corner, 3 px of bolt either side.
+        if (diagonal) crop(p, part + 6, part + 6);
+        else crop(p, part, 13);
         p.s
           .setRotation(rot)
           .setAlpha(a.alpha * fade)
           .setVisible(true);
-        p.s.setPosition(Math.round(x + ux * step * i), Math.round(y + uy * step * i));
+        place(p, x + ux * step * i, y + uy * step * i);
       }
       x += ux * len;
       y += uy * len;
@@ -977,13 +1135,19 @@ export class Effects {
     const anims = cat.meta.sprites[body]?.anims ?? {};
     const fade = a.alpha * Math.min(1, (life - t) / 2);
     if (anims.fan0) {
-      // A spray drawn in sixteen directions: the one nearest the aim, never turned.
+      // A spray drawn in sixteen directions: the one nearest the aim, never turned, played once.
+      // 실험 보고서's fuel has a wider drawing for its longer reach (level 50, 테르밋): the one
+      // whose reach is nearest the cone's.
+      if (!a.key) {
+        const wide =
+          anims.wide0 !== undefined &&
+          Math.abs(a.length - WIDE_REACH) < Math.abs(a.length - SPRAY_REACH);
+        a.key = `${body}/${wide ? "wide" : "fan"}${dir16(a.angle)}`;
+      }
       const p = this.piece(a, 0);
-      show(p, cat.atlas(body), cat.frame(body), `${body}/fan${dir16(a.angle)}`, fresh);
-      p.s
-        .setVisible(true)
-        .setAlpha(fade)
-        .setPosition(Math.round(x), Math.round(y - 8));
+      show(p, cat.atlas(body), cat.frame(body), a.key, fresh);
+      p.s.setVisible(true).setAlpha(fade);
+      place(p, x, y - 8);
       return false;
     }
     if (cat.meta.sprites[body]?.frames.includes(`${body}/bond`)) {
@@ -1011,10 +1175,7 @@ export class Effects {
         }
         const d = 6 + i * 7;
         p.s.setVisible(i < shown).setAlpha(fade);
-        p.s.setPosition(
-          Math.round(x + Math.cos(a.angle) * d),
-          Math.round(y - 8 + Math.sin(a.angle) * d),
-        );
+        place(p, x + Math.cos(a.angle) * d, y - 8 + Math.sin(a.angle) * d);
       }
       return false;
     }
@@ -1034,272 +1195,391 @@ export class Effects {
 
   /** A telegraph: the player's 예보 traced amber, or a monster's tell in hazard red. */
   private mark(a: Active, t: number): boolean {
-    const cat = this.ctx.cat;
     const delay = Math.max(1, a.a);
+    const period = Math.max(1, a.period);
     const repeats = a.kind === FxKind.Mark ? a.count : 0;
-    const total = delay + repeats * Math.max(1, a.period) + FLASH;
-    if (t >= total) return true;
     const line = a.kind === FxKind.Mark ? a.flags === 1 : a.length > 0;
     const enemy = a.kind === FxKind.Danger;
+    // A fault stays after its last strike until it has closed, plates for their trail's time.
+    const after = line && !enemy ? Math.max(FLASH, this.faultTicks(a)) : FLASH;
+    const total = delay + repeats * period + after;
+    if (t >= total) return true;
     // Strikes: the first at `delay`, then every `period`.
     const since = t - delay;
-    const strikes =
-      since < 0 ? 0 : 1 + Math.min(repeats, Math.floor(since / Math.max(1, a.period)));
+    const strikes = since < 0 ? 0 : 1 + Math.min(repeats, Math.floor(since / period));
     if (strikes > a.pulses) {
       a.pulses = strikes;
       if (enemy) this.hooks.fired(a);
       else this.impact(a, a.x, a.y, true);
     }
-    const sinceStrike = strikes === 0 ? -1 : since - (strikes - 1) * Math.max(1, a.period);
+    const sinceStrike = strikes === 0 ? -1 : since - (strikes - 1) * period;
     const charging = strikes === 0 || (strikes <= repeats && sinceStrike > FLASH);
-    const progress = strikes === 0 ? t / delay : 1;
+    // Wind-up progress towards the next strike: the first over the delay, a repeat over its
+    // period.
+    const progress = strikes === 0 ? t / delay : charging ? sinceStrike / period : 1;
     if (line) {
       if (enemy) this.lane(a, strikes, sinceStrike, progress);
-      else this.forecastLine(a, t, total, strikes, sinceStrike, charging, progress);
+      else this.forecastLine(a, t, strikes, sinceStrike, charging, progress);
       return false;
     }
-    if (!enemy && cat.has("fx-forecast-ring"))
-      return this.forecastCircle(a, t, strikes, sinceStrike, charging, progress, delay);
-    // A circle: the drawn ring at ×1, or ×2 for the wide slams, never between.
-    const art = "tele-circle";
-    const sp = cat.meta.sprites[art];
+    if (!enemy && this.ring)
+      return this.forecastCircle(a, sinceStrike, strikes, charging, progress);
+    // A circle drawn for the nearest radius at or above the content's, always at ×1: a blast's
+    // radius does not grow on an elite, and a stretched ring breaks its dashes.
+    const set = this.circle;
+    if (!set) return false;
+    const k = above(set.r, a.radius);
+    const firing = strikes > 0 && !charging;
+    const frames = (firing ? set.second[k] : set.first[k]) ?? NONE;
+    const idx = firing
+      ? Math.floor((sinceStrike * TICK_MS * set.secondFps) / 1000)
+      : Math.floor(progress * frames.length);
+    const frame = frames[Math.min(frames.length - 1, idx)];
     const p = this.piece(a, 0, enemy ? Layer.Tell : Layer.Ground);
-    const fill = sp?.anims.fill?.frames ?? [];
-    const fire = sp?.anims.fire?.frames ?? [];
-    const frame =
-      strikes > 0 && !charging
-        ? (fire[Math.floor(sinceStrike * 2) % Math.max(1, fire.length)] ?? "")
-        : (fill[Math.min(fill.length - 1, Math.floor(progress * fill.length))] ?? "");
     if (frame) show(p, COMBAT, frame, null);
-    const r = Math.max(8, a.radius);
-    const scale = r <= CIRCLE_R1 ? 1 : 2;
-    const oy = sp?.origin[1] ?? 13;
-    p.s.setOrigin(0.5, 0).setScale(scale, scale);
-    p.s.setPosition(Math.round(a.x), Math.round(a.y - oy * scale));
-    p.s
-      .setVisible(true)
-      .setAlpha(a.alpha * (strikes > 0 && !charging ? Math.min(1, (FLASH - sinceStrike) / 3) : 1));
-    if (enemy) this.pieces.tell(p, { color: this.tellColor, radius: r + 8, intensity: TELL_LIGHT });
+    place(p, a.x, a.y);
+    p.s.setVisible(true).setAlpha(a.alpha * (firing ? clamp01((FLASH - sinceStrike) / 3) : 1));
+    const light = this.circleLights[k];
+    if (enemy && light) this.pieces.tell(p, light);
     return false;
   }
 
   /**
-   * A monster's charge lane. Near horizontal or vertical it is the drawn hazard strip laid tile
-   * by tile and turned only by right angles, the last tile cropped; at any other angle it is a
-   * run of striped hazard dots that never turn. Either way it lights from the monster outward
-   * over the wind-up and flashes on the strike.
+   * Ticks a fault lies open after a strike: a crack opens and closes once, plates grind for the
+   * trail the evolution leaves.
    */
-  private lane(a: Active, strikes: number, sinceStrike: number, progress: number): void {
-    const cat = this.ctx.cat;
-    const cos = Math.cos(a.angle);
-    const sin = Math.sin(a.angle);
-    const fade = strikes > 0 ? Math.max(0, Math.min(1, (FLASH - sinceStrike) / 3)) : 1;
-    const turn = axisTurn(a.angle);
-    const sp = cat.meta.sprites["tele-line"];
-    if (sp && !Number.isNaN(turn)) {
-      const segLen = sp.size[0];
-      const h = sp.size[1];
-      const n = Math.min(MAX_PIECES, Math.max(1, Math.ceil(a.length / segLen)));
-      const charge = sp.anims.charge?.frames ?? [];
-      const fire = sp.anims.fire?.frames ?? [];
-      for (let i = 0; i < n; i++) {
-        const p = this.piece(a, i, Layer.Tell);
-        const frame =
-          strikes > 0
-            ? (fire[Math.floor(sinceStrike * 2) % Math.max(1, fire.length)] ?? "")
-            : (charge[Math.floor(this.ctx.now / 100 + i) % Math.max(1, charge.length)] ?? "");
-        if (frame) show(p, COMBAT, frame, null);
-        p.s.setOrigin(0, sp.origin[1] / h).setRotation(turn);
-        crop(p, a.length - i * segLen, h);
-        p.s.setAlpha(a.alpha * fade);
-        p.s.setPosition(Math.round(a.x + cos * i * segLen), Math.round(a.y + sin * i * segLen));
-        p.s.setVisible(true);
-        this.pieces.tell(p, {
-          color: this.tellColor,
-          radius: segLen / 2 + 6,
-          intensity: TELL_LIGHT,
-        });
-      }
-      this.hideFrom(a, n);
-      return;
-    }
-    if (!cat.has("tell-dot")) return;
-    const n = Math.min(MAX_PIECES, Math.max(2, Math.floor(a.length / TELL_GAP)));
-    const lit = strikes > 0 ? n : Math.floor(progress * n);
-    const blink = Math.floor(this.ctx.now / 90) % 2 === 0;
-    for (let i = 0; i < n; i++) {
-      const p = this.piece(a, i, Layer.Tell);
-      const frame =
-        strikes > 0
-          ? blink
-            ? "tell-dot/fire"
-            : "tell-dot/lit"
-          : i < lit
-            ? "tell-dot/lit"
-            : "tell-dot/dim";
-      show(p, COMBAT, frame, null);
-      p.s.setOrigin(0.5, 0);
-      p.s.setAlpha(a.alpha * fade);
-      const d = (i + 1) * TELL_GAP;
-      p.s.setPosition(Math.round(a.x + cos * d), Math.round(a.y + sin * d - 2));
-      p.s.setVisible(true);
-      // Every other dot throws light, so the run lights up as a band, not beads.
-      if (i % 2 === 0) this.pieces.tell(p, { color: this.tellColor, radius: 9, intensity: 0.45 });
-    }
-    this.hideFrom(a, n);
+  private faultTicks(a: Active): number {
+    const line = this.faultArt(a);
+    if (!line) return 0;
+    if (line.anims.has("grind")) return Math.ceil(((a.art?.trail ?? 0) * 1000) / TICK_MS);
+    return Math.ceil((line.secs * 1000) / TICK_MS);
+  }
+
+  /** The fault a line 예보 opens: the book's own (지구는 둥글다's crack, 판 구조론's plates). */
+  private faultArt(a: Active): LineArt | null {
+    const body = a.art?.body;
+    return (body ? this.lines.get(body) : undefined) ?? this.lines.get("fx-fault") ?? null;
   }
 
   /**
-   * The player's line 예보. Near horizontal or vertical: the amber seismograph strip growing
-   * over the delay, then the book's fault (지구는 둥글다's crack, 판 구조론's grinding plates)
-   * opening along it, both turned only by right angles with their last tile cropped. At any other
-   * angle: amber dots traced over the delay that flash on the strike while stones jump out.
+   * A monster's charge lane, laid from the monster along the true line of the charge in the
+   * aim drawn nearest it. Its tiles light from the monster outward over the wind-up, the stop bar
+   * last, and flash together on the strike. An elite's lane is drawn ×2.
+   */
+  private lane(a: Active, strikes: number, sinceStrike: number, progress: number): void {
+    const line = this.lines.get("tele-line");
+    const firing = strikes > 0;
+    const set = line?.anims.get(firing ? "fire" : "charge");
+    if (!line || !set) return;
+    // The lane is drawn for the server's half width of 8; an elite's is twice that.
+    const scale = Math.abs(a.width - 2 * LANE_HALF) < Math.abs(a.width - LANE_HALF) ? 2 : 1;
+    const idx = firing
+      ? Math.floor((sinceStrike * TICK_MS * set.fps) / 1000)
+      : Math.floor((this.ctx.now * set.fps) / 1000);
+    const fade = firing ? clamp01((FLASH - sinceStrike) / 3) : 1;
+    this.layLine(
+      a,
+      0,
+      line,
+      set,
+      a.x,
+      a.y,
+      a.length,
+      scale,
+      idx,
+      Layer.Tell,
+      false,
+      firing ? 1 : progress,
+      a.alpha * fade,
+      scale === 2 ? this.laneLight2 : this.laneLight,
+    );
+  }
+
+  /**
+   * The player's line 예보: the survey line and its trace growing over the delay, all white on
+   * the strike; then the book's fault along it, a crack opening and closing or plates grinding
+   * for as long as their trail lies.
    */
   private forecastLine(
     a: Active,
     t: number,
-    total: number,
     strikes: number,
     sinceStrike: number,
     charging: boolean,
     progress: number,
   ): void {
     const cat = this.ctx.cat;
-    const cos = Math.cos(a.angle);
-    const sin = Math.sin(a.angle);
     const struck = strikes > 0 && !charging;
-    const turn = axisTurn(a.angle);
-    const strip = cat.meta.sprites["fx-forecast"];
-    if (strip && !Number.isNaN(turn)) {
-      const segLen = strip.size[0];
-      const h = strip.size[1];
-      const n = Math.min(MAX_PIECES / 2, Math.max(1, Math.ceil(a.length / segLen)));
-      const warn = strip.anims.warn?.frames ?? [];
-      const brk = strip.anims.break?.frames ?? [];
-      for (let i = 0; i < n; i++) {
-        const p = this.piece(a, i, Layer.Ground);
-        const frame = struck
-          ? (brk[Math.floor(sinceStrike) % Math.max(1, brk.length)] ?? "")
-          : (warn[Math.min(warn.length - 1, Math.floor(progress * warn.length))] ?? "");
-        if (frame) show(p, COMBAT, frame, null);
-        p.s.setOrigin(0, strip.origin[1] / h).setRotation(turn);
-        crop(p, a.length - i * segLen, h);
-        p.s.setAlpha(a.alpha * (struck ? Math.min(1, (FLASH - sinceStrike) / 3) : 1));
-        p.s.setPosition(Math.round(a.x + cos * i * segLen), Math.round(a.y + sin * i * segLen));
-        p.s.setVisible(true);
-      }
-      this.hideFrom(a, n);
-      // The fault opens along the line when the 예보 lands: a crack for the strike's flash, or
-      // plates that keep grinding for as long as the mark lives.
-      const fault = a.art?.body && cat.has(a.art.body) ? a.art.body : "fx-fault";
-      const fs = cat.meta.sprites[fault];
-      if (fs && strikes > 0) {
-        const open = fs.anims.open;
-        const grind = open ? null : (Object.keys(fs.anims)[0] ?? null);
-        const showing = open ? sinceStrike < FLASH : true;
-        const fl = fs.size[0];
-        const fh = fs.size[1];
-        const fn = Math.min(MAX_PIECES - n, Math.ceil(a.length / fl));
-        for (let i = 0; i < fn; i++) {
-          const p = this.piece(a, n + i, Layer.Ground);
-          if (!showing) {
-            p.s.setVisible(false);
-            continue;
-          }
-          const frame = open
-            ? (open.frames[Math.min(open.frames.length - 1, Math.floor(sinceStrike * 1.5))] ?? "")
-            : this.frameAt(fault, grind ?? "", ((t - a.a) * TICK_MS) / 1000);
-          if (frame) show(p, cat.atlas(fault), frame, null);
-          p.s.setOrigin(0, fs.origin[1] / fh).setRotation(turn);
-          crop(p, a.length - i * fl, fh);
-          p.s.setPosition(Math.round(a.x + cos * i * fl), Math.round(a.y + sin * i * fl));
-          const out = open ? (FLASH - sinceStrike) / 2 : (total - t) / 3;
-          p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, out));
-        }
-      }
+    const strip = this.lines.get("fx-forecast");
+    const set = strip?.anims.get(struck ? "break" : "warn");
+    const fade = struck ? clamp01((FLASH - sinceStrike) / 3) : 1;
+    if (strip && set && fade > 0) {
+      const idx = struck
+        ? Math.floor((sinceStrike * TICK_MS * set.fps) / 1000)
+        : Math.floor(progress * (set.full[0]?.length ?? 1));
+      this.layLine(
+        a,
+        0,
+        strip,
+        set,
+        a.x,
+        a.y,
+        a.length,
+        1,
+        idx,
+        Layer.Ground,
+        true,
+        1,
+        a.alpha * fade,
+        null,
+      );
+    } else this.hideRange(a, 0, LINE_SLOTS);
+    const fault = this.faultArt(a);
+    if (!fault || strikes === 0) {
+      this.hideRange(a, LINE_SLOTS, 2 * LINE_SLOTS);
       return;
     }
-    if (!cat.has("forecast-dot")) return;
-    const gap = 6;
-    const n = Math.min(MAX_PIECES - 8, Math.max(2, Math.floor(a.length / gap)));
-    const lit = strikes > 0 ? n : Math.floor(progress * n);
-    const fade = struck ? Math.max(0, Math.min(1, (FLASH - sinceStrike) / 3)) : 1;
-    for (let i = 0; i < n; i++) {
-      const p = this.piece(a, i, Layer.Ground);
-      const frame = struck
-        ? "forecast-dot/fire"
-        : i < lit
-          ? "forecast-dot/lit"
-          : "forecast-dot/dim";
-      show(p, COMBAT, frame, null);
-      p.s.setOrigin(0.5, 0).setAlpha(a.alpha * fade * (i < lit || struck ? 1 : 0.9));
-      const d = (i + 0.5) * gap;
-      p.s.setPosition(Math.round(a.x + cos * d), Math.round(a.y + sin * d - 2)).setVisible(true);
+    const grind = fault.anims.get("grind");
+    let faultSet: LineAnim | undefined = grind;
+    let idx = 0;
+    if (grind) idx = Math.floor(((t - a.a) * TICK_MS * grind.fps) / 1000);
+    else {
+      // The crack of the latest strike: open once, then close once, then gone.
+      const open = fault.anims.get("open");
+      const close = fault.anims.get("close");
+      const secs = (sinceStrike * TICK_MS) / 1000;
+      const openSecs = open ? (open.full[0]?.length ?? 0) / Math.max(1, open.fps) : 0;
+      if (secs < openSecs) {
+        faultSet = open;
+        idx = Math.floor(secs * (open?.fps ?? 1));
+      } else if (secs < fault.secs) {
+        faultSet = close;
+        idx = Math.floor((secs - openSecs) * (close?.fps ?? 1));
+      }
     }
-    this.hideFrom(a, n);
+    if (faultSet)
+      this.layLine(
+        a,
+        LINE_SLOTS,
+        fault,
+        faultSet,
+        a.x,
+        a.y,
+        a.length,
+        1,
+        idx,
+        Layer.Ground,
+        true,
+        1,
+        a.alpha,
+        null,
+      );
+    else this.hideRange(a, LINE_SLOTS, 2 * LINE_SLOTS);
+    // Stones jump out along the line as it breaks.
     if (struck && sinceStrike < 0.5 && a.pulses > a.variant) {
       a.variant = a.pulses;
+      const cos = Math.cos(a.angle);
+      const sin = Math.sin(a.angle);
       for (let k = 0; k < 6; k++) {
         const f = (k + 0.5) / 6;
-        const x = a.x + cos * a.length * f;
-        const y = a.y + sin * a.length * f;
-        this.ctx.particles.burst(Bit.Debris, x, y, 2, cat.color("clay.mid"), 55, 2);
-        if (k % 2 === 0) this.oneShot("fx-rock-hit", "fx-rock-hit/metamorphic", x, y - 4, a.alpha);
+        this.ctx.particles.burst(
+          Bit.Debris,
+          a.x + cos * a.length * f,
+          a.y + sin * a.length * f,
+          2,
+          cat.color("clay.mid"),
+          55,
+          2,
+        );
       }
     }
   }
 
   /**
-   * The player's own circular 예보: the amber ring traced over the delay, then whatever the book
-   * sends down: a meteor falling the last stretch of the delay, a vent rumbling up and erupting,
-   * the crater or lava left where it lands. All at ×1: the ring is drawn for radius 32, and a
-   * radius between drawn sizes takes the nearest drawing, never a stretched one.
+   * Lays a line strip from (x0, y0) along the effect's true angle for `len` px, in the aim drawn
+   * nearest that angle (the effects artist's R2.0): whole tiles each at its own rounded spot on
+   * the true line, odd tiles in the second variant where one is drawn, a quarter tile for the
+   * remainder, the end cap, and on the 예보, the fault and the plates a start cap turned back.
+   * Nothing is turned, stretched or cropped; every piece shows the same frame index `idx`, so the
+   * line marches as one. `reveal` below 1 shows the pieces in order up to that share of them.
+   */
+  private layLine(
+    a: Active,
+    from: number,
+    line: LineArt,
+    set: LineAnim,
+    x0: number,
+    y0: number,
+    len: number,
+    scale: number,
+    idx: number,
+    layer: Layer,
+    startCap: boolean,
+    reveal: number,
+    alpha: number,
+    light: TelegraphOptions | null,
+  ): void {
+    const aim = dir16(a.angle);
+    const tile = line.tile * scale;
+    let n = Math.floor(len / tile);
+    let q = Math.round((4 * (len - n * tile)) / tile);
+    if (q === 4) {
+      n++;
+      q = 0;
+    }
+    n = Math.min(n, LINE_SLOTS - 3);
+    const total = (startCap ? 1 : 0) + n + (q > 0 ? 1 : 0) + 1;
+    const shown = reveal >= 1 ? total : Math.min(total, 1 + Math.floor(reveal * total));
+    const ux = Math.cos(a.angle);
+    const uy = Math.sin(a.angle);
+    let k = 0;
+    if (startCap) {
+      const frames = set.cap[(aim + 8) % 16] ?? NONE;
+      this.lineBit(a, from + k, layer, line.capAtlas, frames, idx, set.loop, x0, y0, scale);
+      this.lineShow(a, from + k, k++ < shown, alpha, light);
+    }
+    for (let i = 0; i < n; i++) {
+      const frames = ((i & 1) === 1 ? set.odd[aim] : set.full[aim]) ?? NONE;
+      const d = i * tile;
+      this.lineBit(
+        a,
+        from + k,
+        layer,
+        line.atlas,
+        frames,
+        idx,
+        set.loop,
+        x0 + ux * d,
+        y0 + uy * d,
+        scale,
+      );
+      this.lineShow(a, from + k, k++ < shown, alpha, light);
+    }
+    if (q > 0) {
+      const frames = set.part[aim]?.[q - 1] ?? NONE;
+      const d = n * tile;
+      this.lineBit(
+        a,
+        from + k,
+        layer,
+        line.atlas,
+        frames,
+        idx,
+        set.loop,
+        x0 + ux * d,
+        y0 + uy * d,
+        scale,
+      );
+      this.lineShow(a, from + k, k++ < shown, alpha, light);
+    }
+    const d = (n + q / 4) * tile;
+    const cap = set.cap[aim] ?? NONE;
+    this.lineBit(
+      a,
+      from + k,
+      layer,
+      line.capAtlas,
+      cap,
+      idx,
+      set.loop,
+      x0 + ux * d,
+      y0 + uy * d,
+      scale,
+    );
+    this.lineShow(a, from + k, k++ < shown, alpha, light);
+    this.hideRange(a, from + k, from + LINE_SLOTS);
+  }
+
+  /** One piece of a laid line on its frame at its spot. */
+  private lineBit(
+    a: Active,
+    i: number,
+    layer: Layer,
+    atlas: string,
+    frames: readonly string[],
+    idx: number,
+    loop: boolean,
+    x: number,
+    y: number,
+    scale: number,
+  ): void {
+    const p = this.piece(a, i, layer);
+    const n = frames.length;
+    const frame = n === 0 ? undefined : frames[loop ? idx % n : Math.min(n - 1, idx)];
+    if (!frame) return;
+    show(p, atlas, frame, null);
+    if (p.s.scaleX !== scale) p.s.setScale(scale);
+    place(p, x, y);
+  }
+
+  private lineShow(
+    a: Active,
+    i: number,
+    visible: boolean,
+    alpha: number,
+    light: TelegraphOptions | null,
+  ): void {
+    const p = a.pieces[i];
+    if (!p) return;
+    p.s.setVisible(visible).setAlpha(alpha);
+    if (visible && light) this.pieces.tell(p, light);
+  }
+
+  /** Hides the pieces in [from, to). */
+  private hideRange(a: Active, from: number, to: number): void {
+    const end = Math.min(to, a.pieces.length);
+    for (let i = from; i < end; i++) a.pieces[i]?.s.setVisible(false);
+  }
+
+  /**
+   * The player's own circular 예보: the amber ring drawn for the radius nearest the content's,
+   * traced over the delay, then whatever the book sends down: a meteor falling the last stretch
+   * of the delay, a vent rumbling up and erupting, the crater or lava left where it lands.
    */
   private forecastCircle(
     a: Active,
-    t: number,
-    strikes: number,
     sinceStrike: number,
+    strikes: number,
     charging: boolean,
     progress: number,
-    delay: number,
   ): boolean {
     const cat = this.ctx.cat;
     const art = a.art;
+    const ring = this.ring as Radii;
     const struck = strikes > 0 && !charging;
-    const p = this.piece(a, 0, Layer.Ground);
-    const warn = cat.frames("fx-forecast-ring", "warn");
-    const brk = cat.frames("fx-forecast-ring", "break");
+    const k = nearestRadius(ring.r, a.radius);
+    const frames = (struck ? ring.second[k] : ring.first[k]) ?? NONE;
+    const n = frames.length;
     const frame = struck
-      ? (brk[Math.floor(sinceStrike * 2) % Math.max(1, brk.length)] ?? "")
-      : (warn[Math.min(warn.length - 1, Math.floor(progress * warn.length))] ?? "");
+      ? frames[Math.floor((sinceStrike * TICK_MS * ring.secondFps) / 1000) % Math.max(1, n)]
+      : frames[Math.min(n - 1, Math.floor(progress * n))];
+    const p = this.piece(a, 0, Layer.Ground);
     if (frame) show(p, COMBAT, frame, null);
-    const oy = cat.meta.sprites["fx-forecast-ring"]?.origin[1] ?? 20;
-    p.s.setOrigin(0.5, 0).setPosition(Math.round(a.x), Math.round(a.y - oy));
-    p.s.setVisible(true).setAlpha(a.alpha * (struck ? Math.min(1, (FLASH - sinceStrike) / 3) : 1));
+    place(p, a.x, a.y);
+    p.s.setVisible(true).setAlpha(a.alpha * (struck ? clamp01((FLASH - sinceStrike) / 3) : 1));
     const body = art?.body && cat.has(art.body) ? art.body : null;
     const sp = body ? cat.meta.sprites[body] : undefined;
-    const left = strikes === 0 ? delay - t : -1;
+    const left = strikes === 0 ? Math.max(1, a.a) * (1 - progress) : -1;
     if (body && sp?.anims.fall) {
       // The meteor comes down its own diagonal over the last twelve ticks, never turned.
       const q = this.piece(a, 1);
       const fallT = 12;
       if (left > 0 && left < fallT) {
         const f = 1 - left / fallT;
-        show(q, cat.atlas(body), cat.frame(body), `${body}/fall`, false);
+        show(q, cat.atlas(body), cat.frame(body), this.key(body, "fall"), false);
+        place(q, a.x + 40 * (1 - f), a.y - 4 - 100 * (1 - f));
         q.s.setVisible(true).setAlpha(a.alpha);
-        q.s.setPosition(Math.round(a.x + 40 * (1 - f)), Math.round(a.y - 4 - 100 * (1 - f)));
       } else q.s.setVisible(false);
     } else if (body && sp?.anims.erupt) {
       // The vent: smoking, rumbling the last half of the delay, erupting on the strike.
       const q = this.piece(a, 1, Layer.Ground);
-      const anim = struck ? "erupt" : progress > 0.5 && sp.anims.rumble ? "rumble" : "smoke";
-      show(q, cat.atlas(body), cat.frame(body), `${body}/${anim}`, false);
-      q.s
-        .setOrigin(0.5, 1)
-        .setVisible(true)
-        .setAlpha(a.alpha)
-        .setPosition(Math.round(a.x), Math.round(a.y + 2));
+      const anim = this.key(
+        body,
+        struck ? "erupt" : progress > 0.5 && sp.anims.rumble ? "rumble" : "smoke",
+      );
+      show(q, cat.atlas(body), cat.frame(body), anim, false);
+      place(q, a.x, a.y);
+      q.s.setVisible(true).setAlpha(a.alpha);
     }
     if (struck && a.landed === false) {
       a.landed = true;
@@ -1308,7 +1588,7 @@ export class Effects {
       if (hit && anims?.land) {
         // Land once, then what lies after it: a crater lingering, lava burning out.
         const after = anims.linger ? `${hit}/linger` : anims.burn ? `${hit}/burn` : null;
-        this.oneShot(hit, `${hit}/land`, a.x, a.y, a.alpha, Layer.Ground, 1, true, 0, after);
+        this.oneShot(hit, `${hit}/land`, a.x, a.y, a.alpha, Layer.Ground, 1, 0, after);
       }
     }
     if (!struck && charging && strikes > 0) a.landed = false;
@@ -1348,7 +1628,7 @@ export class Effects {
       const frame = closing ? fadeFrame : this.nearest(frames, r);
       const p = this.piece(a, 0, Layer.Ground);
       show(p, cat.atlas(art.body), frame, null);
-      p.s.setOrigin(0.5, 0).setPosition(Math.round(cx), Math.round(cy - ring.origin[1]));
+      place(p, cx, cy);
       p.s.setVisible(true).setAlpha(a.alpha);
       this.hideFrom(a, 1);
       return false;
@@ -1362,10 +1642,7 @@ export class Effects {
       show(p, COMBAT, motes[(i + Math.floor(t)) % 4] ?? "", null);
       p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, (life - t) / 3));
       if (art) p.s.setTint(art.color);
-      p.s.setPosition(
-        Math.round(cx + Math.cos(ang) * r),
-        Math.round(cy - 4 + Math.sin(ang) * r * 0.6),
-      );
+      place(p, cx + Math.cos(ang) * r, cy - 4 + Math.sin(ang) * r * 0.6);
     }
     this.hideFrom(a, n);
     return false;
@@ -1399,8 +1676,7 @@ export class Effects {
       }
       const p = this.piece(a, 0, Layer.Ground);
       show(p, cat.atlas(body), this.frameAt(body, "flow", secs), null);
-      const oy = cat.meta.sprites[body]?.origin[1] ?? 0;
-      p.s.setOrigin(0.5, 0).setPosition(Math.round(cx), Math.round(cy - oy));
+      place(p, cx, cy);
       p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, leftSecs / 0.3));
       return false;
     }
@@ -1418,9 +1694,9 @@ export class Effects {
       const loop = keys.find((k) => anims[k]?.loop);
       if (loop) {
         // A cloud: it follows the student about 30 px over their feet, drifting.
-        show(p, cat.atlas(over), cat.frame(over), `${over}/${loop}`, false);
+        show(p, cat.atlas(over), cat.frame(over), this.key(over, loop), false);
         p.s.setVisible(true).setAlpha(a.alpha * fadeIn * fadeOut);
-        p.s.setPosition(Math.round(cx), Math.round(cy - 30));
+        place(p, cx, cy - 30);
       } else {
         // A drop: it lands on the mark over its own animation, then is gone. An apple falls
         // the last 24 px as it plays; a seed plants where it lies.
@@ -1431,7 +1707,7 @@ export class Effects {
           show(p, cat.atlas(over), this.frameAt(over, first, secs), null);
           const fall = first === "drop" ? 24 * (1 - secs / length) : 0;
           p.s.setVisible(true).setAlpha(a.alpha);
-          p.s.setPosition(Math.round(cx), Math.round(cy - fall - 2));
+          place(p, cx, cy - fall - 2);
         } else p.s.setVisible(false);
       }
     }
@@ -1454,10 +1730,10 @@ export class Effects {
         at = tail - leftSecs;
       }
       const frame = this.frameAt(name, anim, at);
-      if (frame) show(p, COMBAT, frame, null);
-      const oy = sp?.origin[1] ?? (sp?.size[1] ?? 20) / 2;
-      p.s.setOrigin(0.5, 0);
-      p.s.setPosition(Math.round(cx), Math.round(cy - oy));
+      if (frame) show(p, cat.atlas(name), frame, null);
+      // The art's pivot on the centre: the tide and the rain are drawn on canvases bigger than
+      // their rings.
+      place(p, cx, cy);
       p.s.setVisible(true).setAlpha(a.alpha);
       this.hideFrom(a, over ? 2 : 1);
       return false;
@@ -1472,10 +1748,7 @@ export class Effects {
       show(p, COMBAT, motes[(i + Math.floor(t / 2)) % 4] ?? "", null);
       p.s.setVisible(true).setAlpha(a.alpha * 0.8 * fadeIn * fadeOut);
       if (art) p.s.setTint(art.color);
-      p.s.setPosition(
-        Math.round(cx + Math.cos(ang) * r),
-        Math.round(cy + Math.sin(ang) * r * 0.55),
-      );
+      place(p, cx + Math.cos(ang) * r, cy + Math.sin(ang) * r * 0.55);
     }
     this.hideFrom(a, from + n);
     return false;
@@ -1497,20 +1770,17 @@ export class Effects {
       const p1 = this.piece(a, 1);
       show(p0, cat.atlas(body), this.frameAt(body, "leave", secs), null);
       show(p1, cat.atlas(body), this.frameAt(body, "arrive", secs), null);
-      p0.s
-        .setVisible(true)
-        .setAlpha(a.alpha * fade)
-        .setPosition(Math.round(a.x), Math.round(a.y - 8));
-      p1.s
-        .setVisible(true)
-        .setAlpha(a.alpha * fade)
-        .setPosition(Math.round(a.tx), Math.round(a.ty - 8));
+      p0.s.setVisible(true).setAlpha(a.alpha * fade);
+      p1.s.setVisible(true).setAlpha(a.alpha * fade);
+      place(p0, a.x, a.y - 8);
+      place(p1, a.tx, a.ty - 8);
       return false;
     }
     if (body && anims?.d0) {
       // The bow wave, the drawing for its heading, rides in front of the student along the
       // dash, two fainter copies behind it.
-      const key = `${body}/d${dir16(ang)}`;
+      if (!a.key) a.key = `${body}/d${dir16(ang)}`;
+      const key = a.key;
       const f = a.duration > 0 ? Math.min(1, t / a.duration) : 1;
       let hx = a.x + (a.tx - a.x) * f;
       let hy = a.y + (a.ty - a.y) * f;
@@ -1524,10 +1794,7 @@ export class Effects {
         const p = this.piece(a, i);
         show(p, cat.atlas(body), cat.frame(body), key, false);
         p.s.setVisible(true).setAlpha(a.alpha * fade * (i === 0 ? 1 : i === 1 ? 0.45 : 0.2));
-        p.s.setPosition(
-          Math.round(hx - Math.cos(ang) * 10 * i),
-          Math.round(hy - Math.sin(ang) * 10 * i),
-        );
+        place(p, hx - Math.cos(ang) * 10 * i, hy - Math.sin(ang) * 10 * i);
       }
       return false;
     }
@@ -1541,7 +1808,7 @@ export class Effects {
         .setAlpha(a.alpha * fade * (0.4 + 0.6 * f))
         .setRotation(ang)
         .setFlipX(false);
-      p.s.setPosition(Math.round(a.x + (a.tx - a.x) * f), Math.round(a.y - 6 + (a.ty - a.y) * f));
+      place(p, a.x + (a.tx - a.x) * f, a.y - 6 + (a.ty - a.y) * f);
     }
     return false;
   }
@@ -1575,7 +1842,7 @@ export class Effects {
     // Lobs land on the ground; everything else lands where it was.
     if (a.kind === FxKind.Lob) {
       if (art.area && cat.has(art.area) && art.area.endsWith("crater")) {
-        this.oneShot(art.area, `${art.area}/land`, x, y, a.alpha, Layer.Ground, 1, true);
+        this.oneShot(art.area, `${art.area}/land`, x, y, a.alpha, Layer.Ground);
       }
       this.cue(name, x, y - 2, a.alpha, anim);
     } else if (a.kind !== FxKind.Mark) {
@@ -1605,12 +1872,12 @@ export class Effects {
       const last = keys[keys.length - 1];
       const out =
         last && !sp.anims[last]?.loop && key !== `${sprite}/${last}` ? `${sprite}/${last}` : null;
-      this.oneShot(sprite, key, x, y, alpha, layer, 1, false, 600, out);
+      this.oneShot(sprite, key, x, y, alpha, layer, 1, 600, out);
       return;
     }
     const second = keys[1];
     const settle = !anim && second && sp.anims[second]?.loop ? `${sprite}/${second}` : null;
-    this.oneShot(sprite, key, x, y, alpha, layer, 1, false, settle ? 900 : 0, settle);
+    this.oneShot(sprite, key, x, y, alpha, layer, 1, settle ? 900 : 0, settle);
   }
 
   /**
@@ -1628,7 +1895,6 @@ export class Effects {
     alpha = 1,
     layer: Layer = Layer.Glow,
     scale = 1,
-    ground = false,
     holdMs = 0,
     then: string | null = null,
     stopAt = "",
@@ -1645,14 +1911,6 @@ export class Effects {
     const p = this.pieces.take(layer);
     const s = show(p, cat.atlas(sprite), cat.frame(sprite), null);
     s.setAlpha(alpha).setScale(scale);
-    if (ground || layer === Layer.Ground) {
-      const oy = sp.origin[1];
-      s.setOrigin(0.5, 0).setPosition(Math.round(x), Math.round(y - oy * scale));
-    } else {
-      // The art's own origin: a strike or a heal stands on its foot, a spark sits on its centre.
-      s.setOrigin(sp.origin[0] / sp.size[0], sp.origin[1] / sp.size[1]);
-      s.setPosition(Math.round(x), Math.round(y));
-    }
     const l = this.loosePool.pop() ?? new Loose();
     l.p = p;
     l.hold = holdMs;
@@ -1666,6 +1924,8 @@ export class Effects {
       l.stage = looping ? 1 : 0;
       l.until = this.ctx.now + holdMs;
     }
+    // The art's own pivot: a strike or a heal stands on its foot, a spark sits on its centre.
+    place(p, x, y);
     this.loose.push(l);
     return s;
   }
@@ -1705,6 +1965,7 @@ export class Effects {
         this.loose.pop();
         continue;
       }
+      hang(l.p as Piece);
       i++;
     }
   }

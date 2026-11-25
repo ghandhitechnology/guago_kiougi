@@ -686,13 +686,13 @@ export class FightView {
         this.counters.revives++;
         this.ctx.sound.self("combat.revive");
         this.ctx.lights.strike(x, y - 10, cat.color("gold.pale"), 32, 0.9, 450);
-        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, false, 1000);
+        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, 1000);
         this.ctx.particles.burst(Bit.Mote, x, y - 10, 14, cat.color("gold.pale"), 50, 0);
         this.ctx.trauma.add(0.15);
         break;
       case Priv.Wake:
         this.ctx.sound.self("combat.revive");
-        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, false, 1000);
+        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, 1000);
         break;
     }
   }
@@ -720,7 +720,8 @@ export class FightView {
       this.ctx.sound.cue("sfx.monster.elite.spawn", x, y, false);
       this.ctx.trauma.add(TRAUMA.elite * 0.2);
     }
-    this.effects.oneShot("tele-circle", "tele-circle/fire", x, y, 0.9, Layer.Ground, 2, true);
+    // The ring an elite lands in, drawn at the arrival's size: never the small ring doubled.
+    this.effects.oneShot("tele-circle", "tele-circle/fire48", x, y, 0.9, Layer.Ground);
     this.ctx.particles.burst(Bit.Debris, x, y, near ? 12 : 6, cat.color("clay.light"), 90, 2);
     if (b) {
       b.arriveAt = this.ctx.now;
