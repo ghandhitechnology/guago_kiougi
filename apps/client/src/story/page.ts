@@ -5,6 +5,7 @@
  */
 import type { narrative } from "@guago/content";
 import type * as Phaser from "phaser";
+import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { layDown, pickUp } from "../ui/motion.ts";
 import { sound } from "../ui/sound.ts";
 import { Label } from "../ui/text.ts";
@@ -25,21 +26,32 @@ const INK: Readonly<
   stranger: { color: "red.dark", font: "galmuri11-bold" },
 };
 
-/** Waits for the page to be turned: a key, a click or a tap, after a moment to read. */
+/**
+ * Waits for the page to be turned, after a moment to read: the keys that turn the dialogue box's
+ * page (Enter, Space, Escape) through a focus scope of its own, or a click or a tap.
+ */
 function turned(ui: Phaser.Scene, after: number): Promise<void> {
   return new Promise((resolve) => {
     let ready = false;
     ui.time.delayedCall(after, () => {
       ready = true;
     });
-    const keys = ["E", "SPACE", "ENTER"].map((k) => ui.input.keyboard?.addKey(k));
+    const scope = new FocusScope();
     const done = () => {
       if (!ready) return;
-      for (const k of keys) k?.off("down", done);
+      popScope(scope);
       ui.input.off("pointerup", done);
       resolve();
     };
-    for (const k of keys) k?.on("down", done);
+    scope.onBack = done;
+    scope.add({
+      bounds: () => ({ x: 0, y: 0, w: W, h: H }),
+      enabled: () => true,
+      setFocus: () => undefined,
+      activate: done,
+    });
+    pushScope(scope);
+    scope.focus(scope.first(), "key");
     ui.input.on("pointerup", done);
   });
 }

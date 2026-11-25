@@ -9,6 +9,7 @@ import type { StoryRequest } from "@guago/shared";
 import type * as Phaser from "phaser";
 import type { Curtain } from "../fade.ts";
 import type { MapView } from "../render/index.ts";
+import { overrideSoundscape, type Soundscape, soundscapeFor } from "../sound/audio.ts";
 import { worldUi } from "../ui/world-ui.ts";
 import { type Dir, StoryActor } from "./actors.ts";
 
@@ -54,9 +55,18 @@ export class Stage {
   /** People who fill the room, by scene id that asked for them. */
   readonly extras = new Map<string, Phaser.GameObjects.Sprite[]>();
   private readonly hidden = new Set<string>();
+  /** The scenes' music and air over the place's own, once a scene set either. */
+  private sound: Soundscape | undefined;
 
   constructor(host: StageHost) {
     this.host = host;
+  }
+
+  /** Sets the scene's music or air; what is not given stays as the scene or the place had it. */
+  air(s: Partial<Soundscape>, fade?: number): void {
+    const place = soundscapeFor(this.host.map.id, this.host.map.time);
+    this.sound = { ...(this.sound ?? place), ...s };
+    overrideSoundscape(this.sound, fade);
   }
 
   /** The actor for `id` in scene `sceneId`, made at (x, y) facing `dir` when not on stage yet. */

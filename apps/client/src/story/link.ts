@@ -131,6 +131,7 @@ export class StoryLink {
     }
     this.runner?.end();
     const runner = new SceneRunner(stage, m, this.playerName());
+    runner.onSkip = () => this.skip();
     this.runner = runner;
     fillRoom(stage, m.scene);
     void runner.play().then((outcome) => {

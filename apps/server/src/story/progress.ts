@@ -20,6 +20,8 @@ export const OPENING_DONE = OPENING_SCENES.length;
 export class StoryStore {
   private readonly db: Db;
   private readonly cache = new Map<string, StoryProgress>();
+  /** Writes in flight by character: a read after `forget` waits for them. */
+  private readonly writing = new Map<string, Promise<unknown>>();
 
   constructor(db: Db) {
     this.db = db;
@@ -28,6 +30,9 @@ export class StoryStore {
   async get(characterId: string): Promise<StoryProgress> {
     const known = this.cache.get(characterId);
     if (known) return known;
+    await this.writing.get(characterId);
+    const again = this.cache.get(characterId);
+    if (again) return again;
     const { rows } = await this.db.execute(sql`
       select opening_beat, opening_play, story_seen from characters where id = ${characterId}`);
     const r = rows[0];
@@ -46,22 +51,38 @@ export class StoryStore {
     const p = await this.get(characterId);
     p.beat = beat;
     p.play = play;
-    await this.db.execute(sql`
-      update characters set opening_beat = ${beat}, opening_play = ${play}
-      where id = ${characterId}`);
+    await this.write(
+      characterId,
+      this.db.execute(sql`
+        update characters set opening_beat = ${beat}, opening_play = ${play}
+        where id = ${characterId}`),
+    );
   }
 
   async markSeen(characterId: string, id: string): Promise<boolean> {
     const p = await this.get(characterId);
     if (p.seen.has(id)) return false;
     p.seen.add(id);
-    await this.db.execute(sql`
-      update characters set story_seen = array_append(story_seen, ${id})
-      where id = ${characterId} and not (${id} = any(story_seen))`);
+    await this.write(
+      characterId,
+      this.db.execute(sql`
+        update characters set story_seen = array_append(story_seen, ${id})
+        where id = ${characterId} and not (${id} = any(story_seen))`),
+    );
     return true;
   }
 
-  /** Drops what is held for a character that left; the next read is fresh. */
+  private async write(characterId: string, work: Promise<unknown>): Promise<void> {
+    const done = work.catch(() => {});
+    this.writing.set(characterId, done);
+    try {
+      await work;
+    } finally {
+      if (this.writing.get(characterId) === done) this.writing.delete(characterId);
+    }
+  }
+
+  /** Drops what is held for a character that left; the next read is fresh, after its writes. */
   forget(characterId: string): void {
     this.cache.delete(characterId);
   }

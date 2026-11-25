@@ -4,6 +4,7 @@
  * effects stay on the stage until something undoes them or the map is left. Light changes all go
  * through `roomLights`, the one place a scene touches the map's own lights.
  */
+import { audio } from "@guago/audio";
 import type { narrative } from "@guago/content";
 import * as Phaser from "phaser";
 import { spriteAnim } from "../art.ts";
@@ -58,9 +59,16 @@ function once(stage: Stage, name: string, anim: string, x: number, y: number): v
   stage.host.scene.time.delayedCall(3000, () => s.active && s.destroy());
 }
 
+/** Registers what undoes a lasting effect; `playFx` took down any earlier one of the same key. */
 function lasting(stage: Stage, key: string, destroy: () => void): void {
-  stage.lasting.get(key)?.destroy();
   stage.lasting.set(key, { destroy });
+}
+
+/** The map's windows, by their feet. */
+function windowsOf(stage: Stage): { x: number; y: number }[] {
+  return stage.host.map.scene.objects.flatMap((o) =>
+    "prop" in o && o.prop === "window" ? [{ x: o.at[0], y: o.at[1] }] : [],
+  );
 }
 
 function drop(stage: Stage, fx: string): void {
@@ -88,6 +96,14 @@ export async function playFx(
   const p = ctx.at(mark) ?? { x: cam.midPoint.x, y: cam.midPoint.y };
   const key = `${fx}@${mark ?? ""}`;
   const color = (name: string) => paint(name);
+  // A lasting effect already standing is kept when a later beat on the map settles its stage;
+  // played again, the old one goes first.
+  const standing = stage.lasting.get(key);
+  if (standing && instant) return;
+  if (standing) {
+    standing.destroy();
+    stage.lasting.delete(key);
+  }
   switch (fx) {
     case "fade-in":
       return instant ? curtain.open(0) : curtain.open(700);
@@ -122,72 +138,48 @@ export async function playFx(
       return;
     }
     case "lights-out":
-      roomLights(stage, 0, instant ? 0 : 140);
-      // The room loses its colour with its light; the rift floods it back.
-      view.drain(color("navy.dark"), instant ? 0 : 900);
-      lasting(stage, key, () => {
-        roomLights(stage, 1, 0);
-        view.drain(null, 0);
-      });
-      return instant ? undefined : sleep(scene, 600);
+      // The tubes die and their hum with them; the moon through the windows stays.
+      roomLights(stage, 0, instant ? 0 : 120);
+      stage.air({ ambient: null }, instant ? 0 : 0.1);
+      if (!instant) cam.shake(140, 0.004);
+      lasting(stage, key, () => roomLights(stage, 1, 0));
+      return instant ? undefined : sleep(scene, 900);
     case "rift-column": {
-      // The column of light out on the field, through the window: gold pouring into the room.
-      const glow = view.addLight(p.x, p.y + 40, {
-        radius: 220,
-        color: color("gold.light"),
-        intensity: instant ? 1.1 : 0,
-        squash: 0.8,
-      });
-      const beam = sprite(stage, "sky-tear", undefined, p.x, p.y, "overlay");
-      beam?.setOrigin(0.5, 0).setAlpha(instant ? 0.9 : 0);
+      // A column of daylight stands on the field: every window shows it, and its gold pours in
+      // through the glass onto the floor.
+      const gold = color("gold.light");
+      view.showPropFrame("window", "rift");
+      view.setWindowLight(2.8, instant ? 0 : 1100, gold);
       if (!instant) {
-        view.flood(p.x, p.y, 1400);
-        scene.tweens.addCounter({
-          from: 0,
-          to: 1,
-          duration: 900,
-          onUpdate: (t) => {
-            const k = t.getValue() ?? 0;
-            glow.set({ intensity: 1.1 * k });
-            beam?.setAlpha(0.9 * k);
-          },
-        });
-        cam.flash(180, 255, 236, 180);
-      } else view.drain(null, 0);
-      lasting(stage, key, () => {
-        glow.remove();
-        beam?.destroy();
-      });
-      return;
-    }
-    case "columns-rise": {
-      const columns: Phaser.GameObjects.Sprite[] = [];
-      for (const [dx, delay] of [
-        [-26, 0],
-        [-9, 260],
-        [9, 520],
-        [26, 780],
-      ] as const) {
-        const c = sprite(stage, "column", undefined, p.x + dx, p.y + 30, "overlay");
-        if (!c) continue;
-        c.setOrigin(0.5, 1).setScale(0.5).setTint(color("gold.pale"));
-        columns.push(c);
-        if (instant) continue;
-        const restY = c.y;
-        c.setY(restY + 18).setAlpha(0);
-        scene.tweens.add({
-          targets: c,
-          y: restY,
-          alpha: 1,
-          delay,
-          duration: 900,
-          ease: "Cubic.Out",
-        });
+        cam.flash(260, 255, 240, 190);
+        for (const w of windowsOf(stage)) {
+          view.flash(w.x, w.y + 34, { radius: 70, color: gold, intensity: 1.2, ms: 1200 });
+        }
       }
       lasting(stage, key, () => {
-        for (const c of columns) c.destroy();
+        view.showPropFrame("window", "night");
+        view.setWindowLight(1, 0, null);
       });
-      return instant ? undefined : sleep(scene, 600);
+      return instant ? undefined : sleep(scene, 700);
+    }
+    case "columns-rise": {
+      // Marble grinding up out of the field: the building shakes once a column, the gold swells,
+      // dust shakes off the window wall.
+      if (instant) return;
+      const gold = color("gold.light");
+      const walls = windowsOf(stage);
+      for (let i = 0; i < 4; i++) {
+        scene.time.delayedCall(i * 480, () => {
+          audio.cue("stone-land");
+          cam.shake(300, 0.006 - i * 0.001);
+          view.setWindowLight(2.8 + (i + 1) * 0.05, 240, gold);
+          for (const w of walls) {
+            if (Math.random() < 0.5) continue;
+            once(stage, "fx-dust", "kick", w.x + Phaser.Math.Between(-14, 14), w.y + 6);
+          }
+        });
+      }
+      return sleep(scene, 1900);
     }
     case "page-gust": {
       if (instant) return;

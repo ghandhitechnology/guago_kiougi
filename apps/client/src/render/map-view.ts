@@ -283,10 +283,13 @@ export class MapView {
   private floodRamp: Ramp | null = null;
   private floodAt: [number, number] = [0, 0];
   private barRamp: Ramp = { from: 0, to: 0, ms: 0, age: 0 };
-  /** The map's own lights, with the strength their data gives them. */
-  private readonly mapLights: { light: Light; base: number }[] = [];
-  private lightsRamp: Ramp = { from: 1, to: 1, ms: 0, age: 0 };
-  private lightsLevel = 1;
+  /** The map's own lamps, and the light its windows let in, with the strength their data gives. */
+  private readonly lamps: { light: Light; base: number }[] = [];
+  private readonly windows: { light: Light; base: number; color: number }[] = [];
+  private lampRamp: Ramp = { from: 1, to: 1, ms: 0, age: 0 };
+  private lampLevel = 1;
+  private windowRamp: Ramp = { from: 1, to: 1, ms: 0, age: 0 };
+  private windowLevel = 1;
   private time = 0;
   private readonly cones = new Set<Cone>();
   private coneCount = 0;
@@ -397,7 +400,9 @@ export class MapView {
       if (source.paint?.region || source.radius <= 0 || source.intensity <= 0) return;
       const light = this.field.addStatic(source, paletteColor(this.meta, source.color), i);
       light.follows = this.sputter(source.at);
-      this.mapLights.push({ light, base: light.spec.intensity });
+      const base = light.spec.intensity;
+      if (light.window) this.windows.push({ light, base, color: light.spec.color });
+      else this.lamps.push({ light, base });
     });
 
     // Filters: light on the ground and on sprites, the grade on the world, cutaways overhead.
@@ -587,12 +592,36 @@ export class MapView {
   }
 
   /**
-   * The map's own lights (its `lights` data: lamps, signs, windows) at `level` of the strength
-   * they are drawn with, 0 to 1, eased over `ms`: a power cut, a lamp switched on. Carried lights,
-   * flashes and a rift's region are not among them.
+   * The map's own lamps (its `lights` data: tubes, lamps, signs) at `level` of the strength they
+   * are drawn with, 0 to 1, eased over `ms`: a power cut, a lamp switched on. The light windows
+   * let in, carried lights, flashes and a rift's region are not among them.
    */
   setMapLights(level: number, ms = 0): void {
-    this.lightsRamp = { from: this.lightsLevel, to: Math.max(0, Math.min(1, level)), ms, age: 0 };
+    this.lampRamp = { from: this.lampLevel, to: Math.max(0, Math.min(1, level)), ms, age: 0 };
+  }
+
+  /**
+   * The light the map's windows let in (their spill on the floor) at `level` of its drawn
+   * strength, 0 to 3, eased over `ms`, in `color` or its own with null: a column of daylight on
+   * the field pouring gold through the glass.
+   */
+  setWindowLight(level: number, ms = 0, color: number | null = null): void {
+    for (const w of this.windows) w.light.spec = { ...w.light.spec, color: color ?? w.color };
+    this.windowRamp = { from: this.windowLevel, to: Math.max(0, Math.min(3, level)), ms, age: 0 };
+  }
+
+  /**
+   * Shows every placed `prop` in its `frame` (`window` in `rift`: the field outside at 23:40),
+   * keeping a variant the placement chose (`-curtain`). Props with no such frame stay as drawn.
+   */
+  showPropFrame(prop: string, frame: string): void {
+    for (const { sprite } of this.placed) {
+      const name = sprite.frame.name;
+      if (!name.startsWith(`${prop}/`)) continue;
+      const variant = name.endsWith("-curtain") ? "-curtain" : "";
+      const next = `${prop}/${frame}${variant}`;
+      if (next !== name && sprite.texture.has(next)) sprite.setFrame(next);
+    }
   }
 
   /** Black bars top and bottom, `size` pixels each, sliding in or out over `ms`. */
@@ -1378,11 +1407,15 @@ export class MapView {
     this.updateGlows();
     this.updateEntities();
     this.updateTelegraphs(t);
-    const lights = step(this.lightsRamp, deltaMs);
-    if (lights !== this.lightsLevel) {
-      this.lightsLevel = lights;
-      for (const m of this.mapLights)
-        m.light.spec = { ...m.light.spec, intensity: m.base * lights };
+    const lamps = step(this.lampRamp, deltaMs);
+    if (lamps !== this.lampLevel) {
+      this.lampLevel = lamps;
+      for (const m of this.lamps) m.light.spec = { ...m.light.spec, intensity: m.base * lamps };
+    }
+    const windows = step(this.windowRamp, deltaMs);
+    if (windows !== this.windowLevel) {
+      this.windowLevel = windows;
+      for (const w of this.windows) w.light.spec = { ...w.light.spec, intensity: w.base * windows };
     }
     this.field.update(t, deltaMs, this.tier.entityLights);
     this.updateRegion(t);
@@ -1450,9 +1483,12 @@ export class MapView {
       g.level = info && g.most > 0 ? info.n / g.most : 0;
       if (g.overlay.frame.name !== g.prop.frame.name)
         g.overlay.setFrame(g.prop.frame.name, false, false);
-      g.overlay.setVisible(screen && g.prop.visible);
+      // Lamps, screens and signs go dark with the map's lamps (`setMapLights`); a window's glow
+      // is the sky's.
+      const power = g.prop.frame.name.startsWith("window/") ? 1 : this.lampLevel;
+      g.overlay.setVisible(screen && g.prop.visible && power > 0).setAlpha(power);
       if (!g.halo) continue;
-      const on = screen && g.prop.visible && this.tier.halos && g.level > 0 && !!info;
+      const on = screen && g.prop.visible && this.tier.halos && g.level > 0 && !!info && power > 0;
       g.halo.setVisible(on);
       if (!on || !info) continue;
       const left = g.prop.x - g.prop.displayOriginX;
@@ -1461,7 +1497,7 @@ export class MapView {
       g.halo
         .setPosition(Math.round(left + info.cx), Math.round(top + info.cy))
         .setDisplaySize(size, size)
-        .setAlpha(0.55 + 0.45 * g.level);
+        .setAlpha((0.55 + 0.45 * g.level) * power);
     }
   }
 

@@ -66,8 +66,9 @@ const personal = (o: Partial<Staging> = {}): Staging => ({
 
 const STAGING: Readonly<Record<string, Staging>> = {
   "opening-b1": personal({ instance: true, start: "seat" }),
-  "opening-b2": personal({ instance: true }),
-  "opening-b3": personal({ instance: true, enter: { entropy: "window" } }),
+  // A reload in the middle of 23:40 stands the player back at the cooler they drank from.
+  "opening-b2": personal({ instance: true, start: "cooler" }),
+  "opening-b3": personal({ instance: true, start: "cooler", enter: { entropy: "window" } }),
   "opening-b4": personal({ instance: true, start: "landing-4f", enter: { entropy: "@player" } }),
   "opening-b5": personal({
     instance: true,

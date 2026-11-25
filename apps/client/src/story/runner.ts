@@ -19,11 +19,10 @@ import {
   stagingOf,
 } from "@guago/content";
 import type { SceneStart } from "@guago/shared";
-import * as Phaser from "phaser";
-import { overrideSoundscape, soundscapeFor } from "../sound/audio.ts";
 import type { DialogueLine } from "../ui/dialogue.ts";
+import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { worldUi } from "../ui/world-ui.ts";
-import { type Dir, dirToward } from "./actors.ts";
+import { dirToward } from "./actors.ts";
 import { clearSwarm, pickUp, playFx } from "./fx.ts";
 import { showDoc, showTitle, WorldPrompt } from "./page.ts";
 import type { Stage } from "./stage.ts";
@@ -61,9 +60,15 @@ export class SceneRunner {
   private stopped = false;
   private ending: (() => void) | undefined;
   /** The scene holds the player's keys (between `play`s). */
-  holding = true;
+  holding = false;
   /** A talk is open from an offer or the dialogue: the keys stay held. */
   talking = false;
+  /**
+   * While the scene holds the keys no menu opens: Escape cuts a scene short where it may be
+   * (`onSkip`), and Enter is nobody's.
+   */
+  private readonly keys = new FocusScope();
+  onSkip: (() => void) | undefined;
 
   constructor(stage: Stage, start: SceneStart, playerName: string) {
     const scene = sceneById(start.scene);
@@ -75,6 +80,21 @@ export class SceneRunner {
     this.stage = stage;
     this.met = start.from;
     this.playerName = playerName;
+    this.keys.onBack = () => {
+      if (this.skip) this.onSkip?.();
+    };
+  }
+
+  /**
+   * Holds the keys or gives them back, with the bars: they slide in as the scene takes over and
+   * out as the player gets their body back.
+   */
+  private hold(on: boolean): void {
+    if (this.holding === on) return;
+    this.holding = on;
+    if (on) pushScope(this.keys);
+    else popScope(this.keys);
+    this.host.view.letterbox(on, on ? 500 : 380);
   }
 
   private get host() {
@@ -235,6 +255,7 @@ export class SceneRunner {
   // Running --------------------------------------------------------------------------------
 
   private async perform(): Promise<void> {
+    this.hold(true);
     const start = resumeIndex(this.scene, this.met);
     audio.preload("page1");
     await this.setStage(start);
@@ -344,9 +365,9 @@ export class SceneRunner {
         return;
       case "title":
         await this.waitWalks();
+        // Deeper bars for the card; they go with the scene.
         view.letterbox(true, 700, 34);
         await showTitle(this.host.ui, step.lines.map(text));
-        view.letterbox(false, 900);
         return;
       default:
         return;
@@ -372,7 +393,7 @@ export class SceneRunner {
     this.host.takeCamera(false);
     this.host.followServer(false);
     this.host.facePlayer(undefined);
-    this.holding = false;
+    this.hold(false);
     if (step.prompt) {
       const where = step.at ?? (step.prompt === "move" ? undefined : "player");
       this.promptAt = this.promptPoint(where, step.prompt);
@@ -394,7 +415,7 @@ export class SceneRunner {
     this.prompt = undefined;
     this.promptAt = undefined;
     this.offers = [];
-    this.holding = true;
+    this.hold(true);
   }
 
   private promptPoint(
@@ -429,8 +450,7 @@ export class SceneRunner {
   }
 
   private music(track: narrative.Music | null): void {
-    const air = soundscapeFor(this.map.id, this.map.time).ambient;
-    overrideSoundscape({ music: track, ambient: air });
+    this.stage.air({ music: track });
   }
 
   private async waitWalks(ids?: readonly string[]): Promise<void> {
@@ -450,6 +470,7 @@ export class SceneRunner {
   }
 
   private cleanup(): void {
+    this.hold(false);
     this.prompt?.destroy();
     this.prompt = undefined;
     worldUi.prompt(undefined);

@@ -61,7 +61,8 @@ export function titleMusic(): void {
 export interface Soundscape {
   /** The song, or null for none (a scene's silence). */
   readonly music: SongId | null;
-  readonly ambient: AmbientId;
+  /** The air, or null for none (the hum gone with the lights). */
+  readonly ambient: AmbientId | null;
 }
 
 /**
@@ -112,11 +113,11 @@ export function soundscapeFor(mapId: string, time?: { readonly phase: string }):
 let current: Soundscape | undefined;
 let override: Soundscape | undefined;
 
-function apply(): void {
+function apply(fade?: number): void {
   const s = override ?? current;
   if (!s) return;
-  audio.music(s.music, { fade: 2 });
-  audio.ambient(s.ambient, { fade: 2.5 });
+  audio.music(s.music, { fade: fade ?? 2 });
+  audio.ambient(s.ambient, { fade: fade ?? 2.5 });
 }
 
 let page1Ready = false;
@@ -134,10 +135,13 @@ export function enterSoundscape(s: Soundscape): void {
   apply();
 }
 
-/** A story scene's own music and air, until it hands back with `null`. */
-export function overrideSoundscape(s: Soundscape | null): void {
+/**
+ * A story scene's own music and air, until it hands back with `null`; `fade` in seconds cuts
+ * shorter than a place's crossfade (a power cut).
+ */
+export function overrideSoundscape(s: Soundscape | null, fade?: number): void {
   override = s ?? undefined;
-  apply();
+  apply(fade);
 }
 
 /** A foot landing. Other players' steps are quieter and placed left or right of the listener. */

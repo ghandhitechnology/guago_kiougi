@@ -254,8 +254,6 @@ export class WorldScene extends Phaser.Scene {
         this.holding = true;
       },
     });
-    // A scene that may be cut short is, with Escape.
-    this.input.keyboard?.on("keydown-ESC", () => this.story.skip());
     if (import.meta.env.DEV) {
       exposeDevStats(this);
       // Development: F9 tells the server the fight a scene waits on is over (until combat does).

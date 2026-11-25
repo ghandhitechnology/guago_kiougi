@@ -935,10 +935,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
 
   override async onLeave(client: Client): Promise<void> {
     places.leave(client.sessionId);
-    story.left(client.sessionId);
+    const pawn = this.pawns.get(client.sessionId);
+    // Through a door the story goes on in the next room; otherwise the character left.
+    story.left(client.sessionId, this.moved.has(client.sessionId) ? undefined : pawn?.character.id);
     this.scripted.delete(client.sessionId);
     this.moved.delete(client.sessionId);
-    const pawn = this.pawns.get(client.sessionId);
     if (pawn) pawn.leaving = true;
     if (this.clients.length === 0) this.emptied();
     // Saves the place, so the body stays in the world until the write is done.

@@ -215,7 +215,12 @@ class Director {
     if (!scene) return undefined;
     const p = scene.kind === "opening" ? await this.store?.get(characterId) : undefined;
     const settled = settle(scene.scene, resumeIndex(scene.scene, p?.play ?? 0));
-    const mark = settled.at.player ?? stagingOf(scene.scene.id).start ?? firstMark(scene.scene);
+    // A replay with no start of its own stands where its first shot looks; the opening and the
+    // 집 say where, or the map's arrival does.
+    const mark =
+      settled.at.player ??
+      stagingOf(scene.scene.id).start ??
+      (scene.kind === "replay" ? firstMark(scene.scene) : undefined);
     return markOf(room.mapDef, mark);
   }
 
@@ -277,8 +282,12 @@ class Director {
     background("story beats", this.beatsAt(room, sessionId, characterId, zones));
   }
 
-  /** The body left the room: its scene ends with it, and plays again from its last `play`. */
-  left(sessionId: string): void {
+  /**
+   * The body left the room: its scene ends with it, and plays again from its last `play`. A
+   * character that left the game (`gone`) is no longer held in memory.
+   */
+  left(sessionId: string, gone?: string): void {
+    if (gone) this.store?.forget(gone);
     const id = this.bySession.get(sessionId);
     if (id === undefined) return;
     this.bySession.delete(sessionId);
