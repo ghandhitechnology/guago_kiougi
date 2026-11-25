@@ -1,4 +1,5 @@
-import { isSolidTile, type TileCollision } from "@guago/shared";
+import { isSolidTile, overlapsSolid, PLAYER_RADIUS, type TileCollision } from "@guago/shared";
+import { CAST_ART } from "../cast.ts";
 import { CUTSCENES } from "../narrative/cutscenes.ts";
 import { OPENING } from "../narrative/opening.ts";
 import type { Cutscene } from "../narrative/schema.ts";
@@ -222,6 +223,13 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
   for (const [name, s] of Object.entries(map.spawns)) {
     const [tx, ty] = tileOf(s);
     if (solid(tx, ty)) say(`spawn ${name} at tile ${tx},${ty} is not walkable`);
+    // A body set down here must fit, and must not be standing in a door it would walk straight
+    // back through.
+    else if (overlapsSolid(map, s.x, s.y, PLAYER_RADIUS))
+      say(`spawn ${name} at tile ${tx},${ty} puts a body into a wall`);
+    for (const p of map.portals)
+      if (tx >= p.rect.x && tx < p.rect.x + p.rect.w && ty >= p.rect.y && ty < p.rect.y + p.rect.h)
+        say(`spawn ${name} stands in portal ${p.id}`);
   }
   const reached = main ? reach(grid, tileOf(main)) : new Uint8Array(map.w * map.h);
   const lost: [number, number][] = [];
@@ -270,30 +278,39 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     const [tx, ty] = tileOf(m);
     if (tx < 0 || ty < 0 || tx >= map.w || ty >= map.h) say(`mark ${name} is outside the map`);
   }
-  const speakers = new Set(SPEAKERS.map((s) => s.id));
+  // Spots are for the story's speakers and for the cast table's people (townspeople, crowds).
+  const speakers = new Set([...SPEAKERS.map((s) => s.id), ...Object.keys(CAST_ART)]);
   for (const n of map.npcs) {
     const [tx, ty] = tileOf(n);
-    if (!speakers.has(n.speaker)) say(`npc spot for ${n.speaker}: no such speaker`);
+    if (!speakers.has(n.speaker)) say(`npc spot for ${n.speaker}: no such speaker or cast`);
     if (solid(tx, ty) || !reached[ty * map.w + tx])
       say(`npc spot for ${n.speaker} at tile ${tx},${ty} is not walkable from the main spawn`);
   }
   // Patrols: every waypoint walkable and reached, every leg a clear straight walk.
-  for (const p of map.patrols) {
-    unique("patrol", p.id);
+  // Patrols and walks: every waypoint walkable and reached, every leg a clear straight walk.
+  const route = (kind: string, p: (typeof map.walks)[number]) => {
+    unique(kind, p.id);
     if (!speakers.has(p.walker) && !art.sprites[p.walker])
-      say(`patrol ${p.id}: no speaker or sprite ${p.walker}`);
-    if (p.route.length < 2) say(`patrol ${p.id} needs two waypoints`);
-    if (!(p.speed > 0) || !(p.cone.length > 0) || !(p.cone.angle > 0 && p.cone.angle <= 360))
-      say(`patrol ${p.id}: speed, cone length and angle must be positive`);
+      say(`${kind} ${p.id}: no speaker, cast or sprite ${p.walker}`);
+    if (p.route.length < 2) say(`${kind} ${p.id} needs two waypoints`);
+    if (!(p.speed > 0)) say(`${kind} ${p.id}: speed must be positive`);
     p.route.forEach((w, i) => {
       const [tx, ty] = tileOf(w);
       if (solid(tx, ty) || !reached[ty * map.w + tx])
-        say(`patrol ${p.id} waypoint ${i} at tile ${tx},${ty} is not walkable from the main spawn`);
+        say(
+          `${kind} ${p.id} waypoint ${i} at tile ${tx},${ty} is not walkable from the main spawn`,
+        );
       const next = p.route[i + 1] ?? (p.loop === "cycle" ? p.route[0] : undefined);
       if (next && next !== w && !clearLine(map, w.x, w.y, next.x, next.y))
-        say(`patrol ${p.id} leg ${i} walks through something solid`);
+        say(`${kind} ${p.id} leg ${i} walks through something solid`);
     });
+  };
+  for (const p of map.patrols) {
+    route("patrol", p);
+    if (!(p.cone.length > 0) || !(p.cone.angle > 0 && p.cone.angle <= 360))
+      say(`patrol ${p.id}: cone length and angle must be positive`);
   }
+  for (const w of map.walks) route("walk", w);
   for (const a of map.arenas) {
     unique("arena", a.id);
     if (!inBounds(a.rect)) say(`arena ${a.id} reaches past the map`);

@@ -117,7 +117,8 @@ export class RoomMetrics {
   private lastFight: RoomSnapshot["fight"] | undefined;
   private fightNet: FightNet | undefined;
   private sentAt: number[] = [];
-  private readonly partsAt = new Map<object, Float64Array>();
+  /** Each viewer's parts at the last roll; a viewer that left is let go with it. */
+  private readonly partsAt = new WeakMap<object, Float64Array>();
   private lastSpawnTotal = 0;
   private viewChangesAt = 0;
   private lastViewRate = 0;

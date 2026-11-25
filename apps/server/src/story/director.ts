@@ -42,15 +42,15 @@ import {
   STORY_MESSAGES,
   type StoryRequest,
 } from "@guago/shared";
+import { background } from "../background.ts";
 import type { Db } from "../db/index.ts";
-
-type Cutscene = narrative.Cutscene;
-
 import { describeError } from "../db/index.ts";
 import { mapOptionAllowed } from "../enter.ts";
 import { live } from "../live/current.ts";
 import { allMaps, belongsOn, builtMap, HOME_MAP, spawnPlace } from "../world-maps.ts";
 import { OPENING_DONE, StoryStore } from "./progress.ts";
+
+type Cutscene = narrative.Cutscene;
 
 /** Where a body is sent: a map (or a private copy of it) and the spot, written down or not. */
 export interface Destination {
@@ -165,7 +165,7 @@ class Director {
     this.unlisten?.();
     this.unlisten = live()?.onFreed((boss) => {
       const script = narrative.NARRATIVE.bosses.find((b) => b.boss === boss);
-      if (script) void this.playSharedOn(script.freed);
+      if (script) background("freed scene", this.playSharedOn(script.freed));
     });
   }
 
@@ -274,7 +274,7 @@ class Director {
   /** Walked into a room zone: a beat staged there may start. */
   zonesChanged(room: StoryRoom, sessionId: string, characterId: string, zones: readonly string[]) {
     if (room.owner || this.bySession.has(sessionId)) return;
-    void this.beatsAt(room, sessionId, characterId, zones).catch(() => {});
+    background("story beats", this.beatsAt(room, sessionId, characterId, zones));
   }
 
   /** The body left the room: its scene ends with it, and plays again from its last `play`. */
@@ -374,10 +374,10 @@ class Director {
     run.room.tell(run.sessionId, STORY_MESSAGES.cue, { run: run.id, until } satisfies SceneCue);
     if (run.kind === "opening") {
       const p = this.store;
-      void p
-        ?.get(run.characterId)
-        .then((s) => p.setOpening(run.characterId, s.beat, run.met))
-        .catch((error) => console.error(`story progress failed: ${describeError(error)}`));
+      background(
+        "story progress",
+        p?.get(run.characterId).then((s) => p.setOpening(run.characterId, s.beat, run.met)),
+      );
     }
   }
 
@@ -464,7 +464,7 @@ class Director {
       return;
     }
     if (req.t === "replay") {
-      void this.replay(room, sessionId, characterId, req.scene);
+      background("story replay", this.replay(room, sessionId, characterId, req.scene));
       return;
     }
     const run = this.runs.get(req.run);
@@ -482,9 +482,7 @@ class Director {
     }
     // Done: every `play` met, or skipped where the scene may be.
     if (run.met < playSteps(run.scene).length) return;
-    void this.finish(run).catch((error) =>
-      console.error(`story finish failed: ${describeError(error)}`),
-    );
+    background("story finish", this.finish(run));
   }
 
   /** The scene walks the player to one of its marks: only marks it walks the player to. */

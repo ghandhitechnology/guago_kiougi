@@ -113,6 +113,13 @@ function border(): Pic {
   return p;
 }
 
+/** A picture turned on its side, rows for columns. */
+function transpose(p: Pic): Pic {
+  const out = Pic.blank(p.h, p.w);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) out.set(y, x, p.at(x, y) as string);
+  return out;
+}
+
 const SHERDS = `
   ....CT.........
   ...CtT....TT...
@@ -188,6 +195,11 @@ export default [
   ),
   greek("paving-inlay", { still: inlay() }, { outline: false, lone: "wkKVM" }),
   greek("paving-meander", { still: border() }, { origin: [0, 0], outline: false, lone: "kVM" }),
+  greek(
+    "paving-meander-v",
+    { still: Pic.blank(6, 32).put(transpose(border()), 0, 0) },
+    { origin: [0, 0], outline: false, lone: "kVM" },
+  ),
   greek("potsherds", { still: Pic.of(SHERDS) }, { outline: false, lone: "CTtJ" }),
   greek("sandal-prints", { still: Pic.of(PRINTS) }, { outline: false, lone: "U" }),
   greek("chalk-orbits", { still: orbits() }, { outline: false, lone: "wu" }),

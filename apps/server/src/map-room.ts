@@ -22,6 +22,8 @@ import {
 import {
   AIM_MESSAGE,
   aimMessage,
+  applyBetween,
+  type Between,
   type Caught,
   type ChangeNotice,
   type Character,
@@ -77,7 +79,6 @@ import {
   shutDoors,
   snap,
   spawnMonster,
-  startRevive,
   stepDoors,
   stepFight,
   storyMessage,
@@ -90,10 +91,12 @@ import {
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
+import { background } from "./background.ts";
 import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
+import { carryIn, carryOut, DEFAULT_MODE, type ModeStore, memoryModes } from "./fight/carry.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
 import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
@@ -143,6 +146,8 @@ const VITALS_EVERY_MS = 500;
  * game clock with no signal, so the room asks; a kit is rebuilt only when a value changed.
  */
 const LIVE_EVERY_MS = 2_000;
+/** Ticks out of full auto before the living world hears that full auto stopped (5 minutes). */
+const AUTO_OFF_TICKS = 6000;
 /**
  * A socket whose player went through a door is closed if still open after this: the client takes
  * its new seat at once, and an old connection kept open counts for nothing anyway.
@@ -227,6 +232,10 @@ interface Pawn {
   readonly queue: InputQueue;
   readonly player: Player;
   readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
+  /** Counts loadout reads, so an older read that lands late is dropped. */
+  loadGen: number;
+  /** Tick from which leaving full auto is reported, or -1. */
+  autoOffAt: number;
   /** What it fights with; replaced when an operation changes it. */
   loadout: Loadout;
   /** The living world's multipliers its kit was built with. */
@@ -281,8 +290,11 @@ function facingToward(x: number, y: number, tx: number, ty: number): Facing {
 let loadouts: Loadouts = starterLoadouts;
 
 /** Called once at server start to read loadouts from the inventory. */
-export function provideFightServices(s: { loadouts?: Loadouts }): void {
+let modes: ModeStore = memoryModes;
+
+export function provideFightServices(s: { loadouts?: Loadouts; modes?: ModeStore }): void {
   if (s.loadouts) loadouts = s.loadouts;
+  if (s.modes) modes = s.modes;
 }
 
 /** Characters fighting in this process, by id, for loadout changes. */
@@ -295,12 +307,14 @@ const fighting = new Map<string, { room: MapRoom; pawn: Pawn }>();
 export function fightLoadoutChanged(characterId: string, change: ChangeNotice): void {
   const at = fighting.get(characterId);
   if (!at) return;
+  // Any item change may be an equip or an unequip (an unequip can report only the item it took
+  // off), so any of them rebuilds the kit.
   const touched =
-    (change.items?.some((i) => i.slot !== null) ?? false) ||
+    (change.items?.length ?? 0) > 0 ||
     (change.removed?.length ?? 0) > 0 ||
     change.progression !== undefined;
   if (!touched) return;
-  void at.room.reload(at.pawn);
+  background("fight reload", at.room.reload(at.pawn));
 }
 
 /** The fight map a room runs on: the built map's, with walls a closed door swaps. */
@@ -357,6 +371,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
   >();
   private unlistenShared: (() => void) | undefined;
   private unlistenParties: (() => void) | undefined;
+  /**
+   * What clients asked of the world since the last tick (aim, mode, revive), applied in arrival
+   * order at the next tick's start, so the world only ever changes at tick boundaries.
+   */
+  private readonly between: Between[] = [];
   /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
   private readonly devActions: (() => void)[] = [];
 
@@ -393,7 +412,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     this.seats = new RoomSeats(def.id, (id) => (this.owner ? undefined : this.placeOf(id)));
     this.state.map = def.id;
     this.state.channel = options.channel;
-    void this.setMetadata({ map: def.id, channel: options.channel });
+    background("room metadata", this.setMetadata({ map: def.id, channel: options.channel }));
     // Bodies before anything else, so their ref ids are the smallest the room will ever hand out.
     for (let i = 0; i < MAP_SEATS; i++) {
       const slot = String(i);
@@ -422,25 +441,18 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.aim.take()) return;
-      const p = pawn.player;
-      p.aiming = aim !== null;
-      p.aimX = aim?.dx ?? 0;
-      p.aimY = aim?.dy ?? 0;
+      this.between.push({ t: "aim", player: pawn.player.id, aim });
     });
     this.onMessage(MODE_MESSAGE, modeMessage, (client, mode) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.mode.take()) return;
-      if (pawn.player.mode === mode) return;
-      pawn.player.mode = mode as Mode;
-      pawn.player.casts = 0;
-      this.tellMode(pawn);
-      story.modeChanged(client.sessionId);
+      this.between.push({ t: "mode", player: pawn.player.id, mode: mode as Mode });
     });
     this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
       const pawn = this.pawns.get(client.sessionId);
       const target = this.bySlot.get(slot);
       if (!pawn?.buckets.revive.take() || !target) return;
-      startRevive(this.world, pawn.player, target.player);
+      this.between.push({ t: "revive", player: pawn.player.id, target: target.player.id });
     });
     if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
@@ -452,7 +464,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       if (this.clients.length > 0)
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
-    this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    this.clock.setInterval(() => background("place save", this.seats.saveAll()), SAVE_INTERVAL_MS);
     this.clock.setInterval(() => this.refreshDoors(), DOORS_EVERY_MS);
     if (def.id === HOME_MAP) this.clock.setInterval(() => this.letGoHome(), HOME_EVERY_MS);
     // A club joined, left or restyled shows under the name at once.
@@ -487,6 +499,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
 
   /** A closed map spawns nothing; a changed modifier rebuilds that player's kit. */
   private readLive(): void {
+    this.settleAutoOff();
     const l = live();
     this.world.director.paused = !(l?.isOpen(this.mapId) ?? true);
     if (!l) return;
@@ -505,9 +518,45 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     return withModifiers(kit, pawn.mods);
   }
 
-  /** A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. */
+  /** Applies the queued client records; a mode that changed is told and stored. */
+  private applyQueued(): void {
+    if (this.between.length === 0) return;
+    for (const e of this.between) {
+      const pawn = this.pawns.get(e.player);
+      if (!pawn || pawn.leaving) continue;
+      const before = pawn.player.mode;
+      applyBetween(this.world, e);
+      if (e.t === "mode" && pawn.player.mode !== before) {
+        this.tellMode(pawn);
+        background("mode save", modes.write(pawn.character.id, pawn.player.mode));
+        story.modeChanged(pawn.client.sessionId);
+      }
+    }
+    this.between.length = 0;
+  }
+
+  /**
+   * A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. Leaving full
+   * auto counts only once the body has stayed out of it for `AUTO_OFF_TICKS` (checked with the
+   * living world, `readLive`), so a toggle and back does not restart the clock.
+   */
   private tellMode(pawn: Pawn): void {
-    live()?.events.autoHunting(pawn.character.id, pawn.player.mode === Mode.Auto);
+    if (pawn.player.mode === Mode.Auto) {
+      pawn.autoOffAt = -1;
+      live()?.events.autoHunting(pawn.character.id, true);
+    } else if (pawn.autoOffAt < 0) {
+      pawn.autoOffAt = this.world.tick + AUTO_OFF_TICKS;
+    }
+  }
+
+  /** Bodies out of full auto long enough: now the living world hears it. */
+  private settleAutoOff(): void {
+    const l = live();
+    for (const pawn of this.pawns.values()) {
+      if (pawn.autoOffAt < 0 || this.world.tick < pawn.autoOffAt) continue;
+      pawn.autoOffAt = -1;
+      if (pawn.player.mode !== Mode.Auto) l?.events.autoHunting(pawn.character.id, false);
+    }
   }
 
   /** The step's events the living world counts (notices, 상점 and 벌점); it buffers them all. */
@@ -566,12 +615,18 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
 
   /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
   async reload(pawn: Pawn): Promise<void> {
+    const gen = ++pawn.loadGen;
     const loadout = await loadouts.read(pawn.character);
-    if (this.pawns.get(pawn.player.id) !== pawn) return;
+    // A newer read started meanwhile, or the body left: this one is stale.
+    if (gen !== pawn.loadGen || this.pawns.get(pawn.player.id) !== pawn) return;
     pawn.loadout = loadout;
     const p = pawn.player;
-    // The inventory's level is the record; the fight may run ahead of grants not yet landed.
-    if (loadout.level > p.level) p.level = loadout.level;
+    // The inventory's level is the record. When it moved the level, its EXP is the record too:
+    // the fight's own count would count the granted EXP a second time toward the next level.
+    if (loadout.level > p.level) {
+      p.level = loadout.level;
+      p.exp = loadout.exp;
+    }
     this.world.setKit(p, this.kitOf(pawn, p.level));
   }
 
@@ -662,7 +717,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
    */
   private emptied(): void {
     this.retireTimer?.clear();
-    this.retireTimer = this.clock.setTimeout(() => void this.retire(), this.graceMs);
+    this.retireTimer = this.clock.setTimeout(
+      () => background("channel retire", this.retire()),
+      this.graceMs,
+    );
   }
 
   private async retire(): Promise<void> {
@@ -675,7 +733,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
   /** Where a session's character stands, in whole pixels, for saving. */
   private placeOf(id: string): { x: number; y: number } | undefined {
     const p = this.world.playerById(id);
-    return p && { x: Math.round(p.x), y: Math.round(p.y) };
+    if (!p) return undefined;
+    // Knocked out, the character is where it will wake.
+    const at = p.down ? this.map.spawn : p;
+    return { x: Math.round(at.x), y: Math.round(at.y) };
   }
 
   override async onJoin(client: Client, options: SeatOptions = {}): Promise<void> {
@@ -702,7 +763,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       return;
     }
     const pawn = this.pawns.get(client.sessionId);
-    if (pawn) void story.arrived(this, client.sessionId, character.id, pawn.zones);
+    if (pawn)
+      background("story arrival", story.arrived(this, client.sessionId, character.id, pawn.zones));
   }
 
   /** Puts a joined character's body into the fight and the client's views around it. */
@@ -720,9 +782,14 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)
         : start.facing;
-    const loadout = await loadouts.read(character);
+    // EXP still in the grant buffer lands first, so the loadout read is the whole record.
+    await grants()?.flush(character.id);
+    const [loadout, mode] = await Promise.all([
+      loadouts.read(character),
+      modes.read(character.id).catch(() => undefined),
+    ]);
     client.view = new StateView();
-    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing);
+    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing, mode);
     this.countBytes(client);
     const p = pawn.player;
     client.send(MAP_MESSAGES.zones, { zones: pawn.zones } satisfies ZoneUpdate);
@@ -749,6 +816,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     x: number,
     y: number,
     facing: Facing,
+    mode: Mode = DEFAULT_MODE,
   ): Pawn {
     const id = client.sessionId;
     const view = client.view;
@@ -769,7 +837,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       throw error;
     }
     player.facing = facing;
+    player.mode = mode;
     player.exp = loadout.exp;
+    // Back within a quarter of an hour: as hurt and as busy as it left (fight/carry.ts).
+    carryIn(character.id, player, this.world.tick);
     player.expMult = mods.exp;
     player.party = partyOf(parties.of(character.id)?.id);
     const net = newViewer();
@@ -783,6 +854,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       net,
       queue: new InputQueue(),
       player,
+      loadGen: 0,
+      autoOffAt: -1,
       loadout,
       mods,
       expCarry: 0,
@@ -892,6 +965,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     const pawn = this.pawns.get(id);
     if (pawn) {
       this.handOverExp(pawn);
+      const p = pawn.player;
+      if (p.joined && p.id === id) {
+        // Leaving knocked out is waking at the 보건실: the 기절 counts.
+        if (p.down) background("knockout", live()?.events.knockout(pawn.character.id));
+        carryOut(pawn.character.id, p, this.world.tick);
+      }
       if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
       for (const other of this.pawns.values()) {
         const theirs = other.client.view;
@@ -953,6 +1032,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
         pawn.fromY = pawn.player.y;
       }
       const s0 = performance.now();
+      this.applyQueued();
       stepFight(this.world, inputs);
       if (this.devActions.length > 0) for (const act of this.devActions.splice(0)) act();
       // What combat earned goes to each character's pending grant; nothing touches the database.
@@ -966,6 +1046,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {
+        // A client that has not acknowledged its join (or is leaving) is sent nothing: Colyseus
+        // would queue the frames for it without limit. Its first real message is a keyframe.
+        if (client.state !== ClientState.JOINED && client.state !== ClientState.RECONNECTED)
+          continue;
         const pawn = this.pawns.get(client.sessionId);
         if (!pawn || pawn.leaving) continue;
         client.sendBytes(SNAPSHOT_MESSAGE, this.net.message(pawn.net));
@@ -1051,7 +1135,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
         this.inside.set(id, -1);
         continue;
       }
-      void this.walkThrough(pawn, p.id, p.to, p.spawn);
+      background("door", this.walkThrough(pawn, p.id, p.to, p.spawn));
     }
     for (const pawn of this.pawns.values()) {
       if (pawn.leaving) continue;
@@ -1209,15 +1293,18 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     const target = builtMap(to);
     if (!pawn || pawn.leaving || !target) return false;
     const arrive = spawnPlace(target, spawn);
-    void this.moveOn(pawn, {
-      map: target.id,
-      x: arrive.x,
-      y: arrive.y,
-      facing: arrive.facing,
-      instance: target.id === HOME_MAP,
-      write: true,
-      via,
-    });
+    background(
+      "relocate",
+      this.moveOn(pawn, {
+        map: target.id,
+        x: arrive.x,
+        y: arrive.y,
+        facing: arrive.facing,
+        instance: target.id === HOME_MAP,
+        write: true,
+        via,
+      }),
+    );
     return true;
   }
 
@@ -1227,9 +1314,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     if (!l) return;
     for (const pawn of this.pawns.values()) {
       if (pawn.leaving || story.busy(pawn.client.sessionId)) continue;
-      void l.homeUntil(pawn.character.id).then((until) => {
-        if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
-      });
+      background(
+        "home check",
+        l.homeUntil(pawn.character.id).then((until) => {
+          if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
+        }),
+      );
     }
   }
 
@@ -1277,7 +1367,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
 
   sendOn(sessionId: string, to: Destination): void {
     const pawn = this.pawns.get(sessionId);
-    if (pawn && !pawn.leaving) void this.moveOn(pawn, to);
+    if (pawn && !pawn.leaving) background("story move", this.moveOn(pawn, to));
   }
 
   /** After a replay: back to where the character's saved record says it belongs. */
@@ -1285,21 +1375,24 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     const pawn = this.pawns.get(sessionId);
     if (!pawn || pawn.leaving) return;
     const auth = pawn.client.auth as RoomAuth;
-    void characterAfterMoves(auth.accountId, auth.characterId).then(async (c) => {
-      if (!c) return;
-      const where = await story.whereBelongs(c);
-      const place = validPlace(where.map, c.x, c.y);
-      const here = c.mapId === where.map ? place : spawnPlace(place.map, "main");
-      this.sendOn(sessionId, {
-        map: place.map.id,
-        x: here.x,
-        y: here.y,
-        facing: here.facing,
-        instance: where.instance,
-        write: false,
-        via: "replay",
-      });
-    });
+    background(
+      "story send back",
+      characterAfterMoves(auth.accountId, auth.characterId).then(async (c) => {
+        if (!c) return;
+        const where = await story.whereBelongs(c);
+        const place = validPlace(where.map, c.x, c.y);
+        const here = c.mapId === where.map ? place : spawnPlace(place.map, "main");
+        this.sendOn(sessionId, {
+          map: place.map.id,
+          x: here.x,
+          y: here.y,
+          facing: here.facing,
+          instance: where.instance,
+          write: false,
+          via: "replay",
+        });
+      }),
+    );
   }
 
   /** Plays a scene for everyone here, and whoever comes while it runs; resolves when it ended. */
@@ -1443,9 +1536,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
       client.send(MAP_MESSAGES.interaction, scripted);
       return;
     }
-    void this.answer(pawn, target, n, at).then((answer) => {
-      if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
-    });
+    background(
+      "interaction",
+      this.answer(pawn, target, n, at).then((answer) => {
+        if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
+      }),
+    );
   }
 
   private async answer(

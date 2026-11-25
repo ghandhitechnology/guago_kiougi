@@ -6,7 +6,7 @@
 import { createServer } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import type { Room } from "@colyseus/sdk";
-import { mapById } from "@guago/content";
+import { snapshotReaderForMap } from "@guago/content";
 import {
   API,
   CLOSE_MAP_CHANGED,
@@ -23,11 +23,9 @@ import {
   type PresenceMessage,
   type SceneCue,
   type SceneStart,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   STORY_MESSAGES,
-  TILE_SIZE,
   type Transfer,
   WORLD_MESSAGES,
   WORLD_ROOM,
@@ -153,14 +151,11 @@ const readers = new WeakMap<Room<unknown, MapState>, SnapshotReader>();
 
 /** Reads a room's fight snapshots, where the client's own body comes (its Self record). */
 function follow(room: Room<unknown, MapState>): void {
-  const reader = new SnapshotReader();
-  readers.set(room, reader);
   room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
-    if (reader.cols === 0) {
-      const map = mapById(room.state.map);
-      const cell = SNAP_CELL_TILES * TILE_SIZE;
-      reader.cols = Math.ceil(((map?.collision.w ?? 0) * TILE_SIZE) / cell);
-      reader.rows = Math.ceil(((map?.collision.h ?? 0) * TILE_SIZE) / cell);
+    let reader = readers.get(room);
+    if (!reader) {
+      reader = snapshotReaderForMap(room.state.map);
+      readers.set(room, reader);
     }
     reader.read(bytes, NULL_SINK);
   });
