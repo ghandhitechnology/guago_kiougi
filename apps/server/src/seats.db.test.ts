@@ -4,7 +4,7 @@
  */
 import { createServer } from "node:net";
 import { ClientState, matchMaker } from "@colyseus/core";
-import { Client, type Room, type SeatReservation } from "@colyseus/sdk";
+import type { Room, SeatReservation } from "@colyseus/sdk";
 import { API, CLOSE_SESSION_REPLACED, MAP_ROOM } from "@guago/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createGameServer } from "./app.ts";
@@ -14,7 +14,8 @@ import { studentLooks } from "./looks.ts";
 import type { MapRoom } from "./map-room.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
-import { call, cookieHeader, type Jar, remember, waitFor, within } from "./test/http.ts";
+import { enter, joinMap, sdk } from "./test/enter.ts";
+import { call, type Jar, remember, waitFor, within } from "./test/http.ts";
 
 const SETTINGS = {
   clientOrigin: "http://localhost:5173",
@@ -70,8 +71,6 @@ async function player(loginId: string): Promise<Jar> {
 const loginAgain = (loginId: string) =>
   call(base, API.login, { body: { loginId, password: "seat pass" }, ip: "10.1.9.9" });
 
-const sdk = (jar: Jar) => new Client(base, { headers: { cookie: cookieHeader(jar) } });
-
 async function seated(): Promise<number> {
   const rooms = await matchMaker.query({ name: MAP_ROOM });
   return rooms.reduce(
@@ -121,10 +120,9 @@ beforeEach(async () => {
 describe("one seat per account", () => {
   it("evicts a player who reconnected, so a new login joins at once", async () => {
     const jar = await player("blip");
-    const room = await sdk(jar).joinOrCreate(MAP_ROOM);
+    const { room } = await joinMap(base, jar);
     room.reconnection.minUptime = 0;
     // Fully joined (the client acknowledged): only then does the server hold a dropped seat.
-    await new Promise((resolve) => room.onStateChange.once(resolve));
     const joined = matchMaker.getLocalRoomById(room.roomId);
     await waitFor(() => joined?.clients[0]?.state === ClientState.JOINED);
     const back = new Promise<void>((resolve) => room.onReconnect(() => resolve()));
@@ -143,7 +141,7 @@ describe("one seat per account", () => {
     );
 
     const started = Date.now();
-    const next = await sdk(fresh).joinOrCreate(MAP_ROOM);
+    const { room: next } = await joinMap(base, fresh);
     expect(Date.now() - started).toBeLessThan(2000);
     expect(await seated()).toBe(1);
     await next.leave();
@@ -151,12 +149,14 @@ describe("one seat per account", () => {
 
   it("evicts a player still joining when the account logs in elsewhere", async () => {
     const jar = await player("joiner");
-    // Character loads: matchmaking is the next call, the room's own load the one after.
+    const { seating } = await enter(base, jar);
+    if (!seating) throw new Error("no seat");
+    // Character loads: the room's own load is the next call.
     gate.calls = 0;
-    gate.armedAt = 2;
+    gate.armedAt = 1;
     gate.reached = false;
-    const joining = sdk(jar)
-      .joinOrCreate(MAP_ROOM)
+    const joining = sdk(base, jar)
+      .consumeSeatReservation(seating.seat)
       .then(
         (room) => closed(room).then((code) => `closed ${code}`),
         () => "refused",
@@ -173,15 +173,11 @@ describe("one seat per account", () => {
 
   it("voids a seat reserved before the session was logged out", async () => {
     const jar = await player("stale");
-    const reserve = await fetch(`${base}/matchmake/joinOrCreate/${MAP_ROOM}`, {
-      method: "POST",
-      headers: { cookie: cookieHeader(jar), "content-type": "application/json" },
-      body: "{}",
-    });
-    expect(reserve.status).toBe(200);
-    const reservation = (await reserve.json()) as SeatReservation;
+    const { status, seating } = await enter(base, jar);
+    expect(status).toBe(200);
+    const reservation = seating?.seat as SeatReservation;
     await call(base, API.logout, { jar, body: {} });
-    await expect(new Client(base).consumeSeatReservation(reservation)).rejects.toBeDefined();
+    await expect(sdk(base, {}).consumeSeatReservation(reservation)).rejects.toBeDefined();
     expect(await seated()).toBe(0);
   });
 });

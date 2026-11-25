@@ -8,7 +8,7 @@ import { request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
-import { API, CLOSE_BANNED, MAP_ROOM, WORLD_ROOM } from "@guago/shared";
+import { API, CLOSE_BANNED, WORLD_ROOM } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGameServer } from "../app.ts";
@@ -21,6 +21,7 @@ import type { Live } from "../live/index.ts";
 import { studentLooks } from "../looks.ts";
 import { evictAccount } from "../seats.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
+import { joinMap } from "../test/enter.ts";
 import { call, cookieHeader, type Jar, remember, waitFor, within } from "../test/http.ts";
 import { createModerationStack, type ModerationStack } from "./index.ts";
 
@@ -149,7 +150,7 @@ describe("a ban", () => {
     const p = await player("banned1");
     const world = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
     world.reconnection.enabled = false;
-    const map = await sdk(p.jar).joinOrCreate(MAP_ROOM);
+    const { room: map } = await joinMap(base, p.jar);
     const mapClosed = closed(map);
     const token = world.reconnectionToken;
     const roomId = world.roomId;

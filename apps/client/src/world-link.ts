@@ -430,7 +430,8 @@ export function connectWorld(
     } else {
       const entry = presence.get(m.id);
       if (!entry) return;
-      const next = m.t === "map" ? { ...entry, map: m.map } : { ...entry, level: m.level };
+      const next =
+        m.t === "map" ? { ...entry, map: m.map, ch: m.ch } : { ...entry, level: m.level };
       presence.set(m.id, next);
       emit({ type: "presence", change: { kind: "update", entry: next } });
     }

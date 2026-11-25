@@ -166,4 +166,17 @@ export const ko = {
   "logout.body": "오늘은 여기까지 하고 하교합니다.",
   "logout.yes": "하교",
   "logout.no": "더 있기",
+
+  // The map's channel, beside its name when it is not the first.
+  "world.channel": "{n}채널",
+
+  // What an emote says over the body that made it.
+  "emote.wave": "안녕",
+  "emote.clap": "짝짝짝",
+  "emote.lol": "ㅋㅋㅋ",
+  "emote.sleepy": "졸려",
+  "emote.fighting": "화이팅",
+  "emote.bow": "꾸벅",
+  "emote.dance": "둠칫둠칫",
+  "emote.meltdown": "멘붕",
 } as const;
