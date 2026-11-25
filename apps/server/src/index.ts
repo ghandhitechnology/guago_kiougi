@@ -7,6 +7,7 @@ import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
 import { studentLooks } from "./looks.ts";
+import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { worldRoom } from "./world-room.ts";
@@ -51,4 +52,5 @@ setInterval(
   },
   10 * 60 * 1000,
 ).unref();
-console.log(`game server on :${config.port}`);
+await serveMetrics(config.metricsPort);
+console.log(`game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}`);
