@@ -8,6 +8,10 @@ export const SONG_IDS = [
   "agora",
   "boss-mid",
   "boss-era",
+  "rift-first",
+  "night-study",
+  "school-theme",
+  "home",
 ] as const;
 export type SongId = (typeof SONG_IDS)[number];
 

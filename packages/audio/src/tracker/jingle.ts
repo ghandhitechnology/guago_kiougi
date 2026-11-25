@@ -34,12 +34,12 @@ export function renderJingle(
       }
     }
   });
-  // Trim the silent tail, then fade the last 20 ms.
+  // Trim the tail below -54 dB, then fade the last 20 ms.
   let end = length;
   while (
     end > 0 &&
-    Math.abs(left[end - 1] as number) < 3e-4 &&
-    Math.abs(right[end - 1] as number) < 3e-4
+    Math.abs(left[end - 1] as number) < 2e-3 &&
+    Math.abs(right[end - 1] as number) < 2e-3
   )
     end--;
   const fade = Math.min(end, Math.round(0.02 * sr));
