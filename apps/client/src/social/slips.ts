@@ -29,6 +29,7 @@ export interface Slip {
 interface Shown {
   readonly slip: Slip;
   readonly root: Phaser.GameObjects.Container;
+  readonly w: number;
   readonly h: number;
   readonly fuse: Phaser.GameObjects.Rectangle | undefined;
   readonly fuseW: number;
@@ -74,8 +75,17 @@ export class Slips {
     const ctx = { scene, scope: this.scope };
     const answers = slip.accept !== undefined || slip.decline !== undefined;
     const h = answers ? 50 : 30;
+    const title = new Label(scene, 24, 5, slip.title, {
+      font: "galmuri11-bold",
+      color: "ink.dark",
+    });
+    const sub = slip.sub
+      ? new Label(scene, 24, 18, slip.sub, { font: "galmuri9", color: "stone.dark" })
+      : undefined;
+    // As wide as its words need, at least the width the answers sit in.
+    const w = Math.max(W, 24 + Math.max(title.width, sub?.width ?? 0) + (slip.sealed ? 30 : 8));
     const [l, r, tt, b] = sliceOf("tooltip");
-    const paper = scene.add.nineslice(0, 0, "ui", "tooltip/idle", W, h, l, r, tt, b).setOrigin(0);
+    const paper = scene.add.nineslice(0, 0, "ui", "tooltip/idle", w, h, l, r, tt, b).setOrigin(0);
     paper.setInteractive();
     const parts: Phaser.GameObjects.GameObject[] = [paper];
     parts.push(
@@ -83,15 +93,9 @@ export class Slips {
         ? scene.add.image(5, 5, slip.icon).setOrigin(0)
         : scene.add.image(5, 5, "ui", slip.icon).setOrigin(0),
     );
-    const title = new Label(scene, 24, 5, slip.title, {
-      font: "galmuri11-bold",
-      color: "ink.dark",
-    });
     parts.push(title.obj);
-    if (slip.sub) {
-      parts.push(new Label(scene, 24, 18, slip.sub, { font: "galmuri9", color: "stone.dark" }).obj);
-    }
-    if (slip.sealed) parts.push(scene.add.image(W - 25, 4, "ui", "seal/on").setOrigin(0));
+    if (sub) parts.push(sub.obj);
+    if (slip.sealed) parts.push(scene.add.image(w - 25, 4, "ui", "seal/on").setOrigin(0));
     const root = scene.add.container(0, 0, parts).setDepth(700);
     if (answers) {
       const bw = Math.floor((W - 14) / 2);
@@ -121,14 +125,14 @@ export class Slips {
       );
     }
     let fuse: Phaser.GameObjects.Rectangle | undefined;
-    const fuseW = W - 8;
+    const fuseW = w - 8;
     if (slip.expiresAt) {
       fuse = scene.add.rectangle(4, h - 3, fuseW, 1, paint("red.mid")).setOrigin(0);
       root.add(fuse);
     }
     const now = Date.now();
     const until = slip.expiresAt ?? now + (slip.ttl ?? 9000);
-    this.shown.unshift({ slip, root, h, fuse, fuseW, until, start: now });
+    this.shown.unshift({ slip, root, w, h, fuse, fuseW, until, start: now });
     const sw = this.scene.scale.width;
     root.setPosition(sw + 4, this.top);
     if (this.hidden) root.setAlpha(0);
@@ -166,9 +170,9 @@ export class Slips {
   }
 
   private layout(): void {
-    const x = this.scene.scale.width - W - 6;
     let y = this.top;
     for (const s of this.shown) {
+      const x = this.scene.scale.width - s.w - 6;
       slide(s.root, { x, y }, 160);
       y += s.h + 3;
     }
