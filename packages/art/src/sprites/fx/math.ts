@@ -146,17 +146,18 @@ function sineDist(x: number, y: number, shift: number): number {
 }
 
 /**
- * One period of the beam: a white curve, pale halo, navy edge. Each frame moves the wave a
- * quarter period, so the tiled segment scrolls toward its head.
+ * One period of the beam: a thin white curve lit pale above and navy below, with a navy edge,
+ * so monsters it pierces stay visible through its loops. Each frame moves the wave a quarter
+ * period, so the tiled segment scrolls toward its head.
  */
 function beam(shift: number): Pic {
   return clean(
     paintAt(PERIOD, BEAM_H, (x, y) => {
       const d = sineDist(x, y, shift);
-      if (d < 0.8) return "W";
-      if (d < 1.5) return "p";
-      if (d < 2.2) return "l";
-      if (d < 2.8) return "m";
+      if (d < 0.75) return "W";
+      if (d < 1.35)
+        return y > MID + 0.5 - 4 * Math.sin((2 * Math.PI * (x + shift)) / PERIOD) ? "l" : "p";
+      if (d < 1.85) return "m";
       return null;
     }),
   );

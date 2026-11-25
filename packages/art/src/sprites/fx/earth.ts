@@ -70,8 +70,18 @@ function forecast(k: number): Pic {
     for (let x = 1; x < FW; x += 4) put(pic, "mm", x, mid);
   } else {
     // Ticks across the line every eight pixels, like a survey.
-    for (let x = 4; x < FW; x += 8) line(pic, x, mid - 2, x, mid + 2, k >= 3 ? "d" : "o");
-    path(pic, trace, k === 4 ? "W" : k >= 2 ? "l" : "m");
+    for (let x = 4; x < FW; x += 8) line(pic, x, mid - 3, x, mid + 3, k >= 3 ? "d" : "o");
+    const ink = k === 4 ? "W" : k >= 2 ? "l" : "m";
+    path(pic, trace, ink);
+    // From the third stage the trace is drawn twice, a pixel apart: it thickens as it nears.
+    if (k >= 2)
+      path(
+        pic,
+        trace.map(([x, y]) => [x, y + 1] as Pt),
+        k === 4 ? "p" : "m",
+        false,
+        ".",
+      );
   }
   // Umber under the trace so it holds on sunlit ground.
   const out = pic.clone();

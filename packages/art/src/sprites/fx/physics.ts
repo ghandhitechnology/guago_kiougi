@@ -334,7 +334,7 @@ function bolt(w: number, h: number, a: Pt, b: Pt, seed: number, bright: boolean)
   }
   pts.push(b);
   const core = bright ? "W" : "p";
-  const halo = bright ? "p" : "l";
+  const halo = bright ? "l" : "m";
   const pic = Pic.blank(w, h);
   path(pic, pts, core);
   // A fork off one of the middle kinks.
@@ -358,7 +358,7 @@ function bolt(w: number, h: number, a: Pt, b: Pt, seed: number, bright: boolean)
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++)
       if (pic.at(x, y) === "." && pic.at(x, y - 1) !== "." && pic.at(x, y - 1) !== undefined)
-        out.set(x, y, "m");
+        out.set(x, y, "d");
   return clean(out);
 }
 
