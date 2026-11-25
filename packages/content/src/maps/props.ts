@@ -51,6 +51,13 @@ export const PROPS = {
   boat: { foot: [3, 1] },
   nets: { foot: [2, 1] },
   gnomon: { foot: [1, 1] },
+  // Page 1 town and boss maps.
+  stall: { foot: [3, 1] },
+  krene: { foot: [4, 2] },
+  heroes: { foot: [5, 1] },
+  pithos: { foot: [1, 1] },
+  cart: { foot: [2, 1] },
+  "bench-stone": { foot: [2, 1] },
 
   // The interior kit: furniture that blocks, by the floor it stands on. Chairs, stools, bags,
   // books and small things on the floor are walked around by eye, not blocked.

@@ -13,6 +13,8 @@ import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
 import home from "./home.ts";
 import jeungmyeong from "./jeungmyeong.ts";
 import lounge from "./lounge.ts";
+// Page 1 town, 위험 구역 and boss maps.
+import p1Agora from "./p1-agora.ts";
 // Page 1 hunting fields and the 생태공원.
 import p1Colonnade from "./p1-colonnade.ts";
 import saebyeok from "./saebyeok.ts";
@@ -48,6 +50,8 @@ export const MAP_SOURCES: readonly MapSource[] = [
   home,
   // Page 1 hunting fields and the 생태공원.
   p1Colonnade,
+  // Page 1 town, 위험 구역 and boss maps.
+  p1Agora,
 ];
 
 /**
@@ -59,7 +63,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "gaseol-2f",
   "gaseol-4f",
   "jeungmyeong",
-  "agora",
   "eco-park",
   // 가설관 and 증명관 interiors: rooms and places their doors lead to before they exist.
   "gaseol-roof",
@@ -77,6 +80,9 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "p1-elea-track",
   "p1-lyceum",
   "p1-olive-road",
+  // Page 1 fields the town and the lairs open onto before they are built.
+  "p1-cave-mouth",
+  "p1-agora-edge",
 ]);
 
 /** Builds every map. */
