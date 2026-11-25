@@ -15,6 +15,8 @@ import { emoteAllowed } from "@guago/content";
 import {
   type ClubRank,
   type ClubView,
+  CONTROL_MODES,
+  type ControlMode,
   type Done,
   EMOTE_TILES,
   encodeEmblem,
@@ -525,12 +527,26 @@ export class SocialHub<P extends Peer> {
       const peer = this.room.online(id);
       if (peer) this.event(peer, { t: "partyInvites", list: parties.invitesOf(id, now) });
     }
+    // One message per member per flush, whatever changed in the party.
+    const byParty = new Map<number, { members: string[]; dirty: string[] }>();
     for (const id of vitals) {
-      const v = parties.vitalsOf(id);
-      if (!v) continue;
-      for (const member of parties.membersOf(id)) {
-        const peer = member === id ? undefined : this.room.online(member);
-        if (peer) this.event(peer, { t: "vitals", id, hp: v.hp, mode: v.mode });
+      const party = parties.of(id);
+      if (!party) continue;
+      const entry = byParty.get(party.id) ?? { members: party.members, dirty: [] };
+      entry.dirty.push(id);
+      byParty.set(party.id, entry);
+    }
+    for (const { members, dirty } of byParty.values()) {
+      for (const member of members) {
+        const peer = this.room.online(member);
+        if (!peer) continue;
+        const v: number[] = [];
+        for (const id of dirty) {
+          const vitals = id === member ? undefined : parties.vitalsOf(id);
+          if (!vitals) continue;
+          v.push(members.indexOf(id), vitals.hp, CONTROL_MODES.indexOf(vitals.mode as ControlMode));
+        }
+        if (v.length > 0) this.event(peer, { t: "vitals", v });
       }
     }
   }

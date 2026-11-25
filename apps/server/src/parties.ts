@@ -129,8 +129,9 @@ class Parties {
     const already = party?.invited.has(target.id) ?? false;
     const taken = (party?.members.size ?? 1) + (party?.invited.size ?? 0) - (already ? 1 : 0);
     if (taken >= PARTY_MAX) return "party_full";
+    // Checked whether or not the invite is delivered, so a block never changes the answer.
     const holding = this.held.get(target.id);
-    if (deliver && !already && (holding?.size ?? 0) >= PARTY_INVITES_IN_CAP) return "invites_full";
+    if (!already && (holding?.size ?? 0) >= PARTY_INVITES_IN_CAP) return "invites_full";
     if (!party) party = this.create(me);
     const expiresAt = now + PARTY_INVITE_SECONDS * 1000;
     party.invited.set(target.id, { name: target.name, expiresAt });

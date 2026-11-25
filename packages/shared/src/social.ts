@@ -363,8 +363,12 @@ export type SocialEvent =
   | { t: "blocks"; list: Person[] }
   | { t: "party"; party: PartyView | null }
   | { t: "partyInvites"; list: PartyInvite[] }
-  /** A party member's health and mode, from combat. */
-  | { t: "vitals"; id: string; hp: number; mode: ControlMode | "" }
+  /**
+   * Party members' health and mode, from combat, at most four times a second: flat triples of
+   * the member's index in `PartyView.members`, health in percent, and the control mode's index
+   * in `CONTROL_MODES` (−1 for none). The receiver's own entry is left out.
+   */
+  | { t: "vitals"; v: number[] }
   | { t: "club"; club: ClubView | null }
   | { t: "clubExp"; level: number; exp: number }
   | { t: "clubInvites"; list: ClubInvite[] }

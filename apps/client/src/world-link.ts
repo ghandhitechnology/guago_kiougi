@@ -27,6 +27,7 @@ import {
   type ClubApplication,
   type ClubInvite,
   type ClubView,
+  CONTROL_MODES,
   cleanChatText,
   cleanText,
   type Done,
@@ -302,11 +303,13 @@ export function connectWorld(
       case "partyInvites":
         social.partyInvites = e.list;
         break;
-      case "vitals": {
-        const member = social.party?.members.find((m) => m.id === e.id);
-        if (member) Object.assign(member, { hp: e.hp, mode: e.mode });
+      case "vitals":
+        for (let i = 0; i + 2 < e.v.length; i += 3) {
+          const member = social.party?.members[e.v[i] as number];
+          const mode = CONTROL_MODES[e.v[i + 2] as number] ?? "";
+          if (member) Object.assign(member, { hp: e.v[i + 1], mode });
+        }
         break;
-      }
       case "club":
         social.club = e.club;
         break;
