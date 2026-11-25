@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   addBookExp,
+  BIND,
   type BookItem,
   bind,
   canEvolve,
   copiesForGrade,
+  FORGE_FEE_BASE,
   feedSheets,
   forge,
   forgeFee,
   mergeTools,
+  PILGI_COIN_BASE,
   pilgi,
   pilgiBaseChance,
   pilgiChance,
@@ -42,11 +45,18 @@ describe("필기", () => {
     expect(pilgiChance(20, 8)).toBe(1);
   });
 
-  it("costs 10 × 1.15ⁿ 잉크 and 100 × 1.15ⁿ × grade 솔방울, rounded up", () => {
-    expect(pilgiCost(0, BookGrade.Textbook)).toEqual({ ink: 10, pinecone: 100 });
+  it("scales the 솔방울 cost with the book's level and keeps 잉크 flat", () => {
+    const low = pilgiCost(3, BookGrade.Textbook, 0);
+    const high = pilgiCost(3, BookGrade.Textbook, 100);
+    expect(high.ink).toBe(low.ink);
+    expect(high.pinecone / low.pinecone).toBeCloseTo(10, 0);
+  });
+
+  it("costs 10 × 1.15ⁿ 잉크 and base × 1.15ⁿ × grade 솔방울 at level 0, rounded up", () => {
+    expect(pilgiCost(0, BookGrade.Textbook)).toEqual({ ink: 10, pinecone: PILGI_COIN_BASE });
     expect(pilgiCost(10, BookGrade.Advanced)).toEqual({
       ink: Math.ceil(10 * 1.15 ** 10),
-      pinecone: Math.ceil(100 * 1.15 ** 10 * 2.2),
+      pinecone: Math.ceil(PILGI_COIN_BASE * 1.15 ** 10 * 2.2),
     });
   });
 
@@ -57,7 +67,7 @@ describe("필기", () => {
     expect(fail.state.success).toBe(false);
     expect(fail.state.item.pilgi).toBe(10);
     expect(fail.state.item.pilgiFails).toBe(1);
-    const cost = pilgiCost(10, BookGrade.Textbook);
+    const cost = pilgiCost(10, BookGrade.Textbook, 1);
     expect(fail.ledger).toEqual([
       { currency: "ink", amount: -cost.ink, key: "sink.pilgi" },
       { currency: "pinecone", amount: -cost.pinecone, key: "sink.pilgi" },
@@ -86,7 +96,7 @@ describe("필기", () => {
 describe("제본 and 제련", () => {
   it("binds 20 sheets into a level 1 교과서", () => {
     const r = bind(
-      { "sheet:wangdo": 25, binding: 1, pinecone: 500 },
+      { "sheet:wangdo": 25, binding: 1, pinecone: BIND.fee + 300 },
       {
         id: "n",
         def: "wangdo",
@@ -104,7 +114,7 @@ describe("제본 and 제련", () => {
       book({ id: "b", level: 12, pilgi: 9, pilgiFails: 2 }),
       book({ id: "c", level: 40, exp: 9 }),
     ];
-    const r = forge({ pinecone: 10_000 }, copies, 1);
+    const r = forge({ pinecone: FORGE_FEE_BASE }, copies, 1);
     if (!r.ok) throw new Error(r.error);
     expect(r.state.item).toMatchObject({
       id: "c",
@@ -115,7 +125,9 @@ describe("제본 and 제련", () => {
       pilgiFails: 2,
     });
     expect(r.state.consumed).toEqual(["a", "b"]);
-    expect(r.ledger).toEqual([{ currency: "pinecone", amount: -1000, key: "sink.forge" }]);
+    expect(r.ledger).toEqual([
+      { currency: "pinecone", amount: -FORGE_FEE_BASE, key: "sink.forge" },
+    ]);
   });
 
   it("refuses mixed or incomplete sets and the top grade", () => {
@@ -131,9 +143,9 @@ describe("제본 and 제련", () => {
   });
 
   it("scales the fee with grade and Page", () => {
-    expect(forgeFee(BookGrade.Textbook, 1)).toBe(1000);
-    expect(forgeFee(BookGrade.Major, 1)).toBe(27_000);
-    expect(forgeFee(BookGrade.Textbook, 3)).toBe(100_000);
+    expect(forgeFee(BookGrade.Textbook, 1)).toBe(FORGE_FEE_BASE);
+    expect(forgeFee(BookGrade.Major, 1)).toBe(FORGE_FEE_BASE * 27);
+    expect(forgeFee(BookGrade.Textbook, 3)).toBe(FORGE_FEE_BASE * 100);
     expect(copiesForGrade(BookGrade.Advanced)).toBe(9);
   });
 });
@@ -154,15 +166,59 @@ describe("book levels", () => {
     expect(r.state.item.level).toBe(31);
     expect(r.ledger).toEqual([{ currency: "sheet:wangdo", amount: -20, key: "sink.feed" }]);
   });
+
+  it("charges only the sheets the book can take before it reaches its owner", () => {
+    const fed = (count: number) =>
+      feedSheets({ item: book({ level: 1 }), purse: { "sheet:wangdo": 100_000 } }, count, 2);
+    const some = fed(100);
+    const all = fed(100_000);
+    if (!some.ok || !all.ok) throw new Error("refused");
+    expect(some.state.item.level).toBe(2);
+    expect(some.state.used).toBe(20);
+    expect(some.state.purse["sheet:wangdo"]).toBe(100_000 - 20);
+    expect(all.state).toEqual(some.state);
+    expect(all.ledger).toEqual([{ currency: "sheet:wangdo", amount: -20, key: "sink.feed" }]);
+  });
+
+  it("ends in the same book however the same sheets are split across requests", () => {
+    const start = book({ level: 3, exp: bookExpToNext(3) * 0.37 });
+    const feedAll = (splits: readonly number[]) => {
+      let state = { item: start, purse: { "sheet:wangdo": 500 } as Record<string, number> };
+      let used = 0;
+      for (const n of splits) {
+        const r = feedSheets(state, n, 40);
+        if (!r.ok) throw new Error(r.error);
+        state = { item: r.state.item, purse: { ...r.state.purse } as Record<string, number> };
+        used += r.state.used;
+      }
+      return { item: state.item, used, left: state.purse["sheet:wangdo"] };
+    };
+    const once = feedAll([240]);
+    expect(once.item.level).toBeGreaterThan(start.level + 10);
+    expect(feedAll([120, 120])).toEqual(once);
+    expect(feedAll([7, 33, 200])).toEqual(once);
+    expect(feedAll(Array(240).fill(1))).toEqual(once);
+  });
 });
 
 describe("tools and evolution", () => {
-  it("merges duplicates up to level 5", () => {
+  it("merges duplicates up to level 5 and keeps the levels that do not fit", () => {
     const r = mergeTools(
-      { id: "t1", def: "compass", level: 3 },
-      { id: "t2", def: "compass", level: 4 },
+      { id: "t1", def: "compass", level: 4 },
+      { id: "t2", def: "compass", level: 3 },
     );
-    expect(r.ok && r.state.level).toBe(5);
+    expect(r.ok && r.state).toEqual({
+      into: { id: "t1", def: "compass", level: 5 },
+      from: { id: "t2", def: "compass", level: 2 },
+    });
+    const whole = mergeTools(
+      { id: "t1", def: "compass", level: 2 },
+      { id: "t2", def: "compass", level: 3 },
+    );
+    expect(whole.ok && whole.state).toEqual({
+      into: { id: "t1", def: "compass", level: 5 },
+      from: null,
+    });
     expect(
       mergeTools({ id: "t1", def: "compass", level: 5 }, { id: "t2", def: "compass", level: 1 }).ok,
     ).toBe(false);

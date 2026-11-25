@@ -13,7 +13,17 @@ import {
   signatureStrength,
 } from "./classes.ts";
 import { dropLedger, rollDrops } from "./drops.ts";
-import { fieldPopulation, PAGE1_FIELDS, spawnLevel, spawnRate, wavePhase } from "./fields.ts";
+import {
+  FIELD_PACING,
+  fieldPopulation,
+  PAGE1_FIELDS,
+  refill,
+  refillCap,
+  regionCount,
+  regionLevels,
+  spawnLevel,
+  wavePhase,
+} from "./fields.ts";
 import { zenoDamage } from "./monsters.ts";
 
 const must = <A>(b: { readonly attack: A | null }): A => {
@@ -148,27 +158,33 @@ describe("field pacing", () => {
     expect(fieldPopulation(40)).toBe(150);
   });
 
-  it("spawns only during a surge", () => {
+  it("refills kill for kill during a surge, up to a cap that grows with players", () => {
     expect(wavePhase(10)).toBe("surge");
     expect(wavePhase(55)).toBe("lull");
     expect(wavePhase(62)).toBe("surge");
-    expect(spawnRate(1, "surge")).toBe(1.5);
-    expect(spawnRate(3, "lull")).toBe(0);
+    const cap = FIELD_PACING.refillBase + FIELD_PACING.refillPerPlayer;
+    expect(refillCap(1, "surge")).toBe(cap);
+    expect(refillCap(3, "lull")).toBe(0);
+    expect(refill(1, "surge", 1)).toBe(1);
+    expect(refill(1, "surge", 100)).toBe(cap);
+    expect(refill(1, "lull", 1)).toBe(0);
   });
 
-  it("spawns near the players' level inside the field", () => {
+  it("cuts a field into regions of levels, deeper is higher", () => {
     const field = PAGE1_FIELDS[0];
     if (!field) throw new Error("no field");
-    expect(spawnLevel(field, 10, 0)).toBe(8);
-    expect(spawnLevel(field, 10, 0.999)).toBe(12);
-    expect(spawnLevel(field, 1, 0)).toBe(1);
-    expect(spawnLevel(field, 40, 0.5)).toBe(25);
+    expect(regionCount(field)).toBe(5);
+    expect(regionLevels(field, 0)).toEqual({ min: 1, max: 5 });
+    expect(regionLevels(field, 4)).toEqual({ min: 21, max: 25 });
+    expect(regionLevels(field, 9)).toEqual({ min: 21, max: 25 });
+    expect(spawnLevel(field, 1, 0)).toBe(6);
+    expect(spawnLevel(field, 1, 0.999)).toBe(10);
   });
 });
 
 describe("drops", () => {
   const roll = {
-    source: { kind: "monster", fieldId: "f", monsterId: "odap", rank: "elite" },
+    source: { kind: "monster", fieldId: "f", monsterId: "odap", rank: "boss" },
     level: 10,
     rank: 12,
     coin: 1,
@@ -179,7 +195,7 @@ describe("drops", () => {
     spotlight: "math",
   } as const;
 
-  it("always pays coin and gives an elite pages, the same for the same seed", () => {
+  it("always pays coin and gives a boss pages, the same for the same seed", () => {
     const a = rollDrops(new Random(9), roll);
     const b = rollDrops(new Random(9), roll);
     expect(a).toEqual(b);
@@ -190,7 +206,7 @@ describe("drops", () => {
     expect(dropLedger(first)).toEqual({
       currency: "pinecone",
       amount: Math.round(2 * 10 ** 0.1 * 12 ** 0.8),
-      key: "drop.elite.odap.f",
+      key: "drop.boss.odap.f",
     });
   });
 });

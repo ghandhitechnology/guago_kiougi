@@ -11,6 +11,10 @@ export const API = {
   nameAvailable: "/api/name-available",
   character: "/api/character",
   recover: "/api/recover",
+  /** GET: the character's `InventorySnapshot`. */
+  inventory: "/api/inventory",
+  /** POST `{ id, op, req }` (inventory.ts): one item or currency operation, answered by its `OpResult`. */
+  op: "/api/op",
 } as const;
 
 /**

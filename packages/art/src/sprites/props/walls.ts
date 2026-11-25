@@ -303,6 +303,33 @@ const RIFT: View = (x, y) => {
   return NIGHT(x, y);
 };
 
+/** 19:20 in the rain: a dusk sky the colour of slate, the city's lights smeared, streaks on the glass. */
+const RAIN =
+  (f: number): View =>
+  (x, y) => {
+    const lit = [
+      [3, 13],
+      [8, 14],
+      [11, 12],
+      [15, 15],
+      [22, 13],
+      [24, 15],
+    ];
+    let base: string;
+    if (y < roof(x)) base = y < 6 ? "v" : "N";
+    else if (y < SEA) base = lit.some(([lx, ly]) => lx === x && ly === y) ? "y" : "j";
+    else if (y < WALL_ROW) base = (x === 8 || x === 22) && y === SEA + 1 ? "o" : "v";
+    else if (y === WALL_ROW) base = "I";
+    else base = "j";
+    // Rain: short dashes falling a little to the right, moving down each frame.
+    const d = (x * 3 - y + f * 4 + 90) % 11;
+    if ((d === 0 || d === 1) && (x + f) % 3 !== 1) return "n";
+    // Drops beaded on the glass.
+    if ((x === 4 && y === 8) || (x === 18 && y === 3) || (x === 21 && y === 18)) return "m";
+    if ((x === 4 && y === 9) || (x === 18 && y === 4) || (x === 21 && y === 19)) return "m";
+    return base;
+  };
+
 /** Reflections: one diagonal streak across each sash, in a tone the view decides. */
 const glare = (x: number, y: number): boolean => {
   const d = (x - y + 64) % 32;
@@ -358,6 +385,9 @@ const VIEWS: readonly [string, View, string | null][] = [
   ["gold", GOLD, null],
   ["day", DAY, "w"],
   ["rift", RIFT, null],
+  ["rain0", RAIN(0), null],
+  ["rain1", RAIN(1), null],
+  ["rain2", RAIN(2), null],
 ];
 
 const windows = sprite({
@@ -373,7 +403,11 @@ const windows = sprite({
       [`${name}-curtain`, window(view, glint, true).toString()],
     ]),
   ),
-  anim: { idle: { frames: ["night"], fps: 1 } },
+  anim: {
+    idle: { frames: ["night"], fps: 1 },
+    rain: { frames: ["rain0", "rain1", "rain2"], fps: 6 },
+    "rain-curtain": { frames: ["rain0-curtain", "rain1-curtain", "rain2-curtain"], fps: 6 },
+  },
 });
 
 // Doors -----------------------------------------------------------------------------------------

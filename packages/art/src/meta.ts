@@ -90,6 +90,8 @@ export interface TilesetMeta {
   readonly lower: string;
   /** Themes the pair is meant for, or null for all. */
   readonly themes: readonly string[] | null;
+  /** Theme atlases that hold its tiles, or null for all. Elsewhere its indices are not drawn. */
+  readonly bake: readonly string[] | null;
   /** Tile indices per dual-grid mask, for `pickTiles`. */
   readonly masks: readonly (readonly number[])[];
   readonly tones: readonly ToneMeta[];
@@ -99,6 +101,8 @@ export interface TilesetMeta {
 /** A dual-grid edge drawn over other ground. Mask 0 is empty. */
 export interface OverlayMeta {
   readonly themes: readonly string[] | null;
+  /** Theme atlases that hold its tiles, or null for all. */
+  readonly bake: readonly string[] | null;
   readonly masks: readonly (readonly number[])[];
   /**
    * Per tile index, its shape as 64 hex digits: 256 flags row major, high bit first, set inside

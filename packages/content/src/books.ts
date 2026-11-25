@@ -6,6 +6,7 @@ import { EARTH_BOOKS } from "./books-earth.ts";
 import { MATH_BOOKS } from "./books-math.ts";
 import { PHYSICS_BOOKS } from "./books-physics.ts";
 import type { ClassId } from "./classes.ts";
+import { NARRATIVE } from "./narrative/index.ts";
 import { TOOLS } from "./tools.ts";
 
 export type { BookCues, BookDef, Evolution, SignatureTuning } from "./book-def.ts";
@@ -39,4 +40,27 @@ export function toolById(id: string): ToolDef {
   const found = TOOLS.find((t) => t.id === id);
   if (!found) throw new Error(`unknown tool ${id}`);
   return found;
+}
+
+/** M2's two books per class: the 신입생 basic kit (PLAN §7), given at character creation. */
+export const STARTER_BOOKS: Readonly<Record<ClassId, readonly [string, string]>> = {
+  math: ["wangdo", "graph-note"],
+  physics: ["holiday-physics", "em-lab"],
+  chemistry: ["zoomin-chem", "lab-report"],
+  biology: ["camping-bio", "dissection"],
+  earth: ["round-earth", "rock-box"],
+};
+
+/** The class a tool belongs to: its linked book's subject. */
+export function toolSubject(id: string): ClassId {
+  const linked = BOOKS.find((b) => b.tool === id);
+  if (!linked) throw new Error(`tool ${id} is linked to no book`);
+  return linked.subject;
+}
+
+/** 도감 entries that unlock when `book` is crafted (PLAN §15). */
+export function craftedCodex(book: string): string[] {
+  return NARRATIVE.codex
+    .filter((e) => e.unlock.when === "crafted" && e.unlock.book === book)
+    .map((e) => e.id);
 }

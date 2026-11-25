@@ -1,10 +1,11 @@
 import {
   type Currency,
-  type LedgerEntry,
+  earn,
   type Outcome,
   type Purse,
   pageScale,
   pay,
+  Random,
 } from "@guago/shared";
 
 /**
@@ -92,11 +93,28 @@ export const VENDING = {
   ],
 } as const;
 
+/**
+ * The 자판기's week, counted from Monday 05:00 KST like the weekly board (PLAN §15). 1970-01-01
+ * was a Thursday, so three days shift the count onto Mondays.
+ */
+export function vendingWeek(ms: number): number {
+  const day = Math.floor((ms + (9 - 5) * 3600_000) / 86_400_000);
+  return Math.floor((day + 3) / 7);
+}
+
+/** This week's stock: the fixed five and one special, drawn by the week number. */
+export function vendingStock(week: number): readonly ShopItem[] {
+  return [...VENDING.fixed, new Random(week).pick(VENDING.weekly)];
+}
+
 export function shopPrice(item: ShopItem, page: number): number {
   return item.price * pageScale(page);
 }
 
-/** Buying from the 자판기: the price leaves the economy as `sink.shop`. */
+/**
+ * Buying from the 자판기: the price leaves the economy as `sink.shop` and the goods land in the
+ * bag as `snack:<id>`, booked as `shop.vending`.
+ */
 export function buy(
   purse: Purse,
   item: ShopItem,
@@ -106,6 +124,10 @@ export function buy(
   if (!Number.isInteger(qty) || qty <= 0) return { ok: false, error: "buy_qty" };
   const paid = pay(purse, { pinecone: shopPrice(item, page) * qty }, "sink.shop");
   if (!paid) return { ok: false, error: "buy_cost" };
-  const ledger: LedgerEntry[] = paid.ledger;
-  return { ok: true, state: { purse: paid.purse, item: item.id, qty }, ledger };
+  const goods = earn(paid.purse, { [goodsOf(item.id)]: qty }, "shop.vending");
+  const ledger = [...paid.ledger, ...goods.ledger];
+  return { ok: true, state: { purse: goods.purse, item: item.id, qty }, ledger };
 }
+
+/** The bag currency a 자판기 item is held as. */
+export const goodsOf = (id: string): Currency => `snack:${id}`;
