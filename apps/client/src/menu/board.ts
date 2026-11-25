@@ -14,8 +14,9 @@ import { inventory } from "../state/inventory.ts";
 import { live } from "../state/live.ts";
 import { Button } from "../ui/button.ts";
 import { fade, layDown, stamp } from "../ui/motion.ts";
+import { Tooltip } from "../ui/overlay.ts";
 import { sound } from "../ui/sound.ts";
-import { Label, wrap } from "../ui/text.ts";
+import { Label, measure, wrap } from "../ui/text.ts";
 import { paint, sliceOf } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
 import { session } from "../world/session.ts";
@@ -38,7 +39,39 @@ const descriptions = new Map(N.descriptions.map((d) => [d.id, d]));
 type Kind = "daily" | "weekly" | "story" | "help";
 const KINDS: readonly Kind[] = ["daily", "weekly", "story", "help"];
 
-const NOTE = { w: 132, h: 90 } as const;
+/**
+ * A pinned note, two rows of three on the cork. Inside it, top to bottom: who posted it, the
+ * title, up to two rows of the body, then the footer: progress (or the note's button) over what
+ * it pays. A body cut short ends on a word and an ellipsis, and the whole note shows on a hover
+ * or a long press.
+ */
+const NOTE = { w: 132, h: 82, gap: 4 } as const;
+const TITLE_Y = 17;
+/** Where the body must end, and the footer's rows. */
+const BODY_END = 52;
+const BAR_Y = 56;
+const ACT_Y = 52;
+const PAY_Y = 67;
+
+/** `text` in at most `max` rows of `width`; a cut ends its last row on a word and an ellipsis. */
+function fitRows(
+  scene: Phaser.Scene,
+  text: string,
+  width: number,
+  max: number,
+): { rows: string[]; cut: boolean } {
+  const all = text ? wrap(scene, "galmuri9", text, width) : [];
+  if (all.length <= max) return { rows: all, cut: false };
+  if (max <= 0) return { rows: [], cut: true };
+  const rows = all.slice(0, max);
+  let last = rows[max - 1] ?? "";
+  while (last && measure(scene, "galmuri9", `${last}…`) > width) {
+    const space = last.lastIndexOf(" ");
+    last = space > 0 ? last.slice(0, space) : last.slice(0, -1);
+  }
+  rows[max - 1] = `${last.replace(/[\s.,]+$/, "")}…`;
+  return { rows, cut: true };
+}
 
 /** A notice slot value as words: places, monsters, books and people by their names. */
 function slotText(v: string | number): string | number {
@@ -69,6 +102,7 @@ class BoardPage {
   private readonly notes: Phaser.GameObjects.Container;
   private readonly clock: Phaser.GameObjects.Container;
   private readonly said: SaidLine;
+  private readonly tip: Tooltip;
   private readonly kindTabs: { kind: Kind; mark: Phaser.GameObjects.Rectangle }[] = [];
   private kind: Kind = "daily";
   private pending = new Set<string>();
@@ -77,6 +111,7 @@ class BoardPage {
     this.ctx = ctx;
     const s = ctx.scene;
     this.root = s.add.container(0, 0);
+    this.tip = new Tooltip(s);
     parent.add(this.root);
     // The cork.
     const cork = s.add.graphics();
@@ -109,7 +144,8 @@ class BoardPage {
     }
     this.clock = s.add.container(size.w - 70, 2);
     this.notes = s.add.container(0, 22);
-    this.said = new SaidLine(s, this.root, 8, size.h - 14, size.w - 16);
+    // One row under the notes, inside the cork.
+    this.said = new SaidLine(s, this.root, 8, size.h - 11, size.w - 16);
     this.root.add([this.clock, this.notes]);
     const off = live.watch((_l, push) => {
       if (
@@ -125,6 +161,7 @@ class BoardPage {
     onGone(this.root, () => {
       off();
       tick.remove();
+      this.tip.hide();
     });
     void live.read("board");
     void live.read("page");
@@ -163,6 +200,7 @@ class BoardPage {
 
   private draw(): void {
     this.drawClock();
+    this.tip.hide();
     this.notes.removeAll(true);
     const b = live.board;
     if (!b) return;
@@ -182,58 +220,144 @@ class BoardPage {
   }
 
   private place(i: number): { x: number; y: number } {
-    return { x: 8 + (i % 3) * (NOTE.w + 8), y: 4 + Math.floor(i / 3) * (NOTE.h + 6) };
+    return {
+      x: 8 + (i % 3) * (NOTE.w + 8),
+      y: 2 + Math.floor(i / 3) * (NOTE.h + NOTE.gap),
+    };
   }
 
-  /** One pinned notice. */
-  private note(i: number, n: NoticeView): void {
+  /**
+   * A note's paper, pin, poster, title and as much of the body as fits; returns the note. The
+   * whole text, when cut, shows over the note on a hover or a long press.
+   */
+  private paper(
+    i: number,
+    pin: string,
+    head: { poster: string; title: string; body: string },
+    /** A button will stand over the bar: the body keeps a row clear above it. */
+    button = false,
+  ): Phaser.GameObjects.Container {
     const s = this.ctx.scene;
     const at = this.place(i);
     const c = s.add.container(at.x, at.y);
     this.notes.add(c);
     const [l, r, tt, bb] = sliceOf("tooltip");
     c.add(s.add.nineslice(0, 0, "ui", "tooltip/idle", NOTE.w, NOTE.h, l, r, tt, bb).setOrigin(0));
-    c.add(s.add.circle(NOTE.w / 2, 3, 2, paint("red.mid")));
-    const q = QUESTS.get(n.template);
-    const poster = q ? (N.ko[q.poster] ?? "") : "";
-    if (poster) c.add(new Label(s, 6, 6, poster, { font: "galmuri9", color: "stone.dark" }).obj);
-    const title = new Label(s, 6, 18, noticeTitle(n), {
+    c.add(s.add.circle(NOTE.w / 2, 3, 2, paint(pin)));
+    if (head.poster)
+      c.add(new Label(s, 6, 5, head.poster, { font: "galmuri9", color: "stone.dark" }).obj);
+    const title = new Label(s, 6, TITLE_Y, head.title, {
       font: "galmuri11-bold",
       color: "ink.dark",
       width: NOTE.w - 12,
     });
     c.add(title.obj);
-    let y = 18 + Math.min(title.height, 26) + 2;
-    const body = q ? fillSlots(N.ko[q.body] ?? "", n.slots) : "";
-    if (body) {
-      const rows = wrap(s, "galmuri9", body, NOTE.w - 12).slice(0, 2);
-      c.add(
-        new Label(s, 6, y, rows.join("\n"), { font: "galmuri9", color: "ink.mid", leading: 0 }).obj,
-      );
-      y += rows.length * 11;
-    }
-    // How far along, and what it pays.
-    const by = NOTE.h - 26;
-    c.add(s.add.rectangle(6, by, NOTE.w - 40, 4, paint("stone.light")).setOrigin(0));
-    const share = Math.min(1, n.progress / Math.max(1, n.target));
-    c.add(
-      s.add
-        .rectangle(
-          6,
-          by,
-          Math.round((NOTE.w - 40) * share),
-          4,
-          paint(share >= 1 ? "grass.mid" : "sea.mid"),
-        )
-        .setOrigin(0),
+    const top = TITLE_Y + title.height - 2;
+    const { rows, cut } = fitRows(
+      s,
+      head.body,
+      NOTE.w - 12,
+      Math.floor(((button ? BODY_END - 12 : BODY_END) - top + 3) / 12),
     );
-    c.add(
-      new Label(s, NOTE.w - 32, by - 3, `${Math.min(n.progress, n.target)}/${n.target}`, {
+    if (rows.length > 0) {
+      c.add(
+        new Label(s, 6, top, rows.join("\n"), { font: "galmuri9", color: "ink.mid", leading: 0 })
+          .obj,
+      );
+    }
+    if (cut) {
+      // Over the paper and the words, never over the footer's button.
+      const zone = s.add
+        .zone(0, 0, NOTE.w, ACT_Y - 1)
+        .setOrigin(0)
+        .setInteractive();
+      const show = () => {
+        const m = c.getWorldTransformMatrix();
+        this.tip.show(`${head.title}\n${head.body}`, { x: m.tx, y: m.ty, w: NOTE.w, h: NOTE.h });
+      };
+      zone.on("pointerover", show);
+      zone.on("pointerdown", (p: Phaser.Input.Pointer) => {
+        if (p.wasTouch) show();
+      });
+      zone.on("pointerout", () => this.tip.hide());
+      zone.on("pointerup", (p: Phaser.Input.Pointer) => {
+        if (p.wasTouch) this.tip.hide();
+      });
+      c.add(zone);
+    }
+    return c;
+  }
+
+  /**
+   * The footer's progress: a bar with the count at its right, or, when a button stands at the
+   * footer's right (`button` is its left edge), the bar alone up to it.
+   */
+  private progress(c: Phaser.GameObjects.Container, now: number, of: number, button?: number) {
+    const s = this.ctx.scene;
+    const share = Math.min(1, now / Math.max(1, of));
+    let w = (button ?? NOTE.w - 6) - 4 - 6;
+    if (button === undefined) {
+      const count = new Label(s, 0, BAR_Y - 2, `${Math.min(now, of)}/${of}`, {
         font: "galmuri9",
         color: "ink.dark",
-      }).obj,
+      });
+      count.at(NOTE.w - 6 - count.width, BAR_Y - 2);
+      c.add(count.obj);
+      w = NOTE.w - 12 - count.width - 4;
+    }
+    c.add(s.add.rectangle(6, BAR_Y, w, 4, paint("stone.light")).setOrigin(0));
+    c.add(
+      s.add
+        .rectangle(6, BAR_Y, Math.round(w * share), 4, paint(share >= 1 ? "grass.mid" : "sea.mid"))
+        .setOrigin(0),
     );
-    const pay = s.add.container(6, NOTE.h - 16);
+  }
+
+  /** A button at the footer's right: over the bar's end, or on the last row. */
+  private action(
+    c: Phaser.GameObjects.Container,
+    label: string,
+    run: () => void,
+    opts: { sound?: "confirm"; y?: number } = {},
+  ): Button {
+    const { sound } = opts;
+    const b = new Button(this.ctx, 0, opts.y ?? ACT_Y, {
+      label,
+      kind: "ink",
+      font: "galmuri9",
+      h: 15,
+      ...(sound ? { sound } : {}),
+      onPress: run,
+    });
+    b.setX(NOTE.w - 6 - b.bounds().w);
+    c.add(b);
+    return b;
+  }
+
+  /** One pinned notice. */
+  private note(i: number, n: NoticeView): void {
+    const s = this.ctx.scene;
+    const q = QUESTS.get(n.template);
+    const c = this.paper(
+      i,
+      "red.mid",
+      {
+        poster: q ? (N.ko[q.poster] ?? "") : "",
+        title: noticeTitle(n),
+        body: q ? fillSlots(N.ko[q.body] ?? "", n.slots) : "",
+      },
+      n.state === "done",
+    );
+    // How far along, or the 받기 on a finished one; under it, what it pays.
+    let claim: Button | undefined;
+    if (n.state === "done") {
+      claim = this.action(c, t("board.claim"), () => void this.claim(n, c), {
+        sound: "confirm",
+      });
+      claim.setEnabled(!this.pending.has(n.id));
+    }
+    this.progress(c, n.progress, n.target, claim?.x);
+    const pay = s.add.container(6, PAY_Y);
     c.add(pay);
     let px = 0;
     const r2 = n.reward;
@@ -247,14 +371,17 @@ class BoardPage {
     ];
     for (const [icon, v] of items) {
       if (!v) continue;
-      if (icon) {
-        pay.add(s.add.image(px, 0, "ui", icon).setOrigin(0));
-        px += 13;
-      } else {
-        pay.add(new Label(s, px, 2, "EXP", { font: "galmuri9", color: "sea.dark" }).obj);
-        px += 20;
+      // Whatever does not fit on the note's last row is left for the claim to show.
+      const lab = new Label(s, 0, 2, amount(v), { font: "galmuri9", color: "ink.dark" });
+      const lead = icon ? 13 : 20;
+      if (px + lead + lab.width > NOTE.w - 12) {
+        lab.obj.destroy();
+        break;
       }
-      const lab = new Label(s, px, 2, amount(v), { font: "galmuri9", color: "ink.dark" });
+      if (icon) pay.add(s.add.image(px, 0, "ui", icon).setOrigin(0));
+      else pay.add(new Label(s, px, 2, "EXP", { font: "galmuri9", color: "sea.dark" }).obj);
+      px += lead;
+      lab.at(px, 2);
       pay.add(lab.obj);
       px += lab.width + 6;
     }
@@ -267,17 +394,6 @@ class BoardPage {
       st.add([ring, w.obj]);
       c.add(st);
       c.setAlpha(0.75);
-    } else if (n.state === "done") {
-      const claim = new Button(this.ctx, NOTE.w - 46, NOTE.h - 24, {
-        label: t("board.claim"),
-        kind: "ink",
-        font: "galmuri9",
-        h: 17,
-        sound: "confirm",
-        onPress: () => void this.claim(n, c),
-      });
-      claim.setEnabled(!this.pending.has(n.id));
-      c.add(claim);
     }
   }
 
@@ -333,52 +449,19 @@ class BoardPage {
   // 도움 notices ---------------------------------------------------------------------------------
 
   private drawHelp(): void {
-    const s = this.ctx.scene;
     const b = live.board;
     if (!b) return;
     let i = 0;
     const draw = (n: HelpNoticeView, action: { label: string; run: () => void } | undefined) => {
-      const at = this.place(i++);
-      const c = s.add.container(at.x, at.y);
-      this.notes.add(c);
-      const [l, r, tt, bb] = sliceOf("tooltip");
-      c.add(s.add.nineslice(0, 0, "ui", "tooltip/idle", NOTE.w, NOTE.h, l, r, tt, bb).setOrigin(0));
-      c.add(s.add.circle(NOTE.w / 2, 3, 2, paint("gold.mid")));
       const q = QUESTS.get(n.template);
-      c.add(
-        new Label(s, 6, 6, q ? (N.ko[q.poster] ?? "") : "", {
-          font: "galmuri9",
-          color: "stone.dark",
-        }).obj,
-      );
-      c.add(
-        new Label(s, 6, 18, q ? (N.ko[q.title] ?? "") : "", {
-          font: "galmuri11-bold",
-          color: "ink.dark",
-        }).obj,
-      );
-      const body = q ? fillSlots(N.ko[q.body] ?? "", { ...n.slots, player: n.poster.name }) : "";
-      const rows = wrap(s, "galmuri9", body, NOTE.w - 12).slice(0, 3);
-      c.add(
-        new Label(s, 6, 34, rows.join("\n"), { font: "galmuri9", color: "ink.mid", leading: 0 })
-          .obj,
-      );
-      c.add(
-        new Label(s, 6, NOTE.h - 14, `${n.progress}/${n.count}`, {
-          font: "galmuri9",
-          color: "ink.dark",
-        }).obj,
-      );
-      if (action) {
-        const btn = new Button(this.ctx, NOTE.w - 46, NOTE.h - 24, {
-          label: action.label,
-          kind: "ink",
-          font: "galmuri9",
-          h: 17,
-          onPress: action.run,
-        });
-        c.add(btn);
-      }
+      const c = this.paper(i++, "gold.mid", {
+        poster: q ? (N.ko[q.poster] ?? "") : "",
+        title: q ? (N.ko[q.title] ?? "") : "",
+        body: q ? fillSlots(N.ko[q.body] ?? "", { ...n.slots, player: n.poster.name }) : "",
+      });
+      // A 도움 notice pays nothing on paper: its button takes the last row, under the count.
+      if (action) this.action(c, action.label, action.run, { y: NOTE.h - 17 });
+      this.progress(c, n.progress, n.count);
     };
     if (b.help.mine)
       draw(

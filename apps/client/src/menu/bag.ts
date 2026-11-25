@@ -44,7 +44,11 @@ export interface BagHost {
 const COLS = 9;
 const ROWS = 5;
 const PITCH = CELL + 2;
-const LEFT_W = 168;
+/** Worn books from the left edge, a pencil line, then worn tools; the bag starts past them. */
+const BOOKS_X = 6;
+const RULE_X = BOOKS_X + 3 * PITCH + 2;
+const TOOLS_X = RULE_X + 4;
+const LEFT_W = TOOLS_X + 3 * PITCH + 4;
 
 export class BagView {
   readonly root: Phaser.GameObjects.Container;
@@ -88,14 +92,14 @@ export class BagView {
     // Worn: books, then tools, three to a row; slots past the tier are locked.
     const tier = TIERS[this.tier] ?? TIERS[0];
     for (let i = 0; i < 6; i++) {
-      const at = { x: 6 + (i % 3) * PITCH, y: 4 + Math.floor(i / 3) * PITCH };
-      const book = new ItemCell(ctx, at.x, at.y, {
+      const at = { x: (i % 3) * PITCH, y: 4 + Math.floor(i / 3) * PITCH };
+      const book = new ItemCell(ctx, BOOKS_X + at.x, at.y, {
         locked: i >= (tier?.books ?? 2),
         onPress: () => this.pressSlot("book", i),
         onPeek: (on) => this.peekWorn("book", i, on),
         onDragStart: (p) => this.dragWorn("book", i, p),
       });
-      const tool = new ItemCell(ctx, at.x + 92, at.y, {
+      const tool = new ItemCell(ctx, TOOLS_X + at.x, at.y, {
         locked: i >= (tier?.tools ?? 1),
         onPress: () => this.pressSlot("tool", i),
         onPeek: (on) => this.peekWorn("tool", i, on),
@@ -106,16 +110,21 @@ export class BagView {
       this.root.add([book, tool]);
     }
     // A pencil line between the books and the tools.
-    this.root.add(
-      s.add.rectangle(6 + 3 * PITCH + 4, 6, 1, 2 * PITCH - 4, paint("stone.light")).setOrigin(0),
-    );
+    this.root.add(s.add.rectangle(RULE_X, 6, 1, 2 * PITCH - 4, paint("stone.light")).setOrigin(0));
     this.pen = new RedPen(s);
     this.root.add(this.pen.gfx);
 
     // The inspector: the picked item, its facts and what can be done with it.
     this.inspector = s.add.container(6, 4 + 2 * PITCH + 8);
     this.root.add(this.inspector);
-    this.said = new SaidLine(s, this.root, 6, size.h - 36, LEFT_W - 10);
+    // What the school says back sits under the wells, above the wallet, clear of the inspector.
+    this.said = new SaidLine(
+      s,
+      this.root,
+      LEFT_W + 6,
+      20 + ROWS * PITCH + 20,
+      size.w - LEFT_W - 12,
+    );
 
     // The bag: kinds as words along the top, the wells under them.
     let kx = LEFT_W + 6;
@@ -292,15 +301,7 @@ export class BagView {
         );
         y += 12;
       }
-      const rows = wrap(s, "galmuri9", good.desc, w).slice(0, 2);
-      add(
-        new Label(s, 0, y + 1, rows.join("\n"), {
-          font: "galmuri9",
-          color: "stone.dark",
-          leading: 1,
-        }).obj,
-      );
-      y += rows.length * 12 + 4;
+      y += this.description(good.desc, y, w);
       this.itemActions(it, actions);
     } else {
       const good = materialGood(p.stack);
@@ -315,15 +316,7 @@ export class BagView {
         }).obj,
       );
       y += 12;
-      const rows = wrap(s, "galmuri9", good.desc, w).slice(0, 2);
-      add(
-        new Label(s, 0, y + 1, rows.join("\n"), {
-          font: "galmuri9",
-          color: "stone.dark",
-          leading: 1,
-        }).obj,
-      );
-      y += rows.length * 12 + 4;
+      y += this.description(good.desc, y, w);
       if (p.stack.startsWith("sheet:")) {
         actions.push({
           id: "bind",
@@ -362,6 +355,20 @@ export class BagView {
       b.setEnabled(!this.pending);
       this.inspector.add(b);
     });
+  }
+
+  /** An item's whole bag line under its facts; returns the height it took. */
+  private description(text: string, y: number, w: number): number {
+    if (!text) return 0;
+    const rows = wrap(this.ctx.scene, "galmuri9", text, w);
+    this.inspector.add(
+      new Label(this.ctx.scene, 0, y + 1, rows.join("\n"), {
+        font: "galmuri9",
+        color: "stone.dark",
+        leading: 1,
+      }).obj,
+    );
+    return rows.length * 13 + 3;
   }
 
   private itemActions(
