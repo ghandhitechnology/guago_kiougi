@@ -3,8 +3,9 @@
  * the top left, and any sprite can be given its elite form. Everything returns ordinary grids and
  * defs, so the output goes through the same parser and checks as hand-typed art.
  */
-import { cells } from "./draw.ts";
+import { cells, grid } from "./draw.ts";
 import type { Legend, PartGrid, Placement, SpriteDef, Vec } from "./format.ts";
+import { type Lobe, lobes } from "./paint.ts";
 import { colorIndex, isColorName, nameOf, type Remap, resolveRemap } from "./palette.ts";
 
 export interface FormRamp {
@@ -56,13 +57,22 @@ export function form(
       return ramp.mid;
     }),
   );
-  // A shaded pixel with no same-colour neighbour takes the colour most of its neighbours have.
-  const tones = new Set([ramp.light, ramp.mid, ramp.dark, ramp.glint]);
+  const tones = [ramp.light, ramp.mid, ramp.dark, ramp.glint ?? ""].join("");
+  return mend(out.map((r) => r.join("")).join("\n"), tones);
+}
+
+/**
+ * A pixel of one of `only` with no same-colour neighbour takes the colour most of its opaque
+ * neighbours have, so shading and overlays never leave single stray pixels.
+ */
+export function mend(src: string, only: string): string {
+  const out = cells(src);
   for (let pass = 0; pass < 2; pass++) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const ch = out[y]?.[x] as string;
-        if (g[y]?.[x] !== "#" || !tones.has(ch)) continue;
+    for (let y = 0; y < out.length; y++) {
+      const row = out[y] as string[];
+      for (let x = 0; x < row.length; x++) {
+        const ch = row[x] as string;
+        if (ch === "." || !only.includes(ch)) continue;
         const around = new Map<string, number>();
         for (let dy = -1; dy <= 1; dy++)
           for (let dx = -1; dx <= 1; dx++) {
@@ -71,11 +81,51 @@ export function form(
           }
         if (around.has(ch)) continue;
         const best = [...around].sort((a, b) => b[1] - a[1])[0];
-        if (best) (out[y] as string[])[x] = best[0];
+        if (best) row[x] = best[0];
       }
     }
   }
   return out.map((r) => r.join("")).join("\n");
+}
+
+/** A `w`×`h` mask (`#` inside) of overlapping ellipses, for soft organic silhouettes. */
+export function blob(w: number, h: number, list: readonly Lobe[]): string {
+  const inside = lobes(list);
+  return grid(w, h, (x, y) => (inside(x, y) ? "#" : "."));
+}
+
+/** Swaps characters: `swap(grid, "ab", "xy")` turns a into x and b into y. */
+export function swap(src: string, from: string, to: string): string {
+  const map = new Map([...from].map((c, i) => [c, to[i] ?? c]));
+  return cells(src)
+    .map((r) => r.map((c) => map.get(c) ?? c).join(""))
+    .join("\n");
+}
+
+/**
+ * Keeps the pixels of a grid where `keep` holds and clears the rest, then turns every kept pixel
+ * on the new edge into `outline`, so a piece broken off a body is outlined along the break.
+ * Characters in `lone` are left alone.
+ */
+export function cut(
+  src: string,
+  keep: (x: number, y: number) => boolean,
+  outline: string,
+  lone = "",
+): string {
+  const g = cells(src).map((r, y) => r.map((c, x) => (keep(x, y) ? c : ".")));
+  const clear = (x: number, y: number) => (g[y]?.[x] ?? ".") === ".";
+  return g
+    .map((r, y) =>
+      r
+        .map((c, x) => {
+          if (c === "." || lone.includes(c)) return c;
+          const edge = clear(x - 1, y) || clear(x + 1, y) || clear(x, y - 1) || clear(x, y + 1);
+          return edge ? outline : c;
+        })
+        .join(""),
+    )
+    .join("\n");
 }
 
 /** Mirrors a grid left to right. */
