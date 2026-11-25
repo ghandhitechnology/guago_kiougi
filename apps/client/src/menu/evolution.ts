@@ -375,8 +375,10 @@ function playArt(scene: Phaser.Scene, into: Phaser.GameObjects.Container, name: 
     into.once("destroy", () => ev.remove());
     return;
   }
-  // The group with the most frames is the one that moves.
-  const frames = [...groups.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+  // The group with the most frames is the one that moves; art made of single poses (the
+  // element cards of 멘델레예프의 꿈) cycles through all of them.
+  const biggest = [...groups.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+  const frames = biggest.length > 1 ? biggest : mine;
   const first = tex.get(frames[0]);
   if (first.width >= 48 || first.height >= 48) {
     const big = scene.add.image(0, 0, "combat-evolved", frames[0]).setScale(3);
