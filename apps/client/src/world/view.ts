@@ -44,6 +44,8 @@ class WorldView {
   selfSid: string | undefined;
   /** Nameplates, bubbles and the prompt, while the world scene runs. */
   overlays: WorldOverlays | undefined;
+  /** The interact action: the E key and the phone's context button call it while the world runs. */
+  interact: (() => void) | undefined;
   /** Someone's nameplate tapped or clicked, by session or speaker id; chat whispers players. */
   onNameTap: ((id: string, name: string, kind: EntityKind) => void) | undefined;
   private readonly listeners = new Set<(map: MapView | undefined) => void>();
@@ -62,6 +64,7 @@ class WorldView {
     this.self = undefined;
     this.selfSid = undefined;
     this.overlays = undefined;
+    this.interact = undefined;
     this.others.clear();
     for (const l of this.listeners) l(undefined);
   }
