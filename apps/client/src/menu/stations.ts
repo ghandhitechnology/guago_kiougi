@@ -27,7 +27,7 @@ import { cue } from "../sound/audio.ts";
 import { inventory } from "../state/inventory.ts";
 import { live } from "../state/live.ts";
 import { Button } from "../ui/button.ts";
-import { type Cost, CostRow } from "../ui/cost-row.ts";
+import { CostRow } from "../ui/cost-row.ts";
 import { CELL, type CellItem, ItemCell } from "../ui/item-cell.ts";
 import { ItemGrid } from "../ui/item-grid.ts";
 import { fade, shake, slide, stamp } from "../ui/motion.ts";
@@ -431,7 +431,9 @@ export class StationView {
     const outName = this.label(this.mid + 30, 70, "");
     this.redraw = () => {
       const copies = pick();
-      wells.forEach((w, i) => w.set(copies[i] ? cellOf(copies[i] as ItemView) : undefined));
+      wells.forEach((w, i) => {
+        w.set(copies[i] ? cellOf(copies[i] as ItemView) : undefined);
+      });
       const top = copies.reduce<ItemView | undefined>(
         (a, b) => (!a || b.level > a.level ? b : a),
         undefined,
@@ -609,10 +611,11 @@ export class StationView {
       pips.push(p);
       this.stage.add(p);
     }
-    const paintPips = (lit: number, next: number) =>
-      pips.forEach((p, i) =>
-        p.setFillStyle(paint(i < lit ? "gold.mid" : i < next ? "gold.pale" : "stone.light")),
-      );
+    const paintPips = (lit: number, next: number) => {
+      pips.forEach((p, i) => {
+        p.setFillStyle(paint(i < lit ? "gold.mid" : i < next ? "gold.pale" : "stone.light"));
+      });
+    };
     this.redraw = () => {
       const it = inventory.item(item.id);
       const f = from();

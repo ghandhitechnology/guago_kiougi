@@ -21,7 +21,6 @@ import { sound } from "../ui/sound.ts";
 import { Label, wrap } from "../ui/text.ts";
 import { paint } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
-import { session } from "../world/session.ts";
 import { onGone, opRefusal, SaidLine, walletRow } from "./common.ts";
 import { registerMenuTab } from "./notebook.ts";
 import { type StationArg, type StationKind, StationView } from "./stations.ts";
@@ -177,8 +176,12 @@ export class BagView {
       this.tier = snap.progression.tier;
     }
     const worn = { book: inventory.worn("book"), tool: inventory.worn("tool") };
-    this.bookSlots.forEach((cell, i) => cell.set(this.cellOf(worn.book.get(i))));
-    this.toolSlots.forEach((cell, i) => cell.set(this.cellOf(worn.tool.get(i))));
+    this.bookSlots.forEach((cell, i) => {
+      cell.set(this.cellOf(worn.book.get(i)));
+    });
+    this.toolSlots.forEach((cell, i) => {
+      cell.set(this.cellOf(worn.tool.get(i)));
+    });
     this.shown = this.listFor(this.kind);
     this.grid.setItems(
       this.shown.map((e) =>
@@ -345,7 +348,7 @@ export class BagView {
     actions.forEach((a, i) => {
       const b = new Button(this.ctx, bx, by, {
         label: a.label,
-        kind: i === (firstInk < 0 ? 0 : firstInk) ? "ink" : "paper",
+        kind: i === Math.max(0, firstInk) ? "ink" : "paper",
         font: "galmuri9",
         h: 17,
         onPress: a.run,
