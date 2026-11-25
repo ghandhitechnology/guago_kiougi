@@ -263,6 +263,12 @@ export interface MapSource extends Layers {
   }[];
   /** Guard routes in a 위험 구역, see `patrols.ts`. */
   readonly patrols?: readonly PatrolSource[];
+  /** Dueling grounds (PLAN §14): a floor of open tiles, or a stamp region name. */
+  readonly arenas?: readonly {
+    readonly id: string;
+    readonly rect: TileRect | string;
+    readonly modes: Arena["modes"];
+  }[];
 }
 
 // Built ----------------------------------------------------------------------------------------
@@ -291,6 +297,8 @@ export interface BuiltMap {
   readonly npcs: readonly NpcSpot[];
   /** Guard routes in world pixels. */
   readonly patrols: readonly Patrol[];
+  /** Dueling grounds, in tiles. */
+  readonly arenas: readonly Arena[];
 }
 
 export interface NpcSpot {
@@ -298,4 +306,11 @@ export interface NpcSpot {
   readonly x: number;
   readonly y: number;
   readonly facing: Spawn["facing"];
+}
+
+/** A dueling ground: open floor, and which fights it hosts. */
+export interface Arena {
+  readonly id: string;
+  readonly rect: TileRect;
+  readonly modes: readonly ("1v1" | "3v3")[];
 }

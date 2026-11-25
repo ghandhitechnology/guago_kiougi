@@ -314,6 +314,11 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
         facing: n.facing ?? "down",
       })),
       patrols: (src.patrols ?? []).map(buildPatrol),
+      arenas: (src.arenas ?? []).map((a) => ({
+        id: a.id,
+        rect: rect(a.rect, `arena ${a.id}`),
+        modes: a.modes,
+      })),
     },
     footprints,
   };
