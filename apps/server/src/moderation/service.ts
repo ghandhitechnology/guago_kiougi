@@ -12,6 +12,7 @@
 import { BOOKS, TOOLS, VENDING } from "@guago/content";
 import {
   type Amounts,
+  type BanNotice,
   type ChangeNotice,
   CLOSE_BANNED,
   CLOSE_KICKED,
@@ -28,7 +29,7 @@ import { live } from "../live/current.ts";
 import type { ClubChange } from "../social/clubs.ts";
 import type { Tx } from "../social/tx.ts";
 import { record, target } from "./audit.ts";
-import { adminMutes } from "./mutes.ts";
+import { mutes } from "./mutes.ts";
 
 export type ModError =
   | "not_found"
@@ -60,6 +61,8 @@ export interface ModerationDeps {
   evict(accountId: string, code: number): void;
   /** A system line to everyone, or to one character when online. False when the world is down. */
   system(line: Omit<SystemLine, "id" | "at">, toCharacterId?: string): boolean;
+  /** Whether the world room is up to carry a notice. */
+  worldOnline(): boolean;
   /** An item or currency change the player did not ask for, sent if they are online. */
   notify(characterId: string, change: ChangeNotice): void;
   /**
@@ -82,9 +85,18 @@ export interface BanOptions {
   told?: string;
   /** Null: until lifted. */
   minutes: number | null;
-  /** Also ban every IP hash the account has signed up or logged in from. */
-  ip: boolean;
+  /**
+   * The addresses the account used in the last `IP_BAN_DAYS`: `none` leaves them alone,
+   * `signup` refuses new accounts from them, `all` also refuses logins and room joins of every
+   * account on them. A dormitory shares one address, so `signup` is the careful choice.
+   */
+  ip: IpScope;
 }
+
+export const IP_SCOPES = ["none", "signup", "all"] as const;
+export type IpScope = (typeof IP_SCOPES)[number];
+/** How far back an IP ban reaches into an account's addresses. */
+export const IP_BAN_DAYS = 30;
 
 export interface MuteOptions {
   reason: string;
@@ -107,7 +119,7 @@ export interface ResolveInput {
   /** For mute and ban; null is until lifted. */
   minutes: number | null;
   /** For ban. */
-  ip: boolean;
+  ip: IpScope;
   /** Internal; never sent to anyone. */
   note: string;
   /** What the reported player is told, for any action but `none`. */
@@ -219,19 +231,53 @@ export function createModeration(deps: ModerationDeps) {
     (await tx.execute(sql`select id from characters where account_id = ${accountId}`)).rows[0]
       ?.id as string | undefined;
 
+  /** The IP hashes the account signed up or logged in from in the last `IP_BAN_DAYS`. */
+  async function recentAddresses(q: Queryable, accountId: string): Promise<string[]> {
+    const { rows } = await q.execute(sql`
+      select ip_hash from account_ips
+      where account_id = ${accountId}
+        and last_seen > now() - make_interval(days => ${IP_BAN_DAYS})
+      union
+      select signup_ip_hash from accounts
+      where id = ${accountId} and created_at > now() - make_interval(days => ${IP_BAN_DAYS})`);
+    return rows.map((r) => r.ip_hash as string);
+  }
+
+  /**
+   * The +3 벌점 of a strike, by the living world under the strike's id (idempotent there), then
+   * marked taken. A false or missing world leaves it for the sweep to try again.
+   */
+  async function applyDemerit(strikeId: number, characterId: string): Promise<void> {
+    const taken = await live()?.events.chatStrike(characterId, String(strikeId));
+    if (taken) {
+      await db.execute(
+        sql`update filter_strikes set demerit_at = now() where id = ${strikeId} and demerit_at is null`,
+      );
+    }
+  }
+
+  let keptAt = 0;
+  /**
+   * Chat is kept 90 days (PLAN §12), and so is what moderation copied out of it or learned
+   * about addresses: a strike's text is blanked and an account's address older than that is
+   * forgotten. Once an hour.
+   */
+  async function keepNinetyDays(): Promise<void> {
+    if (Date.now() - keptAt < 3600_000) return;
+    keptAt = Date.now();
+    await db.execute(sql`
+      update filter_strikes set body = '' where body <> '' and line_at < now() - interval '90 days'`);
+    await db.execute(sql`delete from account_ips where last_seen < now() - interval '90 days'`);
+  }
+
   async function banIn(tx: Tx, adminId: string, accountId: string, o: BanOptions) {
     const account = await lockAccount(tx, accountId);
     if (!account) return fail("not_found");
-    let ips: string[] = [];
-    if (o.ip) {
-      const { rows } = await tx.execute(sql`
-        select ip_hash from account_ips where account_id = ${accountId}
-        union select ${account.signup_ip_hash}`);
-      ips = rows.map((r) => r.ip_hash as string);
-    }
+    const ips = o.ip === "none" ? [] : await recentAddresses(tx, accountId);
     const { rows } = await tx.execute(sql`
-      insert into account_bans (account_id, reason, ends_at, ip_hashes, admin_id)
-      values (${accountId}, ${o.reason}, ${endsAt(o.minutes)}, ${sql.param(ips)}::text[], ${adminId})
+      insert into account_bans (account_id, reason, told, ends_at, ip_hashes, ip_scope, admin_id)
+      values (${accountId}, ${o.reason}, ${o.told ?? o.reason}, ${endsAt(o.minutes)},
+              ${sql.param(ips)}::text[], ${ips.length > 0 ? o.ip : "none"}, ${adminId})
       returning id, ends_at`);
     const ban = rows[0] as { id: string; ends_at: string | null };
     await tx.execute(sql`update accounts set status = 'banned' where id = ${accountId}`);
@@ -252,6 +298,8 @@ export function createModeration(deps: ModerationDeps) {
         ban: Number(ban.id),
         minutes: o.minutes,
         ips: ips.length,
+        ipScope: ips.length > 0 ? o.ip : "none",
+        told: o.told ?? o.reason,
         ...(club ? { club: club.club, disbanded: club.gone === true } : {}),
       },
     });
@@ -279,31 +327,32 @@ export function createModeration(deps: ModerationDeps) {
 
   async function muteIn(tx: Queryable, adminId: string, characterId: string, o: MuteOptions) {
     const { rows } = await tx.execute(sql`
-      insert into mutes (character_id, reason, ends_at, admin_id)
-      select id, ${o.reason}, ${endsAt(o.minutes)}, ${adminId} from characters
+      insert into mutes (character_id, reason, told, ends_at, admin_id)
+      select id, ${o.reason}, ${o.told ?? o.reason}, ${endsAt(o.minutes)}, ${adminId} from characters
       where id = ${characterId}
-      returning id`);
-    const mute = rows[0] as { id: string } | undefined;
+      returning id, floor(extract(epoch from coalesce(ends_at, 'infinity'::timestamptz))::float8 * 1000) as end_ms`);
+    const mute = rows[0] as { id: string; end_ms: number } | undefined;
     if (!mute) return fail("not_found");
     await record(tx, {
       adminId,
       action: "mute",
       target: target.character(characterId),
       reason: o.reason,
-      detail: { mute: Number(mute.id), minutes: o.minutes },
+      detail: { mute: Number(mute.id), minutes: o.minutes, told: o.told ?? o.reason },
     });
     return {
       ok: true as const,
       after: async () => {
-        await adminMutes.refresh(db, characterId);
+        // Holds at once; the re-read confirms it (or a later one wins).
+        mutes.muted(characterId, Number(mute.end_ms));
+        void mutes.refresh(db, characterId).catch(() => {});
         // The player learns the action, its end and the reason they are told; never who asked.
-        const until = adminMutes.until(characterId);
+        const until = mutes.adminUntil(characterId);
         const reason = o.told ?? o.reason;
         deps.system(
-          {
-            key: "moderation.muted",
-            params: Number.isFinite(until) ? { until, reason } : { reason },
-          },
+          Number.isFinite(until)
+            ? { key: "moderation.muted", params: { until, reason } }
+            : { key: "moderation.muted-permanent", params: { reason } },
           characterId,
         );
       },
@@ -321,7 +370,13 @@ export function createModeration(deps: ModerationDeps) {
     if (!account) return fail("not_found");
     await tx.execute(sql`delete from sessions where account_id = ${accountId}`);
     const characterId = await characterOfAccount(tx, accountId);
-    await record(tx, { adminId, action: "kick", target: target.account(accountId), reason });
+    await record(tx, {
+      adminId,
+      action: "kick",
+      target: target.account(accountId),
+      reason,
+      detail: { told },
+    });
     return {
       ok: true as const,
       after: () => {
@@ -377,7 +432,13 @@ export function createModeration(deps: ModerationDeps) {
           reason,
           detail: { mutes: rows.map((r) => Number(r.id)) },
         });
-        return { ok: true, after: () => adminMutes.refresh(db, characterId) };
+        return {
+          ok: true,
+          after: () => {
+            mutes.unmuted(characterId);
+            void mutes.refresh(db, characterId).catch(() => {});
+          },
+        };
       }),
 
     /** Closes the session: the player is out and may log in again. */
@@ -432,7 +493,7 @@ export function createModeration(deps: ModerationDeps) {
           ok: true,
           after: async () => {
             deps.system({ key: "moderation.strike" }, found.sender_id);
-            await live()?.events.chatStrike(found.sender_id, String(strike.id));
+            await applyDemerit(Number(strike.id), found.sender_id);
           },
         };
       }),
@@ -492,10 +553,48 @@ export function createModeration(deps: ModerationDeps) {
       return { ok: true, replayed: out.replayed, items: out.items };
     },
 
+    /** Takes down a 대자보 post (the 층장 notice included). Its text stays in the audit row. */
+    removePost: (adminId: string, postId: number, reason: string) =>
+      run(async (tx) => {
+        const { rows } = await tx.execute(sql`
+          delete from board_posts where id = ${postId}
+          returning author_id, category, body`);
+        const post = rows[0] as { author_id: string; category: string; body: string } | undefined;
+        if (!post) return fail("not_found");
+        await record(tx, {
+          adminId,
+          action: "post.remove",
+          target: target.character(post.author_id),
+          reason,
+          detail: { post: postId, category: post.category, body: post.body },
+        });
+        return { ok: true };
+      }),
+
+    /** Takes down a club notice; the club's members see it gone at once. */
+    removeClubNotice: (adminId: string, noticeId: number, reason: string) =>
+      run(async (tx) => {
+        const { rows } = await tx.execute(sql`
+          delete from club_notices where id = ${noticeId}
+          returning club_id, author_id, body`);
+        const notice = rows[0] as { club_id: number; author_id: string; body: string } | undefined;
+        if (!notice) return fail("not_found");
+        await record(tx, {
+          adminId,
+          action: "notice.remove",
+          target: target.character(notice.author_id),
+          reason,
+          detail: { notice: noticeId, club: notice.club_id, body: notice.body },
+        });
+        return { ok: true, after: () => deps.clubs?.announce({ club: notice.club_id }) };
+      }),
+
     /** A notice on the system channel. Audited first: no row, no notice. */
+    /** A notice on the system channel: recorded only when the world is there to send it. */
     async broadcast(adminId: string, text: string): Promise<ModResult> {
+      if (!deps.worldOnline()) return fail("offline");
       await record(db, { adminId, action: "broadcast", target: target.server, detail: { text } });
-      if (!deps.system({ key: "notice", text })) return fail("offline");
+      deps.system({ key: "notice", text });
       return { ok: true };
     },
 
@@ -562,25 +661,82 @@ export function createModeration(deps: ModerationDeps) {
 
     /** Accounts whose every ban has ended are active again. Run every minute. */
     async sweep(): Promise<number> {
-      const { rowCount } = await db.execute(sql`
-        update accounts a set status = 'active'
+      // Candidates first, then each under its account's lock: the lock waits for a ban being
+      // written now, and the re-check after it, a new statement, sees that ban. One statement
+      // would re-check the row against the snapshot it started with and lift the new ban.
+      const { rows } = await db.execute(sql`
+        select a.id from accounts a
         where a.status = 'banned'
           and exists (select 1 from account_bans b where b.account_id = a.id)
           and not exists (
             select 1 from account_bans b where b.account_id = a.id and b.lifted_at is null
               and (b.ends_at is null or b.ends_at > now()))`);
-      return rowCount ?? 0;
+      let lifted = 0;
+      for (const { id } of rows) {
+        lifted += await db.transaction(async (tx) => {
+          if (!(await lockAccount(tx, id as string))) return 0;
+          const still = await tx.execute(sql`
+            select 1 from account_bans where account_id = ${id as string} and lifted_at is null
+              and (ends_at is null or ends_at > now())`);
+          if (still.rows.length > 0) return 0;
+          await tx.execute(sql`update accounts set status = 'active' where id = ${id as string}`);
+          return 1;
+        });
+      }
+      // Strikes whose 벌점 the living world has not taken yet (it was down, or failed).
+      const pending = await db.execute(sql`
+        select id, character_id from filter_strikes
+        where demerit_at is null and at > now() - interval '7 days'
+        order by at limit 50`);
+      for (const r of pending.rows) await applyDemerit(Number(r.id), r.character_id as string);
+      await keepNinetyDays();
+      return lifted;
+    },
+
+    /**
+     * What an IP ban of this account would cover, shown before it is confirmed: its recent
+     * addresses, and how many other accounts used them in the same days.
+     */
+    async ipPreview(accountId: string): Promise<{ addresses: number; otherAccounts: number }> {
+      const ips = await recentAddresses(db, accountId);
+      if (ips.length === 0) return { addresses: 0, otherAccounts: 0 };
+      const { rows } = await db.execute(sql`
+        select count(distinct account_id)::int as n from (
+          select account_id from account_ips
+          where ip_hash = any(${sql.param(ips)}::text[])
+            and last_seen > now() - make_interval(days => ${IP_BAN_DAYS})
+          union all
+          select id from accounts
+          where signup_ip_hash = any(${sql.param(ips)}::text[])
+            and created_at > now() - make_interval(days => ${IP_BAN_DAYS})
+        ) seen where account_id <> ${accountId}`);
+      return { addresses: ips.length, otherAccounts: Number(rows[0]?.n ?? 0) };
     },
 
     /** For `createAuthService({ gate })`. */
     gate: {
-      async ipBanned(ip: string): Promise<boolean> {
+      async ipBanned(ip: string, use: "signup" | "login"): Promise<boolean> {
+        const scopes = use === "signup" ? ["signup", "all"] : ["all"];
         const { rows } = await db.execute(sql`
           select 1 from account_bans
           where ip_hashes @> array[${ip}]::text[] and lifted_at is null
+            and ip_scope = any(${sql.param(scopes)}::text[])
             and (ends_at is null or ends_at > now())
           limit 1`);
         return rows.length > 0;
+      },
+      async banOf(accountId: string): Promise<BanNotice | null> {
+        // The one that ends last: a ban until lifted before any timed one.
+        const { rows } = await db.execute(sql`
+          select coalesce(told, reason) as told, ends_at from account_bans
+          where account_id = ${accountId} and lifted_at is null
+            and (ends_at is null or ends_at > now())
+          order by ends_at desc nulls first limit 1`);
+        const r = rows[0] as { told: string; ends_at: string | null } | undefined;
+        if (!r) return null;
+        return r.ends_at === null
+          ? { key: "moderation.banned-permanent", reason: r.told }
+          : { key: "moderation.banned", until: new Date(r.ends_at).getTime(), reason: r.told };
       },
       async seen(tx: Queryable, accountId: string, ip: string): Promise<void> {
         await tx.execute(sql`

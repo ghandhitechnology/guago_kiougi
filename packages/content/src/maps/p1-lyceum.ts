@@ -1,5 +1,5 @@
 import type { LightSource, MapSource } from "./format.ts";
-import { blob, GREEK_LEGEND, merge, type Placed, settle } from "./greek.ts";
+import { audience, blob, GREEK_LEGEND, merge, settle } from "./greek.ts";
 import type { Prop, ShadowShape, Vec } from "./layers.ts";
 import { PlanGrid } from "./plan.ts";
 import { place } from "./props.ts";
@@ -173,6 +173,17 @@ const placed = merge({
   objects: [
     { prop: "lecture-hall", at: [LECTURE_X * T, (HALL.steps + 1) * T - 1], sort: HALL.steps * T },
     { prop: "library", at: [LIBRARY_X * T, (LIBRARY.steps + 1) * T - 1], sort: LIBRARY.steps * T },
+    // The hall's students out on its steps and the walk, watching the lawn: more of them toward
+    // the lawn's end, where the view is, a few standing behind the ones who got a step.
+    ...audience(
+      [
+        { x0: (LECTURE_X - 9) * T, x1: (LECTURE_X + 9) * T, y: 156, sort: HALL.steps * T + 6 },
+        { x0: (LECTURE_X - 9) * T, x1: (LECTURE_X + 11) * T, y: 176, sort: 176, stand: true },
+        { x0: (LECTURE_X - 4) * T, x1: (LECTURE_X + 12) * T, y: 189, sort: 189, stand: true },
+      ],
+      (x) => 0.2 + 0.65 * Math.min(1, Math.max(0, (x - (LECTURE_X - 8) * T) / (17 * T))),
+      1650,
+    ),
     // Trees on the bank behind the halls.
     place("cypress", 4, 7),
     place("cypress", 34, 6),

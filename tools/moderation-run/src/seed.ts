@@ -10,9 +10,9 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import type { Room } from "@colyseus/sdk";
-import { API, MAP_ROOM, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
+import { API, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
 import pg from "pg";
-import { adminLogin, api, freshDatabase, run, say, signUp, startServer } from "./lib.ts";
+import { adminLogin, api, enterMap, freshDatabase, run, say, signUp, startServer } from "./lib.ts";
 
 const { values } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== "--"),
@@ -99,7 +99,7 @@ for (const b of bots) {
     world.onMessage(t, () => {});
   }
   rooms.set(b.name, world);
-  const map = await b.sdk().joinOrCreate(MAP_ROOM);
+  const map = await enterMap(BASE, b.jar);
   map.onMessage("*", () => {});
 }
 let n = 0;
@@ -129,6 +129,18 @@ const LINES: [string, string, string, string?][] = [
 ];
 for (const [name, ch, text, to] of LINES) await speak(name, ch, text, to);
 say("chat sent");
+
+// 대자보 posts, as players leave them.
+const POSTS: [string, string, string][] = [
+  ["별빛소년", "party", "아고라 외곽 같이 도실 분 3/4, 물리 환영"],
+  ["도배왕", "trade", "골드 현금으로 삽니다 귓 주세요"],
+  ["착한친구", "chat", "생태공원 밤 풍경 진짜 예뻐요"],
+  ["급식대장", "club", "급식동아리 부원 모집 중, 매일 급식 인증"],
+];
+for (const [name, cat, text] of POSTS) {
+  rooms.get(name)?.send("board.post", { n: ++n, cat, text });
+  await sleep(300);
+}
 
 // Reports, from the players' own clients.
 const report = (from: string, about: string, cat: string, note?: string) =>
@@ -265,7 +277,7 @@ await andy("/filter/add", { mode: "part", text: "골드팝니다", reason: "골�
 await andy("/filter/add", { mode: "allow", text: "시발점", reason: "수학 용어" });
 await andy("/broadcast", { text: "오늘 23시에 서버 점검이 있습니다. 10분 정도 걸려요." });
 const nerd = await account("물리덕후");
-await andy(`/players/${nerd}/ban`, { reason: "이동 속도 조작 확인", minutes: 10_080, ip: false });
+await andy(`/players/${nerd}/ban`, { reason: "이동 속도 조작 확인", minutes: 10_080 });
 await andy(`/players/${nerd}/inventory`);
 await andy(`/admins`);
 const minseo = ((await andy("/admins")).body.admins as { id: string; loginId: string }[]).find(

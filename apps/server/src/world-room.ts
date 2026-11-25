@@ -3,6 +3,7 @@
  * beside its map room. Presence, chat and the social systems (social/hub.ts); trades join it
  * later. Presence goes out as small events, never as synced state, so an idle room sends nothing.
  */
+
 import { type AuthContext, type Client, CloseCode, Room, ServerError } from "@colyseus/core";
 import {
   CHAT_BURST,
@@ -32,11 +33,13 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
+import { background } from "./background.ts";
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
+import type { Dueling } from "./duel/hub.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import type { WorldHandler } from "./live/index.ts";
-import { adminMutes } from "./moderation/mutes.ts";
+import { mutedUntil, mutes } from "./moderation/mutes.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
@@ -89,6 +92,8 @@ interface Services {
   handlers?: readonly WorldHandler[];
   /** Direct trades and the 매점 게시판's reads (trade/room.ts). */
   trading?: Trading | undefined;
+  /** Challenges, the duel queue and matches (duel/hub.ts). */
+  dueling?: Dueling | undefined;
 }
 
 let services: Services | undefined;
@@ -102,6 +107,7 @@ export function provideWorldServices(s: {
   social?: Social;
   handlers?: readonly WorldHandler[];
   trading?: Trading;
+  dueling?: Dueling;
 }): void {
   services = {
     filter: s.filter ?? ChatFilter.fromFile(),
@@ -110,6 +116,7 @@ export function provideWorldServices(s: {
     social: s.social,
     ...(s.handlers ? { handlers: s.handlers } : {}),
     trading: s.trading,
+    dueling: s.dueling,
   };
 }
 
@@ -160,13 +167,15 @@ export class WorldRoom extends Room {
     const ops = use().ops;
     if (ops) {
       for (const op of OPS) {
-        this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
+        this.handle(op, opSchema(op), (client, message) =>
+          background(`operation ${op}`, this.operate(ops, client, message)),
+        );
       }
     }
     for (const h of use().handlers ?? []) {
       this.handle(h.type, h.schema, (client, message) => {
         const me = this.members.get(client.sessionId);
-        if (me) void h.run(me.characterId, message);
+        if (me) background(`world ${h.type}`, h.run(me.characterId, message));
       });
     }
     const social = use().social;
@@ -188,11 +197,25 @@ export class WorldRoom extends Room {
       for (const type of SOCIAL_TYPES) {
         this.handle(type, socialSchema(type), (client, message) => {
           const me = this.members.get(client.sessionId);
-          if (me) void hub.handle(me, type, message);
+          if (me) background(`social ${type}`, hub.handle(me, type, message));
         });
       }
     }
     use().trading?.attach({
+      on: (type, schema, run) =>
+        this.handle(type, schema, (client, message) => {
+          const me = this.members.get(client.sessionId);
+          if (me)
+            background(
+              `trade ${type}`,
+              run(me.characterId, message).then((a) => this.answer(me, a.type, a.body)),
+            );
+        }),
+      member: (id) => this.byCharacter.get(id)?.entry,
+      send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
+      blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
+    });
+    use().dueling?.attach({
       on: (type, schema, run) =>
         this.handle(type, schema, (client, message) => {
           const me = this.members.get(client.sessionId);
@@ -254,6 +277,7 @@ export class WorldRoom extends Room {
     const dropped = this.members.get(client.sessionId);
     if (dropped && this.byCharacter.get(dropped.characterId) === dropped) {
       use().trading?.left(dropped.characterId);
+      use().dueling?.left(dropped.characterId);
     }
     if (this.kicked.has(client.sessionId) || !this.seats.mayReconnect(client)) return;
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
@@ -269,7 +293,7 @@ export class WorldRoom extends Room {
     if (!member) return;
     member.client = client;
     this.sendAll(member);
-    void this.social?.resend(member);
+    background("social resend", this.social?.resend(member));
     for (const { type, body } of member.answers) client.send(type, body);
   }
 
@@ -281,8 +305,10 @@ export class WorldRoom extends Room {
   override async onLeave(client: Client): Promise<void> {
     const member = this.members.get(client.sessionId);
     if (member) {
-      if (this.byCharacter.get(member.characterId) === member)
+      if (this.byCharacter.get(member.characterId) === member) {
         use().trading?.left(member.characterId);
+        use().dueling?.left(member.characterId);
+      }
       this.members.delete(client.sessionId);
       // A newer seat of the same character may already be in (after the eviction wait ran out).
       if (this.byCharacter.get(member.characterId) === member) {
@@ -305,6 +331,7 @@ export class WorldRoom extends Room {
     this.unlisten?.();
     this.social?.dispose();
     use().trading?.detach();
+    use().dueling?.detach();
     await use().log?.flush();
   }
 
@@ -432,12 +459,10 @@ export class WorldRoom extends Room {
     if (!cleaned.ok) return { code: cleaned.code };
     const now = Date.now();
     const standing = this.standingOf(me.characterId, now);
-    // An admin mute and the filter's own stack: refused until the later one ends. A mute until
-    // lifted carries no end.
-    const mutedUntil = Math.max(standing.mutedUntil, adminMutes.until(me.characterId, now));
-    if (mutedUntil > now) {
-      return { code: "muted", ...(Number.isFinite(mutedUntil) ? { until: mutedUntil } : {}) };
-    }
+    // An admin mute and the filter's own stack (moderation/mutes.ts): refused until the later
+    // one ends. A mute until lifted carries no end.
+    const until = mutedUntil(me.characterId, now);
+    if (until > now) return { code: "muted", ...(Number.isFinite(until) ? { until } : {}) };
 
     let recipients: Member[];
     let target: string | null = null;
@@ -501,6 +526,7 @@ export class WorldRoom extends Room {
       // A second hit within the window mutes; the masked line itself still goes out.
       if (now - standing.lastHit <= FILTER_REPEAT_MS) {
         standing.mutedUntil = now + FILTER_MUTE_MS;
+        mutes.filtered(me.characterId, standing.mutedUntil);
       }
       standing.lastHit = now;
     }

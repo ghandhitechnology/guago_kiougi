@@ -49,7 +49,12 @@ function parse(cookie: string): Jar {
  * a saved session while it is still good, else a login, else a new account and character.
  * `http` is the game server's base URL.
  */
-export async function signIn(http: string, prefix: string, index: number): Promise<string> {
+export async function signIn(
+  http: string,
+  prefix: string,
+  index: number,
+  major?: string,
+): Promise<string> {
   const loginId = `${prefix}${String(index).padStart(4, "0")}`;
   const password = `bot-${loginId}-walks`;
   const jar: Jar = parse(loadSessions()[loginId] ?? "");
@@ -85,7 +90,7 @@ export async function signIn(http: string, prefix: string, index: number): Promi
     };
     const made = await call("POST", API.character, {
       name: `${prefix === "bot" ? "봇" : prefix}${String(index).padStart(4, "0")}`.slice(0, 8),
-      major: MAJORS[index % MAJORS.length],
+      major: major ?? MAJORS[index % MAJORS.length],
       look,
     });
     if (made.status !== 200) throw new Error(`${loginId} character: ${JSON.stringify(made.body)}`);

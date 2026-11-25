@@ -1,8 +1,16 @@
-import { type AuthContext, type Client, type Delayed, Room, ServerError } from "@colyseus/core";
+import {
+  type AuthContext,
+  type Client,
+  ClientState,
+  type Delayed,
+  Room,
+  ServerError,
+} from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import {
   type BuiltMap,
   type Drop,
+  DUEL_NORMS,
   fieldOf,
   fightMapOf,
   type Interactable,
@@ -15,6 +23,8 @@ import {
 import {
   AIM_MESSAGE,
   aimMessage,
+  applyBetween,
+  type Between,
   type Caught,
   type ChangeNotice,
   type Character,
@@ -24,12 +34,15 @@ import {
   type DoorRattle,
   type DoorRefusal,
   dressPlayer,
+  duelBuild,
+  duelKit,
   Ev,
   type Facing,
   type FightInput,
   type FightMap,
   FightNet,
   type FightWorld,
+  fenceFloor,
   gainExp,
   type Halt,
   hurtPlayer,
@@ -69,7 +82,6 @@ import {
   shutDoors,
   snap,
   spawnMonster,
-  startRevive,
   stepDoors,
   stepFight,
   TICK_MS,
@@ -81,19 +93,26 @@ import {
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
-import { channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
+import { background } from "./background.ts";
+import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
+import { FloorHost, type FloorRoom } from "./duel/floor.ts";
+import { dueling } from "./duel/hub.ts";
 import { grants } from "./economy/grants.ts";
+import { carryIn, carryOut, DEFAULT_MODE, type ModeStore, memoryModes } from "./fight/carry.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
+import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { parties } from "./parties.ts";
 import { places } from "./places.ts";
-import { RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
 import {
+  belongsOn,
   builtMap,
+  clearSpot,
   describe,
   HOME_MAP,
   isDesk,
@@ -131,8 +150,17 @@ const VITALS_EVERY_MS = 500;
  * game clock with no signal, so the room asks; a kit is rebuilt only when a value changed.
  */
 const LIVE_EVERY_MS = 2_000;
-/** A seat whose player went through a door is closed if its socket is still open after this. */
-const MOVED_SOCKET_MS = 20_000;
+/** Ticks out of full auto before the living world hears that full auto stopped (5 minutes). */
+const AUTO_OFF_TICKS = 6000;
+/**
+ * A socket whose player went through a door is closed if still open after this: the client takes
+ * its new seat at once, and an old connection kept open counts for nothing anyway.
+ */
+const MOVED_SOCKET_MS = 3000;
+/** A character goes through at most one door this often; a door walked into sooner waits. */
+const DOOR_EVERY_MS = 1000;
+/** When each character last went through a door, across the process's rooms. */
+const lastDoor = new Map<string, number>();
 /** Interact requests closer together than this are not answered. */
 const INTERACT_COOLDOWN_MS = 250;
 /** Pressing against a shut door rattles it at most this often per player. */
@@ -156,6 +184,16 @@ const HOME_EVERY_MS = 2000;
 /** Guards look every other tick; a player they caught is not seen again for this long. */
 const PATROL_EVERY_TICKS = 2;
 const CAUGHT_GRACE_TICKS = 80;
+/** Development and tests: how often each room checks that bodies and clients pair up. */
+const BODY_CHECK_MS = 2000;
+
+/** Every map room of this process, for the development checks across rooms. */
+const ROOMS = new Set<MapRoom>();
+
+/** Runs every room's body check now (tests call it at the moments that matter). */
+export function checkMapRooms(): void {
+  for (const room of ROOMS) room.checkBodies();
+}
 
 /** The step's party key for a party id. */
 function partyOf(id: number | undefined): string | null {
@@ -198,6 +236,10 @@ interface Pawn {
   readonly queue: InputQueue;
   readonly player: Player;
   readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
+  /** Counts loadout reads, so an older read that lands late is dropped. */
+  loadGen: number;
+  /** Tick from which leaving full auto is reported, or -1. */
+  autoOffAt: number;
   /** What it fights with; replaced when an operation changes it. */
   loadout: Loadout;
   /** The living world's multipliers its kit was built with. */
@@ -217,6 +259,8 @@ interface Pawn {
   atDesk: boolean;
   /** Tick until which patrols look past this player, after they were caught. */
   unseenUntil: number;
+  /** A meal at the 급식 counter is being served: one at a time. */
+  eating: boolean;
   /** Where the body stood before this tick's step, to tell a push against a shut door. */
   fromX: number;
   fromY: number;
@@ -250,8 +294,11 @@ function facingToward(x: number, y: number, tx: number, ty: number): Facing {
 let loadouts: Loadouts = starterLoadouts;
 
 /** Called once at server start to read loadouts from the inventory. */
-export function provideFightServices(s: { loadouts?: Loadouts }): void {
+let modes: ModeStore = memoryModes;
+
+export function provideFightServices(s: { loadouts?: Loadouts; modes?: ModeStore }): void {
   if (s.loadouts) loadouts = s.loadouts;
+  if (s.modes) modes = s.modes;
 }
 
 /** Characters fighting in this process, by id, for loadout changes. */
@@ -264,12 +311,14 @@ const fighting = new Map<string, { room: MapRoom; pawn: Pawn }>();
 export function fightLoadoutChanged(characterId: string, change: ChangeNotice): void {
   const at = fighting.get(characterId);
   if (!at) return;
+  // Any item change may be an equip or an unequip (an unequip can report only the item it took
+  // off), so any of them rebuilds the kit.
   const touched =
-    (change.items?.some((i) => i.slot !== null) ?? false) ||
+    (change.items?.length ?? 0) > 0 ||
     (change.removed?.length ?? 0) > 0 ||
     change.progression !== undefined;
   if (!touched) return;
-  void at.room.reload(at.pawn);
+  background("fight reload", at.room.reload(at.pawn));
 }
 
 /** The fight map a room runs on: the built map's, with walls a closed door swaps. */
@@ -283,7 +332,7 @@ type RoomMap = { -readonly [K in keyof FightMap]: FightMap[K] };
  * numbers, the cast and the shut doors. Doors, zones, the cast and patrols are worked out from the
  * step's positions after each tick.
  */
-export class MapRoom extends Room<{ state: MapState }> {
+export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
   override maxClients = MAP_SEATS;
@@ -315,9 +364,18 @@ export class MapRoom extends Room<{ state: MapState }> {
   /** Tick the current surge began. */
   private surgeFrom = 0;
   private unlistenClubs: (() => void) | undefined;
+  /** Sessions whose body walked out through a door; their socket stays open a little while. */
+  private readonly moved = new Set<string>();
   private unlistenParties: (() => void) | undefined;
+  /**
+   * What clients asked of the world since the last tick (aim, mode, revive), applied in arrival
+   * order at the next tick's start, so the world only ever changes at tick boundaries.
+   */
+  private readonly between: Between[] = [];
   /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
   private readonly devActions: (() => void)[] = [];
+  /** The map's dueling floor and its match, on a map that has one (duel/floor.ts). */
+  private duel: FloorHost | undefined;
 
   /**
    * Map rooms are never matchmade by a client: every seat is reserved by the server for a
@@ -334,7 +392,6 @@ export class MapRoom extends Room<{ state: MapState }> {
     // Its own walls: closed doors change them as the Page clock opens maps.
     this.map = { ...fightMapOf(def), collision: roomCollision(def).collision };
     this.patrols = def.patrols;
-    this.maxClients = Math.max(1, Math.min(MAP_SEATS, options.seats));
     this.graceMs = options.grace * 1000;
     const { w, h } = def.collision;
     if (w * TILE_SIZE > MAX_MAP_PX || h * TILE_SIZE > MAX_MAP_PX) {
@@ -350,7 +407,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.seats = new RoomSeats(def.id, (id) => this.placeOf(id));
     this.state.map = def.id;
     this.state.channel = options.channel;
-    void this.setMetadata({ map: def.id, channel: options.channel });
+    background("room metadata", this.setMetadata({ map: def.id, channel: options.channel }));
     // Bodies before anything else, so their ref ids are the smallest the room will ever hand out.
     for (let i = 0; i < MAP_SEATS; i++) {
       const slot = String(i);
@@ -359,6 +416,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
     this.placeCast();
     this.refreshDoors();
+    this.openFloor();
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: FightInput) => {
       const pawn = this.pawns.get(client.sessionId);
@@ -370,24 +428,18 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.aim.take()) return;
-      const p = pawn.player;
-      p.aiming = aim !== null;
-      p.aimX = aim?.dx ?? 0;
-      p.aimY = aim?.dy ?? 0;
+      this.between.push({ t: "aim", player: pawn.player.id, aim });
     });
     this.onMessage(MODE_MESSAGE, modeMessage, (client, mode) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.mode.take()) return;
-      if (pawn.player.mode === mode) return;
-      pawn.player.mode = mode as Mode;
-      pawn.player.casts = 0;
-      this.tellMode(pawn);
+      this.between.push({ t: "mode", player: pawn.player.id, mode: mode as Mode });
     });
     this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
       const pawn = this.pawns.get(client.sessionId);
       const target = this.bySlot.get(slot);
       if (!pawn?.buckets.revive.take() || !target) return;
-      startRevive(this.world, pawn.player, target.player);
+      this.between.push({ t: "revive", player: pawn.player.id, target: target.player.id });
     });
     if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
@@ -399,7 +451,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       if (this.clients.length > 0)
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
-    this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    this.clock.setInterval(() => background("place save", this.seats.saveAll()), SAVE_INTERVAL_MS);
     this.clock.setInterval(() => this.refreshDoors(), DOORS_EVERY_MS);
     if (def.id === HOME_MAP) this.clock.setInterval(() => this.letGoHome(), HOME_EVERY_MS);
     // A club joined, left or restyled shows under the name at once.
@@ -411,7 +463,9 @@ export class MapRoom extends Room<{ state: MapState }> {
     // Party members on this map share kills within 20 tiles (PLAN §6); the step reads the party.
     this.unlistenParties = parties.listen((characterId, partyId) => {
       const pawn = fighting.get(characterId)?.pawn;
-      if (pawn && this.pawns.get(pawn.player.id) === pawn) pawn.player.party = partyOf(partyId);
+      // A fighter's party is its side until the match is over (duel/floor.ts).
+      if (pawn && this.pawns.get(pawn.player.id) === pawn && pawn.player.team === 0)
+        pawn.player.party = partyOf(partyId);
     });
     // Party frames: health and mode, which the party module passes on only when they change.
     this.clock.setInterval(() => {
@@ -424,16 +478,23 @@ export class MapRoom extends Room<{ state: MapState }> {
     // The living world is read every couple of seconds from memory, never on the tick.
     this.readLive();
     this.clock.setInterval(() => this.readLive(), LIVE_EVERY_MS);
+    if (invariants.on) {
+      ROOMS.add(this);
+      this.clock.setInterval(() => this.checkBodies(), BODY_CHECK_MS);
+    }
     // Made for a seat that may never be taken.
     this.emptied();
   }
 
   /** A closed map spawns nothing; a changed modifier rebuilds that player's kit. */
   private readLive(): void {
+    this.settleAutoOff();
     const l = live();
     this.world.director.paused = !(l?.isOpen(this.mapId) ?? true);
     if (!l) return;
     for (const pawn of this.pawns.values()) {
+      // A fighter's kit is the duel's; the living world's numbers come back with its own.
+      if (pawn.player.team > 0) continue;
       const mods = l.modifiers(pawn.character.id);
       if (sameModifiers(mods, pawn.mods)) continue;
       pawn.mods = mods;
@@ -448,9 +509,46 @@ export class MapRoom extends Room<{ state: MapState }> {
     return withModifiers(kit, pawn.mods);
   }
 
-  /** A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. */
+  /** Applies the queued client records; a mode that changed is told and stored. */
+  private applyQueued(): void {
+    if (this.between.length === 0) return;
+    for (const e of this.between) {
+      const pawn = this.pawns.get(e.player);
+      if (!pawn || pawn.leaving) continue;
+      // A fighter's mode is set for the match (duel/floor.ts).
+      if (e.t === "mode" && pawn.player.team > 0) continue;
+      const before = pawn.player.mode;
+      applyBetween(this.world, e);
+      if (e.t === "mode" && pawn.player.mode !== before) {
+        this.tellMode(pawn);
+        background("mode save", modes.write(pawn.character.id, pawn.player.mode));
+      }
+    }
+    this.between.length = 0;
+  }
+
+  /**
+   * A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. Leaving full
+   * auto counts only once the body has stayed out of it for `AUTO_OFF_TICKS` (checked with the
+   * living world, `readLive`), so a toggle and back does not restart the clock.
+   */
   private tellMode(pawn: Pawn): void {
-    live()?.events.autoHunting(pawn.character.id, pawn.player.mode === Mode.Auto);
+    if (pawn.player.mode === Mode.Auto) {
+      pawn.autoOffAt = -1;
+      live()?.events.autoHunting(pawn.character.id, true);
+    } else if (pawn.autoOffAt < 0) {
+      pawn.autoOffAt = this.world.tick + AUTO_OFF_TICKS;
+    }
+  }
+
+  /** Bodies out of full auto long enough: now the living world hears it. */
+  private settleAutoOff(): void {
+    const l = live();
+    for (const pawn of this.pawns.values()) {
+      if (pawn.autoOffAt < 0 || this.world.tick < pawn.autoOffAt) continue;
+      pawn.autoOffAt = -1;
+      if (pawn.player.mode !== Mode.Auto) l?.events.autoHunting(pawn.character.id, false);
+    }
   }
 
   /** The step's events the living world counts (notices, 상점 and 벌점); it buffers them all. */
@@ -482,7 +580,9 @@ export class MapRoom extends Room<{ state: MapState }> {
         case Ev.Revive: {
           const target = of(e.a);
           const by = of(e.b);
-          if (target && by) void l.events.revive(by.character.id, target.character.id);
+          // Getting a teammate up in a duel earns no 상점.
+          if (target && by && target.player.team === 0)
+            void l.events.revive(by.character.id, target.character.id);
           break;
         }
         case Ev.Phase:
@@ -509,12 +609,20 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
   async reload(pawn: Pawn): Promise<void> {
+    const gen = ++pawn.loadGen;
     const loadout = await loadouts.read(pawn.character);
-    if (this.pawns.get(pawn.player.id) !== pawn) return;
+    // A newer read started meanwhile, or the body left: this one is stale.
+    if (gen !== pawn.loadGen || this.pawns.get(pawn.player.id) !== pawn) return;
     pawn.loadout = loadout;
     const p = pawn.player;
-    // The inventory's level is the record; the fight may run ahead of grants not yet landed.
-    if (loadout.level > p.level) p.level = loadout.level;
+    // A fighter keeps the duel's kit; the new loadout is worn once the match is over.
+    if (p.team > 0) return;
+    // The inventory's level is the record. When it moved the level, its EXP is the record too:
+    // the fight's own count would count the granted EXP a second time toward the next level.
+    if (loadout.level > p.level) {
+      p.level = loadout.level;
+      p.exp = loadout.exp;
+    }
     this.world.setKit(p, this.kitOf(pawn, p.level));
   }
 
@@ -585,6 +693,15 @@ export class MapRoom extends Room<{ state: MapState }> {
     return this.state.channel;
   }
 
+  /** Accounts with a body standing here: what fills a channel (`channels.occupancy`). */
+  accountsHere(): ReadonlySet<string> {
+    const out = new Set<string>();
+    for (const pawn of this.pawns.values()) {
+      if (!pawn.leaving) out.add((pawn.client.auth as RoomAuth).accountId);
+    }
+    return out;
+  }
+
   /** Ids of the characters standing here, for tests and tools. */
   get characterIds(): string[] {
     return [...this.pawns.values()].map((p) => p.character.id);
@@ -596,7 +713,10 @@ export class MapRoom extends Room<{ state: MapState }> {
    */
   private emptied(): void {
     this.retireTimer?.clear();
-    this.retireTimer = this.clock.setTimeout(() => void this.retire(), this.graceMs);
+    this.retireTimer = this.clock.setTimeout(
+      () => background("channel retire", this.retire()),
+      this.graceMs,
+    );
   }
 
   private async retire(): Promise<void> {
@@ -609,7 +729,10 @@ export class MapRoom extends Room<{ state: MapState }> {
   /** Where a session's character stands, in whole pixels, for saving. */
   private placeOf(id: string): { x: number; y: number } | undefined {
     const p = this.world.playerById(id);
-    return p && { x: Math.round(p.x), y: Math.round(p.y) };
+    if (!p) return undefined;
+    // Knocked out, the character is where it will wake.
+    const at = p.down ? this.map.spawn : p;
+    return { x: Math.round(at.x), y: Math.round(at.y) };
   }
 
   override async onJoin(client: Client, options: SeatOptions = {}): Promise<void> {
@@ -617,6 +740,9 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.retireTimer = undefined;
     const character = await this.seats.join(client);
     try {
+      // A seat is good only for where the character belongs as it is taken: a ticket from before
+      // a door, an expel or another page's move is refused, and the client enters again.
+      if (!(await this.belongsHere(character))) throw new ServerError(409, "elsewhere");
       await this.seat(client, character, options);
     } catch (error) {
       // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
@@ -625,22 +751,43 @@ export class MapRoom extends Room<{ state: MapState }> {
       await this.seats.leave(client);
       throw error;
     }
+    // Sent home while the seat was being taken, the expel found no body to move: move it now.
+    if (this.def.id !== HOME_MAP && (await live()?.homeUntil(character.id)) != null) {
+      this.relocate(character.id, HOME_MAP, "main", "home");
+    }
+  }
+
+  /**
+   * Whether the character belongs on this map by its durable record (`belongsOn`): every seat,
+   * whether from entering, a door, the school moving them or a reconnection, is checked by it.
+   */
+  private async belongsHere(saved: Pick<Character, "id" | "mapId" | "x" | "y">): Promise<boolean> {
+    const sentHome = (await live()?.homeUntil(saved.id)) != null;
+    return belongsOn(saved, sentHome) === this.def.id;
   }
 
   /** Puts a joined character's body into the fight and the client's views around it. */
   private async seat(client: Client, character: Character, options: SeatOptions): Promise<void> {
     const id = client.sessionId;
-    const start =
+    if (invariants.on) oneBody(character.id, this);
+    const place =
       character.mapId === this.def.id
         ? validPlace(this.def.id, character.x, character.y)
         : spawnPlace(this.def, "main");
+    // Clear of the walls as they stand now, doors the Page clock shut included.
+    const start = { ...place, ...clearSpot(this.def, place.x, place.y, this.map) };
     const facing =
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)
         : start.facing;
-    const loadout = await loadouts.read(character);
+    // EXP still in the grant buffer lands first, so the loadout read is the whole record.
+    await grants()?.flush(character.id);
+    const [loadout, mode] = await Promise.all([
+      loadouts.read(character),
+      modes.read(character.id).catch(() => undefined),
+    ]);
     client.view = new StateView();
-    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing);
+    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing, mode);
     this.countBytes(client);
     const p = pawn.player;
     client.send(MAP_MESSAGES.zones, { zones: pawn.zones } satisfies ZoneUpdate);
@@ -653,6 +800,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       zones: () => this.pawns.get(id)?.zones ?? [],
     });
     this.visit(character.id, placesAt(this.def, p.x, p.y));
+    this.duel?.seatedHere(character.id);
   }
 
   /**
@@ -667,6 +815,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     x: number,
     y: number,
     facing: Facing,
+    mode: Mode = DEFAULT_MODE,
   ): Pawn {
     const id = client.sessionId;
     const view = client.view;
@@ -687,7 +836,10 @@ export class MapRoom extends Room<{ state: MapState }> {
       throw error;
     }
     player.facing = facing;
+    player.mode = mode;
     player.exp = loadout.exp;
+    // Back within a quarter of an hour: as hurt and as busy as it left (fight/carry.ts).
+    carryIn(character.id, player, this.world.tick);
     player.expMult = mods.exp;
     player.party = partyOf(parties.of(character.id)?.id);
     const net = newViewer();
@@ -701,6 +853,8 @@ export class MapRoom extends Room<{ state: MapState }> {
       net,
       queue: new InputQueue(),
       player,
+      loadGen: 0,
+      autoOffAt: -1,
       loadout,
       mods,
       expCarry: 0,
@@ -717,6 +871,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       lastRattle: 0,
       atDesk: false,
       unseenUntil: 0,
+      eating: false,
       fromX: player.x,
       fromY: player.y,
     };
@@ -744,34 +899,48 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   /** Tells the living world the character is in these places (도감 school entries, notices). */
   private visit(characterId: string, ids: readonly string[]): void {
+    // Carried to a dueling floor and back is not going anywhere: a duel advances no quest.
+    if (this.duel?.fights(characterId)) return;
     const events = live()?.events;
     if (events) for (const id of ids) events.visit(characterId, id);
   }
 
   override onDrop(client: Client): void {
     const pawn = this.pawns.get(client.sessionId);
+    // A fighter who drops is out of its match at once (duel/floor.ts `leaving`).
+    if (pawn) this.duel?.leaving(pawn.character.id);
     // The character stays and plays itself meanwhile (PLAN §19 reconnect); queued inputs are stale.
     if (pawn) {
       pawn.queue.clear();
       pawn.player.away = true;
     }
-    if (!this.seats.mayReconnect(client)) return;
+    if (!this.seats.mayReconnect(client)) {
+      if (pawn) pawn.leaving = true;
+      return;
+    }
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
 
-  override onReconnect(client: Client): void {
+  override async onReconnect(client: Client): Promise<void> {
     this.seats.reconnected(client);
-    const pawn = this.pawns.get(client.sessionId);
-    if (pawn) {
-      pawn.player.away = false;
-      pawn.net.fresh = true;
-      this.net.resendDrops(pawn.net);
-    }
     this.countBytes(client);
+    // Moved by the server while the socket was down (sent home, let back, walked out): there is
+    // no body here to come back to. The client enters again and lands where it belongs.
+    const pawn = this.pawns.get(client.sessionId);
+    if (!pawn || pawn.leaving || !(await this.belongsHere(pawn.character))) {
+      if (client.state !== ClientState.LEAVING) client.leave(CLOSE_MAP_CHANGED);
+      return;
+    }
+    pawn.player.away = false;
+    pawn.net.fresh = true;
+    this.net.resendDrops(pawn.net);
   }
 
   override async onLeave(client: Client): Promise<void> {
     places.leave(client.sessionId);
+    this.moved.delete(client.sessionId);
+    const pawn = this.pawns.get(client.sessionId);
+    if (pawn) pawn.leaving = true;
     if (this.clients.length === 0) this.emptied();
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
@@ -780,7 +949,9 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override onDispose(): void {
+    ROOMS.delete(this);
     channels.forget(this.roomId);
+    if (this.duel) dueling()?.removeFloor(this.roomId);
     this.unlistenClubs?.();
     this.unlistenParties?.();
     this.metrics.dispose();
@@ -793,8 +964,15 @@ export class MapRoom extends Room<{ state: MapState }> {
    */
   private removeBody(id: string): void {
     const pawn = this.pawns.get(id);
+    if (pawn) this.duel?.leaving(pawn.character.id);
     if (pawn) {
       this.handOverExp(pawn);
+      const p = pawn.player;
+      if (p.joined && p.id === id) {
+        // Leaving knocked out is waking at the 보건실: the 기절 counts.
+        if (p.down) background("knockout", live()?.events.knockout(pawn.character.id));
+        carryOut(pawn.character.id, p, this.world.tick);
+      }
       if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
       for (const other of this.pawns.values()) {
         const theirs = other.client.view;
@@ -856,8 +1034,10 @@ export class MapRoom extends Room<{ state: MapState }> {
         pawn.fromY = pawn.player.y;
       }
       const s0 = performance.now();
+      this.applyQueued();
       stepFight(this.world, inputs);
       if (this.devActions.length > 0) for (const act of this.devActions.splice(0)) act();
+      this.duel?.tick();
       // What combat earned goes to each character's pending grant; nothing touches the database.
       const sink = grants();
       for (const g of this.world.grants) {
@@ -869,6 +1049,10 @@ export class MapRoom extends Room<{ state: MapState }> {
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {
+        // A client that has not acknowledged its join (or is leaving) is sent nothing: Colyseus
+        // would queue the frames for it without limit. Its first real message is a keyframe.
+        if (client.state !== ClientState.JOINED && client.state !== ClientState.RECONNECTED)
+          continue;
         const pawn = this.pawns.get(client.sessionId);
         if (!pawn || pawn.leaving) continue;
         client.sendBytes(SNAPSHOT_MESSAGE, this.net.message(pawn.net));
@@ -942,12 +1126,18 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
     const doors = stepDoors(this.inside, walkers, this.def.portals);
     this.inside = new Map(doors.inside);
+    const now = Date.now();
     for (const { id, portal } of doors.entered) {
       const pawn = this.pawns.get(id);
       const p = this.def.portals[portal];
-      if (pawn && p?.built) void this.walkThrough(pawn, p.id, p.to, p.spawn);
+      if (!pawn || !p?.built) continue;
+      // Too soon after the last door: it counts as walked into again next tick, until it may open.
+      if (now - (lastDoor.get(pawn.character.id) ?? 0) < DOOR_EVERY_MS) {
+        this.inside.set(id, -1);
+        continue;
+      }
+      background("door", this.walkThrough(pawn, p.id, p.to, p.spawn));
     }
-    const now = Date.now();
     for (const pawn of this.pawns.values()) {
       if (pawn.leaving) continue;
       const p = pawn.player;
@@ -1003,7 +1193,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     );
     if ([...closed].join() === [...this.closed].join()) return;
     this.closed = closed;
-    this.map.collision = shutDoors(this.def.collision, this.def.portals, closed);
+    this.applyWalls();
     this.state.closed.splice(0, this.state.closed.length, ...closed);
   }
 
@@ -1022,20 +1212,35 @@ export class MapRoom extends Room<{ state: MapState }> {
     const target = builtMap(to);
     if (!target) return;
     // The Page clock can close a map between the door check and the step.
-    if (this.closed.has(via)) {
+    if (this.closed.has(via) || live()?.isOpen(target.id) === false) {
       this.rattle(via, "portal", pawn.client.sessionId, "door_closed");
       return;
     }
+    noteDoor(pawn.character.id);
+    await this.carry(pawn, via, target.id, spawnPlace(target, spawn));
+  }
+
+  /**
+   * The body leaves for `mapId` at `arrive`: the save-first handoff of `walkThrough`, into the
+   * channel `roomId` when one is named (a dueling floor and back, duel/hub.ts) and it has room.
+   */
+  private async carry(
+    pawn: Pawn,
+    via: string,
+    mapId: string,
+    arrive: { x: number; y: number; facing: Facing },
+    roomId?: string,
+  ): Promise<void> {
     const { client } = pawn;
     const id = client.sessionId;
     const at = this.placeOf(id);
     pawn.leaving = true;
     pawn.queue.clear();
     this.removeBody(id);
-    const arrive = spawnPlace(target, spawn);
+    this.moved.add(id);
     let auth: Awaited<ReturnType<RoomSeats["moveOut"]>>;
     try {
-      auth = await this.seats.moveOut(client, target.id, arrive.x, arrive.y);
+      auth = await this.seats.moveOut(client, mapId, arrive.x, arrive.y);
     } catch {
       // Nothing was written, or another login took the account: stay, or let eviction end it.
       if (this.seats.mayReconnect(client) && at && this.clients.includes(client)) {
@@ -1043,11 +1248,15 @@ export class MapRoom extends Room<{ state: MapState }> {
       }
       return;
     }
+    // Dropped meanwhile: the far side is written, and entering again lands there.
+    if (!this.clients.includes(client)) return;
     let seating: Awaited<ReturnType<typeof channels.seat>> | undefined;
     try {
-      seating = await channels.seat(target.id, auth, { facing: arrive.facing });
+      seating = roomId
+        ? await channels.seatIn(mapId, roomId, auth, { facing: arrive.facing })
+        : await channels.seat(mapId, auth, { facing: arrive.facing });
     } catch (error) {
-      console.error(`seating ${id} in ${target.id} failed: ${String(error)}`);
+      console.error(`seating ${id} in ${mapId} failed: ${String(error)}`);
     }
     if (!this.clients.includes(client)) return;
     if (!seating) {
@@ -1068,7 +1277,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   relocate(characterId: string, to: string, spawn: string, via: string): boolean {
     const pawn = [...this.pawns.values()].find((p) => p.character.id === characterId);
     if (!pawn || pawn.leaving) return false;
-    void this.walkThrough(pawn, via, to, spawn);
+    background("relocate", this.walkThrough(pawn, via, to, spawn));
     return true;
   }
 
@@ -1077,8 +1286,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     const l = live();
     if (!l) return;
     for (const pawn of this.pawns.values()) {
-      if (pawn.leaving || l.homeUntil(pawn.character.id) !== null) continue;
-      this.relocate(pawn.character.id, START_MAP, "main", "school");
+      if (pawn.leaving) continue;
+      background(
+        "home check",
+        l.homeUntil(pawn.character.id).then((until) => {
+          if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
+        }),
+      );
     }
   }
 
@@ -1094,9 +1308,149 @@ export class MapRoom extends Room<{ state: MapState }> {
         pawn.player.facing,
       );
       back.net.fresh = true;
+      this.moved.delete(pawn.client.sessionId);
     } catch {
       // No free body: the client is told to enter again by its seat's eviction.
     }
+  }
+
+  /**
+   * Development and tests: every joined client has a body here, unless it just walked out through
+   * a door, and every body has its client or a reconnection held for it.
+   */
+  checkBodies(): void {
+    const where = `${this.def.id}#${this.state.channel}`;
+    for (const client of this.clients) {
+      const id = client.sessionId;
+      if (client.state !== ClientState.JOINED || this.pawns.has(id) || this.moved.has(id)) continue;
+      invariants.report(`client ${id} in ${where} has no body`);
+    }
+    for (const [id, pawn] of this.pawns) {
+      if (pawn.leaving || this.seats.holding(id)) continue;
+      if (!this.clients.some((c) => c.sessionId === id)) {
+        invariants.report(`body ${id} in ${where} has no client`);
+      }
+    }
+  }
+
+  /** Bodies of a character standing in this room, for the check across rooms. */
+  bodiesOf(characterId: string): number {
+    let n = 0;
+    for (const pawn of this.pawns.values()) {
+      if (pawn.character.id === characterId && !pawn.leaving) n++;
+    }
+    return n;
+  }
+
+  // Duels ----------------------------------------------------------------------------------
+
+  /** A floor on a map with one: the room lends it its world, bodies, walls and messages. */
+  private openFloor(): void {
+    const arena = this.def.arenas.find((a) => a.modes.length > 0);
+    const hub = dueling();
+    if (!arena || !hub) return;
+    const gallery = spawnPlace(this.def, "colosseum");
+    const room: FloorRoom = {
+      roomId: this.roomId,
+      mapId: this.def.id,
+      channel: this.state.channel,
+      world: this.world,
+      bodyOf: (id) => {
+        const pawn = this.pawnOf(id);
+        return pawn && !pawn.leaving
+          ? { player: pawn.player, sid: pawn.client.sessionId }
+          : undefined;
+      },
+      seated: () =>
+        [...this.pawns.values()]
+          .filter((p) => !p.leaving)
+          .map((p) => ({ characterId: p.character.id, player: p.player })),
+      broadcast: (type, body) => this.broadcast(type, body),
+      send: (sid, type, body) => this.pawns.get(sid)?.client.send(type, body),
+      fence: (id, on) => {
+        const list = this.state.fenced;
+        const at = list.indexOf(id);
+        if (on && at < 0) list.push(id);
+        else if (!on && at >= 0) list.splice(at, 1);
+        this.applyWalls();
+      },
+      duelKit: (id, mode) => {
+        const pawn = this.pawnOf(id);
+        if (!pawn) return undefined;
+        const l = pawn.loadout;
+        const build = duelBuild(pawn.character.major, l.minor, l, DUEL_NORMS);
+        return duelKit(this.world.rules, build, DUEL_NORMS, mode);
+      },
+      unarm: (id) => {
+        const pawn = this.pawnOf(id);
+        if (!pawn) return;
+        const p = pawn.player;
+        p.party = partyOf(parties.of(id)?.id);
+        // A grant that landed during the match raised the recorded level.
+        if (pawn.loadout.level > p.level) p.level = pawn.loadout.level;
+        pawn.mods = live()?.modifiers(id) ?? pawn.mods;
+        p.expMult = pawn.mods.exp;
+        this.world.setKit(p, this.kitOf(pawn, p.level));
+        this.tellMode(pawn);
+      },
+      modeChanged: (id) => {
+        const pawn = this.pawnOf(id);
+        if (pawn) this.tellMode(pawn);
+      },
+      gallery: { x: gallery.x, y: gallery.y },
+    };
+    this.duel = hub.addFloor(this.roomId, (events) => new FloorHost(room, arena, events));
+  }
+
+  /** The room's walls: the map's, with shut doors, and the floor's ring while a match is on it. */
+  private applyWalls(): void {
+    const base = shutDoors(this.def.collision, this.def.portals, this.closed);
+    const fenced = this.duel && this.state.fenced.length > 0;
+    this.map.collision = fenced && this.duel ? fenceFloor(base, this.duel.arena.rect) : base;
+  }
+
+  private pawnOf(characterId: string): Pawn | undefined {
+    const at = fighting.get(characterId);
+    return at?.room === this && this.pawns.get(at.pawn.player.id) === at.pawn ? at.pawn : undefined;
+  }
+
+  /** Whether a character here may be pulled into a duel now: seated, staying, on its feet. */
+  duelReady(characterId: string): boolean {
+    const pawn = this.pawnOf(characterId);
+    const p = pawn?.player;
+    return !!pawn && !!p && !pawn.leaving && !p.down && !p.away && p.team === 0;
+  }
+
+  /** Whether `n` fighters on their way still fit: they may take seats past what newcomers may. */
+  seatsFor(n: number): boolean {
+    return this.clients.length + n <= this.maxClients;
+  }
+
+  /** Sends a character here to a spot on a map, in a given channel when it has room. */
+  sendTo(
+    characterId: string,
+    to: { map: string; x: number; y: number; roomId?: string; via: string },
+  ): boolean {
+    const pawn = this.pawnOf(characterId);
+    if (!pawn || pawn.leaving) return false;
+    const place = validPlace(to.map, to.x, to.y);
+    background("duel move", this.carry(pawn, to.via, place.map.id, place, to.roomId));
+    return true;
+  }
+
+  /** Puts a character standing here somewhere else in this room at once. */
+  teleport(characterId: string, x: number, y: number): boolean {
+    const pawn = this.pawnOf(characterId);
+    if (!pawn || pawn.leaving) return false;
+    const place = validPlace(this.def.id, x, y);
+    const p = pawn.player;
+    p.x = snap(place.x);
+    p.y = snap(place.y);
+    p.rollLeft = 0;
+    p.forceTicks = 0;
+    pawn.queue.clear();
+    this.inside.delete(pawn.client.sessionId);
+    return true;
   }
 
   // The cast -----------------------------------------------------------------------------------
@@ -1178,9 +1532,12 @@ export class MapRoom extends Room<{ state: MapState }> {
     pawn.lastInteract = now;
     const at = this.world.playerById(client.sessionId);
     const target = at && nearestUsable(this.usable, at.x, at.y);
-    void this.answer(pawn, target, n, at).then((answer) => {
-      if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
-    });
+    background(
+      "interaction",
+      this.answer(pawn, target, n, at).then((answer) => {
+        if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
+      }),
+    );
   }
 
   private async answer(
@@ -1205,7 +1562,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (PLACE_THINGS.has(thing.id)) this.visit(who, [thing.id]);
     const l = live();
     if (MEAL_COUNTERS.has(thing.id) && l) {
-      return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+      if (pawn.eating) return { t: "none", n };
+      pawn.eating = true;
+      try {
+        return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+      } finally {
+        pawn.eating = false;
+      }
     }
     if (thing.kind === "locked") {
       this.rattle(thing.id, "thing", "", "door_locked");
@@ -1259,5 +1622,25 @@ export class MapRoom extends Room<{ state: MapState }> {
       y: back.y,
     } satisfies Caught);
     void live()?.events.patrolCaught(pawn.character.id);
+  }
+}
+
+/** Development and tests: a character about to be seated has no body anywhere else. */
+function oneBody(characterId: string, here: MapRoom): void {
+  for (const room of ROOMS) {
+    if (room.bodiesOf(characterId) > 0) {
+      invariants.report(
+        `character ${characterId} has a body in ${room.mapId}#${room.channel} while seated in ${here.mapId}#${here.channel}`,
+      );
+    }
+  }
+}
+
+/** Remembers a character's door; old entries go once there are many. */
+function noteDoor(characterId: string): void {
+  const now = Date.now();
+  lastDoor.set(characterId, now);
+  if (lastDoor.size > 10_000) {
+    for (const [id, at] of lastDoor) if (now - at > DOOR_EVERY_MS) lastDoor.delete(id);
   }
 }

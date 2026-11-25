@@ -8,6 +8,11 @@
  *
  * Map rooms are never joined by matchmaking from a client: every seat is reserved here, by the
  * server, for a character it has already placed (PLAN §19, positions are never the client's).
+ *
+ * A channel is full when `seats` accounts stand in it or hold the seat they were last given
+ * there. Sockets left behind by a door and seats an account was given before its latest one do
+ * not count, so nobody can fill a channel with tickets or old connections, and each account
+ * holds one outstanding entry ticket at a time.
  */
 import { type IRoomCache, matchMaker, type Room } from "@colyseus/core";
 import { CHANNEL_SEATS, MAP_ROOM, MAP_SEATS, type Seating, type SeatTicket } from "@guago/shared";
@@ -36,6 +41,19 @@ interface Channel {
   readonly cache: IRoomCache;
 }
 
+/** What a channel's room tells about who is in it. */
+export interface ChannelRoom {
+  /** Accounts with a body standing in the room. */
+  accountsHere(): ReadonlySet<string>;
+}
+
+/** A seat an account was given. */
+interface Ticket {
+  readonly map: string;
+  readonly roomId: string;
+  readonly seating: Seating;
+}
+
 class Channels {
   /** Players a channel holds. Load tests raise it to fill one room past the PLAN's 60. */
   seats = CHANNEL_SEATS;
@@ -43,6 +61,10 @@ class Channels {
   graceSeconds = 30;
   private readonly byMap = new Map<string, Channel[]>();
   private readonly locks = new Map<string, Promise<unknown>>();
+  /** The seat each account was given last, by entering or by a door: the only one that counts. */
+  private readonly latest = new Map<string, Ticket>();
+  /** The seat each account was given last by entering, handed again while it can be taken. */
+  private readonly entries = new Map<string, Ticket>();
 
   /**
    * Reserves a seat for `auth`'s character on `map`: in the lowest channel with room, or a new
@@ -60,13 +82,67 @@ class Channels {
         const channel = this.open(map) ?? (await this.create(map, fill.monsters));
         try {
           const seat = await matchMaker.reserveSeatFor(channel.cache, options, auth);
-          return { map, channel: channel.number, seat: ticket(seat) };
+          const seating: Seating = { map, channel: channel.number, seat: ticket(seat) };
+          this.latest.set(auth.accountId, { map, roomId: channel.roomId, seating });
+          return seating;
         } catch {
           // Closed since it was picked (a closing room counts as full, so `open` skips it).
           if (!matchMaker.getLocalRoomById(channel.roomId)) this.forget(channel.roomId);
         }
       }
       throw new Error(`no channel of ${map} would seat a player`);
+    });
+  }
+
+  /**
+   * Entering: the account's outstanding ticket for `map` again while it can still be taken,
+   * else a new seat. Asking twice never holds two seats.
+   */
+  async enter(map: string, auth: RoomAuth, fill: { monsters?: number } = {}): Promise<Seating> {
+    const held = await this.locked(map, async () => {
+      const t = this.entries.get(auth.accountId);
+      return t?.map === map && this.pending(t) ? t : undefined;
+    });
+    if (held) {
+      this.latest.set(auth.accountId, held);
+      return held.seating;
+    }
+    const seating = await this.seat(map, auth, {}, fill);
+    const made = this.latest.get(auth.accountId);
+    if (made?.seating === seating) this.entries.set(auth.accountId, made);
+    return seating;
+  }
+
+  /**
+   * Reserves a seat in one given channel of `map` (a dueling floor, or the channel a fighter came
+   * from), past the seats newcomers may take; any channel when that one is gone or full.
+   */
+  async seatIn(
+    map: string,
+    roomId: string,
+    auth: RoomAuth,
+    options: SeatOptions = {},
+  ): Promise<Seating> {
+    const seating = await this.locked(map, async () => {
+      const channel = (this.byMap.get(map) ?? []).find((c) => c.roomId === roomId);
+      const room = channel && (matchMaker.getLocalRoomById(roomId) as Room | undefined);
+      if (!channel || !room || room.hasReachedMaxClients()) return null;
+      try {
+        const seat = await matchMaker.reserveSeatFor(channel.cache, options, auth);
+        const made: Seating = { map, channel: channel.number, seat: ticket(seat) };
+        this.latest.set(auth.accountId, { map, roomId: channel.roomId, seating: made });
+        return made;
+      } catch {
+        return null;
+      }
+    });
+    return seating ?? this.seat(map, auth, options);
+  }
+
+  /** Opens one more channel of `map` whatever the others hold: a dueling floor for a match. */
+  openExtra(map: string): Promise<void> {
+    return this.locked(map, async () => {
+      await this.create(map);
     });
   }
 
@@ -95,6 +171,9 @@ class Channels {
 
   /** Called by a map room when it closes. */
   forget(roomId: string): void {
+    for (const tickets of [this.latest, this.entries]) {
+      for (const [account, t] of tickets) if (t.roomId === roomId) tickets.delete(account);
+    }
     for (const [map, list] of this.byMap) {
       const kept = list.filter((c) => c.roomId !== roomId);
       if (kept.length === list.length) continue;
@@ -105,10 +184,35 @@ class Channels {
 
   private open(map: string): Channel | undefined {
     for (const c of this.byMap.get(map) ?? []) {
-      const room = matchMaker.getLocalRoomById(c.roomId) as Room | undefined;
-      if (room && !room.hasReachedMaxClients()) return c;
+      const room = matchMaker.getLocalRoomById(c.roomId) as (Room & ChannelRoom) | undefined;
+      if (room && !room.hasReachedMaxClients() && this.occupancy(room) < this.seats) return c;
     }
     return undefined;
+  }
+
+  /**
+   * Accounts a room holds a place for: those standing in it, and those whose latest ticket is a
+   * seat in it not taken yet. A dropped player keeps their body, so their held reconnection is
+   * already counted; sockets that walked out through a door and superseded tickets are not.
+   */
+  occupancy(room: Room & ChannelRoom): number {
+    const accounts = new Set(room.accountsHere());
+    for (const [sessionId, reserved] of Object.entries(reservedSeats(room))) {
+      const auth = reserved[1] as RoomAuth | undefined;
+      if (!auth || reserved[3]) continue;
+      const latest = this.latest.get(auth.accountId);
+      if (latest?.roomId === room.roomId && latest.seating.seat.sessionId === sessionId) {
+        accounts.add(auth.accountId);
+      }
+    }
+    return accounts.size;
+  }
+
+  /** Whether a ticket's seat can still be taken. */
+  private pending(t: Ticket): boolean {
+    const room = matchMaker.getLocalRoomById(t.roomId) as Room | undefined;
+    const reserved = room && reservedSeats(room)[t.seating.seat.sessionId];
+    return reserved !== undefined && !reserved[2];
   }
 
   private async create(map: string, monsters?: number): Promise<Channel> {
@@ -150,8 +254,16 @@ class Channels {
  * the same one.
  */
 function pendingSeats(room: Room): number {
+  return Object.keys(reservedSeats(room)).length;
+}
+
+/**
+ * Colyseus's table of reserved seats by session id: `[options, auth, consumed, reconnection]`.
+ * A seat being joined is hidden from its keys.
+ */
+function reservedSeats(room: Room): Record<string, [unknown, unknown, boolean, boolean]> {
   // biome-ignore lint/complexity/useLiteralKeys: the field is private in the typings.
-  return Object.keys(room["_reservedSeats"]).length;
+  return room["_reservedSeats"];
 }
 
 function ticket(seat: Awaited<ReturnType<typeof matchMaker.reserveSeatFor>>): SeatTicket {
