@@ -172,7 +172,13 @@ export function createReads(db: Db, trades: TradeLogSource | null = null) {
       let mutes: Record<string, unknown>[] = [];
       let strikes: Record<string, unknown>[] = [];
       let reports: Record<string, unknown>[] = [];
+      let conduct: Record<string, unknown>[] = [];
       if (characterId) {
+        conduct = (
+          await db.execute(sql`
+            select id, at, kind, amount, reason from conduct_ledger
+            where character_id = ${characterId} order by id desc limit 100`)
+        ).rows;
         mutes = (
           await db.execute(sql`
             select u.id, u.reason, u.starts_at, u.ends_at, m.login_id as admin, u.lifted_at,
@@ -220,6 +226,14 @@ export function createReads(db: Db, trades: TradeLogSource | null = null) {
           body: s.body as string,
           demerits: Number(s.demerits),
           admin: s.admin as string,
+        })),
+        /** 벌점 and 상점 with their reasons (PLAN §11), newest first. */
+        conduct: conduct.map((c) => ({
+          id: Number(c.id),
+          at: iso(c.at) as string,
+          kind: c.kind as "demerit" | "merit",
+          amount: Number(c.amount),
+          reason: c.reason as string,
         })),
         reports: reports.map((x) => ({
           id: Number(x.id),

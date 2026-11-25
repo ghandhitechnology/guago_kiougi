@@ -1,4 +1,5 @@
 import {
+  boardWeek,
   type Currency,
   earn,
   type Outcome,
@@ -93,13 +94,9 @@ export const VENDING = {
   ],
 } as const;
 
-/**
- * The 자판기's week, counted from Monday 05:00 KST like the weekly board (PLAN §15). 1970-01-01
- * was a Thursday, so three days shift the count onto Mondays.
- */
+/** The 자판기's week: the weekly board's (PLAN §15), from Monday 05:00 KST. */
 export function vendingWeek(ms: number): number {
-  const day = Math.floor((ms + (9 - 5) * 3600_000) / 86_400_000);
-  return Math.floor((day + 3) / 7);
+  return boardWeek(ms);
 }
 
 /** This week's stock: the fixed five and one special, drawn by the week number. */

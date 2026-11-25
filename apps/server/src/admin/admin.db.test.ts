@@ -16,6 +16,8 @@ import { type AuthService, createAuthService } from "../auth/service.ts";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
 import { createEconomy } from "../economy/index.ts";
+import { provideLive } from "../live/current.ts";
+import type { Live } from "../live/index.ts";
 import { studentLooks } from "../looks.ts";
 import { evictAccount } from "../seats.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
@@ -154,7 +156,9 @@ describe("a ban", () => {
     await waitFor(() => (matchMaker.getLocalRoomById(roomId)?.clients.length ?? 0) === 1);
 
     // The link drops: the server holds the seat for the 30-second reconnection.
-    const live = matchMaker.getLocalRoomById(roomId)?.clients[0]?.ref as { terminate(): void };
+    const live = matchMaker.getLocalRoomById(roomId)?.clients[0]?.ref as unknown as {
+      terminate(): void;
+    };
     live.terminate();
     await waitFor(() => matchMaker.getLocalRoomById(roomId)?.clients.length === 0);
 
@@ -317,7 +321,11 @@ describe("the audit log", () => {
     expect(await count("ban", `account:${p.accountId}`)).toBe(0);
     expect((await call(base, API.me, { jar: p.jar, ip: p.ip })).status).toBe(200);
 
-    // A strike lands once with its 벌점 and one row; a second strike of the line adds neither.
+    // A strike lands once with one row and one 벌점 call; a second strike of the line adds neither.
+    const struck: string[] = [];
+    provideLive({
+      events: { chatStrike: async (id: string) => void struck.push(id) },
+    } as unknown as Live);
     await db.execute(sql`
       insert into chat_log (channel, sender_id, target, body, masked, at)
       values ('world', ${p.characterId}, null, '시발 진짜', true, now())`);
@@ -329,10 +337,8 @@ describe("the audit log", () => {
     expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).body.error).toBe(
       "already_struck",
     );
-    const demerits = await db.execute(
-      sql`select demerits from characters where id = ${p.characterId}`,
-    );
-    expect(demerits.rows[0]?.demerits).toBe(3);
+    provideLive(undefined);
+    expect(struck).toEqual([p.characterId]);
     expect(await count("strike", `character:${p.characterId}`)).toBe(1);
   });
 

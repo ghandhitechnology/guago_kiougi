@@ -16,6 +16,7 @@ import {
   CLOSE_BANNED,
   CLOSE_KICKED,
   type Currency,
+  DEMERITS,
   type SystemLine,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
@@ -23,8 +24,8 @@ import type { AuthGate } from "../auth/service.ts";
 import type { Db } from "../db/index.ts";
 import type { Executor, Queryable } from "../economy/executor.ts";
 import { MAX_STACK } from "../economy/ops.ts";
+import { live } from "../live/current.ts";
 import { record, target } from "./audit.ts";
-import { awardDemerits, STRIKE_DEMERITS } from "./demerits.ts";
 import { adminMutes } from "./mutes.ts";
 
 export type ModError =
@@ -171,6 +172,11 @@ export function cleanNotice(raw: unknown): string | null {
 
 // The service ----------------------------------------------------------------------------------
 
+/**
+ * Bans and mutes are about real people, so they run on the wall clock: Postgres `now()` here and
+ * in every check, never the Page clock the executor reads (live/clock.ts), which a test server
+ * may run faster than real time.
+ */
 const endsAt = (minutes: number | null) =>
   minutes === null ? sql`null` : sql`now() + make_interval(mins => ${minutes})`;
 
@@ -308,8 +314,10 @@ export function createModeration(deps: ModerationDeps) {
       run((tx) => kickIn(tx, adminId, accountId, reason)),
 
     /**
-     * Confirms a logged line as a filter strike: +3 벌점 (PLAN §11) through `awardDemerits`, once
-     * per line. `line` is the `chat_log` key, id and time.
+     * Confirms a logged line as a filter strike, once per line: the strike and its audit row
+     * commit together, then the living world adds the +3 벌점 (PLAN §11) with everything that
+     * follows from it (the warning line, 명령퇴사 at 20) through `live().events.chatStrike`.
+     * `line` is the `chat_log` key, id and time.
      */
     strike: (adminId: string, line: { id: number; at: Date }, reason: string) =>
       run(async (tx) => {
@@ -327,19 +335,13 @@ export function createModeration(deps: ModerationDeps) {
         if (!found) return fail("not_found");
         const made = await tx.execute(sql`
           insert into filter_strikes (character_id, line_id, line_at, body, demerits, admin_id)
-          select ${found.sender_id}, l.id, l.at, ${found.body}, ${STRIKE_DEMERITS}, ${adminId}
+          select ${found.sender_id}, l.id, l.at, ${found.body}, ${DEMERITS.chat}, ${adminId}
           from chat_log l where l.id = ${line.id} and l.at >= ${at}::timestamptz
             and l.at < ${at}::timestamptz + interval '1 millisecond'
           on conflict (line_id, line_at) do nothing
           returning id`);
         const strike = made.rows[0];
         if (!strike) return fail("already_struck");
-        await awardDemerits(tx, {
-          characterId: found.sender_id,
-          amount: STRIKE_DEMERITS,
-          reason: "filter_strike",
-          ref: Number(strike.id),
-        });
         await record(tx, {
           adminId,
           action: "strike",
@@ -351,10 +353,11 @@ export function createModeration(deps: ModerationDeps) {
             lineAt: line.at.toISOString(),
             channel: found.channel,
             masked: found.masked,
-            demerits: STRIKE_DEMERITS,
+            demerits: DEMERITS.chat,
           },
         });
-        return { ok: true };
+        // Its own operation in the live world, which logs (never throws) when it fails.
+        return { ok: true, after: () => live()?.events.chatStrike(found.sender_id) };
       }),
 
     /**

@@ -11,7 +11,7 @@ class AdminMutes {
   /** Character id to the end of its last mute in ms; `Infinity` until lifted. */
   private ends = new Map<string, number>();
 
-  /** When the admin mute on this character ends, or 0 when none holds. */
+  /** When the admin mute on this character ends, or 0 when none holds. Wall clock, never the Page clock. */
   until(characterId: string, now = Date.now()): number {
     const end = this.ends.get(characterId);
     if (end === undefined) return 0;
