@@ -194,7 +194,12 @@ export async function tradesScreen(ctx: Ctx): Promise<Node> {
   return h(
     "div",
     null,
-    h("h1", null, "Trades"),
+    h(
+      "h1",
+      null,
+      "Trades",
+      h("span", { class: "muted" }, "  each trade for 90 days, then daily totals per pair"),
+    ),
     form(
       { class: "row" },
       [

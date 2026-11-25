@@ -12,9 +12,10 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { ipHash } from "../auth/crypto.ts";
-import { readCookie } from "../auth/http.ts";
+import { clientAddress, readCookie } from "../auth/http.ts";
 import { describeError } from "../db/index.ts";
 import { Buckets } from "../economy/buckets.ts";
+import { auditContext } from "../moderation/audit.ts";
 import type { Admin, AdminAuth } from "./auth.ts";
 
 const MAX_BODY = 16 * 1024;
@@ -30,6 +31,24 @@ export interface AdminSettings {
   secret: string;
   /** Built admin page (`apps/admin/dist`); not served when missing. */
   staticDir?: string;
+  /**
+   * Behind a proxy on this machine (`tailscale serve`), every admin connects from loopback;
+   * with this on, limits and audit rows key on the person the proxy names instead
+   * (`Tailscale-User-Login`, else the last `X-Forwarded-For` hop). Off by default: without a
+   * proxy those headers are whatever the client sent.
+   */
+  trustProxy?: boolean;
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+/** Who a request comes from, for limits and audit rows: the peer, or the proxy's word for it. */
+export function requester(req: IncomingMessage, trustProxy: boolean): string {
+  const peer = req.socket.remoteAddress ?? "unknown";
+  if (!trustProxy || !LOOPBACK.has(peer)) return peer;
+  const user = req.headers["tailscale-user-login"];
+  if (typeof user === "string" && user) return `tailscale-user:${user.toLowerCase()}`;
+  return clientAddress(req.headers["x-forwarded-for"], peer, true);
 }
 
 export class HttpError extends Error {
@@ -160,9 +179,19 @@ export function createAdminHandler(settings: AdminSettings, auth: AdminAuth, rou
   }
 
   async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    const method = req.method ?? "GET";
-    const ip = ipHash(req.socket.remoteAddress ?? "unknown", settings.secret);
+    const ip = ipHash(requester(req, settings.trustProxy ?? false), settings.secret);
     if (flood.take(ip, FLOOD, Date.now()) > 0) throw new HttpError(429, "rate_limited");
+    // Every audit row written while serving this request carries the address.
+    return auditContext.run({ ipHash: ip }, () => serve(req, res, url, ip));
+  }
+
+  async function serve(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    ip: string,
+  ): Promise<void> {
+    const method = req.method ?? "GET";
     // A browser says where a request comes from; only this page may call the API.
     const site = req.headers["sec-fetch-site"];
     if (site !== undefined && site !== "same-origin") throw new HttpError(403, "forbidden");

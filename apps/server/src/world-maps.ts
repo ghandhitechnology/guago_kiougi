@@ -71,11 +71,18 @@ export function startPlace(): Place {
 /** Pixels a blocked spot may be moved to find room for the feet. */
 const NUDGE_PX = 12;
 
-/** The spot, or the nearest one within a few pixels where the feet fit. */
-function clearSpot(map: BuiltMap, x: number, y: number): { x: number; y: number } | undefined {
+/**
+ * The spot, or the nearest one within a few pixels where the feet fit, on `walls` (the map's own
+ * with doors to unbuilt maps shut, unless a room passes its current walls).
+ */
+export function clearSpot(
+  map: BuiltMap,
+  x: number,
+  y: number,
+  walls: Collidable = roomCollision(map),
+): { x: number; y: number } | undefined {
   if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) return undefined;
   if (x >= map.w * TILE_SIZE || y >= map.h * TILE_SIZE) return undefined;
-  const walls = roomCollision(map);
   for (let r = 0; r <= NUDGE_PX; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
@@ -96,6 +103,20 @@ export function validPlace(mapId: string, x: number, y: number): Place {
   if (!map) return startPlace();
   const spot = clearSpot(map, x, y);
   return spot ? { map, ...spot, facing: facingOf("down") } : mainOf(map);
+}
+
+/**
+ * The map a character belongs on by its durable record: the 집 while sent home, else where it
+ * was saved (made valid), and never the 집 once the time is up. Entering seats a character there,
+ * and a room takes only a character that belongs on it at the moment of joining.
+ */
+export function belongsOn(
+  saved: { readonly mapId: string; readonly x: number; readonly y: number },
+  sentHome: boolean,
+): string {
+  if (sentHome) return HOME_MAP;
+  const map = validPlace(saved.mapId, saved.x, saved.y).map.id;
+  return map === HOME_MAP ? START_MAP : map;
 }
 
 /** A spawn of `map` by name, nudged clear of walls, else its main spawn. */

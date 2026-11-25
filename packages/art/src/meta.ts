@@ -66,6 +66,26 @@ export interface RigMeta {
   readonly anims: Readonly<Record<string, AnimMeta>>;
   /** The first look is the default. */
   readonly looks: Readonly<Record<string, LookMeta>>;
+  /**
+   * Parts drawn just below another layer instead of in their own layer's place, per layer and
+   * part: `{ accessory: { headphones: 'hair' } }` draws the headphones after the face and before
+   * the hair, so long hair falls over them. Parts not listed draw in their own layer.
+   */
+  readonly under: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * Stack the layers with `stackLayers` from `@guago/art` (exported from `layer-order.ts`) and
+   * `clean` on, before swapping slot colours in: a pixel a later layer leaves without any
+   * same-colour neighbour takes that layer's colour. Without it, hair cut by a clip or a strap
+   * keeps one-pixel crumbs. Outline colours are every ramp's `deep` step and every slot's `deep`
+   * key.
+   */
+  readonly clean: boolean;
+  /**
+   * Points that follow the skeleton, keyed `{layer}/{part}/{anchor}`, then `{dir}/{frame}` to a
+   * pixel in the frame. A frame left out has the point hidden. `jacket/varsity/emblem` is the
+   * top left of the 과잠's back panel, where a club's 6×6 emblem is drawn after the jacket layer.
+   */
+  readonly anchors: Readonly<Record<string, Readonly<Record<string, Vec>>>>;
 }
 
 export interface DecalMeta {
