@@ -1,4 +1,4 @@
-import { flightWall, FxKind, traceBeam, type Collidable, type WireFx } from "@guago/shared";
+import { type Collidable, FxKind, flightWall, traceBeam, type WireFx } from "@guago/shared";
 import type * as Phaser from "phaser";
 
 /**
@@ -90,8 +90,8 @@ export class FightSketch {
               { x: f.x - nx, y: f.y - ny },
             ];
             g.fillStyle(color, age >= fire ? 0.7 : 0.15 + 0.3 * k);
-            g.fillPoints(pts, true);
-            g.strokePoints(pts, true);
+            g.fillPoints(pts as never, true);
+            g.strokePoints(pts as never, true);
           } else {
             g.fillStyle(color, age >= fire ? 0.7 : 0.12);
             g.fillCircle(f.x, f.y, f.radius);
@@ -125,7 +125,8 @@ export class FightSketch {
           g.lineStyle(Math.max(1, f.width / 3), BEAM, 0.8);
           g.beginPath();
           g.moveTo(l.path[0] as number, l.path[1] as number);
-          for (let i = 1; i < l.points; i++) g.lineTo(l.path[i * 2] as number, l.path[i * 2 + 1] as number);
+          for (let i = 1; i < l.points; i++)
+            g.lineTo(l.path[i * 2] as number, l.path[i * 2 + 1] as number);
           g.strokePath();
           break;
         }

@@ -14,6 +14,7 @@ import {
   aimMessage,
   type ChangeNotice,
   type Character,
+  CONTROL_MODES,
   createFight,
   dressPlayer,
   Ev,
@@ -45,11 +46,15 @@ import {
   startRevive,
   stepFight,
   TILE_SIZE,
+  wearClub,
 } from "@guago/shared";
+import { clubActivity } from "./club-activity.ts";
+import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
 import { expMultiplier, fightFacts } from "./fight/seams.ts";
 import { RoomMetrics } from "./metrics.ts";
+import { parties } from "./parties.ts";
 import { places } from "./places.ts";
 import { mapOptionAllowed } from "./room-maps.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
@@ -71,6 +76,14 @@ const LOG_EVERY_MS = 30_000;
  * keeps every tick within a few milliseconds of its time.
  */
 const POLL_MS = 5;
+/** Party frames hear about health and mode this often (only changes go on). */
+const VITALS_EVERY_MS = 500;
+
+/** The step's party key for a party id. */
+function partyOf(id: number | undefined): string | null {
+  return id === undefined ? null : String(id);
+}
+
 /** EXP modifiers are read this often. */
 const MODIFIERS_EVERY_MS = 2_000;
 /** Aim, mode and revive requests a client may send per second, after a small burst. */
@@ -188,6 +201,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   private ticks!: TickClock;
   /** Tick the current surge began. */
   private surgeFrom = 0;
+  private unlistenClubs: (() => void) | undefined;
+  private unlistenParties: (() => void) | undefined;
 
   /** Only a browser with a live session and a character gets a seat. */
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
@@ -252,6 +267,25 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    // A club joined, left or restyled shows under the name at once.
+    this.unlistenClubs = clubTags.listen((characterId, tag) => {
+      for (const pawn of this.pawns.values()) {
+        if (pawn.character.id === characterId) wearClub(pawn.state, tag);
+      }
+    });
+    // Party members on this map share kills within 20 tiles (PLAN §6); the step reads the party.
+    this.unlistenParties = parties.listen((characterId, partyId) => {
+      const pawn = fighting.get(characterId)?.pawn;
+      if (pawn && this.pawns.get(pawn.player.id) === pawn) pawn.player.party = partyOf(partyId);
+    });
+    // Party frames: health and mode, which the party module passes on only when they change.
+    this.clock.setInterval(() => {
+      for (const pawn of this.pawns.values()) {
+        const p = pawn.player;
+        const mode = CONTROL_MODES[p.mode] ?? "semi";
+        parties.report(pawn.character.id, { hp: p.hp, maxHp: p.kit.maxHp, mode });
+      }
+    }, VITALS_EVERY_MS);
     // EXP modifiers come from memory every couple of seconds, never on the tick.
     this.clock.setInterval(() => {
       for (const pawn of this.pawns.values())
@@ -443,8 +477,10 @@ export class MapRoom extends Room<{ state: MapState }> {
     );
     player.exp = loadout.exp;
     player.rebuild = kitAt;
+    player.party = partyOf(parties.of(character.id)?.id);
     state.sid = id;
     dressPlayer(state, character);
+    wearClub(state, clubTags.get(character.id));
     this.syncOwn(state, player);
 
     const view = new StateView();
@@ -544,6 +580,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override onDispose(): void {
+    this.unlistenClubs?.();
+    this.unlistenParties?.();
     this.metrics.dispose();
   }
 
@@ -568,6 +606,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     pawn.expCarry = total - whole;
     if (whole >= 1 && Number.isSafeInteger(whole)) {
       grants()?.add(pawn.character.id, { exp: whole, drops: [] });
+      clubActivity.add(pawn.character.id, whole);
     }
   }
 

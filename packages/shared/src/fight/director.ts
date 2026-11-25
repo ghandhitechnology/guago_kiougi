@@ -408,4 +408,3 @@ export function onFieldKill(w: FightWorld, m: Monster): void {
   d.kills++;
   if (d.surge) d.queue.push(w.tick + w.rules.pacing.respawnDelay);
 }
-

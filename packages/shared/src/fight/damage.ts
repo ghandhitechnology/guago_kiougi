@@ -818,4 +818,3 @@ function dropFor(w: FightWorld, p: Player, m: Monster): void {
 
 /** Uncollected drops vanish after a minute (content `DROPS.despawnSeconds`). */
 export const PICKUP_TICKS = ticks(60);
-

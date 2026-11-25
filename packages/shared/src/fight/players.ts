@@ -186,4 +186,3 @@ export function startRevive(w: FightWorld, by: Player, target: Player): boolean 
   target.reviveFrom = w.tick;
   return true;
 }
-

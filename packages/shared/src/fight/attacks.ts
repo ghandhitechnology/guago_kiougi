@@ -1629,5 +1629,3 @@ function specializeFor(w: FightWorld, p: Player, n: Minion): number {
   }
   return swarm >= 3 ? MinionRole.Burster : MinionRole.Plain;
 }
-
-

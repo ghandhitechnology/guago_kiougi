@@ -38,6 +38,12 @@ export const PlayerState = schema(
     major: t.string(),
     level: t.uint16(),
     look: LookState,
+    /** The 동아리 shown under the name (PLAN §12): its id, or 0 for none. */
+    clubId: t.uint32(),
+    club: t.string(),
+    /** 과잠 colour, a `jacket` swap slot option, and back emblem (`encodeEmblem` form). */
+    jacket: t.string(),
+    emblem: t.string(),
     // The owner's numbers that change now and then. Its body, health and shield change every
     // tick and travel in its snapshot's Self record (`fight/wire.ts`); everyone else sees the
     // body in the snapshot.
@@ -71,6 +77,17 @@ export function dressPlayer(player: PlayerState, character: Character): void {
   player.name = character.name;
   player.major = character.major;
   player.look = synced;
+}
+
+/** Puts a character's club on its synced player, or takes it off. Fields change only if needed. */
+export function wearClub(
+  player: PlayerState,
+  club: { id: number; name: string; jacket: string; emblem: string } | undefined,
+): void {
+  player.clubId = club?.id ?? 0;
+  player.club = club?.name ?? "";
+  player.jacket = club?.jacket ?? "";
+  player.emblem = club?.emblem ?? "";
 }
 
 /** Player bodies a map room holds, which is also its seat count. */

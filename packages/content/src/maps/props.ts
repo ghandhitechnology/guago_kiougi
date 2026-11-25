@@ -38,6 +38,21 @@ export const PROPS = {
   podium: { foot: [4, 2] },
   bars: { foot: [3, 1] },
   tires: { foot: [3, 1] },
+  // Page 1 town and boss maps.
+  "market-stall": { foot: [3, 1] },
+  krene: { foot: [4, 2] },
+  heroes: { foot: [5, 1] },
+  pithos: { foot: [1, 1] },
+  handcart: { foot: [2, 1] },
+  "marble-bench": { foot: [2, 1] },
+  "shackle-bench": { foot: [4, 1] },
+  "cave-fire": { foot: [2, 1] },
+  stalagmite: { foot: [1, 1] },
+  beans: { foot: [4, 2] },
+  monochord: { foot: [3, 1] },
+  tower: { foot: [3, 1] },
+  plane: { foot: [2, 1] },
+  "scroll-rack": { foot: [2, 1] },
 
   // The interior kit: furniture that blocks, by the floor it stands on. Chairs, stools, bags,
   // books and small things on the floor are walked around by eye, not blocked.

@@ -61,7 +61,9 @@ export class Predictor {
     }
     const [vx, vy] = moveDirection(mx, my);
     if (vx === 0 && vy === 0 && f === 0 && this.body.roll === 0) return undefined;
-    const input: FlaggedInput = f ? { seq: ++this.seq, mx, my, flags: f } : { seq: ++this.seq, mx, my };
+    const input: FlaggedInput = f
+      ? { seq: ++this.seq, mx, my, flags: f }
+      : { seq: ++this.seq, mx, my };
     this.pending.push(input);
     if (this.pending.length > MAX_PENDING) this.pending.shift();
     this.body = stepBody(this.map, this.body, mx, my, f, this.speed, true);

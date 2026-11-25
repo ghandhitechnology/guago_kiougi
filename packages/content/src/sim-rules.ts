@@ -708,4 +708,3 @@ export function monsterKindIndex(id: string): number {
   if (i === undefined) throw new Error(`unknown monster ${id}`);
   return i;
 }
-

@@ -12,6 +12,7 @@ import type { OpHandler } from "./economy/handler.ts";
 import { inventoryLoadouts } from "./fight/loadout.ts";
 import { MapRoom, provideFightServices } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
+import type { Social } from "./social/index.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
@@ -24,7 +25,7 @@ export function createGameServer(
   auth: AuthService,
   settings: HttpSettings,
   looks: () => LookOptions,
-  chat: { filter?: ChatFilter; log?: ChatSink } = {},
+  chat: { filter?: ChatFilter; log?: ChatSink; social?: Social } = {},
   economy: { ops?: OpHandler; routes?: readonly ApiRoute[]; grants?: GrantBuffer } = {},
 ) {
   const { grants } = economy;

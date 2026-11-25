@@ -1050,4 +1050,3 @@ export const NULL_SINK: SnapshotSink = {
   self() {},
   note() {},
 };
-

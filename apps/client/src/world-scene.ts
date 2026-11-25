@@ -3,15 +3,15 @@ import type { ArtMetadata } from "@guago/art";
 import { LAWN, simRules } from "@guago/content";
 import {
   AIM_MESSAGE,
-  castFlag,
   type Collidable,
+  castFlag,
   encodeInput,
   Facing,
   INPUT_MESSAGE,
   InputFlag,
   MAX_AIM,
-  MODE_MESSAGE,
   type MapState,
+  MODE_MESSAGE,
   NULL_SINK,
   PLAYER_SPEED,
   Q,
@@ -36,12 +36,12 @@ import { CameraRig } from "./camera.ts";
 import { devMap, drawDevMap } from "./dev-map.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
+import { FightKeys } from "./fight-keys.ts";
+import { FightSketch } from "./fight-sketch.ts";
 import { drawGround } from "./ground.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { stayConnected } from "./net.ts";
-import { FightKeys } from "./fight-keys.ts";
-import { FightSketch } from "./fight-sketch.ts";
 import { drawProps } from "./props.ts";
 import { SelfMover } from "./self.ts";
 

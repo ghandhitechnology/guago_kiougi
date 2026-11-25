@@ -6,11 +6,13 @@ import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
-import { studentLooks } from "./looks.ts";
+import { clubJackets, studentLooks } from "./looks.ts";
 import { fightLoadoutChanged } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
+import { executorFees } from "./social/fees.ts";
+import { createSocial } from "./social/index.ts";
 import { worldRoom } from "./world-room.ts";
 
 assertServable(config);
@@ -30,11 +32,16 @@ const auth = createAuthService({
 });
 startChatLogMaintenance(db);
 const chatLog = new ChatLog(db, { onMissingPartition: () => maintainChatLog(db) });
+const social = createSocial(db, {
+  fees: executorFees(db, economy.executor),
+  jackets: clubJackets,
+  log: chatLog,
+});
 const server = createGameServer(
   auth,
   config,
   studentLooks,
-  { log: chatLog },
+  { log: chatLog, social },
   { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
@@ -51,6 +58,7 @@ setInterval(
   () => {
     auth.sweep().catch(() => {});
     economy.prune().catch(() => {});
+    void social.sweep();
   },
   10 * 60 * 1000,
 ).unref();
