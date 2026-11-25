@@ -30,6 +30,8 @@ const MAX_HITS = 48;
 /** Kinds that last long enough to be worth sending again to someone who arrives late. */
 /** Kinds that can end before their clock runs out (a hit, a bounce, a merge). */
 const ENDS_EARLY = new Set<number>([FxKind.Shot, FxKind.Lob, FxKind.EnemyShot, FxKind.Pool]);
+const NONE: readonly number[] = [];
+
 /** Half the 480×270 view. */
 const VIEW_W = 240;
 const VIEW_H = 135;
@@ -110,6 +112,8 @@ export interface NetViewer {
   readonly sentFx: Uint8Array;
   /** The own body as last sent: x, y (1/POS_SCALE px), facing, seq, hp, shield, roll left. */
   readonly self: Float64Array;
+  /** Its drops go out again in the next message (after a reconnect). */
+  resendDrops: boolean;
   /** Bytes of the last message, for metrics. */
   lastBytes: number;
   /** Bytes sent to this client by part (as `FightNet.sent`), running totals. */
@@ -134,6 +138,7 @@ export function newViewer(): NetViewer {
     privCount: 0,
     sentFx: new Uint8Array(65536),
     self: new Float64Array(7).fill(-1),
+    resendDrops: false,
     lastBytes: 0,
     parts: new Float64Array(8),
   };
@@ -902,6 +907,30 @@ export class FightNet {
   }
 
   /** Lasting effects anchored in a cell, for a keyframe. */
+  /** Lasting effects by cell, sorted once a tick the first time a cell is keyed. */
+  private readonly lasting = new Map<number, number[]>();
+  private lastingTick = -1;
+
+  private lastingIn(c: number): readonly number[] {
+    const w = this.w;
+    if (this.lastingTick !== w.tick) {
+      this.lastingTick = w.tick;
+      for (const list of this.lasting.values()) list.length = 0;
+      for (const e of w.effects) {
+        if (!e.alive || !LASTING.has(e.kind) || e.born === w.tick) continue;
+        const anchor = e.kind === FxKind.Orbit ? w.players[e.source] : null;
+        const at = this.cellAt(anchor ? anchor.x : e.x, anchor ? anchor.y : e.y);
+        let list = this.lasting.get(at);
+        if (!list) {
+          list = [];
+          this.lasting.set(at, list);
+        }
+        list.push(e.index);
+      }
+    }
+    return this.lasting.get(c) ?? NONE;
+  }
+
   private lastingFx(c: number): void {
     const w = this.w;
     const out = this.out;
@@ -909,11 +938,9 @@ export class FightNet {
     out.u8(0);
     let n = 0;
     const f = this.fxRec;
-    for (const e of w.effects) {
-      if (!e.alive || !LASTING.has(e.kind) || e.born === w.tick) continue;
-      const anchor = e.kind === FxKind.Orbit ? w.players[e.source] : null;
-      const at = this.cellAt(anchor ? anchor.x : e.x, anchor ? anchor.y : e.y);
-      if (at !== c || !this.describe(e, f)) continue;
+    for (const i of this.lastingIn(c)) {
+      const e = w.effects[i] as Effect;
+      if (!this.describe(e, f)) continue;
       writeFx(out, f);
       (this.cells[c] as Cell).keyFx.push(e.fx);
       n++;
@@ -996,6 +1023,11 @@ export class FightNet {
         me[5] = shield;
       }
       v.privCount++;
+    }
+    for (const v of this.viewers) {
+      if (!v.resendDrops) continue;
+      v.resendDrops = false;
+      this.writeDrops(v);
     }
     for (let i = 0; i < w.eventCount; i++) {
       const ev = w.events[i];
@@ -1324,7 +1356,12 @@ export class FightNet {
   }
 
   /** Every own pickup still lying, for a viewer that just came back. */
+  /** A reconnected client gets its drops again, in its next message. */
   resendDrops(v: NetViewer): void {
+    v.resendDrops = true;
+  }
+
+  private writeDrops(v: NetViewer): void {
     const p = v.player;
     if (!p) return;
     for (const k of this.w.pickups) {

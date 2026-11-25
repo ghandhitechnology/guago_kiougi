@@ -507,6 +507,31 @@ describe("a body leaving", () => {
   });
 });
 
+describe("a reconnect", () => {
+  it("sends the client its drops again in its next message", () => {
+    const w = arena();
+    const p = w.addPlayer("p", 0, 200, 200, kitFor("math", ["wangdo"], 10), 10);
+    const k = w.freePickup();
+    if (!k) throw new Error("no pickup");
+    Object.assign(k, { alive: true, id: w.allocPickup(), owner: p.index, x: 300, y: 300 });
+    Object.assign(k, { fromX: 300, fromY: 300, born: w.tick, until: w.tick + 1000 });
+    k.drop = { kind: 0, payload: null } as never;
+    const net = new FightNet(w);
+    const v = newViewer();
+    v.player = p;
+    net.viewers.add(v);
+    stepFight(w, new Map());
+    net.update();
+    net.message(v);
+    net.resendDrops(v);
+    stepFight(w, new Map());
+    net.update();
+    let drops = 0;
+    snapshotReaderFor(w.map).read(net.message(v).slice(), { ...NULL_SINK, drop: () => drops++ });
+    expect(drops).toBe(1);
+  });
+});
+
 describe("aim", () => {
   it("never carries a book past its reach or through a wall", () => {
     const w = arena();
