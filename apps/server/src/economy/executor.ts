@@ -962,7 +962,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash, others));
         for (const [id, level] of out.levels) notifyLevel(id, level);
-        if (out.fresh) {
+        if (out.fresh && !DEFS[name].quiet) {
           for (const [id, result] of out.results) {
             if (id !== characterId && result.ok) notifyChange(id, result.change);
           }

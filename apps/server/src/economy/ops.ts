@@ -257,6 +257,8 @@ export interface PartyOpDef<R> {
    * others under `<id>@<initiator>`, which no client id can take.
    */
   readonly shared?: boolean;
+  /** The parties hear of it some other way (a trade window's `done`), not by `onChange`. */
+  readonly quiet?: boolean;
   rows(req: R, party: string, locked: Locked): Rows;
   /** Yes-or-no facts outside the economy's rows, read in the transaction (a block). */
   facts?(q: Queryable, req: R, locked: Locked): Promise<Record<string, boolean>>;

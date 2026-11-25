@@ -28,7 +28,8 @@
     "balance": "pnpm --filter @guago/balance-sim balance",
     "loadtest": "pnpm --filter @guago/loadtest start",
     "netsim": "pnpm --filter @guago/loadtest netsim",
-    "social:run": "pnpm --filter @guago/social-run start"
+    "social:run": "pnpm --filter @guago/social-run start",
+    "trade:run": "pnpm --filter @guago/trade-run start"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

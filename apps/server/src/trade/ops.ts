@@ -117,6 +117,8 @@ const later = (now: Date, hours: number) => new Date(now.getTime() + hours * HOU
 const commit: PartyOpDef<TradeCommitRequest> = {
   client: false,
   shared: true,
+  // Both sides get their change in the window's `done`.
+  quiet: true,
   async others(_q, req) {
     return req.parties;
   },
