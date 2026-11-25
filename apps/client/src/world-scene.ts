@@ -753,9 +753,12 @@ export class WorldScene extends Phaser.Scene {
     const players = here.room.state.players;
     const seen = this.seenPlates;
     seen.clear();
+    // In a field the player's own plate would lie under their feet where the hits land; the ring
+    // there marks them instead.
+    const field = here.map.zones.some((z) => z.kind === "monsters");
     here.fight.forEachStudent((slot, x, y, self) => {
       const p = players.get(String(slot));
-      if (!p?.sid) return;
+      if (!p?.sid || (self && field)) return;
       seen.add(p.sid);
       if (!this.plates.has(p.sid)) {
         this.plates.add(p.sid);

@@ -80,6 +80,11 @@ export class Body {
   anim = "";
   // Hit feel.
   stopUntil = 0;
+  /**
+   * Hitstop asked for by a hit that arrived between frames, ms: it starts on the next drawn
+   * frame, so a 50 ms stop holds three frames at 60 fps and not two.
+   */
+  stopPending = 0;
   stopHeavy = false;
   lag = 0;
   /** Frames of flash still to draw. */
@@ -217,6 +222,7 @@ export class Bodies {
     b.art = b.cat === Cat.Monster ? this.ctx.cat.monster(m.kind) : null;
     b.anim = "";
     b.stopUntil = 0;
+    b.stopPending = 0;
     b.lag = 0;
     b.flash = 0;
     b.flashing = false;
@@ -417,10 +423,9 @@ export class Bodies {
   struck(b: Body, stopMs: number, heavy: boolean, kx: number, ky: number): void {
     b.flash = 2;
     b.flashMode = 0;
-    const until = this.ctx.now + stopMs;
-    if (until > b.stopUntil) {
+    if (stopMs > b.stopPending) {
       if (b.stopUntil <= this.ctx.now) b.sprite.anims.pause();
-      b.stopUntil = until;
+      b.stopPending = stopMs;
       b.stopHeavy = heavy;
     }
     const k = Math.hypot(kx, ky);
@@ -451,6 +456,11 @@ export class Bodies {
     const dtTicks = dtMs / TICK_MS;
     const dt = Math.min(0.05, dtMs / 1000);
     for (const b of this.byId.values()) {
+      if (b.stopPending > 0) {
+        // A hair under, so a stop of exactly three frames never rounds up to four.
+        b.stopUntil = Math.max(b.stopUntil, now + b.stopPending - 1);
+        b.stopPending = 0;
+      }
       // Position.
       const frozen = now < b.stopUntil;
       if (b.self) {
