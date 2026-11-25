@@ -84,8 +84,8 @@ export class PageClock {
    * anchor; `rate` applies only to a fresh one.
    */
   async load(rate = 1): Promise<void> {
-    const wall = Date.now();
     const fresh = this.clock.state;
+    const wall = fresh.realMs;
     await this.db.execute(sql`
       insert into server_state (id, current_page, page_opened_at, milestone, clock_real_ms,
         clock_game_ms, clock_rate, last_day, last_week)

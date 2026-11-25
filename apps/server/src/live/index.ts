@@ -161,10 +161,14 @@ export function createLive(db: Db, o: LiveOptions) {
   const notify = (characterId: string, r: ExecResult) => {
     if (r.ok) world()?.notify(characterId, r.change);
   };
-  const background = (what: string, work: () => Promise<unknown>) =>
-    void Promise.resolve()
+  /** Work off the caller's path: it never throws, and a caller may leave the promise alone. */
+  const background = (what: string, work: () => Promise<unknown>): Promise<void> =>
+    Promise.resolve()
       .then(work)
-      .catch((error) => log(`live ${what} failed: ${describeError(error)}`));
+      .then(
+        () => {},
+        (error) => log(`live ${what} failed: ${describeError(error)}`),
+      );
 
   /** Runs a server operation, retrying a dropped connection under the same id. */
   async function run<K extends AnyOp>(
@@ -658,17 +662,17 @@ export function createLive(db: Db, o: LiveOptions) {
       progress.count(characterId, "nohit", placeId);
     },
     /** 기절 in a field: +1 벌점. */
-    knockout(characterId: string): void {
-      background("knockout", () => conduct(characterId, { kind: "demerit", reason: "knockout" }));
+    knockout(characterId: string): Promise<void> {
+      return background("knockout", () => conduct(characterId, { kind: "demerit", reason: "knockout" }));
     },
     /** One player got another back up: +1 상점, and a `help-revive` notice moves. */
-    revive(reviverId: string, revivedId: string): void {
-      if (reviverId === revivedId) return;
-      background("revive", () => conduct(reviverId, { kind: "merit", reason: "revive" }));
+    revive(reviverId: string, revivedId: string): Promise<void> {
+      if (reviverId === revivedId) return Promise.resolve();
       const h = helping.get(reviverId);
       if (h?.template === "help-revive" && h.posterId === revivedId) {
         progress.help(reviverId, helpQuestId(h.notice), h.notice);
       }
+      return background("revive", () => conduct(reviverId, { kind: "merit", reason: "revive" }));
     },
     /** Full-auto hunting started or stopped: two unbroken hours bring 졸음. */
     autoHunting(characterId: string, on: boolean): void {
@@ -706,12 +710,12 @@ export function createLive(db: Db, o: LiveOptions) {
       progress.mark(characterId, "story", beatId);
     },
     /** Spotted by a patrol in a 위험 구역: +2 벌점. */
-    patrolCaught(characterId: string): void {
-      background("patrol", () => conduct(characterId, { kind: "demerit", reason: "patrol" }));
+    patrolCaught(characterId: string): Promise<void> {
+      return background("patrol", () => conduct(characterId, { kind: "demerit", reason: "patrol" }));
     },
     /** 권 사감 caught a snack in the 기숙사: +1 벌점. */
-    dormSnack(characterId: string): void {
-      background("dorm-food", () => conduct(characterId, { kind: "demerit", reason: "dorm-food" }));
+    dormSnack(characterId: string): Promise<void> {
+      return background("dorm-food", () => conduct(characterId, { kind: "demerit", reason: "dorm-food" }));
     },
     /** Standing at a 졸방대 began or ended: thirty seconds clear 졸음. */
     atDesk(characterId: string, on: boolean): void {
@@ -721,14 +725,14 @@ export function createLive(db: Db, o: LiveOptions) {
     /** Ate at the 급식실: today's menu as a 30-minute buff. */
     eat,
     /** The 청소 당번 daily was done: +1 상점. */
-    cleaning(characterId: string): void {
-      background("cleaning", () => conduct(characterId, { kind: "merit", reason: "cleaning" }));
+    cleaning(characterId: string): Promise<void> {
+      return background("cleaning", () => conduct(characterId, { kind: "merit", reason: "cleaning" }));
     },
 
     // Moderation.
     /** A chat filter strike an admin confirmed: +3 벌점. */
-    chatStrike(characterId: string): void {
-      background("chat", () => conduct(characterId, { kind: "demerit", reason: "chat" }));
+    chatStrike(characterId: string): Promise<void> {
+      return background("chat", () => conduct(characterId, { kind: "demerit", reason: "chat" }));
     },
 
     // The raid system.
@@ -917,6 +921,17 @@ export function createLive(db: Db, o: LiveOptions) {
         await page.restart();
         await page.tick();
         return { page: page.view() };
+      case "credit": {
+        // Income as combat hands it to the grant buffer, for the pool's measurement.
+        if (!o.testEvents) throw new Error("credit is for test servers (LIVE_TEST_EVENTS=1)");
+        const credit = body.credit as Parameters<IncomeTracker["credit"]>[1];
+        for (let i = 0; i < Number(body.times ?? 1); i++) {
+          income.credit(String(body.character), credit);
+          if (body.every) clock.step(duration(body.every));
+        }
+        if (body.every) await page.saveClock(clock.state);
+        return { measured: income.measure(String(body.character)) };
+      }
       case "event": {
         if (!o.testEvents) throw new Error("events are for test servers (LIVE_TEST_EVENTS=1)");
         const name = String(body.name) as keyof typeof events;

@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node src/main.ts",
     "netsim": "node src/netsim.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "page-run": "node src/page-run.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"
