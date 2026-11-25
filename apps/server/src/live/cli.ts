@@ -1,6 +1,7 @@
 /**
  * The living world's admin commands, sent to the running server on this machine
- * (`POST /admin/live`, loopback only). PORT picks the server (default 2567).
+ * (`POST /admin/live` on the loopback metrics port, never the game port). PORT or METRICS_PORT
+ * picks the server (default 2667).
  *
  *   pnpm live state                     the Page as the server sees it
  *   pnpm live step <1w|3d|5h|90m>       moves the server clock forward
@@ -35,7 +36,7 @@ if (command === "event") {
   body.flush = true;
 }
 
-const res = await fetch(`http://127.0.0.1:${config.port}/admin/live`, {
+const res = await fetch(`http://127.0.0.1:${config.metricsPort}/admin/live`, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),

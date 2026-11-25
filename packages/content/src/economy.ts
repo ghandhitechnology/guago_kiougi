@@ -143,7 +143,8 @@ export const goodsOf = (id: string): Currency => `snack:${id}`;
 /**
  * Where an item is made (PLAN §13 "Bound items"). A bound item never leaves its first owner:
  * era boss drops, quest rewards and what 상점 or 탐구 토큰 buy. The 신입생 kit is bound too, so
- * throwaway characters cannot mint books to pass on. Bought or received items are not bound;
+ * throwaway characters cannot mint books to pass on, and so is what an admin grants, so a grant
+ * cannot be passed on to another account. Bought or received items are not bound;
  * they wait out `TRADE.retradeHours` instead.
  */
 export type ItemOrigin =
@@ -154,7 +155,8 @@ export type ItemOrigin =
   | "quest"
   | "council-shop"
   | "research-shop"
-  | "mentor-shop";
+  | "mentor-shop"
+  | "admin";
 
 const BOUND_ORIGINS: ReadonlySet<ItemOrigin> = new Set([
   "kit",
@@ -162,6 +164,7 @@ const BOUND_ORIGINS: ReadonlySet<ItemOrigin> = new Set([
   "quest",
   "council-shop",
   "research-shop",
+  "admin",
 ]);
 
 export const bindsOn = (origin: ItemOrigin): boolean => BOUND_ORIGINS.has(origin);

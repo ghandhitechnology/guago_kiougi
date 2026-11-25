@@ -1,5 +1,19 @@
 import type { LightSource, MapSource } from "./format.ts";
-import { blob, GREEK_LEGEND, merge, type Placed, px, settle, trees } from "./greek.ts";
+import {
+  blob,
+  deepen,
+  fieldLegend,
+  foam,
+  merge,
+  type Placed,
+  px,
+  rockPiles,
+  rubble,
+  settle,
+  sparkles,
+  track,
+  trees,
+} from "./greek.ts";
 import type { Decal, Prop, Vec } from "./layers.ts";
 import { fractal } from "./noise.ts";
 import { PlanGrid } from "./plan.ts";
@@ -137,6 +151,8 @@ function paintPlan(): string {
 }
 
 const PLAN = paintPlan();
+/** The plan with the deep marked out past the shallows; same collision. */
+const GROUND = deepen(PLAN);
 
 // The temple --------------------------------------------------------------------------------------
 
@@ -167,6 +183,13 @@ function temple(): Placed {
       { prop: "drum", at: [842, 316], flip: true },
       { prop: "drum", at: [770, 392] },
       { prop: "drum", at: [600, 300] },
+      // The roof came down in front of the columns: the pediment's half, its corner ornament.
+      place("pediment-fallen", 30, 17),
+      place("acroterion", 33, 17),
+      // A kore from the porch, on her back where she fell.
+      place("statue-toppled", 40, 21),
+      // The temple's own altar, out front where the sacrifices were made.
+      place("altar", 44, 26),
       // On the platform: one shaft fell inward across the cella, an amphora rolled to its edge.
       place("shaft-fallen", 36, 18, { frame: "snapped" }),
       { prop: "amphora", at: [658, 360] },
@@ -285,6 +308,7 @@ const lights: LightSource[] = [
 ];
 
 const placed = merge(
+  { objects: rockPiles(PLAN, 2, 17) },
   temple(),
   trees("olive", OLIVES, 1),
   trees("cypress", CYPRESSES),
@@ -337,7 +361,45 @@ const placed = merge(
   },
 );
 
+/** Roads and the paths people cut: the cart road in from the 아고라 and down to the grove. */
+const RUTS: readonly (readonly Vec[])[] = [
+  [
+    [0, 28],
+    [9, 29],
+    [17, 25],
+    [27, 21],
+  ],
+  [
+    [36, 26],
+    [36, 45],
+    [37, 59],
+  ],
+];
+const PATHS: readonly (readonly Vec[])[] = [
+  [
+    [44, 22],
+    [52, 28],
+    [57, 33],
+  ],
+  [
+    [12, 30],
+    [22, 37],
+    [30, 42],
+  ],
+  [
+    [24, 12],
+    [30, 12],
+  ],
+];
+
 const details: (Decal | Prop)[] = [
+  ...foam(GROUND),
+  ...RUTS.flatMap((r) => track("ruts", r, PLAN)),
+  ...PATHS.flatMap((r) => track("footpath", r, PLAN)),
+  // Masonry strewn around the temple and down the line of the fallen columns.
+  ...rubble([36, 19], 11, 14, 3, PLAN),
+  ...rubble([49, 19], 7, 8, 4, PLAN),
+  ...rubble([24, 12], 5, 5, 5, PLAN),
   { prop: "threshing", at: px(36, 45) },
   { prop: "statue-head", at: [636, 518] },
   ...tracks(),
@@ -366,8 +428,8 @@ const map: MapSource = {
   shade: "greece-shade",
   sky: "navy.pale",
   ambient: { color: "gold.pale", intensity: 1 },
-  plan: PLAN,
-  legend: GREEK_LEGEND,
+  plan: GROUND,
+  legend: fieldLegend("slab"),
   backdrop: [
     { prop: "hellas-sky", at: [0, 0], repeat: 6, raw: true },
     { prop: "tear-night", at: [866, 0], raw: true },
@@ -381,28 +443,7 @@ const map: MapSource = {
   objects: placed.objects,
   overhead: placed.overhead,
   lights,
-  atmosphere: [
-    ...(
-      [
-        [380, 150],
-        [612, 120],
-        [936, 214],
-        [960, 380],
-        [930, 560],
-        [880, 700],
-        [200, 166],
-      ] as const
-    ).map(
-      ([x, y], i): Prop => ({
-        prop: "surf",
-        anim: "lap",
-        play: true,
-        index: i % 3,
-        at: [x, y],
-        raw: true,
-      }),
-    ),
-  ],
+  atmosphere: sparkles(GROUND, 5, 9),
   emitters: [
     // Pages of the notebook blowing out of the tear and over the headland.
     {

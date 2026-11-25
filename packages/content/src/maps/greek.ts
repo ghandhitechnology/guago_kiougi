@@ -26,6 +26,176 @@ export const GREEK_LEGEND: MapSource["legend"] = {
   ":": { terrain: "dirt", solid: "#" },
 };
 
+/**
+ * The fields' own ground (their own terrain ids, baked into the Greek themes only), keyed by the
+ * same plan characters as `GREEK_LEGEND` so a plan and its collision stay as they are: `w` is
+ * the shallows and `W` the deep beyond them, `m` the paving the field is laid with.
+ */
+export function fieldLegend(paving: "slab" | "flags"): MapSource["legend"] {
+  return {
+    "~": { terrain: null },
+    w: { terrain: "shallows", solid: "~" },
+    W: { terrain: "sea", solid: "~" },
+    r: { terrain: "crag", solid: "#" },
+    _: { terrain: "dust" },
+    ",": { terrain: "dry" },
+    m: { terrain: paving },
+    "%": { terrain: "dry", solid: "#" },
+    ":": { terrain: "dust", solid: "#" },
+  };
+}
+
+const WATER = "wW";
+
+/**
+ * Water `reach` tiles or more from any shore becomes the deep (`W`). Both are water, so the
+ * collision does not change; only the colour steps down past the shelf.
+ */
+export function deepen(plan: string, reach = 2): string {
+  const rows = plan.split("\n").map((r) => [...r]);
+  const at = (x: number, y: number) => rows[y]?.[x];
+  const out = rows.map((r) => [...r]);
+  const open = (x: number, y: number): boolean => {
+    for (let dy = -reach; dy <= reach; dy++)
+      for (let dx = -reach; dx <= reach; dx++) {
+        const n = at(x + dx, y + dy);
+        if (n !== undefined && n !== "~" && !WATER.includes(n)) return false;
+      }
+    return true;
+  };
+  rows.forEach((row, y) => {
+    row.forEach((ch, x) => {
+      if (ch === "w" && open(x, y)) (out[y] as string[])[x] = "W";
+    });
+  });
+  return out.map((r) => r.join("")).join("\n");
+}
+
+/**
+ * Foam along every side where land meets the shallows, one strip per tile edge, the waves
+ * staggered so they travel along the coast instead of breaking all at once.
+ */
+export function foam(plan: string): Prop[] {
+  const at = cellOf(plan);
+  const rows = plan.split("\n");
+  const out: Prop[] = [];
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const ch = at(x, y);
+      if (ch === "~" || WATER.includes(ch)) continue;
+      for (const [dx, dy, dir] of [
+        [0, 1, "s"],
+        [0, -1, "n"],
+        [1, 0, "e"],
+        [-1, 0, "w"],
+      ] as const) {
+        if (at(x + dx, y + dy) !== "w") continue;
+        out.push({
+          prop: "foam",
+          anim: dir,
+          play: true,
+          index: (x + y * 2) % 4,
+          at: [(x + dx) * T, (y + dy) * T],
+          raw: true,
+        });
+      }
+    }
+  });
+  return out;
+}
+
+/** Sun catching the deep at a scatter of points. */
+export function sparkles(plan: string, step: number, seed: number): Prop[] {
+  const at = cellOf(plan);
+  const rows = plan.split("\n");
+  return scatter(
+    { x: 0, y: 0, w: rows[0]?.length ?? 0, h: rows.length },
+    step,
+    seed,
+    (x, y) => at(x, y) === "W",
+  ).map(
+    ([x, y], i): Prop => ({
+      prop: "sparkle",
+      anim: "glint",
+      play: true,
+      index: (i * 2) % 6,
+      at: [x * T + 8, y * T + 8],
+      raw: true,
+    }),
+  );
+}
+
+/**
+ * Wheel ruts or a trodden footpath along a route of tiles, one piece per tile, only where the
+ * route crosses open dust.
+ */
+export function track(kind: "ruts" | "footpath", route: readonly Vec[], plan: string): Prop[] {
+  const at = cellOf(plan);
+  const out: Prop[] = [];
+  const seen = new Set<string>();
+  for (let k = 0; k + 1 < route.length; k++) {
+    const [x0, y0] = route[k] as Vec;
+    const [x1, y1] = route[k + 1] as Vec;
+    const n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0)));
+    const frame = Math.abs(x1 - x0) >= Math.abs(y1 - y0) ? "h" : "v";
+    for (let i = 0; i <= n; i++) {
+      const tx = Math.round(x0 + ((x1 - x0) * i) / n);
+      const ty = Math.round(y0 + ((y1 - y0) * i) / n);
+      const key = `${tx},${ty}`;
+      if (seen.has(key) || at(tx, ty) !== "_") continue;
+      seen.add(key);
+      out.push({ prop: kind, frame, at: [tx * T, ty * T + (frame === "h" ? 4 : 0)] });
+    }
+  }
+  return out;
+}
+
+/** Masonry fragments strewn around a point, thinning out with distance, on open ground only. */
+export function rubble(
+  center: Vec,
+  radius: number,
+  count: number,
+  seed: number,
+  plan: string,
+): Prop[] {
+  const at = cellOf(plan);
+  const out: Prop[] = [];
+  for (let k = 0; out.length < count && k < count * 6; k++) {
+    const a = unit(k, 1, seed) * Math.PI * 2;
+    const r = radius * unit(k, 2, seed) ** 1.6;
+    const tx = Math.round(center[0] + Math.cos(a) * r);
+    const ty = Math.round(center[1] + Math.sin(a) * r * 0.8);
+    if (!"_,m".includes(at(tx, ty) || "\0")) continue;
+    out.push({
+      prop: "rubble",
+      frame: ["a", "b", "c"][k % 3] as string,
+      at: [
+        tx * T + Math.floor(unit(k, 3, seed) * 10),
+        ty * T + 10 + Math.floor(unit(k, 4, seed) * 5),
+      ],
+      ...(k % 2 ? { flip: true } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * Boulders heaped on the rims of rock outcrops, so a small crag reads as a pile of stone and not
+ * as a pad. The tiles are solid already: the boulders carry no footprint and change nothing a
+ * player bumps into.
+ */
+export function rockPiles(plan: string, step: number, seed: number): Prop[] {
+  const at = cellOf(plan);
+  return edgeLine(plan, "r", "_,m", step, seed).map(
+    ([x, y], i): Prop => ({
+      prop: i % 3 === 0 ? "boulder-big" : "boulder",
+      at: [x * T + 8 + Math.floor(unit(x, y, seed) * 6) - 3, y * T + 13],
+      ...(i % 2 ? { flip: true } : {}),
+      ...(at(x, y + 1) === "r" ? { sort: y * T + 13 } : {}),
+    }),
+  );
+}
+
 const WALKABLE = "_,m";
 const SOLID_TWIN = { _: ":", ",": "%", m: ":" } as const;
 

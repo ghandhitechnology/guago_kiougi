@@ -1,0 +1,19 @@
+{
+  "name": "@guago/moderation-run",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "seed": "node src/seed.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "8.23.1"
+  },
+  "dependencies": {
+    "@colyseus/sdk": "0.18.10",
+    "@guago/shared": "workspace:*",
+    "pg": "8.23.1"
+  }
+}
