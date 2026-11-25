@@ -145,7 +145,8 @@ export class FightStage extends Phaser.Scene {
     const cls = this.params.get("cls") ?? "math";
     await signIn(cls, artMetadata(this));
     const bots = Number(this.params.get("bots") ?? 0);
-    await fetch(`/__fight/bots?n=${bots}`).catch(() => undefined);
+    const follow = encodeURIComponent(NAMES[cls] ?? "");
+    await fetch(`/__fight/bots?n=${bots}&follow=${follow}`).catch(() => undefined);
     const client = new Client(ROOMS_PATH);
     const room = await client.joinOrCreate(MAP_ROOM, {}, MapState);
     this.room = room;

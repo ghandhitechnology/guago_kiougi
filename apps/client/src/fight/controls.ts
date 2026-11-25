@@ -1,4 +1,4 @@
-import { CONTROL_MODES, castFlag, InputFlag, MAX_AIM } from "@guago/shared";
+import { CONTROL_MODES, MAX_AIM } from "@guago/shared";
 import type * as Phaser from "phaser";
 
 /** Aim is re-sent at most this often, ms, and only when it moved this far, px. */

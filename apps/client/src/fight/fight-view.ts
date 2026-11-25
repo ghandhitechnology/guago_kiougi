@@ -53,6 +53,7 @@ import { type FightContext, RESTRAINT } from "./context.ts";
 import { type ControlSink, FightKeys, MouseAim, nextMode } from "./controls.ts";
 import { Effects } from "./effects.ts";
 import { Feedback, TRAUMA } from "./feedback.ts";
+import { HudFeed } from "./hud-source.ts";
 import { FightLights } from "./lights.ts";
 import { DamageNumbers } from "./numbers.ts";
 import { Overlays } from "./overlays.ts";
@@ -99,6 +100,8 @@ interface Look {
 export class FightView {
   readonly state: FightState = emptyState();
   readonly actions: FightActions;
+  /** What the HUD binds: `bindFight(fight.hud)` (`hud/fight.ts`). */
+  readonly hud: HudFeed;
 
   private readonly scene: Phaser.Scene;
   private readonly view: MapView;
@@ -290,6 +293,10 @@ export class FightView {
       clearAim: () => this.room.send(AIM_MESSAGE, []),
       revive: () => this.revive(),
     };
+    this.hud = new HudFeed(this.state, this.actions, () => ({
+      x: this.ctx.selfX,
+      y: this.ctx.selfY,
+    }));
 
     this.offs.push(room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => this.onSnapshot(bytes)));
     const onState = (s: MapState) => this.onState(s);
@@ -694,6 +701,7 @@ export class FightView {
     this.screenFrame(now, dt);
     ctx.trauma.apply(this.scene.cameras.main, dt);
     this.refreshState(now);
+    this.hud.update(now);
   }
 
   private controlsFrame(now: number): void {
@@ -923,6 +931,7 @@ export class FightView {
   /** Leaves: everything the fight made goes; the map view stays. */
   detach(): void {
     for (const off of this.offs.splice(0)) off();
+    this.hud.close();
     this.keys?.dispose();
     this.aim?.dispose();
     this.reticle?.destroy();
