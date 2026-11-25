@@ -12,6 +12,8 @@ const HORIZON = 148;
 /** Top of the sea wall, and of the promenade behind it. */
 const WALL = 182;
 const GROUND = 196;
+/** Depth of the far shore: the city and the water in front of it move as one. */
+const FAR = 0.4;
 const NIGHT = "campus-night";
 /** Lamp light, brightest band first, as the campus-night scene paints it. */
 export const LAMP_BANDS = ["campus-lamp", "campus-dusk", "campus-glow"] as const;
@@ -108,14 +110,17 @@ export class NightBackdrop {
       .tileSprite(0, HORIZON - 30, W + 32, 30, "core", "night-city/still")
       .setOrigin(0);
     this.tiles.push({ obj: city, speed: 1.2, pos: 0 });
-    this.layer(city, -16, HORIZON - 30, 0.3);
+    this.layer(city, -16, HORIZON - 30, FAR);
     this.sea = scene.add
       .tileSprite(0, HORIZON, W + 32, 34, "core", "night-sea/ripple0")
       .setOrigin(0);
     this.tiles.push({ obj: this.sea, speed: 2.6, pos: 0 });
-    this.layer(this.sea, -16, HORIZON, 0.5);
-    const seaFill = scene.add.rectangle(0, HORIZON + 32, W + 32, 4, paint("ink.deep")).setOrigin(0);
-    this.layer(seaFill, -16, HORIZON + 32, 0.5);
+    this.layer(this.sea, -16, HORIZON, FAR);
+    // Deep water under the sea strip, so tilting the view never opens a gap above the wall.
+    const seaFill = scene.add
+      .rectangle(0, HORIZON + 32, W + 32, 220, paint("ink.deep"))
+      .setOrigin(0);
+    this.layer(seaFill, -16, HORIZON + 32, FAR);
 
     // The sea wall and the promenade, the lawn going down from it.
     const wall = scene.add.tileSprite(0, WALL, W + 32, 14, night, "seawall/run").setOrigin(0);
@@ -306,7 +311,7 @@ export class NightBackdrop {
     const tileset = meta.tilesets["lawn-walk"];
     if (!tileset) throw new Error("art has no lawn-walk terrain");
     const cols = 33;
-    const rows = 6;
+    const rows = 8;
     // 1 is grass, 0 the paved walk: a promenade two cells deep, a path down to the bottom.
     const cells = new Uint8Array(cols * rows);
     for (let y = 0; y < rows; y++) {

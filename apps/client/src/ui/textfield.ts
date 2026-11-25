@@ -208,13 +208,15 @@ export class TextField extends Widget {
     const canvas = this.scene.game.canvas;
     const r = canvas.getBoundingClientRect();
     const k = r.width / this.scene.scale.width;
-    const m = this.box.getWorldTransformMatrix();
+    // The input covers the label too, so a tap anywhere on the field lands on it natively;
+    // a tap on the canvas would hand the browser's focus straight back to the page.
+    const m = this.getWorldTransformMatrix();
     Object.assign(el.style, {
       display: "block",
       left: `${r.left + m.tx * k}px`,
       top: `${r.top + m.ty * k}px`,
       width: `${this.boxW * k * m.scaleX}px`,
-      height: `${(this.boxH - this.boxY) * k * m.scaleY}px`,
+      height: `${this.boxH * k * m.scaleY}px`,
     });
     if (document.activeElement === el) {
       this.blink += delta;
