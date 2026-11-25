@@ -10,23 +10,13 @@ import { CLEAR, crop, type Indexed, indexed, Rgba, stamp } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
 import type { CompiledSprite } from "../sprite.ts";
 import { type BitmapFont, drawText } from "./font.ts";
+import { CLUB, randomLooks, type WornLook } from "./looks.ts";
+
+export type { WornLook } from "./looks.ts";
 
 interface Fonts {
   readonly label: BitmapFont;
   readonly head: BitmapFont;
-}
-
-/** A club crest: background, border (or none) and symbol, drawn at the 과잠's emblem anchor. */
-export interface Crest {
-  readonly bg: string;
-  readonly border?: string;
-  readonly symbol: string;
-}
-
-export interface WornLook {
-  readonly parts: Readonly<Record<string, string>>;
-  readonly slots: Readonly<Record<string, string>>;
-  readonly crest?: Crest;
 }
 
 const isOutline = (v: number) => DEEP_INDICES.has(v) || slotOf(v)?.base === v;
@@ -89,62 +79,8 @@ export function wear(
   return out;
 }
 
-/** A small deterministic generator, so the twenty looks are the same on every build. */
-function seeded(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const optionsOf = (rig: CompiledRig, layer: string) =>
   rig.parts.filter((p) => p.layer === layer).map((p) => p.name);
-
-/** Twenty looks from the whole set: every layer and slot chosen at random. */
-export function randomLooks(
-  rig: CompiledRig,
-  crests: CompiledSprite | undefined,
-  slots: Readonly<Record<string, readonly string[]>>,
-  n = 20,
-  seed = 2026,
-): WornLook[] {
-  const rand = seeded(seed);
-  const any = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)] as T;
-  const crestFrames = [...(crests?.frames.keys() ?? [])];
-  const kinds = (k: string) => [
-    ...new Set(crestFrames.filter((f) => f.startsWith(`${k}/`)).map((f) => f.split("/")[1])),
-  ];
-  return Array.from({ length: n }, () => {
-    const parts: Record<string, string> = {
-      shadow: "blob",
-      body: "base",
-      uniform: any(optionsOf(rig, "uniform")),
-      face: any(optionsOf(rig, "face")),
-      hair: any(optionsOf(rig, "hair")),
-      book: "textbook",
-    };
-    if (rand() < 0.45) parts.jacket = rand() < 0.7 ? "varsity" : any(optionsOf(rig, "jacket"));
-    if (rand() < 0.55) parts.accessory = any(optionsOf(rig, "accessory"));
-    const look: WornLook = {
-      parts,
-      slots: Object.fromEntries(Object.entries(slots).map(([s, o]) => [s, any(o)])),
-      ...(parts.jacket === "varsity" && crests
-        ? {
-            crest: {
-              bg: any(kinds("bg")) as string,
-              symbol: any(kinds("symbol")) as string,
-              ...(rand() < 0.6 ? { border: any(kinds("border")) as string } : {}),
-            },
-          }
-        : {}),
-    };
-    return look;
-  });
-}
 
 const BG = [0x1a, 0x14, 0x27] as const;
 const GROUND = [0xbd, 0xb2, 0xab] as const;
@@ -305,7 +241,18 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
 
   // Twenty random looks from the whole set.
   {
-    const looks = randomLooks(rig, crests, slotNames);
+    const kinds = (k: string) => [
+      ...new Set(
+        [...(crests?.frames.keys() ?? [])]
+          .filter((fr) => fr.startsWith(`${k}/`))
+          .map((fr) => fr.split("/")[1] as string),
+      ),
+    ];
+    const looks = randomLooks({
+      parts: Object.fromEntries(rig.layers.map((l) => [l, optionsOf(rig, l)])),
+      slots: slotNames,
+      crests: { bg: kinds("bg"), symbol: kinds("symbol") },
+    });
     const z = 3;
     const per = 10;
     const b = new Board(20 + per * (3 * w * z + 20), 60 + 2 * (h * z + 16 + 3 * (h + 4)) * 1 + 200);
@@ -366,7 +313,7 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
           jacket: "varsity",
         },
         slots: { skin: "deep", hair: "black", jacket: "crimson", emblem: "ivory" },
-        crest: { bg: "shield", border: "rim", symbol: "flame" },
+        crest: { bg: "shield", symbol: "flame" },
       },
     ];
     const anims = Object.entries(rig.anim);
@@ -399,57 +346,7 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
 
   // A club row: five members, five crests, front and back.
   {
-    const members: WornLook[] = [
-      {
-        parts: { ...base.parts, jacket: "varsity", hair: "bun", face: "bright" },
-        slots: { skin: "fair", hair: "black", jacket: "navy", emblem: "ivory" },
-        crest: { bg: "shield", border: "rim", symbol: "setsquare" },
-      },
-      {
-        parts: { ...base.parts, uniform: "gym", jacket: "varsity", hair: "buzz", face: "sharp" },
-        slots: {
-          skin: "warm",
-          hair: "brown",
-          jacket: "crimson",
-          emblem: "mustard",
-          cohort: "gold",
-        },
-        crest: { bg: "circle", border: "gold", symbol: "atom" },
-      },
-      {
-        parts: {
-          ...base.parts,
-          uniform: "shirt",
-          jacket: "varsity",
-          hair: "twintails",
-          face: "shy",
-        },
-        slots: { skin: "fair", hair: "pink", jacket: "forest", emblem: "ivory" },
-        crest: { bg: "hexagon", border: "trim", symbol: "flask" },
-      },
-      {
-        parts: {
-          ...base.parts,
-          uniform: "cardigan",
-          jacket: "varsity",
-          hair: "undercut",
-          face: "cool",
-        },
-        slots: { skin: "deep", hair: "silver", jacket: "violet", emblem: "rose" },
-        crest: { bg: "banner", border: "stitch", symbol: "cat" },
-      },
-      {
-        parts: {
-          ...base.parts,
-          jacket: "varsity",
-          hair: "shag",
-          face: "goofy",
-          accessory: "headphones",
-        },
-        slots: { skin: "warm", hair: "chestnut", jacket: "teal", emblem: "orange" },
-        crest: { bg: "pennant", symbol: "star" },
-      },
-    ];
+    const members = CLUB;
     const z = 5;
     const b = new Board(20 + members.length * (2 * w * z + 24), 60 + h * z + 16 + h + 40);
     drawText(b.c, f.head, "a club · front and back, crests at the 과잠 anchor", 20, b.y, HEAD);
@@ -503,7 +400,7 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
         looks: slotNames.jacket.map((jacket) => ({
           parts: { ...base.parts, jacket: "varsity" },
           slots: { ...base.slots, jacket, emblem: "ivory" },
-          crest: { bg: "circle", border: "rim", symbol: "pinecone" },
+          crest: { bg: "circle", symbol: "pinecone" },
         })),
       },
     ];

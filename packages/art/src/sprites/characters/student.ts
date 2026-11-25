@@ -180,5 +180,76 @@ export default rig({
       },
       slots: { skin: "warm", hair: "red", jacket: "forest" },
     },
+    // The rest of the class, for scenes.
+    gymbun: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "gym",
+        face: "bright",
+        hair: "bun",
+        book: "textbook",
+      },
+      slots: { skin: "warm", hair: "black", cohort: "gold" },
+    },
+    quiet: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "cardigan",
+        face: "cool",
+        hair: "shag",
+        accessory: "headphones",
+        book: "textbook",
+      },
+      slots: { skin: "fair", hair: "brown" },
+    },
+    buzzcut: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "shirt",
+        face: "goofy",
+        hair: "buzz",
+        book: "textbook",
+      },
+      slots: { skin: "deep", hair: "black" },
+    },
+    twins: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "blazer",
+        face: "shy",
+        hair: "twintails",
+        accessory: "lanyard",
+        book: "textbook",
+      },
+      slots: { skin: "fair", hair: "chestnut" },
+    },
+    plaits: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "cardigan",
+        face: "sleepy",
+        hair: "braids",
+        accessory: "glasses",
+        book: "textbook",
+      },
+      slots: { skin: "warm", hair: "red" },
+    },
+    quiff: {
+      parts: {
+        shadow: "blob",
+        body: "base",
+        uniform: "shirt",
+        jacket: "varsity",
+        face: "sharp",
+        hair: "undercut",
+        book: "textbook",
+      },
+      slots: { skin: "deep", hair: "silver", jacket: "teal" },
+    },
   },
 });

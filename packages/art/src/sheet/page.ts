@@ -8,6 +8,7 @@ import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
 import { drawOrder, outlineColors, packRgba, stackLayers } from "../layer-order.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
+import { CLUB, type Crest, randomLooks, type WornLook } from "./looks.ts";
 import { mapViews, overlay } from "./map-view.ts";
 import { sampleGrid } from "./sample-grid.ts";
 import { uiSections } from "./ui-page.ts";
@@ -59,6 +60,7 @@ interface Meta {
       looks: Record<string, { parts: Record<string, string>; slots: Record<string, string> }>;
       under?: Record<string, Record<string, string>>;
       clean?: boolean;
+      anchors?: Record<string, Record<string, [number, number]>>;
     }
   >;
   tileGrid: { tile: number; margin: number; spacing: number; columns: number };
@@ -564,7 +566,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
 
 function composite(
   rigName: string,
-  look: { parts: Record<string, string>; slots: Record<string, string> },
+  look: { parts: Record<string, string>; slots: Record<string, string>; crest?: Crest },
   key: string,
 ): HTMLCanvasElement {
   const rig = meta.rigs[rigName];
@@ -581,6 +583,14 @@ function composite(
     .filter((layer) => layer !== "shadow" && look.parts[layer])
     .map((layer) => {
       const img = frameImage(rig.atlas, `${rigName}/${layer}/${look.parts[layer]}/${key}`);
+      // A club's crest goes on the 과잠's back at its anchor, as part of the jacket layer.
+      const at = rig.anchors?.[`${layer}/${look.parts[layer]}/emblem`]?.[key];
+      if (layer === "jacket" && look.crest && at) {
+        const ictx = ctx2d(img);
+        for (const f of [`bg/${look.crest.bg}`, `symbol/${look.crest.symbol}`]) {
+          ictx.drawImage(frameImage("ui", `crest/${f}`), at[0], at[1]);
+        }
+      }
       return packRgba(ctx2d(img).getImageData(0, 0, w, h).data);
     });
   const { px } = stackLayers(layers, w, h, -1, rig.clean ?? false, (v) => OUTLINES.has(v));
@@ -631,6 +641,108 @@ function composite(
       }
     }
     s.append(box);
+  }
+}
+
+// Wardrobe ----------------------------------------------------------------------------------
+// The student rig as players will see it: twelve hairstyles from every side, the six faces,
+// twenty random looks from the whole set, every animation, and a club in its crests.
+
+{
+  const rig = meta.rigs.student;
+  const first = rig ? Object.values(rig.looks)[0] : undefined;
+  if (rig && first) {
+    const s = section("wardrobe", "wardrobe");
+    const base: WornLook = { parts: first.parts, slots: { ...first.slots, hair: "brown" } };
+    const dirs = rig.directions;
+    const frameOf = (look: WornLook, dir: string, f: string) =>
+      composite("student", look as never, `${dir}/${f}`);
+    const anim = (look: WornLook, dir: string, name: string, z: number) => {
+      const a = rig.anims[name];
+      if (!a) return el("div");
+      return player(
+        a.frames.map((f) => frameOf(look, dir, f)),
+        a.fps,
+        z,
+        "checker",
+      );
+    };
+
+    const hairs = rig.parts.hair ?? [];
+    const hairBox = el("article");
+    hairBox.append(el("h3", "name", "hair"));
+    for (const dir of ["up", "down", "side"]) {
+      const r = row(hairBox, dir);
+      for (const hair of hairs) {
+        const look = { ...base, parts: { ...base.parts, hair } };
+        r.append(cell(show(frameOf(look, dir, "idle0"), 4, "checker"), hair));
+      }
+      const ones = row(hairBox);
+      for (const hair of hairs) {
+        ones.append(
+          show(frameOf({ ...base, parts: { ...base.parts, hair } }, dir, "idle0"), 1, "checker"),
+        );
+      }
+    }
+    s.append(hairBox);
+
+    const faceBox = el("article");
+    faceBox.append(el("h3", "name", "faces"));
+    for (const face of rig.parts.face ?? []) {
+      const look = { ...base, parts: { ...base.parts, face } };
+      const r = row(faceBox, face);
+      for (const f of ["idle0", "attack1", "page0", "hit", "yawn0", "clap0", "sleepy0", "panic0"]) {
+        for (const dir of ["down", "side"]) r.append(show(frameOf(look, dir, f), 4, "checker"));
+      }
+    }
+    s.append(faceBox);
+
+    const slotsOf = (name: string) => Object.keys(meta.slots[name]?.options ?? {});
+    const crestKinds = (k: string) => [
+      ...new Set(
+        (meta.sprites.crest?.frames ?? [])
+          .map((f) => f.slice("crest/".length))
+          .filter((f) => f.startsWith(`${k}/`))
+          .map((f) => f.split("/")[1] as string),
+      ),
+    ];
+    const looks = randomLooks({
+      parts: rig.parts,
+      slots: Object.fromEntries(Object.keys(meta.slots).map((n) => [n, slotsOf(n)])),
+      crests: { bg: crestKinds("bg"), symbol: crestKinds("symbol") },
+    });
+    const lookBox = el("article");
+    lookBox.append(el("h3", "name", "twenty random looks"));
+    const lr = row(lookBox);
+    for (const look of looks) {
+      const pair = el("div", "pair");
+      for (const dir of dirs) pair.append(anim(look, dir, "walk", 3));
+      lr.append(cell(pair));
+    }
+    s.append(lookBox);
+
+    const animBox = el("article");
+    animBox.append(el("h3", "name", "animations"));
+    const who: WornLook[] = [base, looks[3] ?? base, CLUB[1] ?? base];
+    for (const name of Object.keys(rig.anims)) {
+      const r = row(animBox, name);
+      for (const look of who) {
+        const pair = el("div", "pair");
+        for (const dir of dirs) pair.append(anim(look, dir, name, 3));
+        r.append(cell(pair));
+      }
+    }
+    s.append(animBox);
+
+    const clubBox = el("article");
+    clubBox.append(el("h3", "name", "a club"));
+    const cr = row(clubBox);
+    for (const look of CLUB) {
+      const pair = el("div", "pair");
+      for (const dir of ["down", "up"]) pair.append(anim(look, dir, "idle", 5));
+      cr.append(cell(pair));
+    }
+    s.append(clubBox);
   }
 }
 

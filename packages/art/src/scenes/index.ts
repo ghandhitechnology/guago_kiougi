@@ -2,6 +2,7 @@ import type { SceneDef } from "../scene.ts";
 import agoraRift from "./agora-rift.ts";
 import cafeteriaNoon from "./cafeteria-noon.ts";
 import campusNight from "./campus-night.ts";
+import classroomBreak from "./classroom-break.ts";
 import combat from "./combat.ts";
 import greekHorde from "./greek-horde.ts";
 import makerRoom from "./maker-room.ts";
@@ -20,6 +21,7 @@ export const SCENES: readonly SceneDef[] = [
   studyRoomNight,
   makerRoom,
   cafeteriaNoon,
+  classroomBreak,
   p1Croton,
   p1Elea,
   p1Lyceum,
