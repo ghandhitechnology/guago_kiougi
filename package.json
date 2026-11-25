@@ -20,7 +20,9 @@
     "db:stop": "node apps/server/src/db/local.ts stop",
     "db:reset": "node apps/server/src/db/local.ts reset",
     "db:migrate": "node --env-file-if-exists=.env apps/server/src/db/migrate.ts",
-    "db:generate": "pnpm --filter @guago/server exec drizzle-kit generate"
+    "db:generate": "pnpm --filter @guago/server exec drizzle-kit generate",
+    "loadtest": "pnpm --filter @guago/loadtest start",
+    "netsim": "pnpm --filter @guago/loadtest netsim"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
