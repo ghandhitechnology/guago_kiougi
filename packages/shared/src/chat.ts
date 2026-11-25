@@ -3,6 +3,7 @@
  * validators both sides run. The client renders every chat string as plain text (PLAN §22).
  */
 import { checkName, type Major, normalizeName } from "./api.ts";
+import { TRADE_ERRORS } from "./trade.ts";
 
 /** The room every client holds for the whole session, beside its map room (PLAN §19). */
 export const WORLD_ROOM = "world";
@@ -63,6 +64,8 @@ export const WORLD_MESSAGES = {
   done: "done",
   /** Server to client: `SocialEvent` (social.ts): the login snapshot, then small changes. */
   social: "social",
+  /** Server to client: `TradeUpdate` (trade.ts): a direct trade window as it changes. */
+  trade: "trade",
 } as const;
 
 /** Why a request was not carried out. The client owns the copy for each. */
@@ -130,6 +133,8 @@ export const REFUSAL_CODES = [
   /** Pinning is for 층장. */
   "not_allowed",
   "unknown_emote",
+  // Direct trades and 매점 게시판 reads (trade.ts).
+  ...TRADE_ERRORS,
 ] as const;
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 

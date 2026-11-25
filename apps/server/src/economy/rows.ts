@@ -2,7 +2,7 @@
  * Rows as the executor loads them, and the conversions to and from the pure shapes in
  * `@guago/shared` (`BookItem`, `ToolItem`) and the wire views (`ItemView`, `ProgressionView`).
  */
-import { bookById, toolSubject } from "@guago/content";
+import { bindsOn, bookById, type ItemOrigin, toolSubject } from "@guago/content";
 import {
   type BookGrade,
   type BookItem,
@@ -10,6 +10,8 @@ import {
   expToNext,
   type ItemKind,
   type ItemView,
+  type ListedItem,
+  type ListingCategory,
   type LogoutPlace,
   type Major,
   type NoticeCadence,
@@ -44,6 +46,8 @@ export interface ItemRow {
   bound: boolean;
   tradableAt: Date | null;
   slot: number | null;
+  /** The live listing holding the item; it is out of the bag meanwhile. */
+  listing: string | null;
   affixes: unknown[];
 }
 
@@ -120,7 +124,7 @@ export interface QuestRow {
 // Database rows -------------------------------------------------------------------------------
 
 export const ITEM_COLUMNS =
-  "id, def_id, kind, grade, level, exp, pilgi, pilgi_fail_streak, affixes, evolved, bound, tradable_at, slot";
+  "id, def_id, kind, grade, level, exp, pilgi, pilgi_fail_streak, affixes, evolved, bound, tradable_at, slot, listing_id";
 
 /**
  * Drizzle's driver hands raw-query timestamps back as Postgres text (`2026-11-25 03:00:00+00`);
@@ -152,6 +156,7 @@ export function itemFromDb(r: Record<string, unknown>): ItemRow {
     bound: r.bound as boolean,
     tradableAt: timeFromDb(r.tradable_at),
     slot: (r.slot as number | null) ?? null,
+    listing: (r.listing_id as string | null) ?? null,
   };
 }
 
@@ -248,7 +253,7 @@ export function withTool(row: ItemRow, tool: ToolItem): ItemRow {
   return { ...row, level: tool.level };
 }
 
-const blank = (id: string, def: string, kind: ItemKind): ItemRow => ({
+const blank = (id: string, def: string, kind: ItemKind, origin: ItemOrigin): ItemRow => ({
   id,
   def,
   kind,
@@ -258,16 +263,18 @@ const blank = (id: string, def: string, kind: ItemKind): ItemRow => ({
   pilgi: 0,
   pilgiFails: 0,
   evolved: false,
-  bound: false,
+  bound: bindsOn(origin),
   tradableAt: null,
   slot: null,
+  listing: null,
   affixes: [],
 });
 
-export const newBookRow = (book: BookItem): ItemRow =>
-  withBook(blank(book.id, book.def, "book"), book);
-export const newToolRow = (tool: ToolItem): ItemRow =>
-  withTool(blank(tool.id, tool.def, "tool"), tool);
+/** A new item row; `origin` decides whether it is bound (PLAN §13 "Bound items"). */
+export const newBookRow = (book: BookItem, origin: ItemOrigin): ItemRow =>
+  withBook(blank(book.id, book.def, "book", origin), book);
+export const newToolRow = (tool: ToolItem, origin: ItemOrigin): ItemRow =>
+  withTool(blank(tool.id, tool.def, "tool", origin), tool);
 
 export function subjectOf(row: ItemRow): Major {
   return row.kind === "book" ? bookById(row.def).subject : toolSubject(row.def);
@@ -362,3 +369,65 @@ export const STAT_COLUMNS: Readonly<Record<(typeof STAT_IDS)[number], string>> =
   agility: "stat_agility",
   luck: "stat_luck",
 };
+
+// Listings ------------------------------------------------------------------------------------
+
+export type ListingState = "live" | "sold" | "cancelled" | "expired";
+
+export interface ListingRow {
+  id: string;
+  sellerId: string;
+  state: ListingState;
+  category: ListingCategory;
+  def: string;
+  grade: number;
+  itemId: string | null;
+  item: ListedItem | null;
+  qty: number;
+  listedQty: number;
+  unitPrice: bigint;
+  fee: bigint;
+  createdAt: Date;
+  expiresAt: Date;
+  closedAt: Date | null;
+  /**
+   * Past `expires_at` by the server clock once the row was locked (after any wait for the lock,
+   * so a buy that waited past the hour sees it expired). Read only.
+   */
+  expired: boolean;
+}
+
+export const LISTING_COLUMNS = `id, seller_id, state, category, def_id, grade, item_id, item, qty,
+  listed_qty, unit_price::text as unit_price, fee::text as fee, created_at, expires_at, closed_at`;
+
+/** `now` is the server clock when the row was read; a listing at or past `expires_at` is expired. */
+export function listingFromDb(r: Record<string, unknown>, now: Date): ListingRow {
+  const expiresAt = timeFromDb(r.expires_at) as Date;
+  return {
+    id: r.id as string,
+    sellerId: r.seller_id as string,
+    state: r.state as ListingState,
+    category: r.category as ListingCategory,
+    def: r.def_id as string,
+    grade: r.grade as number,
+    itemId: (r.item_id as string | null) ?? null,
+    item: (r.item as ListedItem | null) ?? null,
+    qty: Number(r.qty),
+    listedQty: Number(r.listed_qty),
+    unitPrice: BigInt(r.unit_price as string),
+    fee: BigInt(r.fee as string),
+    createdAt: timeFromDb(r.created_at) as Date,
+    expiresAt,
+    closedAt: timeFromDb(r.closed_at),
+    expired: expiresAt.getTime() <= now.getTime(),
+  };
+}
+
+/** What the board shows of a listed book or tool. */
+export const listedItem = (row: ItemRow): ListedItem => ({
+  kind: row.kind,
+  grade: row.grade,
+  level: row.level,
+  pilgi: row.pilgi,
+  evolved: row.evolved,
+});

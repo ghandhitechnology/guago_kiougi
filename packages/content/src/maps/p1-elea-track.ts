@@ -56,15 +56,27 @@ const PLAN = paintPlan();
 
 function track(): Prop[] {
   const out: Prop[] = [];
-  // Lane lines from the sill on, to the edge of the map and past it.
+  // Lane lines from the sill on: fresh at the start, worn halfway, then gone over again in
+  // dashes that come shorter and closer together the nearer the end they get.
   for (const y of LINES)
-    for (let x = TRACK.start; x < W; x += 2)
-      out.push({
-        prop: "p1-track",
-        frame: x === TRACK.start ? "start" : "line",
-        at: [x * T, y * T - 4],
-        raw: true,
-      });
+    for (let x = TRACK.start; x < W; x += 2) {
+      if (x === TRACK.start) {
+        out.push({ prop: "p1-track", frame: "start", at: [x * T, y * T - 4], raw: true });
+        continue;
+      }
+      const f = (x - TRACK.start) / (END - TRACK.start);
+      const level = f < 0.5 ? 0 : Math.floor(-Math.log2(Math.max(1e-3, 1 - f)));
+      const period = Math.max(1, 8 >> level);
+      const seg = Math.round((x - TRACK.start) / 2);
+      if (f < 0.32) out.push({ prop: "lane-chalk", frame: "fresh", at: [x * T, y * T - 2] });
+      else if (f < 0.5) out.push({ prop: "lane-chalk", frame: "faded", at: [x * T, y * T - 2] });
+      else if (seg % period < Math.max(1, period / 2))
+        out.push({ prop: "lane-chalk", frame: "redrawn", at: [x * T, y * T - 2] });
+    }
+  // Cross-lines chalked over the lanes at every halving, each nearer the last.
+  for (const [, f] of HALVES)
+    for (let y = TRACK.top; y <= TRACK.bottom; y++)
+      out.push({ prop: "chalk-v", frame: `v${y % 4}`, at: [at(f) * T, y * T] });
   // The starting sill, slab by slab across the track.
   for (let y = TRACK.top; y < TRACK.bottom + 1; y += 2)
     out.push({ prop: "balbis", at: [TRACK.start * T - 12, y * T] });
@@ -79,6 +91,19 @@ function track(): Prop[] {
   // The tortoise's prints in the second lane, from the sill to where it is now.
   for (let x = TRACK.start + 1; x < TORTOISE[0] - 1; x += 2)
     out.push({ prop: "tracks", frame: "h", at: [x * T, TORTOISE[1] * T + 4] });
+  // A runner's prints down the fourth lane, each stride a little shorter than the one before.
+  const L = (END - TRACK.start) * T;
+  let x = (TRACK.start + 1) * T;
+  let stride = 26;
+  for (let k = 0; stride > 3 && x < END * T; k++) {
+    out.push({
+      prop: "footprint",
+      frame: k % 2 ? "l" : "r",
+      at: [Math.round(x), 19 * T + (k % 2 ? 2 : 9)],
+    });
+    x += stride;
+    stride *= 1 - 26 / L;
+  }
   return out;
 }
 
@@ -135,7 +160,34 @@ const map: MapSource = {
     ...grove.objects,
     // The tiers, end to end along the north side.
     ...Array.from({ length: W / 2 }, (_, i) => i * 2).map(
-      (x): Prop => ({ prop: "tiers", at: [x * T, 9 * T - 1], sort: 8 * T }),
+      (x): Prop => ({
+        prop: "tiers",
+        frame: x % 20 === 10 ? "stair" : x % 14 === 4 ? "left" : "plain",
+        at: [x * T, 9 * T - 1],
+        sort: 8 * T,
+      }),
+    ),
+    // The judges' stand in the middle of the tiers, its palms waiting for a winner.
+    { prop: "judges-stand", at: [50 * T, 9 * T - 1], sort: 8 * T + 1 },
+    // Banners along the top of the stand and down the south walk.
+    ...[12, 26, 38, 62, 74, 88].map(
+      (x, i): Prop => ({
+        prop: "banner",
+        anim: "snap",
+        play: true,
+        index: i % 3,
+        at: [x * T, 5 * T + 4],
+        sort: 8 * T + 2,
+      }),
+    ),
+    ...[20, 44, 70, 90].map(
+      (x, i): Prop => ({
+        prop: "banner",
+        anim: "snap",
+        play: true,
+        index: (i + 1) % 3,
+        at: [x * T + 8, (TRACK.bottom + 3) * T + 10],
+      }),
     ),
     // Herms at the sill, a statue of the teacher who said all is one, water for the runners.
     place("herm", TRACK.start - 2, TRACK.top),

@@ -101,64 +101,10 @@ const PLAN = paintPlan();
 
 // The halls ----------------------------------------------------------------------------------
 
-/** A stoa row with a syllabus pinned to each column, as the place's description demands. */
-function hall(
-  x: number,
-  steps: number,
-  frames: readonly string[],
-): Partial<Placed> & { objects: Prop[] } {
-  const foot = (steps + 1) * T - 1;
-  const sort = steps * T;
-  const x0 = x * T;
-  return {
-    objects: [
-      { prop: "stoa-end", frame: "w", at: [x0 - T, foot], sort },
-      ...frames.map(
-        (frame, i): Prop => ({ prop: "stoa-bay", frame, at: [x0 + i * 2 * T, foot], sort }),
-      ),
-      { prop: "stoa-end", frame: "e", at: [x0 + frames.length * 2 * T, foot], sort },
-      ...frames.map(
-        (_, i): Prop => ({
-          prop: "syllabus",
-          frame: ["a", "b", "c"][i % 3] as string,
-          at: [x0 + i * 2 * T + 16, foot - 26],
-          sort: sort + 1,
-        }),
-      ),
-    ],
-  };
-}
-
-const HALL_BAYS = [
-  "door",
-  "plain",
-  "hoplites",
-  "plain",
-  "horse",
-  "plain",
-  "door",
-  "plain",
-  "ship",
-  "plain",
-  "horse",
-  "plain",
-  "hoplites",
-  "plain",
-  "door",
-];
-const LIBRARY_BAYS = [
-  "door",
-  "plain",
-  "door",
-  "plain",
-  "door",
-  "plain",
-  "door",
-  "plain",
-  "door",
-  "plain",
-  "door",
-];
+/** The lecture hall's middle, in tiles: its face is its columns, a syllabus on every one. */
+const LECTURE_X = 21;
+/** The library's middle. */
+const LIBRARY_X = 50.5;
 
 /** Long shadows east, the sun being low in the west. */
 function east(x: number, y: number, len: number, w = 6): ShadowShape {
@@ -183,81 +129,179 @@ const BENCHES: readonly [number, number, boolean][] = [
   [PLANE[0] + 4, PLANE[1] + 3, true],
 ];
 
-const placed = merge(
-  hall(HALL.x, HALL.steps, HALL_BAYS),
-  hall(LIBRARY.x, LIBRARY.steps, LIBRARY_BAYS),
-  {
-    objects: [
-      // The tower over the fall yard, its basket of stones and sack of feathers up top.
-      place("tower", TOWER[0] - 1, TOWER[1]),
-      // The plane in its ring of benches.
-      place("plane", PLANE[0], PLANE[1]),
-      ...BENCHES.map(([x, y, flip]) => place("marble-bench", x, y, { flip })),
-      // Scroll racks either side of the library's middle door, out in the light to be read.
-      place("scroll-rack", LIBRARY.x + 7, LIBRARY.steps + 2),
-      place("scroll-rack", LIBRARY.x + 13, LIBRARY.steps + 2),
-      // The gate: columns either side of a wide opening, herms on guard.
-      place("column", GATE.x - 1, H - 3, { frame: "whole" }),
-      place("column", GATE.x + GATE.w, H - 3, { frame: "whole" }),
-      place("herm", GATE.x - 2, H - 3),
-      place("herm", GATE.x + GATE.w + 1, H - 3),
-      // Statues along the walk from the gate, and the fountain at the pool's head.
-      place("statue", GATE.x - 2, 40),
-      place("statue", GATE.x + GATE.w + 1, 34, { flip: true }),
-      place("krene", ICE.x + ICE.cols * 2 + 3, ICE.y - 1, { anim: "run", play: true }),
-      // Cypresses and olives along the hedges.
-      place("cypress", 2, 26),
-      place("cypress", 2, 36),
-      place("cypress", W - 3, 14),
-      place("cypress", W - 3, 46),
-      place("olive", 70, 6),
-      place("olive", 37, 6),
-      place("pithos", 4, 47),
-      place("handcart", 22, 50),
-    ],
-    overhead: [
-      { prop: "tower-top", at: place("tower", TOWER[0] - 1, TOWER[1]).at },
-      { prop: "plane-crown", anim: "sway", play: true, at: place("plane", PLANE[0], PLANE[1]).at },
-      { prop: "column-capital", at: place("column", GATE.x - 1, H - 3).at },
-      { prop: "column-capital", at: place("column", GATE.x + GATE.w, H - 3).at },
-      { prop: "cypress-crown", anim: "sway", play: true, at: place("cypress", 2, 26).at },
-      { prop: "cypress-crown", anim: "sway", play: true, index: 1, at: place("cypress", 2, 36).at },
-      { prop: "cypress-crown", anim: "sway", play: true, at: place("cypress", W - 3, 14).at },
-      {
-        prop: "cypress-crown",
-        anim: "sway",
-        play: true,
-        index: 1,
-        at: place("cypress", W - 3, 46).at,
-      },
-      { prop: "olive-crown", anim: "stir", play: true, at: place("olive", 70, 6).at },
-      { prop: "olive-crown", anim: "stir", play: true, index: 1, at: place("olive", 37, 6).at },
-    ],
-    shadows: [
-      east(TOWER[0] * T + 8, (TOWER[1] + 1) * T - 2, 150, 20),
-      east(PLANE[0] * T + 8, (PLANE[1] + 1) * T - 2, 90, 40),
-      blob(PLANE[0] * T + 40, (PLANE[1] + 1) * T, 40, 12, 4),
-      east((GATE.x - 1) * T + 8, (H - 2) * T - 2, 60, 6),
-      east((GATE.x + GATE.w) * T + 8, (H - 2) * T - 2, 60, 6),
-    ],
-  },
-);
+/** Things left on the lawn by students who went to look at something. */
+const LEFT: readonly [string, number, number][] = [
+  ["tablet", 36, 15],
+  ["sandal", 52, 20],
+  ["scroll", 44, 39],
+  ["satchel", 59, 28],
+  ["apple", 38, 31],
+  ["tablet", 68, 31],
+  ["scroll", 29, 28],
+  ["sandal", 47, 42],
+];
 
-/** The frozen pool, slab by slab, frost round its rim. */
-function ice(): Prop[] {
+/** The element places, larger than their rings: where a crowd can fight round each. */
+const PLACES: Readonly<Record<keyof typeof ZONES, readonly [string, string, number, number][]>> = {
+  fire: [
+    ["scorch", "a", -4, -2],
+    ["scorch", "b", 3, -2],
+    ["scorch", "c", -4, 2],
+    ["scorch", "a", 3, 2],
+    ["scorch", "b", 0, 0],
+  ],
+  water: [
+    ["wet-hollow", "a", -4, -2],
+    ["wet-hollow", "b", 3, -1],
+    ["wet-hollow", "a", -2, 2],
+    ["wet-hollow", "b", 3, 2],
+  ],
+  air: [
+    ["combed", "a", -4, -2],
+    ["combed", "b", 3, -2],
+    ["combed", "c", -4, 2],
+    ["combed", "a", 3, 2],
+    ["combed", "b", 0, 0],
+  ],
+  earth: [
+    ["outcrop", "a", -4, -2],
+    ["outcrop", "b", 3, -2],
+    ["outcrop", "c", -3, 2],
+    ["outcrop", "a", 4, 2],
+  ],
+};
+
+const placed = merge({
+  objects: [
+    { prop: "lecture-hall", at: [LECTURE_X * T, (HALL.steps + 1) * T - 1], sort: HALL.steps * T },
+    { prop: "library", at: [LIBRARY_X * T, (LIBRARY.steps + 1) * T - 1], sort: LIBRARY.steps * T },
+    // Trees on the bank behind the halls.
+    place("cypress", 4, 7),
+    place("cypress", 34, 6),
+    place("olive", 64, 7),
+    // Streamers round the air's corner, reeds round the water's.
+    ...(
+      [
+        [-6, -3],
+        [4, -4],
+        [5, 3],
+        [-7, 2],
+      ] as const
+    ).map(
+      ([dx, dy], i): Prop => ({
+        prop: "streamer",
+        anim: "fly",
+        play: true,
+        index: i % 3,
+        at: [(ZONES.air[0] + dx) * T + 8, (ZONES.air[1] + dy) * T + 12],
+      }),
+    ),
+    ...(
+      [
+        [-5, -2],
+        [4, -2],
+        [5, 2],
+        [-4, 3],
+        [0, 4],
+      ] as const
+    ).map(
+      ([dx, dy], i): Prop => ({
+        prop: "hollow-reeds",
+        anim: "bend",
+        play: true,
+        index: i % 2,
+        at: [(ZONES.water[0] + dx) * T + 8, (ZONES.water[1] + dy) * T + 12],
+      }),
+    ),
+    // Benches and racks at the lawn's edges, for those who only watch.
+    ...(
+      [
+        [28, 12],
+        [44, 12],
+        [60, 12],
+        [72, 24],
+        [72, 34],
+      ] as const
+    ).map(([x, y]): Prop => ({ prop: "marble-bench", at: [x * T, y * T + 12] })),
+    { prop: "scroll-rack", at: [70 * T, 18 * T + 14] },
+    // The tower over the fall yard, its basket of stones and sack of feathers up top.
+    place("drop-tower", TOWER[0] - 1, TOWER[1]),
+    // The plane in its ring of benches.
+    place("plane", PLANE[0], PLANE[1]),
+    ...BENCHES.map(([x, y, flip]) => place("marble-bench", x, y, { flip })),
+    // Scroll racks either side of the library's middle door, out in the light to be read.
+    place("scroll-rack", LIBRARY.x + 7, LIBRARY.steps + 2),
+    place("scroll-rack", LIBRARY.x + 13, LIBRARY.steps + 2),
+    // The gate: columns either side of a wide opening, herms on guard.
+    place("column", GATE.x - 1, H - 3, { frame: "whole" }),
+    place("column", GATE.x + GATE.w, H - 3, { frame: "whole" }),
+    place("herm", GATE.x - 2, H - 3),
+    place("herm", GATE.x + GATE.w + 1, H - 3),
+    // Statues along the walk from the gate, and the fountain at the pool's head.
+    place("statue", GATE.x - 2, 40),
+    place("statue", GATE.x + GATE.w + 1, 34, { flip: true }),
+    place("krene", ICE.x + ICE.cols * 2 + 3, ICE.y - 1, { anim: "run", play: true }),
+    // Cypresses and olives along the hedges.
+    place("cypress", 2, 26),
+    place("cypress", 2, 36),
+    place("cypress", W - 3, 14),
+    place("cypress", W - 3, 46),
+    place("olive", 70, 6),
+    place("olive", 37, 6),
+    place("pithos", 4, 47),
+    place("handcart", 22, 50),
+  ],
+  overhead: [
+    {
+      prop: "drop-tower-top",
+      anim: "flap",
+      play: true,
+      at: place("drop-tower", TOWER[0] - 1, TOWER[1]).at,
+    },
+    { prop: "cypress-crown", anim: "sway", play: true, at: place("cypress", 4, 7).at },
+    { prop: "cypress-crown", anim: "sway", play: true, index: 1, at: place("cypress", 34, 6).at },
+    { prop: "olive-crown", anim: "stir", play: true, at: place("olive", 64, 7).at },
+    { prop: "plane-crown", anim: "sway", play: true, at: place("plane", PLANE[0], PLANE[1]).at },
+    { prop: "column-capital", at: place("column", GATE.x - 1, H - 3).at },
+    { prop: "column-capital", at: place("column", GATE.x + GATE.w, H - 3).at },
+    { prop: "cypress-crown", anim: "sway", play: true, at: place("cypress", 2, 26).at },
+    { prop: "cypress-crown", anim: "sway", play: true, index: 1, at: place("cypress", 2, 36).at },
+    { prop: "cypress-crown", anim: "sway", play: true, at: place("cypress", W - 3, 14).at },
+    {
+      prop: "cypress-crown",
+      anim: "sway",
+      play: true,
+      index: 1,
+      at: place("cypress", W - 3, 46).at,
+    },
+    { prop: "olive-crown", anim: "stir", play: true, at: place("olive", 70, 6).at },
+    { prop: "olive-crown", anim: "stir", play: true, index: 1, at: place("olive", 37, 6).at },
+  ],
+  shadows: [
+    east(TOWER[0] * T + 8, (TOWER[1] + 1) * T - 2, 260, 22),
+    east((LECTURE_X + 9.5) * T, (HALL.steps + 1) * T - 20, 50, 40),
+    east((LIBRARY_X + 11.5) * T, (LIBRARY.steps + 1) * T - 20, 40, 36),
+    east(PLANE[0] * T + 8, (PLANE[1] + 1) * T - 2, 90, 40),
+    blob(PLANE[0] * T + 40, (PLANE[1] + 1) * T, 40, 12, 4),
+    east((GATE.x - 1) * T + 8, (H - 2) * T - 2, 60, 6),
+    east((GATE.x + GATE.w) * T + 8, (H - 2) * T - 2, 60, 6),
+  ],
+});
+
+/** Mowing stripes over the lawn: every other pair of columns, laid the other way. */
+function stripes(): Prop[] {
+  const rows = PLAN.split("\n");
   const out: Prop[] = [];
-  for (let r = 0; r < ICE.rows; r++)
-    for (let c = 0; c < ICE.cols; c++) {
-      const rim = r === 0 || r === ICE.rows - 1 || c === 0 || c === ICE.cols - 1;
-      out.push({
-        prop: "p1-ice",
-        frame: rim && (c + r) % 3 === 0 ? "frost" : "fill",
-        at: [(ICE.x + c * 2) * T, (ICE.y + r * 2) * T],
-        raw: true,
-      });
+  for (let y = FLOOR.y; y < FLOOR.y + FLOOR.h; y += 2)
+    for (let x = FLOOR.x; x < FLOOR.x + FLOOR.w; x += 2) {
+      if ((x - FLOOR.x) % 4 !== 0) continue;
+      if (rows[y]?.[x] !== "," || rows[y + 1]?.[x + 1] !== ",") continue;
+      out.push({ prop: "mown", at: [x * T, y * T] });
     }
   return out;
 }
+
+const around = ([x, y]: Vec, dx: number, dy: number): Vec => [(x + dx) * T + 8, (y + dy) * T + 8];
 
 const zoneRect = ([x, y]: Vec) => ({ x: x - 2, y: y - 1, w: 5, h: 3 });
 
@@ -278,7 +322,50 @@ const map: MapSource = {
     { prop: "attica", at: [-300, 64], repeat: 2, raw: true },
   ],
   details: [
-    ...ice(),
+    ...stripes(),
+    // Rings worn into the lawn where pairs practise.
+    { prop: "duel-ring", at: [38 * T, 18 * T] },
+    { prop: "duel-ring", at: [57 * T, 41 * T] },
+    { prop: "duel-ring", at: [48 * T, 29 * T + 8] },
+    // The elements' places, wider than their rings.
+    ...Object.entries(PLACES).flatMap(([name, list]) =>
+      list.map(
+        ([prop, frame, dx, dy]): Prop => ({
+          prop,
+          frame,
+          at: around(ZONES[name as keyof typeof ZONES], dx, dy),
+        }),
+      ),
+    ),
+    // The fall yard: targets chalked on the paving, dents where things landed.
+    { prop: "drop-target", at: [10 * T, 16 * T] },
+    { prop: "drop-target", at: [18 * T, 19 * T] },
+    ...(
+      [
+        [9, 14],
+        [13, 18],
+        [20, 15],
+        [16, 21],
+        [7, 20],
+      ] as const
+    ).map(([x, y]): Prop => ({ prop: "dent", at: [x * T, y * T] })),
+    ...LEFT.map(([frame, x, y]): Prop => ({ prop: "left-behind", frame, at: [x * T, y * T + 10] })),
+    // The frozen pool, and frost creeping out from it over the paving.
+    { prop: "ice-sheet", at: [ICE.x * T - 7, ICE.y * T - 7], raw: true },
+    ...[0, 1, 2, 3, 4, 5, 6, 7].flatMap((k): Prop[] => [
+      {
+        prop: "frost",
+        frame: ["a", "b", "c"][k % 3] as string,
+        at: [(ICE.x + 1 + k * 3.4) * T, ICE.y * T - 8],
+        raw: true,
+      },
+      {
+        prop: "frost",
+        frame: ["c", "a", "b"][k % 3] as string,
+        at: [(ICE.x + 2 + k * 3.4) * T, (ICE.y + ICE.rows * 2) * T + 26],
+        raw: true,
+      },
+    ]),
     // The element corners, dormant until the second 논제.
     ...Object.entries(ZONES).map(
       ([name, [x, y]]): Prop => ({
@@ -293,6 +380,27 @@ const map: MapSource = {
   objects: placed.objects,
   overhead: placed.overhead,
   lights,
+  atmosphere: [
+    ...[0, 1, 2, 3, 4, 5].map(
+      (k): Prop => ({
+        prop: "ice-mist",
+        anim: "drift",
+        play: true,
+        index: k % 4,
+        at: [(ICE.x + 2 + k * 4.4) * T, (ICE.y + 1 + (k % 2) * 2) * T],
+        raw: true,
+      }),
+    ),
+    ...[0, 1, 2].map(
+      (k): Prop => ({
+        prop: "embers",
+        anim: "rise",
+        play: true,
+        index: k * 4,
+        at: around(ZONES.fire, (k - 1) * 3, k % 2),
+      }),
+    ),
+  ],
   emitters: [
     {
       sprite: "mote",

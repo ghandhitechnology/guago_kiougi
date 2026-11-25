@@ -195,7 +195,10 @@ class Parties {
     if (!party) return "no_party";
     if (party.leader !== me) return "not_leader";
     if (target === me) return "target_self";
-    if (!party.members.has(target)) return "not_member";
+    const member = party.members.get(target);
+    if (!member) return "not_member";
+    // The header's rule: the lead never sits with someone who is not there to use it.
+    if (!member.online) return "target_offline";
     party.leader = target;
     this.touch(party);
     return null;
