@@ -245,9 +245,8 @@ export class WorldScene extends Phaser.Scene {
       if (this.room === room) this.onInteraction(m);
     });
     room.onMessage(MAP_MESSAGES.door, (m: DoorRattle) => {
-      if (this.room !== room) return;
-      if (m.sid === room.sessionId) emitWorld({ t: "door", id: m.id, why: m.why });
-      else this.rattle(m.id, m.of, false);
+      // Our own push rattled and spoke already, from the walls the prediction walks on.
+      if (this.room === room && m.sid !== room.sessionId) this.rattle(m.id, m.of, false);
     });
     room.onMessage(MAP_MESSAGES.caught, (m: Caught) => {
       if (this.room === room) this.onCaught(m);
@@ -812,6 +811,8 @@ export class WorldScene extends Phaser.Scene {
     if (!door || now - this.lastRattle < RATTLE_COOLDOWN_MS) return;
     this.lastRattle = now;
     this.rattle(door.id, "portal", true);
+    // Why it stays shut, for the line said with it; the walls already told the prediction.
+    emitWorld({ t: "door", id: door.id, why: door.built ? "door_closed" : "door_unbuilt" });
   }
 
   /**
