@@ -348,7 +348,9 @@ export function createLive(db: Db, o: LiveOptions) {
       if (q) push(characterId, { t: "done", quest: noticeView(q) });
       if (id.startsWith("chore:")) {
         line("merit.cleaning", undefined, characterId);
-        void refreshRules(characterId);
+        void refreshRules(characterId).catch((e) =>
+          log(`rules refresh failed: ${describeError(e)}`),
+        );
       }
       if (id.startsWith("help:")) {
         const h = helping.get(characterId);
@@ -360,7 +362,10 @@ export function createLive(db: Db, o: LiveOptions) {
           push(characterId, { t: "help", notice: view });
           push(view.poster.id, { t: "help", notice: view });
         }
-        if (h) void refreshRules(characterId);
+        if (h)
+          void refreshRules(characterId).catch((e) =>
+            log(`rules refresh failed: ${describeError(e)}`),
+          );
       }
     }
     // The poster finished a quest a helper was helping with (`help-finish`).
