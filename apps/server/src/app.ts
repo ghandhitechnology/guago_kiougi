@@ -11,9 +11,10 @@ import type { ChatSink } from "./chat/log.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { enterRoute } from "./enter.ts";
+import { inventoryLoadouts } from "./fight/loadout.ts";
 import { sendHomeOnExpel } from "./home.ts";
 import type { Live } from "./live/index.ts";
-import { MapRoom } from "./map-room.ts";
+import { MapRoom, provideFightServices } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
 import type { Social } from "./social/index.ts";
 import type { Trading } from "./trade/room.ts";
@@ -63,6 +64,8 @@ export function createGameServer(
     ...(live ? { handlers: live.handlers } : {}),
     ...(economy.trading ? { trading: economy.trading } : {}),
   });
+  const ops = economy.ops;
+  if (ops) provideFightServices({ loadouts: inventoryLoadouts((id) => ops.snapshot(id)) });
   if (world.channelSeats !== undefined) channels.seats = world.channelSeats;
   if (world.emptyGraceSeconds !== undefined) channels.graceSeconds = world.emptyGraceSeconds;
   const api = createApiHandler(auth, settings, looks, economy.routes);

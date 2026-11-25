@@ -141,6 +141,7 @@ export class PlayerActor extends Actor {
 /** A monster: idles in place, hops while it moves, faces the way it last went. */
 export class MonsterActor extends Actor {
   private readonly kind: string;
+  private readonly moveAnim: string;
   private movedFor = 0;
   private lastX: number | undefined;
   private lastY: number | undefined;
@@ -150,6 +151,7 @@ export class MonsterActor extends Actor {
     if (!sprite) throw new Error(`art has no sprite ${kind}`);
     super(scene.add.sprite(-100, -100, sprite.atlas).play(spriteAnim(kind, "idle")));
     this.kind = kind;
+    this.moveAnim = sprite.anims.move ? "move" : "hop";
     // Start each loop at a different point so a crowd does not bob in step.
     this.body.anims.setProgress(Math.random());
   }
@@ -161,7 +163,7 @@ export class MonsterActor extends Actor {
     this.lastY = y;
     this.movedFor = moved ? 0 : this.movedFor + dtMs;
     this.body.setFlipX(facing === Facing.Left);
-    const anim = this.movedFor < 150 ? "hop" : "idle";
+    const anim = this.movedFor < 150 ? this.moveAnim : "idle";
     this.body.play(spriteAnim(this.kind, anim), true);
     this.place(x, y);
   }
