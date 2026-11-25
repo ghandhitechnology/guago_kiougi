@@ -78,7 +78,6 @@ export function createGameServer(
     },
     express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
       app.disable("x-powered-by");
-      if (live) app.use(live.adminRoute);
       app.use(api);
     },
     greet: false,

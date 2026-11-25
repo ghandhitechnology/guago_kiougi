@@ -27,7 +27,6 @@ import {
   type ChangeNotice,
   type ChatLine,
   type ChatSend,
-  CLOSE_SESSION_REPLACED,
   CLUB_NOTICE_LENGTH,
   type ClubApplication,
   type ClubInvite,
@@ -35,6 +34,7 @@ import {
   CONTROL_MODES,
   cleanChatText,
   cleanText,
+  closeEnd,
   type Done,
   type FriendEntry,
   type FriendRequest,
@@ -73,6 +73,10 @@ export type WorldStatus =
   | "reconnecting"
   /** The account joined somewhere else. Final: show it and offer a fresh start. */
   | "replaced"
+  /** An admin closed the session (`CLOSE_KICKED`). Final; logging in again works. */
+  | "kicked"
+  /** The account was banned (`CLOSE_BANNED`). Final; logging in answers `account_banned`. */
+  | "banned"
   /** No session or no character. Final. */
   | "signedOut"
   /** `close()` was called. Final. */
@@ -484,8 +488,9 @@ export function connectWorld(
       for (const n of [...pending.keys()]) settle(n, { ok: false, code: "offline" });
       for (const n of [...requests.keys()]) settleRequest(n, { ok: false, code: "offline" });
       for (const [id, p] of [...ops]) settleOp(id, { id, op: p.op, ok: false, error: "offline" });
-      if (code === CLOSE_SESSION_REPLACED) {
-        setStatus("replaced");
+      const end = closeEnd(code);
+      if (end) {
+        setStatus(end);
         return;
       }
       if (!stopped) await sleep(wait);
