@@ -351,6 +351,8 @@ export class BagView {
           label: a.label,
           kind: i === Math.max(0, firstInk) ? "ink" : "paper",
           font: "galmuri9",
+          // Snug keycaps, so four actions share one row and leave the item's line its room.
+          w: Math.max(30, measure(s, "galmuri9", a.label) + 12),
           h: 17,
           onPress: a.run,
         }),

@@ -376,7 +376,7 @@ export class StationView {
         // Success: the scratches turn to clean ink, the book flashes white, red ink bursts and
         // the new + stamps down over it.
         scratch.clear();
-        this.flash(wb, "stone.bright");
+        this.flash(wb, "red.light");
         this.burst(centre.x, centre.y, "red.light", 12, 30);
         this.stampText(centre.x, centre.y, level, "red.mid", 2);
         stamp(well, { x: well.x, y: well.y, scale: 2 });
@@ -507,7 +507,7 @@ export class StationView {
       }
       // A new book: the binding flashes, the copy stamps down whole and the page jolts.
       out.set({ icon: book.icon, grade: 0 });
-      this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "stone.bright");
+      this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "gold.pale");
       stamp(out, { x: out.x, y: out.y, scale: 2 });
       this.burst(to.x, to.y, "gold.pale", 14, 30);
       this.ringOut(to.x, to.y, "stone.mid", 56);
@@ -585,7 +585,7 @@ export class StationView {
       wells.forEach((w, i) => {
         s.time.delayedCall(i * 150 + 240, () => {
           sound("stamp");
-          this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "stone.bright");
+          this.flash({ x: out.x, y: out.y, w: CELL * 2, h: CELL * 2 }, "gold.pale");
           nudgeOut();
         });
         s.tweens.add({
