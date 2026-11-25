@@ -6,7 +6,7 @@ import { cue } from "../sound/audio.ts";
 import { live } from "../state/live.ts";
 import { fade, shake, stamp } from "../ui/motion.ts";
 import { sound } from "../ui/sound.ts";
-import { Label } from "../ui/text.ts";
+import { ink, Label, wrap } from "../ui/text.ts";
 import { paint } from "../ui/theme.ts";
 import { type Ctx, Widget } from "../ui/widget.ts";
 import { onGone, rightLabel, speakerName } from "./common.ts";
@@ -360,15 +360,21 @@ class ResearchPage {
     const s = this.ctx.scene;
     const sh = this.sheet;
     const split = rows.length ? Math.round(w * 0.5) : 24;
+    // Each note starts on the rule after the last one ended, its wrapped lines on the rules
+    // below, a pixel or two off where the last hand started; what reaches the 도장 waits.
+    let ny = 26;
+    const floor = h - 44;
     rows.forEach((r, i) => {
-      // Each hand sits on its own rule, a pixel or two off where the last one started.
       const jitter = [0, 2, 1, 3, 0, 2, 1][i % 7] ?? 0;
-      const label = new Label(s, 30 + jitter, 26 + i * RULE, r.text, {
+      const lines = wrap(s, "galmuri9", r.text, split - 40 - jitter);
+      if (ny + lines.length * RULE > floor) return;
+      const label = new Label(s, 30 + jitter, ny, lines.join("\n"), {
         font: "galmuri9",
         color: HAND[r.hand] ?? "ink.mid",
-        width: split - 40,
+        leading: RULE - ink("galmuri9").line,
       });
       sh.add(label.obj);
+      ny += lines.length * RULE;
     });
     if (rows.length)
       sh.add(s.add.rectangle(split - 4, 26, 1, h - 52, paint("stone.light")).setOrigin(0));
