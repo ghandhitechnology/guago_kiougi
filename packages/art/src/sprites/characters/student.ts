@@ -503,15 +503,15 @@ const bob = hair({
     `,
     up: `
       .....XXXXXX.....
-      ...XXHHHHHhXX...
-      ..XHHHHhhhhhhX..
-      .XHHHhhhhhhhhxX.
-      .XHhhhhhhhhhhxX.
-      XHhhhhhhhhhhhxxX
-      XhhhhxhhhxhhhxxX
-      XhhhhxhhhxhhxxxX
-      XhhhxhhhxhhhxxxX
-      XhhhxhhhxhhxxxxX
+      ...XXHHHxHHXX...
+      ..XHHHHHxhhhhX..
+      .XHHhhhhxhhhhxX.
+      .XHhhhhhxhhhhxX.
+      XHhhhhhxhxhhhxxX
+      XhhhhhxhhhxhhxxX
+      XhhhhxhhhhhxhxxX
+      XhhhxhhhhhhxxxxX
+      XhhxhhhhhhhhxxxX
       .XXXXXXXXXXXXXX.
     `,
     side: `
@@ -554,18 +554,18 @@ const long = hair({
     `,
     up: `
       .....XXXXXX.....
-      ...XXHHHHHhXX...
-      ..XHHHHhhhhhhX..
-      .XHHHhhhhhhhhxX.
-      .XHhhhhhhhhhhxX.
-      XHhhhhhhhhhhhxxX
-      XhHhhhhhhhhhhxxX
-      XhHhhxhhhhxhhxxX
-      XhhhhxhhhhxhxxxX
-      XhhhhxhhhhxhxxxX
-      XhhhxhhhhhxhxxxX
-      XhhhxhhhhxhhxxxX
-      .XhhxhhhhxhxxxX.
+      ...XXHHHxHHXX...
+      ..XHHHHhxhHHhX..
+      .XHHhhhhxhhHhxX.
+      .XHhhhhhxhhhhxX.
+      XHhhhhhhxhhhhxxX
+      XhHhhhhhxhhhhxxX
+      XhHhhhhxhxhhhxxX
+      XhhhhhhxhxhhhxxX
+      XhhhhhxhhhxhxxxX
+      XhhhhhxhhhxhxxxX
+      XhhhxhhhhhhxxxxX
+      .XhhxhhhhhxhxxX.
       ..XhXhhhhXhxXX..
       ...X.XXXX.XX....
     `,
