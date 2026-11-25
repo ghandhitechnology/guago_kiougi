@@ -30,7 +30,7 @@ import {
 import { sql } from "drizzle-orm";
 import { type Db, describeError } from "../db/index.ts";
 import { Buckets } from "../economy/buckets.ts";
-import { type Executor, isTransient } from "../economy/executor.ts";
+import { type ExecResult, type Executor, isTransient } from "../economy/executor.ts";
 import { ITEM_COLUMNS, type ItemRow, itemFromDb, itemView } from "../economy/rows.ts";
 import {
   type CommitOffer,
@@ -105,6 +105,8 @@ export interface TradeOptions {
   now?: () => number;
   /** The server clock (live/clock.ts), for the rules: an item's re-trade cooldown. */
   clock?: () => Date;
+  /** Waits between attempts at a commit whose answer was lost; tests shorten them. */
+  commitRetriesMs?: readonly number[];
 }
 
 export function createTrades({
@@ -114,6 +116,7 @@ export function createTrades({
   isBlocked = nobodyBlocked,
   now = Date.now,
   clock = () => new Date(now()),
+  commitRetriesMs = COMMIT_RETRIES_MS,
 }: TradeOptions) {
   const windows = new Map<string, Window>();
   const byCharacter = new Map<string, Window>();
@@ -121,6 +124,25 @@ export function createTrades({
 
   const other = (w: Window, me: string) => (w.from === me ? w.to : w.from);
   const party = (w: Window, me: string) => w.from === me || w.to === me;
+
+  /**
+   * The results a commit recorded under its id, read once more after every attempt failed, or
+   * undefined when nothing was recorded (or the database cannot be read either).
+   */
+  async function recorded(
+    opId: string,
+    parties: readonly string[],
+  ): Promise<Map<string, ExecResult> | undefined> {
+    try {
+      const { rows } = await db.execute(sql`
+        select character_id, result from operations
+        where op_id = ${opId} and character_id = any(${sql.param([...parties])}::uuid[])`);
+      if (rows.length !== parties.length) return undefined;
+      return new Map(rows.map((r) => [r.character_id as string, r.result as ExecResult]));
+    } catch {
+      return undefined;
+    }
+  }
 
   /** Runs `work` after every earlier message of the window. */
   function serial<T>(w: Window, work: () => Promise<T>): Promise<T> {
@@ -366,7 +388,7 @@ export function createTrades({
       try {
         results = (await executor.executeAll(last, opId, "trade.commit", request)).results;
       } catch (error) {
-        const delay = COMMIT_RETRIES_MS[attempt];
+        const delay = commitRetriesMs[attempt];
         if (!isTransient(error) || delay === undefined) {
           console.error(`trade ${w.id} commit failed: ${describeError(error)}`);
           break;
@@ -374,9 +396,12 @@ export function createTrades({
         await new Promise((r) => setTimeout(r, delay));
       }
     }
+    // Every attempt failed before an answer came back: the database still says whether it landed.
+    results ??= await recorded(opId, parties);
     const mine = results?.get(last);
     if (!results || !mine) {
-      // The outcome is whatever the database holds; a new version could apply it twice.
+      // Nothing recorded, but a lost connection may yet commit it: a new version could apply it
+      // twice, so the window closes instead.
       push(w, { t: "failed", session: w.id, version: w.version, error: "server_error" });
       w.state = "open";
       return close(w, w.closing ?? "cancelled");

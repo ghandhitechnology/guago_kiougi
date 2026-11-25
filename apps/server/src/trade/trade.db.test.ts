@@ -1534,6 +1534,49 @@ describe("direct trade windows", () => {
     expectConserved(before, await census(), true);
   });
 
+  it("a commit whose every answer was lost tells both sides what the database holds", async () => {
+    const eco = economy();
+    const lost = () => new Error("Connection terminated unexpectedly");
+    for (const landed of [true, false]) {
+      const w = world();
+      // Lands (or not) and then loses the answer, every time.
+      const flaky: Pick<Economy["executor"], "executeAll"> = {
+        async executeAll(...args: Parameters<Economy["executor"]["executeAll"]>) {
+          if (landed) await eco.executor.executeAll(...args);
+          throw lost();
+        },
+      };
+      const trades = createTrades({
+        db,
+        executor: flaky,
+        link: w.link,
+        commitRetriesMs: [1, 1, 1],
+      });
+      const [a, b] = [await student(eco), await student(eco)];
+      w.join(a);
+      w.join(b, 16);
+      const item = await book(eco, a);
+      const session = await opened(trades, a, b);
+      await trades.handle(
+        a,
+        msg("trade.offer", { session, items: [item], stacks: {}, pinecone: "0" }),
+      );
+      await trades.handle(a, msg("trade.confirm", { session, version: 1 }));
+      await trades.handle(b, msg("trade.confirm", { session, version: 1 }));
+      if (landed) {
+        expect(w.last(a, "done")).toBeDefined();
+        expect(w.last(b, "done")).toBeDefined();
+        expect(w.last(a, "failed")).toBeUndefined();
+        expect(await ownerOf(item)).toBe(b);
+      } else {
+        expect(w.last(a, "failed")).toMatchObject({ error: "server_error" });
+        expect(w.last(a, "closed")).toBeDefined();
+        expect(await ownerOf(item)).toBe(a);
+      }
+      expect(trades.open).toBe(0);
+    }
+  });
+
   it("a refused commit reopens the window with fresh offers and cleared confirmations", async () => {
     const eco = economy();
     const w = world();
