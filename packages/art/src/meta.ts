@@ -24,6 +24,8 @@ export interface SpriteMeta {
     readonly top: number;
     readonly bottom: number;
   };
+  /** `add` for light (sparks, bolts, glows) drawn with additive blending. Absent is normal. */
+  readonly blend?: "add";
 }
 
 /** A bitmap font for `load.bitmapFont(key, image, data)`. */

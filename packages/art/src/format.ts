@@ -76,6 +76,11 @@ export interface SpriteDef extends Common {
    * pack untrimmed, and the middle column and row must repeat exactly so stretching never smears.
    */
   readonly slice?: Slice;
+  /**
+   * How the client blends it. `add` is light: sparks, flashes, bolts and glows, added onto what
+   * is under them (and drawn plainly where additive blending is off). Defaults to normal.
+   */
+  readonly blend?: "add";
 }
 
 export type Slice = readonly [left: number, right: number, top: number, bottom: number];
