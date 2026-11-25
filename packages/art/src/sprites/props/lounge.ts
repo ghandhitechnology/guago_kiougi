@@ -4,7 +4,6 @@ import {
   frames,
   hline,
   mounted,
-  ovalShadow,
   rect,
   vline,
 } from "../../interior.ts";
