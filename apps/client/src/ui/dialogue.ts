@@ -56,6 +56,8 @@ export class DialogueBox {
   private resolve: ((choice: number | undefined) => void) | undefined;
   /** Fills `{player}` in lines. */
   playerName = "";
+  /** Told when the box opens and closes, so the HUD and chat can step out of its way. */
+  onOpenChange: ((open: boolean) => void) | undefined;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -119,7 +121,7 @@ export class DialogueBox {
     // Enter and Space turn the page; they reach the page through the scope's one item.
     this.scope.add({
       bounds: () => ({ x: BOX.x, y: BOX.y, w: BOX.w, h: BOX.h }),
-      enabled: () => this.root.visible && !this.choiceBox,
+      enabled: () => this.resolve !== undefined && !this.choiceBox,
       setFocus: () => undefined,
       activate: () => this.advance(),
     });
@@ -132,17 +134,22 @@ export class DialogueBox {
 
   /** Plays the lines in order; resolves with the choice picked on the last, if it had any. */
   say(lines: readonly DialogueLine[]): Promise<number | undefined> {
+    const reopened = this.resolve !== undefined;
     this.resolve?.(undefined);
     this.lines = lines;
     this.index = 0;
-    pushScope(this.scope);
+    const done = new Promise<number | undefined>((r) => {
+      this.resolve = r;
+    });
+    if (!reopened) {
+      pushScope(this.scope);
+      this.onOpenChange?.(true);
+    }
     this.scope.focus(this.scope.first(), "key");
     if (!this.root.visible) layDown(this.root, { x: BOX.x, y: BOX.y });
     sound("open");
     this.show();
-    return new Promise((r) => {
-      this.resolve = r;
-    });
+    return done;
   }
 
   private show(): void {
@@ -159,7 +166,8 @@ export class DialogueBox {
     const frame = speaker?.portrait ? `${speaker.portrait}/${face}` : undefined;
     const has = frame !== undefined && this.scene.textures.get("portraits").has(frame);
     this.portrait.setVisible(has);
-    if (has) this.portrait.setFrame(frame);
+    // Portrait frames carry their own pivot; the slot wants the top-left corner.
+    if (has) this.portrait.setFrame(frame).setOrigin(0);
     const text = line.text.replaceAll("{player}", this.playerName);
     this.full = wrap(this.scene, "galmuri11", text, TEXT_W).slice(0, 3);
     this.total = this.full.join("").length;
@@ -252,6 +260,7 @@ export class DialogueBox {
     this.resolve = undefined;
     sound("close");
     pickUp(this.root, { x: BOX.x, y: BOX.y });
+    this.onOpenChange?.(false);
     r?.(choice);
   }
 }

@@ -97,7 +97,7 @@ export function registerSettings(): void {
       ring(qualityTier(), false);
       const stop = onQualityTier((tier) => ring(tier, true));
       page.once(Phaser.GameObjects.Events.DESTROY, stop);
-      y += 26;
+      y += 24;
 
       section(ctx, page, x, y, w, t("settings.sound"));
       y += 14;
@@ -110,35 +110,41 @@ export function registerSettings(): void {
           onChange: (v) => setVolume(bus, v),
         });
         page.add(s);
-        y += 18;
+        y += 17;
       }
-      y += 6;
+      y += 4;
 
       section(ctx, page, x, y, w, t("settings.controls"));
       y += 15;
       const touch = touchScreen();
-      const rows: [string, string[]][] = touch
-        ? [[t("settings.move"), [t("settings.stick")]]]
+      // Each line holds one or two bindings, the second starting halfway across.
+      const lines: [string, string[]][][] = touch
+        ? [[[t("settings.move"), [t("settings.stick")]]]]
         : [
-            [t("settings.move"), ["W", "A", "S", "D", "←", "↑", "↓", "→"]],
-            [t("settings.chat"), ["Enter"]],
-            [t("settings.menu"), ["Esc"]],
+            [[t("settings.move"), ["W", "A", "S", "D", "←", "↑", "↓", "→"]]],
+            [
+              [t("settings.chat"), ["Enter"]],
+              [t("settings.menu"), ["Esc"]],
+            ],
           ];
-      for (const [name, keys] of rows) {
-        const label = new Label(ctx.scene, x, y + 3, name, {
-          font: "galmuri11",
-          color: "ink.dark",
+      for (const line of lines) {
+        line.forEach(([name, keys], i) => {
+          const lx = x + i * Math.floor(w / 2);
+          const label = new Label(ctx.scene, lx, y + 3, name, {
+            font: "galmuri11",
+            color: "ink.dark",
+          });
+          page.add(label.obj);
+          let kx = i === 0 ? lx + 64 : lx + label.width + 8;
+          for (const k of keys) {
+            const cap = keycap(ctx, kx, y, k);
+            page.add(cap.obj);
+            kx += cap.w + 2;
+          }
         });
-        page.add(label.obj);
-        let kx = x + 64;
-        for (const k of keys) {
-          const cap = keycap(ctx, kx, y, k);
-          page.add(cap.obj);
-          kx += cap.w + 2;
-        }
         y += 18;
       }
-      y += 6;
+      y += 4;
 
       section(ctx, page, x, y, w, t("settings.account"));
       y += 14;

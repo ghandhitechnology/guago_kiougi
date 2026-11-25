@@ -346,6 +346,18 @@ export class Hud {
     }
   }
 
+  /** The phone's chat button hides while the chat panel it opens is out. */
+  setChatOpen(open: boolean): void {
+    fade(this.chat.root, !open && this.chat.live ? 1 : 0, 100);
+  }
+
+  /** While a dialogue box covers the bottom of the screen, the thumb's buttons step aside. */
+  setDialogue(open: boolean): void {
+    for (const p of [this.books, this.dodge, this.mentor, this.interact, this.chat]) {
+      fade(p.root, !open && p.live ? 1 : 0, 120);
+    }
+  }
+
   private tick(): void {
     if (this.minimapPiece.live) this.minimap.update();
   }
@@ -384,6 +396,8 @@ export class Hud {
   }
 
   private buildBooks(): void {
+    // Phones: a fan around the dodge under the right thumb. Desktops: a row in the corner,
+    // each slot marked with the number key that casts it.
     const cx = 440;
     const cy = 230;
     const at = (r: number, deg: number) => [
@@ -398,8 +412,10 @@ export class Hud {
       [64, 247.5],
       [64, 292.5],
     ];
-    ring.forEach(([r, deg], i) => {
-      const [x, y] = at(r, deg) as [number, number];
+    const spots = this.touch
+      ? ring.map(([r, deg]) => at(r, deg) as [number, number])
+      : ring.map((_, i): [number, number] => [W - 6 - 6 * 24 - 5 * 3 + i * 27, H - 6 - 24]);
+    spots.forEach(([x, y], i) => {
       const back = this.scene.add.image(x, y, "ui", "book-slot/idle").setOrigin(0);
       const dim = this.scene.add.image(x + 4, y + 4, "ui", "book-dim/wangdo").setOrigin(0);
       const book = this.scene.add.image(x + 4, y + 4, "ui", "book/wangdo").setOrigin(0);
@@ -414,6 +430,11 @@ export class Hud {
         () => this.actions.cast?.(i),
       );
       this.bookSlots.push({ back, book, dim, cd, lock });
+      if (!this.touch) {
+        const key = new Lifted(this.scene, "galmuri9");
+        key.set(String(i + 1), x + 1, y - 2);
+        this.books.root.add(key.objs);
+      }
     });
   }
 

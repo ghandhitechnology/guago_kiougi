@@ -7,8 +7,10 @@ import { type MapView, worldView } from "../world/view.ts";
 export const MINIMAP = { x: 416, y: 6, size: 58, inset: 4 } as const;
 const INNER = MINIMAP.size - MINIMAP.inset * 2;
 const TILE = 16;
+/** Minimap pixels per tile: at two, a street reads as a street and a door as a door. */
+const SCALE = 2;
 
-/** One pixel per tile: ground by what it is made of, walls dark, water and the void darker. */
+/** Ground by what it is made of, walls dark, water and the void darker. */
 const GROUND = {
   grass: "grass.dark",
   dirt: "clay.mid",
@@ -22,8 +24,8 @@ function mapTexture(scene: Phaser.Scene, map: MapView): string {
   if (scene.textures.exists(key)) return key;
   const { w, h, rows } = map.collision;
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = w * SCALE;
+  canvas.height = h * SCALE;
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
   const css = (name: string) => `#${paint(name).toString(16).padStart(6, "0")}`;
   const colors = new Map<string, string>();
@@ -45,7 +47,7 @@ function mapTexture(scene: Phaser.Scene, map: MapView): string {
           : t === "~"
             ? fill("ink.dark")
             : fill(GROUND[map.surfaceAt(x, y)]);
-      ctx.fillRect(x, y, 1, 1);
+      ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
     }
   }
   scene.textures.addCanvas(key, canvas);
@@ -53,7 +55,7 @@ function mapTexture(scene: Phaser.Scene, map: MapView): string {
 }
 
 /**
- * The minimap: the walked map at a pixel a tile, kept centred on the player, with doorways, other
+ * The minimap: the walked map at two pixels a tile, kept centred on the player, with doorways, other
  * students and the cast as pins, and the place's name on a card underneath.
  */
 export class Minimap {
@@ -110,12 +112,14 @@ export class Minimap {
   update(): void {
     const map = this.map;
     if (!map) return;
-    const { w, h } = map.collision;
+    const w = map.collision.w * SCALE;
+    const h = map.collision.h * SCALE;
     const { inset } = MINIMAP;
     const self = worldView.self;
-    const cx = self ? self.x / TILE : w / 2;
-    const cy = self ? self.y / TILE : h / 2;
-    // The window's top-left in tiles: centred on the player, held inside the map; a map smaller
+    const k = SCALE / TILE;
+    const cx = self ? self.x * k : w / 2;
+    const cy = self ? self.y * k : h / 2;
+    // The window's top-left in minimap pixels: centred on the player, held inside the map; a map smaller
     // than the window sits in its middle.
     const left =
       w <= INNER ? -Math.floor((INNER - w) / 2) : clamp(Math.round(cx - INNER / 2), 0, w - INNER);
@@ -137,7 +141,7 @@ export class Minimap {
     this.me.setVisible(self !== undefined && this.me.visible);
     map.portals.forEach((p, i) => {
       const d = this.doors[i];
-      if (d) place(d, p.x + p.w / 2, p.y + p.h / 2);
+      if (d) place(d, (p.x + p.w / 2) * SCALE, (p.y + p.h / 2) * SCALE);
     });
     let n = 0;
     for (const e of worldView.others.values()) {
@@ -148,7 +152,7 @@ export class Minimap {
         this.pins.push(pin);
       }
       pin.setFrame(e.kind === "npc" ? "pin/npc" : "pin/player");
-      place(pin, e.x / TILE, e.y / TILE);
+      place(pin, e.x * k, e.y * k);
       n++;
     }
     for (let i = n; i < this.pins.length; i++) this.pins[i]?.setVisible(false);

@@ -34,7 +34,7 @@ export function registerMenuTab(tab: MenuTab): void {
 }
 
 const PW = 320;
-const PH = 222;
+const PH = 246;
 
 /** The menu: a notebook page laid over the world, its tabs along the top. */
 export class Notebook {

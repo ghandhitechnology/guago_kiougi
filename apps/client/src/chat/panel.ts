@@ -93,6 +93,8 @@ export class ChatPanel {
   private shown = true;
   private sending = false;
   private whisperTo: string | undefined;
+  /** Told when the panel unfolds or folds, so the HUD's chat button can step aside. */
+  onShownChange: ((shown: boolean) => void) | undefined;
   /** Who whispered last: the 귓속말 tab answers them when no one else is picked. */
   private replyTo: string | undefined;
   private readonly unlisten: () => void;
@@ -327,6 +329,7 @@ export class ChatPanel {
     if (this.typing) this.closeInput();
     if (!this.shown) return;
     this.shown = false;
+    this.onShownChange?.(false);
     sound("close");
     fade(this.root, 0, 120);
     if (!this.layout.top) fade(this.collapsed, 1, 120);
@@ -335,11 +338,19 @@ export class ChatPanel {
   private unfold(withSound = true): void {
     if (this.shown) return;
     this.shown = true;
+    this.onShownChange?.(true);
     if (withSound) sound("open");
     this.root.setVisible(true);
     fade(this.root, 1, 140);
     fade(this.collapsed, 0, 100);
     this.collapsedMark.setVisible(false);
+  }
+
+  /** Steps out of sight while something else holds the screen, keeping its state. */
+  setHidden(on: boolean): void {
+    if (on && this.typing) this.closeInput();
+    fade(this.root, !on && this.shown ? 1 : 0, 120);
+    if (this.collapsed.visible) fade(this.collapsed, on || this.shown ? 0 : 1, 120);
   }
 
   /** Shows or hides the folded chat button: phones use the HUD's own chat button instead. */

@@ -14,7 +14,7 @@ import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
 import { setIdleKeys } from "./focus.ts";
 import { setToaster, Toaster } from "./overlay.ts";
-import { setWorldUiHost } from "./world-ui.ts";
+import { setWorldUiHost, worldUi } from "./world-ui.ts";
 
 /**
  * The UI layer: a scene kept above every other, at the same 480×270, so what it draws covers the
@@ -50,6 +50,8 @@ export class UiScene extends Phaser.Scene {
       placeBanner: (name) => this.banner.show(name),
     });
     if (touchScreen()) new RotateCard(this);
+    // Development checks drive the world's UI from the console; never in a production build.
+    if (import.meta.env.DEV) (window as unknown as { __worldUi?: unknown }).__worldUi = worldUi;
     const unwatch = session.watch((s) => (s.entry ? this.enterWorld() : this.leaveWorld()));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unwatch();
@@ -81,13 +83,25 @@ export class UiScene extends Phaser.Scene {
       },
       touch,
     );
-    // The left thumb walks; the right one aims, only while there is a fight to aim in.
+    if (chat && touch) chat.onShownChange = (shown) => hudView.setChatOpen(shown);
+    // The left thumb walks; the right one aims, only while there is a fight to aim in. Neither
+    // works under a dialogue.
     const sticks: Joystick[] = [];
     let unfight = () => {};
-    if (touch) {
-      const aim = aimStick(this, (dir) => fight()?.aim(dir));
-      sticks.push(moveStick(this), aim);
-      unfight = watchFight((live) => aim.setEnabled(live));
+    let talking = false;
+    let fighting = false;
+    const move = touch ? moveStick(this) : undefined;
+    const aim = touch ? aimStick(this, (dir) => fight()?.aim(dir)) : undefined;
+    const enableSticks = () => {
+      move?.setEnabled(!talking);
+      aim?.setEnabled(!talking && fighting);
+    };
+    if (move && aim) {
+      sticks.push(move, aim);
+      unfight = watchFight((live) => {
+        fighting = live;
+        enableSticks();
+      });
     }
     setIdleKeys((e) => {
       if (e.key === "Enter" && chat) {
@@ -102,6 +116,12 @@ export class UiScene extends Phaser.Scene {
       return false;
     });
     this.dialogue.playerName = session.entry?.character.name ?? "";
+    this.dialogue.onOpenChange = (open) => {
+      hudView.setDialogue(open);
+      chat?.setHidden(open);
+      talking = open;
+      enableSticks();
+    };
     // The place's name drops in on arriving.
     let lastPlace = "";
     const unplace = hud.watch((data, changed) => {
@@ -134,6 +154,7 @@ export class UiScene extends Phaser.Scene {
     if (!w) return;
     this.world = undefined;
     setIdleKeys(undefined);
+    this.dialogue.onOpenChange = undefined;
     w.stop();
     w.notebook.close();
     w.chat?.destroy();
