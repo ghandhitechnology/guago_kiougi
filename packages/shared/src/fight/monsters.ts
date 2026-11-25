@@ -1,4 +1,4 @@
-import { pushOut } from "../collision.ts";
+import { overlapsSolid, pushOut } from "../collision.ts";
 import { Facing, slide } from "../movement.ts";
 import {
   CONTACT_SAFE_TICKS,
@@ -63,6 +63,13 @@ export function spawnMonster(
   m.entity = w.allocEntity();
   m.kind = kind;
   w.spawned++;
+  // A large body placed by its centre is settled out of any wall it reaches into.
+  const r = kind.radius * (elite ? w.rules.elite.scale : 1);
+  if (overlapsSolid(w.monsterMap, x, y, r)) {
+    const out = pushOut(w.monsterMap, x, y, r);
+    x = out.x;
+    y = out.y;
+  }
   w.kindAlive[kind.index] = (w.kindAlive[kind.index] as number) + 1;
   m.level = kind.level > 0 ? kind.level : level;
   m.rank = kind.rank > 0 ? kind.rank : elite ? e.rank : 1;
@@ -470,13 +477,14 @@ export function stepMonsters(w: FightWorld, flow: FlowField): void {
       }
     }
 
-    // Knockback moves it instead of its legs while it is faster than walking.
+    // Knockback moves it instead of its legs while it is faster than walking: it moves, then
+    // runs into what it reached, then decays (PLAN §6: decaying 15% per tick).
     const kSpeed = Math.sqrt(m.kx * m.kx + m.ky * m.ky);
     if (kSpeed > 0) {
-      knockStep(w, m);
       const at = slide(w.monsterMap, m.x, m.y, m.kx, m.ky, m.radius);
       m.x = at.x;
       m.y = at.y;
+      knockStep(w, m);
       if (kSpeed > m.speed) {
         m.vx = 0;
         m.vy = 0;
@@ -560,10 +568,13 @@ export function rebuildHash(w: FightWorld): void {
 /** Pulls overlapping monsters apart, the lighter one further, then out of the walls again. */
 function separate(w: FightWorld): void {
   const out = w.scratch;
+  const px = w.pushX;
+  const py = w.pushY;
+  px.fill(0);
+  py.fill(0);
   for (const m of w.monsters) {
     if (!m.alive || m.dying) continue;
     const n = w.monsterHash.query(m.x, m.y, m.radius + 28, out);
-    let moved = false;
     for (let i = 0; i < n; i++) {
       const j = out[i] as number;
       if (j <= m.index) continue;
@@ -584,24 +595,21 @@ function separate(w: FightWorld): void {
       const total = m.mass + o.mass;
       const mm = o.mass / total;
       const om = m.mass / total;
-      m.x -= (dx / d) * overlap * mm;
-      m.y -= (dy / d) * overlap * mm;
-      o.x += (dx / d) * overlap * om;
-      o.y += (dy / d) * overlap * om;
-      moved = true;
-    }
-    if (moved) {
-      const at = pushOut(w.monsterMap, m.x, m.y, m.radius);
-      m.x = at.x;
-      m.y = at.y;
+      px[m.index] = (px[m.index] as number) - (dx / d) * overlap * mm;
+      py[m.index] = (py[m.index] as number) - (dy / d) * overlap * mm;
+      px[o.index] = (px[o.index] as number) + (dx / d) * overlap * om;
+      py[o.index] = (py[o.index] as number) + (dy / d) * overlap * om;
     }
   }
+  // The pushes move through the same sliding as walking, so a crowd never shoves one through a wall.
   for (const m of w.monsters) {
     if (!m.alive || m.dying) continue;
-    if (m.x < m.radius) m.x = m.radius;
-    if (m.y < m.radius) m.y = m.radius;
-    if (m.x > w.width - m.radius) m.x = w.width - m.radius;
-    if (m.y > w.height - m.radius) m.y = w.height - m.radius;
+    const dx = px[m.index] as number;
+    const dy = py[m.index] as number;
+    if (dx === 0 && dy === 0) continue;
+    const at = slide(w.monsterMap, m.x, m.y, dx, dy, m.radius);
+    m.x = at.x;
+    m.y = at.y;
   }
 }
 

@@ -544,6 +544,9 @@ export class FightWorld {
   /** Live monsters of each kind, for roster caps. */
   readonly kindAlive: Int32Array;
   private pickupCursor = 0;
+  /** Crowd pushes per monster, summed before they slide. */
+  readonly pushX = new Float64Array(MONSTER_CAP);
+  readonly pushY = new Float64Array(MONSTER_CAP);
   readonly scratch = new Int32Array(1024);
   readonly scratch2 = new Int32Array(1024);
   readonly scratch3 = new Int32Array(256);
