@@ -296,6 +296,7 @@ export function stepDirector(w: FightWorld): void {
   const field = w.field;
   if (!field) return;
   const d = w.director;
+  if (d.paused) return;
   const pacing = w.rules.pacing;
   const players = present(w);
   if (players === 0) return;

@@ -1025,7 +1025,7 @@ export class FightNet {
           this.note(v, Priv.Down, 0, 0, 0);
           break;
         case Ev.Revive:
-          this.note(v, Priv.Revive, ev.b, 0, 0);
+          this.note(v, Priv.Revive, w.players[ev.b]?.slot ?? -1, 0, 0);
           break;
         case Ev.Wake:
           this.note(v, Priv.Wake, 0, 0, 0);

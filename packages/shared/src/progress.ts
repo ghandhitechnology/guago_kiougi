@@ -276,11 +276,24 @@ export function questReward(
   };
 }
 
+/**
+ * A story chapter's first clear (PLAN §15): a daily's reward, a weekly's for a chapter that ends
+ * in a boss being freed.
+ */
+export function storyReward(
+  boss: boolean,
+  level: number,
+  playerLevel = level,
+  catchUpMult = 1,
+): QuestReward {
+  return questReward(boss ? "weekly" : "daily", level, 0, playerLevel, catchUpMult);
+}
+
 /** Turning in a notice. Sheets land on the book the player named when accepting it. */
 export function completeQuest(
   purse: Purse,
   reward: QuestReward,
-  cadence: Cadence,
+  cadence: Cadence | "story" | "help",
   sheetBook: string,
 ): Outcome<{ purse: Purse; exp: number }> {
   const gain: Amounts = { pinecone: reward.pinecone, ink: reward.ink, binding: reward.binding };

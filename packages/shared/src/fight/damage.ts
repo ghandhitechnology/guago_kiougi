@@ -282,7 +282,8 @@ export function hitMonster(
       w.rules.modeBonus[p.mode] ?? 1,
     ) *
     roll *
-    momentum;
+    momentum *
+    kit.damage;
   const flags = (crit ? HitFlag.Crit : 0) | (knock >= 100 || roll >= 5 ? HitFlag.Heavy : 0);
   const dealt = damageMonster(
     w,

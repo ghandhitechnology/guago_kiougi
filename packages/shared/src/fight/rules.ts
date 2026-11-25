@@ -6,6 +6,8 @@
  * so the hot loops read numbers and never test for absent options.
  */
 
+import { TICK_RATE_HZ } from "../constants.ts";
+import type { Modifiers } from "../live.ts";
 import type { Random } from "../random.ts";
 import type { Stats } from "../stats.ts";
 
@@ -204,6 +206,8 @@ export interface Strengths {
 export interface PlayerKit {
   readonly major: string;
   readonly weapons: readonly Weapon[];
+  /** Multiplies every hit (the live server's damage modifier). */
+  readonly damage: number;
   readonly maxHp: number;
   /** Share of max HP regenerated per tick. */
   readonly regen: number;
@@ -228,6 +232,35 @@ export interface PlayerKit {
   readonly killHeal: number;
   /** 운동량: share of a launching hit dealt on collision. */
   readonly collisionShare: number;
+}
+
+/**
+ * A kit with the living world's modifiers (buffs, penalties, 도감 sets) applied where the step
+ * reads them; EXP is the player's own multiplier and is not part of the kit.
+ */
+export function withModifiers(kit: PlayerKit, m: Modifiers): PlayerKit {
+  return {
+    ...kit,
+    damage: kit.damage * m.damage,
+    maxHp: kit.maxHp * m.hp,
+    regen: kit.regen + m.regen / TICK_RATE_HZ,
+    speed: kit.speed * m.moveSpeed,
+    dropMult: kit.dropMult * m.drop,
+    coinMult: kit.coinMult * m.pinecone,
+  };
+}
+
+/** Whether two modifier sets are the same, so a kit is rebuilt only when one changed. */
+export function sameModifiers(a: Modifiers, b: Modifiers): boolean {
+  return (
+    a.exp === b.exp &&
+    a.pinecone === b.pinecone &&
+    a.damage === b.damage &&
+    a.moveSpeed === b.moveSpeed &&
+    a.regen === b.regen &&
+    a.drop === b.drop &&
+    a.hp === b.hp
+  );
 }
 
 // ── Statuses and reactions ─────────────────────────────────────────────────
