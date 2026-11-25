@@ -22,6 +22,8 @@ import {
   type FightMap,
   FightNet,
   type FightWorld,
+  gainExp,
+  hurtPlayer,
   INPUT_MESSAGE,
   InputQueue,
   inputMessage,
@@ -212,6 +214,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   /** Tick the current surge began. */
   private surgeFrom = 0;
   private unlistenClubs: (() => void) | undefined;
+  /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
+  private readonly devActions: (() => void)[] = [];
   private unlistenParties: (() => void) | undefined;
 
   /** Only a browser with a live session and a character gets a seat. */
@@ -420,6 +424,14 @@ export class MapRoom extends Room<{ state: MapState }> {
         }
       } else if (cmd === "clear") {
         for (const m of this.world.monsters) if (m.alive) m.gone = true;
+      } else if (cmd === "exp" && typeof a === "number" && a > 0) {
+        // Inside the next tick, so its level-up events reach the snapshot.
+        this.devActions.push(() => gainExp(this.world, p, Math.min(1e7, a)));
+      } else if (cmd === "down") {
+        this.devActions.push(() => {
+          p.invulnerableUntil = 0;
+          hurtPlayer(this.world, p, p.hp + p.shield + 1, p.entity, 0);
+        });
       }
     });
   }
@@ -644,6 +656,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take() as FightInput[]);
       const s0 = performance.now();
       stepFight(this.world, inputs);
+      if (this.devActions.length > 0) for (const act of this.devActions.splice(0)) act();
       // What combat earned goes to each character's pending grant; nothing touches the database.
       const sink = grants();
       for (const g of this.world.grants) {
@@ -690,6 +703,21 @@ export class MapRoom extends Room<{ state: MapState }> {
       state.books.clear();
       state.books.push(...books);
     }
+    // Cooldowns: they move only on a cast, a kit change or an attack-speed aura.
+    const tick = this.world.tick;
+    const rate = (1 + p.attackSpeed) / Math.max(0.2, 1 - p.cooldownBuff);
+    const n = p.kit.weapons.length;
+    for (let s = 0; s < n; s++) {
+      const left = p.ready[s] ?? 0;
+      const ready = left > 0 ? tick + Math.ceil(left / rate - 1e-6) : 0;
+      const cooldown = Math.min(65535, Math.round((p.kit.weapons[s]?.cooldown ?? 0) / rate));
+      if (s >= state.ready.length) state.ready.push(ready);
+      else if (state.ready[s] !== ready) state.ready[s] = ready;
+      if (s >= state.cooldown.length) state.cooldown.push(cooldown);
+      else if (state.cooldown[s] !== cooldown) state.cooldown[s] = cooldown;
+    }
+    if (state.ready.length > n) state.ready.splice(n);
+    if (state.cooldown.length > n) state.cooldown.splice(n);
   }
 
   /** Mirrors each player into its own synced body. */

@@ -1,5 +1,5 @@
 import { TILE_SIZE } from "../constants.ts";
-import { removeMonster, spawnMonster } from "./monsters.ts";
+import { spawnMonster } from "./monsters.ts";
 import type { FieldRule, MonsterKind } from "./rules.ts";
 import { Ev, type FightWorld, type Monster, MState, type Player, type TileRect } from "./world.ts";
 

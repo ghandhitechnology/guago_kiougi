@@ -40,11 +40,11 @@ export const Leave = { Died: 0, Gone: 1, Moved: 2 } as const;
 
 /**
  * 2-bit member codes. A move is the step from the last position, two bytes, which the client
- * keeps taking every tick until told otherwise; an extra is a mask byte and the fields it names.
+ * keeps taking every tick until told otherwise; an extra (code 2, any other) is a mask byte and
+ * the fields it names.
  */
 const CODE_SAME = 0;
 const CODE_MOVE = 1;
-const CODE_EXTRA = 2;
 const CODE_FLASH = 3;
 
 /** Bits of an extra update. */
@@ -323,6 +323,8 @@ export interface WireFx {
   owner: number;
   /** Book index for a player's effect, behaviour for a monster's tell, burst kind for a burst. */
   def: number;
+  /** A player's effect from the book's evolved form (draw `evo-<evolution id>`). */
+  evolved: boolean;
   cast: number;
   /** Ticks after the message's tick that it starts (a delayed follow-up, the next wave); negative
    * for one already running when the client came to see it. */
@@ -362,6 +364,7 @@ export function emptyFx(): WireFx {
     kind: 0,
     owner: 0,
     def: 0,
+    evolved: false,
     cast: 0,
     start: 0,
     x: 0,
@@ -413,6 +416,8 @@ const clampI8 = (v: number) => Math.max(-128, Math.min(127, Math.round(v)));
 
 /** Set on the kind byte when a start offset follows. */
 const HAS_START = 0x40;
+/** Kind byte flag: the effect comes from an evolved book. */
+const EVOLVED = 0x80;
 
 /**
  * An effect's spawn: u8 type · u16 fx · u8 kind (+ start flag) · u16 owner · u8 def ·
@@ -422,7 +427,7 @@ export function writeFx(w: ByteWriter, f: WireFx): void {
   const start = Math.max(-32768, Math.min(32767, Math.round(f.start)));
   w.u8(FxRec.Spawn);
   w.u16(f.fx);
-  w.u8(f.kind | (start !== 0 ? HAS_START : 0));
+  w.u8(f.kind | (start !== 0 ? HAS_START : 0) | (f.evolved ? EVOLVED : 0));
   w.u16(f.owner);
   w.u8(f.def);
   if (start !== 0) w.i16(start);
@@ -525,6 +530,7 @@ export function readFx(r: ByteReader, f: WireFx): WireFx {
   f.fx = r.u16();
   const kind = r.u8();
   f.kind = kind & 0x3f;
+  f.evolved = (kind & EVOLVED) !== 0;
   f.owner = r.u16();
   f.def = r.u8();
   f.cast = 0;
@@ -646,6 +652,8 @@ export interface WireHit {
   ky: number;
   /** Hits merged into this record. */
   count: number;
+  /** The target's health after the tick's hits, a 0–255 share of its max (0 dead). */
+  hp: number;
 }
 
 export interface WireHurt {
@@ -706,6 +714,7 @@ export class SnapshotReader {
     kx: 0,
     ky: 0,
     count: 1,
+    hp: 255,
   };
   private readonly scratchHurt: WireHurt = { source: 0, amount: 0, flags: 0 };
   private readonly scratchDrop: WireDrop = { id: 0, kind: 0, x: 0, y: 0, fromX: 0, fromY: 0 };
@@ -979,6 +988,7 @@ export class SnapshotReader {
           h.kx = r.i8() / Q;
           h.ky = r.i8() / Q;
           h.count = r.u8();
+          h.hp = r.u8();
           sink.hit(h);
           break;
         }
