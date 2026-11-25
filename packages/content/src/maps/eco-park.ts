@@ -290,14 +290,14 @@ const map: MapSource = {
       kind: "monsters",
       rect: { x: 3, y: 12, w: W - 6, h: H - 15 },
       monster: "odap",
-      density: 3,
+      density: 3.5,
     },
     {
       id: "far-weeds",
       kind: "monsters",
       rect: { x: 3, y: 26, w: W - 6, h: 11 },
       monster: "odap-pencil",
-      density: 3,
+      density: 4,
     },
   ],
 };
