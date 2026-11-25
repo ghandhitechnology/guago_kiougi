@@ -1,6 +1,6 @@
 /**
- * The one place UI code asks for a sound. Silent until the audio engine connects a player with
- * `setUiSoundPlayer`; every interaction already calls it, so wiring audio touches nothing else.
+ * The one place UI code asks for a sound: each name plays `ui.<name>` from `@guago/audio`, which
+ * `startAudio` connects with `setUiSoundPlayer`.
  */
 export type UiSound =
   | "open"
@@ -12,7 +12,8 @@ export type UiSound =
   | "tab"
   | "type"
   | "page"
-  | "stamp";
+  | "stamp"
+  | "toast";
 
 let player: ((name: UiSound) => void) | undefined;
 

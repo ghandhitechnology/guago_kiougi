@@ -32,6 +32,9 @@ importers:
       '@guago/art':
         specifier: workspace:*
         version: link:../../packages/art
+      '@guago/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@guago/content':
         specifier: workspace:*
         version: link:../../packages/content
