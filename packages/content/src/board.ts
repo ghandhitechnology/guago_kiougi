@@ -45,7 +45,7 @@ export interface BoardDraw {
   readonly milestone: Milestone;
   /** Repeatables already finished today, for the step-down. */
   readonly completedToday?: number;
-  /** Catch-up of the field's Page (`catchUp`), 1 on the live Page. */
+  /** The player's catch-up (`catchUp(level, frontier)`); 1 at or above the live band. */
   readonly catchUpMult?: number;
 }
 

@@ -28,8 +28,8 @@ export function monsterDamage(level: number, rank: number): number {
 
 /** K(L) = min(cap, base + slope × L): how many same-level normal kills one level costs. */
 export const K_BASE = 100;
-export const K_SLOPE = 75;
-export const K_CAP = 3600;
+export const K_SLOPE = 660;
+export const K_CAP = 31680;
 
 export function killsPerLevel(level: number): number {
   return Math.min(K_CAP, K_BASE + K_SLOPE * level);
