@@ -109,6 +109,8 @@ export const PROPS = {
   "grow-rack": { foot: [2, 1] },
   tarp: { foot: [2, 1] },
   "stacked-chairs": { foot: [1, 1] },
+  "shoe-cabinet": { foot: [3, 1] },
+  washers: { foot: [3, 1] },
 } as const satisfies Record<string, { readonly foot: Vec }>;
 
 export type SolidProp = keyof typeof PROPS;
