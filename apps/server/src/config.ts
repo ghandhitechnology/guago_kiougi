@@ -46,6 +46,8 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     trustProxy: env.TRUST_PROXY === "1",
     /** Development and load tests only: an entry may name its map (`enter.ts`). */
     allowMapOption: env.ALLOW_MAP_OPTION === "1",
+    /** `dev` messages (spawn monsters, EXP, knock-outs) for recordings: local development only. */
+    devCommands: env.GUAGO_DEV_COMMANDS === "1",
     /** Keys the IP hashes and device cookies. The fallback is public and only good on localhost. */
     serverSecret: env.SERVER_SECRET || "local-development-only",
     serverSecretSet: Boolean(env.SERVER_SECRET),
@@ -109,6 +111,9 @@ export const config = readConfig();
 export function assertServable(c: Config): void {
   if (c.allowMapOption && !c.local) {
     throw new Error("ALLOW_MAP_OPTION lets a client choose its map: local development only");
+  }
+  if (c.devCommands && !c.local) {
+    throw new Error("GUAGO_DEV_COMMANDS lets a client spawn monsters: local development only");
   }
   if (!c.serverSecretSet && !c.local) {
     throw new Error(

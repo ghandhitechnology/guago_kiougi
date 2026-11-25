@@ -44,6 +44,8 @@ import { startNetsim } from "./netsim.ts";
  *   … --map p1-colonnade  seat the bots on this map (default campus-field) and `--monsters 150`
  *                         fills a fieldless one; both need ALLOW_MAP_OPTION=1 on the server
  *   … --auto 0.5          share of bots in full auto
+ *   … --major chemistry  new characters all of one class (a reaction or healer heavy crowd); use
+ *                         a fresh --accounts prefix, since an existing character keeps its class
  *   … --latency 150 --jitter 30 --loss 0.01   every bot through a simulated mobile link
  *   … --out report.txt    also write the report to a file
  *   … --abusers 4         accounts that hoard entry tickets and leave sockets at the yard door
@@ -70,6 +72,7 @@ const { values } = parseArgs({
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
     accounts: { type: "string", default: "bot" },
+    major: { type: "string" },
     map: { type: "string", default: "campus-field" },
     monsters: { type: "string" },
     metrics: { type: "string" },
@@ -331,7 +334,7 @@ const bots: Bot[] = [];
 /** Which channel each bot was seated in. */
 const channelsOf: number[] = [];
 for (let i = 0; i < BOTS; i++) {
-  const cookie = await signIn(`http://${target.host}`, values.accounts, i + 1);
+  const cookie = await signIn(`http://${target.host}`, values.accounts, i + 1, values.major);
   for (let attempt = 1; ; attempt++) {
     try {
       const res = await fetch(`http://${target.host}${ENTER_PATH}`, {
