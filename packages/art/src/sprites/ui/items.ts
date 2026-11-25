@@ -160,7 +160,6 @@ function book(c: Cover, symbol: string, at: readonly [number, number] = [5, 4]):
   return over(base, symbol, at[0], at[1]);
 }
 
-const RED = { line: "X", spine: "x", light: "R", mid: "r", dark: "x" };
 /**
  * Pale covers: a cream workbook bound in the class colour. With the solid covers they give each
  * class two looks, so two books of one class still tell apart in the bag.
