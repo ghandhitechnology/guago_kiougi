@@ -216,8 +216,8 @@ function blink(k: number): Pic {
   const pic = Pic.blank(s, s);
   const arrive = k >= 3;
   const step = k % 3;
-  const r = arrive ? [2, 5, 7][step] : [7, 4, 1][step];
-  if (r !== undefined && r > 1) {
+  const r = (arrive ? [2, 5, 7][step] : [7, 4, 1][step]) as number;
+  if (r > 1) {
     // ( and ) brackets at radius r.
     path(
       pic,
