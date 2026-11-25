@@ -1,262 +1,300 @@
 import { sprite } from "../../format.ts";
 
 /**
- * 오답노트 골렘: the tutorial mini-boss, stacked together from a student's notebook of wrong
- * answers. Earnest and stubborn: between steps it re-reads its own red-pen marks, squints, and
- * keeps the wrong answer anyway. Eraser fists, a pencil stuck in its head.
+ * 오답노트 골렘: the tutorial mini-boss, a spiral notebook of wrong answers that stood up. Ruled
+ * cream pages covered in red-pen X marks, a dog-eared corner, a torn bottom edge, the spiral
+ * down its left side. Earnest and stubborn: between steps it lifts a page to re-read its own
+ * marks, squints, and keeps the wrong answer anyway. Hunched, with one heavy rolled-up arm that
+ * drags and one thin one, eraser fists, and a pencil stuck in its crumpled head.
  *
- * Parts move on their own: head, body, both arms and the feet. The slam telegraphs with both
- * fists held overhead and the eyes lit, smears down, and lands with a shock ring.
+ * Parts move on their own: head, body, both arms, the feet and the loose sheets. The slam
+ * telegraphs with both fists held overhead and the eyes lit, smears down, and lands with a
+ * shock ring.
  */
 export default sprite({
   name: "golem",
   size: [32, 32],
   palette: {
     ".": null,
-    "6": "olive.deep",
-    "7": "olive.dark",
-    "8": "olive.mid",
-    "9": "olive.light",
-    G: "stone.deep",
-    g: "stone.mid",
-    q: "stone.light",
+    S: "stone.deep",
+    s: "stone.dark",
+    C: "stone.light",
     p: "stone.pale",
     w: "stone.bright",
-    R: "red.deep",
-    r: "red.dark",
-    m: "red.mid",
+    b: "navy.pale",
+    r: "red.mid",
     M: "red.light",
-    P: "red.pale",
     "&": "rose.deep",
-    "*": "rose.dark",
     f: "rose.mid",
     F: "rose.light",
     W: "wood.deep",
-    D: "gold.dark",
     a: "gold.mid",
     A: "gold.light",
+    c: "stone.mid",
     e: "ink.deep",
+    // Lone marks: the wire glint on each coil, eye glints, flying scraps.
+    o: "ink.light",
     "^": "stone.bright",
     "~": "stone.pale",
     "!": "red.light",
-    o: "stone.light",
   },
-  lone: "^~!o",
+  lone: "o^~!",
   parts: {
     pencil: {
-      at: [18, 0],
+      at: [16, 5],
       grid: `
-        .ee.
+        .&&.
+        &FF&
+        WccW
         WaAW
         WaAW
         WaAW
-        WWWW
       `,
     },
     head: {
-      at: [9, 3],
+      at: [10, 11],
       grid: `
-        .666666666666.
-        69998888888876
-        69888888888876
-        698mm8888mm876
-        69m88m88m88m76
-        698mm8888mm876
-        69888888888876
-        69888mmmm88876
-        67777777777776
-        .666666666666.
+        .SSSS..SSSS.
+        SwwwwSSpppCS
+        SwrrpppprrCS
+        Sp^eppp^epCS
+        SpeepppeepCS
+        SppppepeppCS
+        SpppepepeCCS
+        SCCCCCCCCCCS
+        .SSSSSSSSSS.
       `,
     },
     squint: {
-      at: [9, 3],
+      at: [10, 11],
       grid: `
-        .666666666666.
-        69998888888876
-        69888888888876
-        69888888888876
-        69mmmm88mmmm76
-        69888888888876
-        69888888888876
-        6988888mmmm876
-        67777777777776
-        .666666666666.
+        .SSSS..SSSS.
+        SwwwwSSpppCS
+        SwppppppppCS
+        SprrppprrpCS
+        SpeeeppeeeCS
+        SppppppppCCS
+        SpppeeeepCCS
+        SCCCCCCCCCCS
+        .SSSSSSSSSS.
       `,
     },
     glare: {
-      at: [9, 3],
+      at: [10, 11],
       grid: `
-        .666666666666.
-        69998888888876
-        69888888888876
-        698mm8888mm876
-        69mMMm88mMMm76
-        698mm8888mm876
-        69888888888876
-        6988mmmmmm8876
-        67777777777776
-        .666666666666.
+        .SSSS..SSSS.
+        SwwwwSSpppCS
+        SwrrpppprrCS
+        SpMMpppMMpCS
+        SpMMpppMMpCS
+        SppeeeeeppCS
+        SppeMMMeeCCS
+        SCCCCCCCCCCS
+        .SSSSSSSSSS.
       `,
     },
     body: {
-      at: [8, 12],
+      at: [6, 5],
       grid: `
-        GG66666666666666
-        Go99988888888876
-        GG98888888888876
-        Go98pppppppp8876
-        GG98pmmpmmmp8876
-        Go98pppppppp8876
-        GG98888888888876
-        Go988mm888mm8876
-        GG9888mmmm888876
-        Go98888mm8888876
-        GG9888mmmm888876
-        Go988mm888mm8876
-        GG98888888888776
-        Go88888888887776
-        GG77777777777776
-        GG66666666666666
+        .....SSSSSSSS.......
+        ...SSwwwwwwwwSSSS...
+        ..SwwwwwwwwwwwpsCS..
+        .SSwwMpppppppppsCCS.
+        SoSwpMppppppppppsssS
+        .SSwpMbbbbbbbbbbbbCS
+        ..SwpMppppppppppppCS
+        .SSwpMbbbbbbbbbbbbCS
+        SoSwpMppppppppppppCS
+        .SSwpMbbbbbbbbbbbbCS
+        ..SwpMppppppppppppCS
+        .SSwpMbbbbbbbbbbbbCS
+        SoSwpMppppppppppppCS
+        .SSwpMbbbbbbbbbbbbCS
+        ..SwpMppppppppppppCS
+        .SSwpMbbrbbbbrbbbbCS
+        SoSwpMppprpprpppppCS
+        .SSwpMbbbbrrbbbbbbCS
+        ..SwpMppprpprpppppCS
+        ..SwpMbbrbbbbrbbbbCS
+        ..SCCCSSCCCCSSCCCSSS
+        ...SSS..SSSS..SSS...
       `,
     },
+    // A page lifted to re-read the marks on it.
     flap: {
-      at: [12, 15],
+      at: [17, 18],
       grid: `
-        ......wwp
-        ppppwwpp.
-        ppppwwpp.
-        ppppppp..
+        .......S
+        ......SS
+        .....SpS
+        ....SppS
+        ...SpppS
+        ..SppCCS
+        SSSSSSSS
+      `,
+    },
+    // Loose sheets stuck in the back: they lie flat at rest and lift on every step.
+    sheet: {
+      at: [21, 2],
+      grid: `
+        .SSSS
+        SpppS
+        SbbbS
+        SpppS
+        SSSSS
+      `,
+    },
+    sheetUp: {
+      at: [22, 0],
+      grid: `
+        ..SS..
+        .SwwS.
+        SwppbS
+        SpbbCS
+        .SpCS.
+        ..SS..
       `,
     },
     armL: {
-      at: [3, 13],
+      at: [1, 8],
       grid: `
-        .666.
-        69876
-        69876
-        69876
-        69876
-        69876
-        69876
-        .666.
+        .SSSS.
+        SwppCS
+        SwppCS
+        SbbbbS
+        SwppCS
+        SwppCS
+        SwppCS
+        SbbbbS
+        SwppCS
+        SwppCS
+        SwppCS
+        SbbbbS
+        SwppCS
+        SwppCS
+        SwppCS
+        .SSSS.
       `,
     },
     armR: {
-      at: [24, 13],
+      at: [25, 9],
       grid: `
-        .666.
-        69876
-        69876
-        69876
-        69876
-        69876
-        69876
-        .666.
+        .SS.
+        SwCS
+        SwCS
+        SbbS
+        SwCS
+        SwCS
+        SwCS
+        SwCS
+        SwCS
+        .SS.
       `,
     },
     fistL: {
-      at: [2, 20],
+      at: [0, 23],
       grid: `
-        .&&&&.
-        &FFff&
-        &Ffff&
-        &wwwq&
-        &pppq&
-        .&&&&.
+        .&&&&&.
+        &FFfff&
+        &Fffff&
+        &wwwwC&
+        &ppppC&
+        .&&&&&.
       `,
     },
     fistR: {
-      at: [24, 20],
+      at: [25, 18],
       grid: `
         .&&&&.
         &FFff&
         &Ffff&
-        &wwwq&
-        &pppq&
+        &wwwC&
+        &pppC&
         .&&&&.
       `,
     },
     feet: {
       at: [8, 27],
       grid: `
-        6666666..6666666
-        6998886..6998886
-        6888886..6888886
-        6666666..6666666
+        SSSSSSS..SSSSSSS
+        SwwppCS..SwwppCS
+        SCCCCCS..SCCCCCS
+        SSSSSSS..SSSSSSS
       `,
     },
     stepL: {
       at: [8, 26],
       grid: `
-        6666666.........
-        6998886..6666666
-        6888886..6998886
-        6666666..6666666
+        SSSSSSS.........
+        SwwppCS..SSSSSSS
+        SCCCCCS..SwwppCS
+        SSSSSSS..SCCCCCS
+        .........SSSSSSS
       `,
     },
     stepR: {
       at: [8, 26],
       grid: `
-        .........6666666
-        6666666..6998886
-        6998886..6888886
-        6666666..6666666
+        .........SSSSSSS
+        SSSSSSS..SwwppCS
+        SwwppCS..SCCCCCS
+        SCCCCCS..SSSSSSS
+        SSSSSSS.........
       `,
     },
     // Slam: arms overhead, a smear on the way down, fists on the ground.
     upL: {
-      at: [4, 1],
+      at: [0, 0],
       grid: `
-        .&&&&.
-        &FFff&
-        &Ffff&
-        &wwwq&
-        &pppq&
-        .&&&&.
-        .666..
-        69876.
-        69876.
-        69876.
-        69876.
-        69876.
-        .666..
+        .&&&&&.
+        &FFfff&
+        &Fffff&
+        &wwwwC&
+        &ppppC&
+        .&&&&&.
+        ..SSSS.
+        .SwppCS
+        .SwppCS
+        .SbbbbS
+        .SwppCS
+        .SwppCS
+        ..SSSS.
       `,
     },
     upR: {
-      at: [22, 1],
+      at: [24, 3],
       grid: `
         .&&&&.
         &FFff&
         &Ffff&
-        &wwwq&
-        &pppq&
+        &wwwC&
+        &pppC&
         .&&&&.
-        ..666.
-        .69876
-        .69876
-        .69876
-        .69876
-        .69876
-        ..666.
+        ..SS..
+        .SwCS.
+        .SwCS.
+        .SbbS.
+        .SwCS.
+        .SwCS.
+        ..SS..
       `,
     },
     smearL: {
-      at: [1, 6],
+      at: [0, 9],
       grid: `
-        ..~...
-        .~....
-        .~....
-        ~.....
-        ~.....
-        .&&&&.
-        &FFff&
-        &Ffff&
-        &Ffff&
-        &wwwq&
-        &wwwq&
-        &pppq&
-        &pppq&
-        .&&&&.
+        ..~....
+        .~.....
+        .~.....
+        ~......
+        .&&&&&.
+        &FFfff&
+        &Fffff&
+        &Fffff&
+        &wwwwC&
+        &wwwwC&
+        &ppppC&
+        &ppppC&
+        .&&&&&.
       `,
     },
     smearR: {
@@ -266,27 +304,26 @@ export default sprite({
         ....~.
         ....~.
         .....~
-        .....~
         .&&&&.
         &FFff&
         &Ffff&
         &Ffff&
-        &wwwq&
-        &wwwq&
-        &pppq&
-        &pppq&
+        &wwwC&
+        &wwwC&
+        &pppC&
+        &pppC&
         .&&&&.
       `,
     },
     slamFists: {
-      at: [3, 22],
+      at: [0, 23],
       grid: `
-        .&&&&&&&..........&&&&&&&.
-        &FFFffff&........&FFFffff&
-        &Fffffff&........&Fffffff&
-        &wwwwwwq&........&wwwwwwq&
-        &ppppppq&........&ppppppq&
-        .&&&&&&&..........&&&&&&&.
+        .&&&&&&&&..................&&&&&.
+        &FFFfffff&................&FFff&.
+        &Ffffffff&................&Ffff&.
+        &wwwwwwwC&................&wwwC&.
+        &pppppppC&................&pppC&.
+        .&&&&&&&&..................&&&&..
       `,
     },
     shock: {
@@ -302,46 +339,38 @@ export default sprite({
     pages: {
       at: [0, 2],
       grid: `
-        ..~.........................^...
-        .~~........................~~...
+        ..~..........................^..
+        .~~...........................~~
         ................................
         ....^..........................~
       `,
     },
-    cracked: {
-      at: [8, 12],
+    torn: {
+      at: [10, 11],
       grid: `
-        GG66666666666666
-        Go99988888888876
-        GG98888888888876
-        Go98pppppppp8876
-        GG98pmmpmmmp8876
-        Go98pppppppp8876
-        GG98888888888876
-        Go98ee88888ee876
-        GG988ee888ee8876
-        Go98888ee888e876
-        GG98888ee8888876
-        Go98888e888ee876
-        GG98ee888888e776
-        Go88888888887776
-        GG77777777777776
-        GG66666666666666
+        .SSSS..SSSS.
+        SwwwwSSpppCS
+        SwpppSppppCS
+        SprrppSrrpCS
+        SpeeeSpeeeCS
+        SpppppSppCCS
+        SpppeeeSpCCS
+        SCCCCCSCCCCS
+        .SSSSSSSSSS.
       `,
     },
     heap: {
-      at: [3, 20],
+      at: [2, 21],
       grid: `
-        ..........WWWWWW..........
-        ..........WaaAAW..........
-        ..6666666.WWWWWW&&&&&.....
-        .699888876.....&FFff&.....
-        .688888876..66666666666...
-        ..6666666..69988888888866.
-        ..6666666666666666666666..
-        .6999888888888888888887766
-        .6777777777777777777777776
-        ..666666666666666666666666
+        ............&&............
+        ...SSSS....&FF&...&&&&....
+        ..SwppCS...WccW..&FFff&...
+        .SwpbbCSSSSWaAWS.&ffff&...
+        SwwppprrpppWaAWS.&wwCC&...
+        SwpbbbbbbbbWWWWpS&&&&SSSS.
+        SwpppppppprrpppppppppppCCS
+        SCCCCCCCCCCCCCCCCCCCCCCCCS
+        .SSSSSSSSSSSSSSSSSSSSSSSS.
       `,
     },
     scraps: {
@@ -349,7 +378,7 @@ export default sprite({
       grid: `
         ..........~.........^..........
         ...~...........................
-        ................~.......~......
+        ........................~......
         ......^........................
         ..............................~
         ...........^...........~.......
@@ -357,122 +386,162 @@ export default sprite({
     },
   },
   frames: {
-    idle0: ["pencil", "armL", "armR", "fistL", "fistR", "feet", "body", "head"],
+    idle0: ["sheet", "armL", "armR", "fistL", "fistR", "feet", "body", "pencil", "head"],
     idle1: [
-      ["pencil", 0, 1],
+      ["sheet", 0, 1],
       ["armL", 0, 1],
       ["armR", 0, 1],
       "fistL",
       "fistR",
       "feet",
       ["body", 0, 1],
+      ["pencil", 0, 1],
       ["head", 0, 1],
     ],
     idle2: [
-      ["pencil", 1, 1],
+      ["sheet", 0, 1],
       ["armL", 0, 1],
       ["armR", 0, 1],
       "fistL",
       "fistR",
       "feet",
       ["body", 0, 1],
-      "flap",
-      ["squint", 1, 1],
+      ["flap", 0, 1],
+      ["pencil", 0, 1],
+      ["squint", 0, 1],
     ],
-    idle3: ["pencil", "armL", "armR", "fistL", "fistR", "feet", "body", "flap", "squint"],
+    idle3: [
+      "sheet",
+      "armL",
+      "armR",
+      "fistL",
+      "fistR",
+      "feet",
+      "body",
+      "flap",
+      "pencil",
+      "squint",
+    ],
     walk0: [
-      ["pencil", -1, 0],
+      ["sheetUp", -1, 0],
       ["armL", -1, 0],
       ["armR", -1, 0],
-      ["fistL", -1, 1],
+      ["fistL", 0, 1],
       ["fistR", -1, -1],
       "stepL",
       ["body", -1, 0],
+      ["pencil", -1, 0],
       ["head", -1, 0],
     ],
     walk1: [
-      ["pencil", 0, 1],
+      ["sheet", 0, 1],
       ["armL", 0, 1],
       ["armR", 0, 1],
       "fistL",
       "fistR",
       "feet",
       ["body", 0, 1],
+      ["pencil", 0, 1],
       ["head", 0, 1],
     ],
     walk2: [
-      ["pencil", 1, 0],
+      ["sheetUp", 1, 0],
       ["armL", 1, 0],
       ["armR", 1, 0],
       ["fistL", 1, -1],
       ["fistR", 1, 1],
       "stepR",
       ["body", 1, 0],
+      ["pencil", 1, 0],
       ["head", 1, 0],
     ],
     walk3: [
-      ["pencil", 0, 1],
+      ["sheet", 0, 1],
       ["armL", 0, 1],
       ["armR", 0, 1],
       "fistL",
       "fistR",
       "feet",
       ["body", 0, 1],
+      ["pencil", 0, 1],
       ["head", 0, 1],
     ],
     slam0: [
-      ["pencil", 0, 1],
+      ["sheetUp", 0, 1],
       ["armL", 0, -3],
       ["armR", 0, -3],
       ["fistL", 0, -6],
       ["fistR", 0, -6],
       "feet",
       ["body", 0, 1],
+      ["pencil", 0, 1],
       ["glare", 0, 1],
     ],
-    slam1: ["pencil", "upL", "upR", "feet", ["body", 0, -1], "glare"],
-    slam2: [["pencil", 0, 1], "feet", ["body", 0, 1], "smearL", "smearR", ["glare", 0, 2]],
+    slam1: [["sheet", 0, -1], "upL", "upR", "feet", ["body", 0, -1], "pencil", "glare"],
+    slam2: [
+      "sheet",
+      "feet",
+      ["body", 0, 1],
+      "smearL",
+      "smearR",
+      ["pencil", 0, 2],
+      ["glare", 0, 2],
+    ],
     slam3: [
-      ["pencil", 0, 3],
+      ["sheetUp", 0, 3],
       ["armL", 0, 4],
       ["armR", 0, 4],
       "feet",
       ["body", 0, 3],
+      ["pencil", 0, 4],
       ["head", 0, 4],
       "slamFists",
       "shock",
     ],
     slam4: [
-      ["pencil", 0, 2],
-      ["armL", 0, 2],
-      ["armR", 0, 2],
-      ["fistL", 0, 2],
-      ["fistR", 0, 2],
+      ["sheet", 0, 1],
+      ["armL", 0, 1],
+      ["armR", 0, 1],
+      ["fistL", 0, 1],
+      ["fistR", 0, 1],
       "feet",
-      ["body", 0, 2],
-      ["squint", 0, 2],
+      ["body", 0, 1],
+      ["pencil", 0, 1],
+      ["squint", 0, 1],
     ],
     hit: [
-      ["pencil", 2, 0],
+      ["sheetUp", 2, 0],
       ["armL", 1, -1],
       ["armR", 1, -1],
       ["fistL", 1, -2],
       ["fistR", 1, -2],
       "feet",
       ["body", 1, -1],
-      ["squint", 2, 0],
+      ["pencil", 1, -1],
+      ["squint", 1, -1],
       "pages",
     ],
-    die0: ["pencil", "armL", "armR", "fistL", "fistR", "feet", "cracked", "squint"],
+    die0: [
+      "sheetUp",
+      "armL",
+      "armR",
+      "fistL",
+      "fistR",
+      "feet",
+      "body",
+      "flap",
+      "pencil",
+      "torn",
+    ],
     die1: [
-      ["pencil", 3, 4],
-      ["armL", -2, 6],
+      ["armL", -1, 6],
       ["armR", 2, 6],
-      ["fistL", -1, 5],
+      ["fistL", 0, 2],
       ["fistR", 1, 5],
       "feet",
-      ["cracked", 0, 4],
-      ["squint", 0, 7],
+      ["body", 0, 4],
+      ["pencil", 0, 7],
+      ["torn", 0, 7],
       "scraps",
     ],
     die2: ["heap"],
