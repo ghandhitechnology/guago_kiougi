@@ -39,8 +39,12 @@ export interface CardActions {
 
 const W = 150;
 const BAND = 21;
-/** The card closes once the player walks this far from whoever it is about. */
+/**
+ * The card closes once the two walk apart: past this far, or past where they stood when it
+ * opened with some room to spare, whichever is further.
+ */
 const FAR_PX = 140;
+const SPARE_PX = 48;
 
 /**
  * The player card (PLAN §12): a 학생증 that opens beside a player tapped, clicked or long-pressed,
@@ -56,6 +60,8 @@ export class PlayerCard {
   private catcher: Phaser.GameObjects.Zone | undefined;
   private doll: { sprite: Doll; key: string } | undefined;
   private target: CardTarget | undefined;
+  /** How far apart the two stood when the card opened, once both were seen. */
+  private openDist: number | undefined;
   private readonly unfight: () => void;
   private readonly unsocial: () => void;
 
@@ -81,6 +87,7 @@ export class PlayerCard {
 
   open(target: CardTarget): void {
     if (target.name === hud.get().player?.name) return;
+    this.openDist = undefined;
     this.draw(target, true);
   }
 
@@ -398,6 +405,9 @@ export class PlayerCard {
       if (target.sid) this.close();
       return;
     }
-    if (me && Math.hypot(them.x - me.x, them.y - me.y) > FAR_PX) this.close();
+    if (!me) return;
+    const d = Math.hypot(them.x - me.x, them.y - me.y);
+    this.openDist ??= d;
+    if (d > Math.max(FAR_PX, this.openDist + SPARE_PX)) this.close();
   }
 }
