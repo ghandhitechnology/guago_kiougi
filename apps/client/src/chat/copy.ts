@@ -44,5 +44,8 @@ export function systemText(line: SystemLine): string | undefined {
   const msg = SYSTEM.get(line.key);
   if (!msg) return undefined;
   const text = narrative.NARRATIVE.ko[msg.text];
-  return text ? narrative.fill(text, line.params ?? {}) : undefined;
+  // An end time arrives as server ms (`until`); lines name it as {time}.
+  const params: Record<string, string | number> = { ...(line.params ?? {}) };
+  if (typeof params.until === "number") params.time = clock(params.until);
+  return text ? narrative.fill(text, params) : undefined;
 }

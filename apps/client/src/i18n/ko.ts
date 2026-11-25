@@ -261,4 +261,5 @@ export const ko = {
   "report.send": "보내기",
 
   "settings.emote": "이모트",
+  "moderation.back": "처음으로",
 } as const;

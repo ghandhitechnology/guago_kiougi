@@ -93,7 +93,9 @@ export class UiScene extends Phaser.Scene {
       touch,
     );
     if (chat && touch) chat.onShownChange = (shown) => hudView.setChatOpen(shown);
-    social = link ? startSocialUi(this, link, { chat, hud: hudView }) : undefined;
+    social = link
+      ? startSocialUi(this, link, { chat, hud: hudView, toTitle: () => void this.signOut() })
+      : undefined;
     // The left thumb walks; the right one aims, only while there is a fight to aim in. Neither
     // works under a dialogue.
     const sticks: Joystick[] = [];

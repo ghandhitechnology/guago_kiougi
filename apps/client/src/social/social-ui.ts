@@ -12,6 +12,7 @@ import { Board } from "./board.ts";
 import { type CardTarget, PlayerCard } from "./card.ts";
 import { clubTab } from "./club.ts";
 import { friendsTab } from "./friends.ts";
+import { watchModeration } from "./moderation.ts";
 import { watchNews } from "./news.ts";
 import { PartyFrames } from "./party-frames.ts";
 import { openReport } from "./report.ts";
@@ -50,7 +51,7 @@ let current:
 export function startSocialUi(
   scene: Phaser.Scene,
   link: WorldLink,
-  opts: { chat: ChatPanel | undefined; hud: Hud },
+  opts: { chat: ChatPanel | undefined; hud: Hud; toTitle: () => void },
 ): SocialUi {
   const whisper = (name: string) => opts.chat?.open(name);
   const card = new PlayerCard(scene, link, {
@@ -93,6 +94,7 @@ export function startSocialUi(
   const slips = new Slips(scene);
   const offSlips = watchInvites(link, slips);
   const offNews = watchNews(link);
+  const offModeration = watchModeration(scene, link, opts.toTitle);
   const wheel = new EmoteWheel(scene, link);
 
   return {
@@ -123,6 +125,7 @@ export function startSocialUi(
       unfight();
       offSlips();
       offNews();
+      offModeration();
       if (worldView.onNameTap) worldView.onNameTap = undefined;
       opts.hud.onLeftColumn = undefined;
       card.destroy();
