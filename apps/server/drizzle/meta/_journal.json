@@ -36,6 +36,13 @@
       "when": 1795586068431,
       "tag": "0004_live_server",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795587329394,
+      "tag": "0005_trading",
+      "breakpoints": true
     }
   ]
 }

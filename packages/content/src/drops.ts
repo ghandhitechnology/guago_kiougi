@@ -43,6 +43,8 @@ export interface DropSource {
   readonly fieldId: string;
   readonly monsterId: string;
   readonly rank: RankName;
+  /** The Page's era boss (PLAN §10 raid): its drops are bound. */
+  readonly era?: true;
 }
 
 /** The `source_or_sink` key a drop is booked under in `economy_ledger`. */
