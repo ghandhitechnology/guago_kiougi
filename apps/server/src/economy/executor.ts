@@ -1,22 +1,25 @@
 /**
  * The one path every change to items and currency goes through (PLAN §19, §21, §22).
  *
- * One operation is one transaction:
- *  1. Lock the character row (`for no key update`) and look up the operation id in the same
- *     statement. Every operation on a character takes this lock first, so two operations on one
- *     character, or on one of its items, run one after the other. Operations spanning several
- *     characters (trading, later) lock their character rows in ascending id order, then items,
- *     quests, the wallet and materials, so lock waits can never form a cycle.
+ * One operation is one transaction over one or more characters (its parties):
+ *  1. Lock every party's character row (`for no key update`), one at a time in ascending id
+ *     order, then look the operation id up in a second statement. Every operation on a
+ *     character takes this lock first, so two operations on one character, or on one of its
+ *     items, run one after the other; and since every operation takes its locks in the same
+ *     order, two trades in opposite directions (or a ring of them) can never wait on each other.
+ *     Every other row of a character is locked only while its character lock is held.
  *  2. A known id with the same request returns the recorded result and applies nothing; a known
  *     id with another request is refused.
- *  3. Load and lock exactly the rows the operation names: items (by id, and every equipped item
- *     when asked), quest rows, the wallet and the material rows of the currencies it touches.
+ *  3. Lock the listings the operation names, then load and lock exactly each party's rows:
+ *     items (by id, every equipped item when asked, listed items by their listing's
+ *     operations), quest rows, the wallet and the material rows of the currencies it touches.
  *  4. Roll the server's randomness and run the pure rule.
  *  5. Check the answer against what was loaded: the purse may only move where ledger entries
  *     say it moved, amounts are whole, items written were loaded or made here, nothing outside
  *     the loaded rows is touched. A broken answer throws and the transaction rolls back.
  *  6. Write rows as deltas in exact `numeric` arithmetic, book the ledger (items included, +1
- *     when made and -1 when used up), record the operation id with its one result, commit.
+ *     when made or received and -1 when used up or given), record the operation id with each
+ *     party's one result, commit.
  *
  * The database backs every step: currency and counts cannot go negative, an item cannot sit in
  * two slots or share one, and the operation id is a primary key.
@@ -26,16 +29,24 @@ import type { ChangeNotice, LedgerEntry, OpError, OpOutcome, OpResult, Purse } f
 import { sql } from "drizzle-orm";
 import { CURRENT_COHORT } from "../auth/service.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
+import { PARTY_OPS } from "../trade/ops.ts";
 import {
   type AnyOp,
   type Applied,
   type Ctx,
   checkGrant,
   type Env,
+  type ExactEntry,
   type GrantRequest,
   type Loaded,
+  type Locked,
   OPS,
+  type PartyOpDef,
   type Requests,
+  type SoloOp,
+  solo,
+  type TradeLogRow,
+  type World,
 } from "./ops.ts";
 import {
   CHARACTER_COLUMNS,
@@ -45,6 +56,9 @@ import {
   type ItemRow,
   itemFromDb,
   itemView,
+  LISTING_COLUMNS,
+  type ListingRow,
+  listingFromDb,
   progressionView,
   type QuestRow,
   questFromDb,
@@ -79,10 +93,19 @@ type Widen<T> = T extends unknown ? Omit<T, "op"> & { op: AnyOp } : never;
 export type ExecResult = Widen<OpResult>;
 
 export interface OpContext {
+  /** The initiator: whose request it is, or whose listing expires. */
   characterId: string;
   opId: string;
   name: AnyOp;
 }
+
+/** Every operation as a party operation: one-character ones are their initiator's alone. */
+const DEFS: { [K in AnyOp]: PartyOpDef<Requests[K]> } = {
+  ...(Object.fromEntries(Object.entries(OPS).map(([name, def]) => [name, solo(def as never)])) as {
+    [K in SoloOp]: PartyOpDef<Requests[K]>;
+  }),
+  ...PARTY_OPS,
+};
 
 export interface ExecutorOptions {
   /** Server randomness in [0, 1); a CSPRNG unless a test scripts the rolls. */
@@ -97,6 +120,11 @@ export interface ExecutorOptions {
   };
   /** Called after a commit that changed the character's level. */
   onLevel?(characterId: string, level: number): void;
+  /**
+   * A party other than the initiator was changed (the seller of a listing bought while they
+   * were offline or elsewhere): their notice, for their client.
+   */
+  onChange?(characterId: string, change: ChangeNotice): void;
 }
 
 const cryptoRoll = () => (getRandomValues(new Uint32Array(1))[0] as number) / 2 ** 32;
@@ -123,6 +151,11 @@ function decimal(n: number): string {
   return BigInt(n).toString();
 }
 
+/** An item another party gives this one, as it will stand once moved. */
+interface Received {
+  row: ItemRow;
+}
+
 interface Plan {
   /** Exact deltas per touched currency, from the ledger. */
   deltas: Map<string, bigint>;
@@ -130,22 +163,36 @@ interface Plan {
   inserts: ItemRow[];
   updates: ItemRow[];
   removes: string[];
+  gives: NonNullable<Applied["give"]>[number][];
+  received: readonly Received[];
 }
 
 /**
  * Step 5: everything the rule answered must be writable as it stands. Returns the writes.
  */
-function plan(loaded: Loaded, applied: Applied, touched: ReadonlySet<string>, made: Set<string>) {
+function plan(
+  loaded: Loaded,
+  applied: Applied,
+  touched: ReadonlySet<string>,
+  made: Set<string>,
+  received: readonly Received[],
+) {
   const deltas = new Map<string, bigint>();
   const sums = new Map<string, number>();
   const ledger: Plan["ledger"] = [];
   const booked = new Map<string, { currency: string; key: string; amount: bigint }>();
-  for (const e of (applied.ledger ?? []) as readonly LedgerEntry[]) {
+  for (const e of (applied.ledger ?? []) as readonly (LedgerEntry | ExactEntry)[]) {
     if (!touched.has(e.currency)) throw new ContractError(`books ${e.currency}, never loaded`);
-    if (!Number.isFinite(e.amount) || e.amount === 0) throw new ContractError("empty amount");
-    const amount = BigInt(decimal(e.amount));
+    let amount: bigint;
+    if (typeof e.amount === "bigint") {
+      amount = e.amount;
+    } else {
+      if (!Number.isFinite(e.amount)) throw new ContractError("empty amount");
+      amount = BigInt(decimal(e.amount));
+    }
+    if (amount === 0n) throw new ContractError("empty amount");
     deltas.set(e.currency, (deltas.get(e.currency) ?? 0n) + amount);
-    sums.set(e.currency, (sums.get(e.currency) ?? 0) + e.amount);
+    sums.set(e.currency, (sums.get(e.currency) ?? 0) + Number(amount));
     // One ledger row per (currency, key) and operation.
     const k = `${e.currency}\u0000${e.key}`;
     const row = booked.get(k) ?? { currency: e.currency, key: e.key, amount: 0n };
@@ -204,17 +251,32 @@ function plan(loaded: Loaded, applied: Applied, touched: ReadonlySet<string>, ma
   }
   for (const id of removes) {
     if (!loaded.items.has(id) || seen.has(id)) throw new ContractError(`cannot remove ${id}`);
+    seen.add(id);
+  }
+  const gives = [...(applied.give ?? [])];
+  for (const g of gives) {
+    if (!loaded.items.has(g.id) || seen.has(g.id)) throw new ContractError(`cannot give ${g.id}`);
+    if (g.to === loaded.character.id) throw new ContractError(`gives ${g.id} to its owner`);
+    seen.add(g.id);
   }
   const keyOf = (id: string) =>
     typeof applied.itemKey === "function" ? applied.itemKey(id) : (applied.itemKey ?? "unknown");
   for (const row of inserts) {
     ledger.push({ currency: `item:${row.def}`, key: keyOf(row.id), amount: "1", item: row.id });
   }
-  for (const id of removes) {
+  for (const r of received) {
+    ledger.push({
+      currency: `item:${r.row.def}`,
+      key: keyOf(r.row.id),
+      amount: "1",
+      item: r.row.id,
+    });
+  }
+  for (const id of [...removes, ...gives.map((g) => g.id)]) {
     const def = (loaded.items.get(id) as ItemRow).def;
     ledger.push({ currency: `item:${def}`, key: keyOf(id), amount: "-1", item: id });
   }
-  return { deltas, ledger, inserts, updates, removes } satisfies Plan;
+  return { deltas, ledger, inserts, updates, removes, gives, received } satisfies Plan;
 }
 
 /** True when the only thing that moved on an item is its EXP. */
@@ -236,7 +298,7 @@ function onlyExp(before: ItemRow, after: ItemRow): boolean {
  */
 function notices(loaded: Loaded, p: Plan): Pick<ChangeNotice, "items" | "exp"> {
   const exp: Record<string, number> = {};
-  const items = [...p.inserts];
+  const items = [...p.inserts, ...p.received.map((r) => r.row)];
   for (const row of p.updates) {
     const before = loaded.items.get(row.id) as ItemRow;
     if (onlyExp(before, row)) exp[row.id] = row.exp;
@@ -251,37 +313,73 @@ function notices(loaded: Loaded, p: Plan): Pick<ChangeNotice, "items" | "exp"> {
 // Loading -------------------------------------------------------------------------------------
 
 /**
- * Steps 1 and 2. The lookup is its own statement on purpose: a transaction that waited for the
- * lock re-reads only the locked row, so a join in the locking statement would miss the record
- * the transaction it waited for just committed. A new statement sees it (READ COMMITTED).
+ * Step 1: the parties' character rows, one statement each in ascending id order, so the order
+ * the locks are taken in is the order every operation takes them in. Undefined when one of
+ * them does not exist.
  */
-async function lockCharacter(q: Queryable, characterId: string, opId: string) {
-  const locked = await q.execute(sql`
-    select ${sql.raw(CHARACTER_COLUMNS)} from characters c
-    where c.id = ${characterId}
-    for no key update`);
-  const character = locked.rows[0];
-  if (!character) return undefined;
-  const recorded = await q.execute(sql`
-    select request_hash, result from operations
-    where character_id = ${characterId} and op_id = ${opId}`);
-  return { character, recorded: recorded.rows[0] };
+async function lockCharacters(q: Queryable, parties: readonly string[]) {
+  const characters = new Map<string, CharacterRow>();
+  for (const id of parties) {
+    const { rows } = await q.execute(sql`
+      select ${sql.raw(CHARACTER_COLUMNS)} from characters c
+      where c.id = ${id}
+      for no key update`);
+    const row = rows[0];
+    if (!row) return undefined;
+    characters.set(id, characterFromDb(row));
+  }
+  return characters;
 }
 
+/**
+ * Step 2. The lookup is its own statement on purpose: a transaction that waited for a lock
+ * re-reads only the locked row, so a join in the locking statement would miss the record the
+ * transaction it waited for just committed. A new statement sees it (READ COMMITTED).
+ */
+async function lookup(q: Queryable, records: readonly { characterId: string; opId: string }[]) {
+  const { rows } = await q.execute(sql`
+    select o.character_id, o.request_hash, o.result from operations o
+    join unnest(
+      ${sql.param(records.map((r) => r.characterId))}::uuid[],
+      ${sql.param(records.map((r) => r.opId))}::text[]) as k(character_id, op_id)
+      on o.character_id = k.character_id and o.op_id = k.op_id`);
+  return rows as { character_id: string; request_hash: string; result: ExecResult }[];
+}
+
+async function lockListings(q: Queryable, ids: readonly string[]) {
+  if (ids.length === 0) return new Map<string, ListingRow>();
+  const { rows } = await q.execute(sql`
+    select ${sql.raw(LISTING_COLUMNS)} from listings
+    where id = any(${sql.param([...ids])}::uuid[])
+    order by id
+    for update`);
+  return new Map(rows.map((r) => [r.id as string, listingFromDb(r)]));
+}
+
+/** Bag and worn items by id (and every worn one when asked); listed items only by `listed`. */
 async function loadItems(
   q: Queryable,
   owner: string,
   ids: readonly string[],
   worn: boolean,
+  listed: readonly string[],
 ): Promise<Map<string, ItemRow>> {
-  if (ids.length === 0 && !worn) return new Map();
+  if (ids.length === 0 && !worn && listed.length === 0) return new Map();
   const { rows } = await q.execute(sql`
     select ${sql.raw(ITEM_COLUMNS)} from items
     where owner_id = ${owner}
-      and (id = any(${sql.param([...ids])}::uuid[]) or (${worn} and slot is not null))
+      and ((listing_id is null
+            and (id = any(${sql.param([...ids])}::uuid[]) or (${worn} and slot is not null)))
+        or (listing_id is not null and id = any(${sql.param([...listed])}::uuid[])))
     order by id
     for update`);
   return new Map(rows.map((r) => [r.id as string, itemFromDb(r)]));
+}
+
+async function countListings(q: Queryable, sellerId: string): Promise<number> {
+  const { rows } = await q.execute(sql`
+    select count(*)::int as n from listings where seller_id = ${sellerId} and state = 'live'`);
+  return (rows[0]?.n as number | undefined) ?? 0;
 }
 
 async function loadQuests(q: Queryable, characterId: string, ids: readonly string[]) {
@@ -296,6 +394,7 @@ async function loadQuests(q: Queryable, characterId: string, ids: readonly strin
 
 async function loadPurse(q: Queryable, characterId: string, currencies: readonly string[]) {
   const purse: Record<string, number> = {};
+  const exact: Record<string, bigint> = {};
   if (currencies.some(isWallet)) {
     const read = () =>
       q.execute(sql`
@@ -310,19 +409,26 @@ async function loadPurse(q: Queryable, characterId: string, currencies: readonly
     const w = rows[0] as Record<string, string>;
     for (const c of currencies.filter(isWallet)) {
       purse[c] = Number(w[WALLET[c] as string]);
+      exact[c] = BigInt(w[WALLET[c] as string] as string);
     }
   }
   const stacks = currencies.filter((c) => !isWallet(c));
   if (stacks.length > 0) {
-    for (const c of stacks) purse[c] = 0;
+    for (const c of stacks) {
+      purse[c] = 0;
+      exact[c] = 0n;
+    }
     const { rows } = await q.execute(sql`
       select def_id, qty from materials
       where character_id = ${characterId} and def_id = any(${sql.param(stacks)}::text[])
       order by def_id
       for update`);
-    for (const r of rows) purse[r.def_id as string] = Number(r.qty);
+    for (const r of rows) {
+      purse[r.def_id as string] = Number(r.qty);
+      exact[r.def_id as string] = BigInt(r.qty as string);
+    }
   }
-  return purse;
+  return { purse, exact };
 }
 
 // Writing -------------------------------------------------------------------------------------
@@ -340,6 +446,7 @@ async function write(
   applied: Applied,
   p: Plan,
   opId: string,
+  coalesce: boolean,
 ): Promise<Written> {
   const c = loaded.character.id;
   const out: Partial<Written> = { codex: [] };
@@ -400,7 +507,8 @@ async function write(
     const done = await q.execute(sql`
       update items i set
         grade = u.grade, level = u.level, exp = u.exp, pilgi = u.pilgi,
-        pilgi_fail_streak = u.fails, evolved = u.evolved, slot = u.slot, updated_at = now()
+        pilgi_fail_streak = u.fails, evolved = u.evolved, slot = u.slot,
+        listing_id = u.listing, updated_at = now()
       from unnest(
         ${sql.param(u.map((r) => r.id))}::uuid[],
         ${sql.param(u.map((r) => r.grade))}::smallint[],
@@ -409,16 +517,34 @@ async function write(
         ${sql.param(u.map((r) => r.pilgi))}::integer[],
         ${sql.param(u.map((r) => r.pilgiFails))}::integer[],
         ${sql.param(u.map((r) => r.evolved))}::boolean[],
-        ${sql.param(u.map((r) => r.slot))}::smallint[]
-      ) as u(id, grade, level, exp, pilgi, fails, evolved, slot)
+        ${sql.param(u.map((r) => r.slot))}::smallint[],
+        ${sql.param(u.map((r) => r.listing))}::uuid[]
+      ) as u(id, grade, level, exp, pilgi, fails, evolved, slot, listing)
       where i.id = u.id and i.owner_id = ${c}`);
     if (done.rowCount !== u.length) throw new ContractError("updated items went missing");
+  }
+  if (p.gives.length > 0) {
+    // Whole and unchanged, into the receiver's bag; out of any listing that held it.
+    const g = p.gives;
+    const moved = await q.execute(sql`
+      update items i set
+        owner_id = g.owner, slot = null, listing_id = null, tradable_at = g.tradable,
+        updated_at = now()
+      from unnest(
+        ${sql.param(g.map((r) => r.id))}::uuid[],
+        ${sql.param(g.map((r) => r.to))}::uuid[],
+        ${sql.param(g.map((r) => r.tradableAt.toISOString()))}::timestamptz[]
+      ) as g(id, owner, tradable)
+      where i.id = g.id and i.owner_id = ${c}`);
+    if (moved.rowCount !== g.length) throw new ContractError("given items went missing");
   }
   if (p.inserts.length > 0) {
     const n = p.inserts;
     await q.execute(sql`
-      insert into items (id, owner_id, def_id, kind, grade, level, exp, pilgi, pilgi_fail_streak, evolved, slot)
-      select u.id, ${c}, u.def, u.kind, u.grade, u.level, u.exp, u.pilgi, u.fails, u.evolved, u.slot
+      insert into items (id, owner_id, def_id, kind, grade, level, exp, pilgi, pilgi_fail_streak,
+        evolved, slot, bound, tradable_at)
+      select u.id, ${c}, u.def, u.kind, u.grade, u.level, u.exp, u.pilgi, u.fails, u.evolved,
+        u.slot, u.bound, u.tradable
       from unnest(
         ${sql.param(n.map((r) => r.id))}::uuid[],
         ${sql.param(n.map((r) => r.def))}::text[],
@@ -429,8 +555,10 @@ async function write(
         ${sql.param(n.map((r) => r.pilgi))}::integer[],
         ${sql.param(n.map((r) => r.pilgiFails))}::integer[],
         ${sql.param(n.map((r) => r.evolved))}::boolean[],
-        ${sql.param(n.map((r) => r.slot))}::smallint[]
-      ) as u(id, def, kind, grade, level, exp, pilgi, fails, evolved, slot)`);
+        ${sql.param(n.map((r) => r.slot))}::smallint[],
+        ${sql.param(n.map((r) => r.bound))}::boolean[],
+        ${sql.param(n.map((r) => r.tradableAt?.toISOString() ?? null))}::timestamptz[]
+      ) as u(id, def, kind, grade, level, exp, pilgi, fails, evolved, slot, bound, tradable)`);
   }
 
   for (const quest of applied.quests ?? []) {
@@ -463,8 +591,12 @@ async function write(
     returning ${sql.raw(CHARACTER_COLUMNS.replaceAll("c.", ""))}`);
   out.character = characterFromDb(rows[0] as Record<string, unknown>);
 
-  if (p.ledger.length > 0) {
-    const l = p.ledger;
+  // Combat grants add into one row per character, day, currency and source (the ledger's
+  // growth, PLAN §19 persistence); items and every other operation keep a row of their own.
+  const pooled = coalesce ? p.ledger.filter((e) => e.item === null) : [];
+  const single = coalesce ? p.ledger.filter((e) => e.item !== null) : p.ledger;
+  if (single.length > 0) {
+    const l = single;
     await q.execute(sql`
       insert into economy_ledger (character_id, operation_id, currency, source_or_sink, amount, item_id)
       select ${c}, ${opId}, u.currency, u.key, u.amount, u.item
@@ -475,7 +607,73 @@ async function write(
         ${sql.param(l.map((e) => e.item))}::uuid[]
       ) as u(currency, key, amount, item)`);
   }
+  if (pooled.length > 0) {
+    const l = pooled;
+    await q.execute(sql`
+      insert into economy_ledger
+        (character_id, operation_id, currency, source_or_sink, amount, coalesced)
+      select ${c}, ${opId}, u.currency, u.key, u.amount, true
+      from unnest(
+        ${sql.param(l.map((e) => e.currency))}::text[],
+        ${sql.param(l.map((e) => e.key))}::text[],
+        ${sql.param(l.map((e) => e.amount))}::numeric[]
+      ) as u(currency, key, amount)
+      on conflict (character_id, day, currency, source_or_sink) where coalesced
+      do update set amount = economy_ledger.amount + excluded.amount,
+        entries = economy_ledger.entries + 1, operation_id = excluded.operation_id,
+        at = excluded.at`);
+  }
   return out as Written;
+}
+
+/** Listings new (made here, sold by a party) or changed (locked here, same listing). */
+async function writeListings(
+  q: Queryable,
+  rows: readonly ListingRow[],
+  locked: ReadonlyMap<string, ListingRow>,
+  made: ReadonlySet<string>,
+  parties: ReadonlySet<string>,
+): Promise<void> {
+  const seen = new Set<string>();
+  for (const l of rows) {
+    if (seen.has(l.id)) throw new ContractError(`listing ${l.id} written twice`);
+    seen.add(l.id);
+    const before = locked.get(l.id);
+    if (before) {
+      const same =
+        before.sellerId === l.sellerId &&
+        before.def === l.def &&
+        before.itemId === l.itemId &&
+        before.unitPrice === l.unitPrice &&
+        l.qty <= before.qty;
+      if (!same) throw new ContractError(`listing ${l.id} changed what it sells`);
+      await q.execute(sql`
+        update listings set state = ${l.state}, qty = ${l.qty}, closed_at = ${l.closedAt?.toISOString() ?? null}
+        where id = ${l.id}`);
+    } else if (made.has(l.id) && parties.has(l.sellerId)) {
+      await q.execute(sql`
+        insert into listings (id, seller_id, state, category, def_id, grade, item_id, item, qty,
+          listed_qty, unit_price, fee, expires_at)
+        values (${l.id}, ${l.sellerId}, ${l.state}, ${l.category}, ${l.def}, ${l.grade},
+          ${l.itemId}, ${l.item ? JSON.stringify(l.item) : null}::jsonb, ${l.qty}, ${l.listedQty},
+          ${l.unitPrice.toString()}::numeric, ${l.fee.toString()}::numeric,
+          ${l.expiresAt.toISOString()}::timestamptz)`);
+    } else {
+      throw new ContractError(`listing ${l.id} was neither locked nor made here`);
+    }
+  }
+}
+
+async function writeLog(q: Queryable, log: TradeLogRow, opId: string): Promise<void> {
+  const b = log.board;
+  await q.execute(sql`
+    insert into trade_log (kind, op_id, from_id, to_id, item_ids, defs, tax, payload,
+      listing_id, def_id, grade, qty, unit_price)
+    values (${log.kind}, ${opId}, ${log.fromId}, ${log.toId},
+      ${sql.param(log.itemIds)}::uuid[], ${sql.param(log.defs)}::text[],
+      ${log.tax.toString()}::numeric, ${JSON.stringify(log.payload)}::jsonb,
+      ${b?.listingId ?? null}, ${b?.def ?? null}, ${b?.grade ?? null}, ${b?.qty ?? null},
+      ${b ? b.unitPrice.toString() : null}::numeric)`);
 }
 
 async function record(
@@ -517,41 +715,68 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
    * One operation per character at a time in this process, queued before it takes a database
    * connection, so a player flooding requests waits on their own queue and never parks the
    * pool's connections on their character lock. The lock still orders operations from anywhere
-   * else (another process, a tool).
+   * else (another process, a tool). An operation of several characters joins every party's
+   * queue at once, synchronously, so two of them can never each hold a queue the other waits
+   * for: every queue sees them in the same order.
    */
-  function inLane<T>(characterId: string, work: () => Promise<T>): Promise<T> {
-    const before = lanes.get(characterId) ?? Promise.resolve();
+  function inLanes<T>(characterIds: readonly string[], work: () => Promise<T>): Promise<T> {
+    const ids = [...new Set(characterIds)];
+    const before = Promise.all(ids.map((id) => lanes.get(id) ?? Promise.resolve()));
     const result = before.then(work);
     const done = result.then(
       () => {},
       () => {},
     );
-    lanes.set(characterId, done);
+    for (const id of ids) lanes.set(id, done);
     void done.then(() => {
-      if (lanes.get(characterId) === done) lanes.delete(characterId);
+      for (const id of ids) if (lanes.get(id) === done) lanes.delete(id);
     });
     return result;
   }
 
-  /** Steps 1 to 6 on an open transaction. Returns the result and, if applied, the new level. */
+  interface Ran {
+    /** Each recorded party's result. Only the initiator's on an unrecorded refusal. */
+    results: Map<string, ExecResult>;
+    /** Parties whose level changed. */
+    levels: Map<string, number>;
+    /** Applied now, not read back from a record. */
+    fresh: boolean;
+  }
+
+  /** Steps 1 to 6 on an open transaction. */
   async function run<K extends AnyOp>(
     q: Queryable,
     op: OpContext & { name: K },
     request: Requests[K],
     hash: string,
-  ): Promise<{ result: ExecResult; level?: number }> {
-    const def = OPS[op.name];
-    const refuse = (error: OpError): { result: ExecResult } => ({
-      result: { id: op.opId, op: op.name, ok: false, error },
+    others: readonly string[],
+  ): Promise<Ran> {
+    const def = DEFS[op.name] as PartyOpDef<Requests[K]>;
+    const initiator = op.characterId;
+    const unrecorded = (error: OpError): Ran => ({
+      results: new Map([[initiator, { id: op.opId, op: op.name, ok: false, error }]]),
+      levels: new Map(),
+      fresh: false,
     });
+    const parties = [...new Set([initiator, ...others])].sort();
+    // Each party's record: the shared id, or the initiator's id under the initiator's name.
+    const records = parties.map((characterId) => ({
+      characterId,
+      opId: def.shared || characterId === initiator ? op.opId : `${op.opId}@${initiator}`,
+    }));
 
-    const found = await lockCharacter(q, op.characterId, op.opId);
-    if (!found) return refuse("no_character");
-    if (found.recorded) {
-      if (found.recorded.request_hash !== hash) return refuse("op_id_reused");
-      return { result: found.recorded.result as ExecResult };
+    const characters = await lockCharacters(q, parties);
+    if (!characters) return unrecorded("no_character");
+    const recorded = await lookup(q, records);
+    if (recorded.length > 0) {
+      if (recorded.some((r) => r.request_hash !== hash)) return unrecorded("op_id_reused");
+      return {
+        results: new Map(recorded.map((r) => [r.character_id, r.result])),
+        levels: new Map(),
+        fresh: false,
+      };
     }
-    const character = characterFromDb(found.character);
+
     const ctx: Ctx = { now: now(), page: page() };
     const made = new Set<string>();
     const env: Env = {
@@ -563,53 +788,136 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         return id;
       },
     };
-
-    const want = def.rows(request, character);
-    const items = await loadItems(q, character.id, want.items ?? [], want.worn ?? false);
-    const quests = await loadQuests(q, character.id, want.quests ?? []);
-    const touched = new Set(def.currencies(request, { character, items, quests }, ctx));
-    const purse = await loadPurse(q, character.id, [...touched].sort());
-    const worn = want.worn ? [...items.values()].filter((r) => r.slot !== null) : [];
-    const loaded: Loaded = { character, items, worn, quests, purse: purse as Purse };
+    const listings = await lockListings(q, [...(def.listings?.(request) ?? [])].sort());
+    const locked: Locked = { initiator, characters, listings };
+    const loaded = new Map<string, Loaded>();
+    const touchedBy = new Map<string, Set<string>>();
+    for (const id of parties) {
+      const character = characters.get(id) as CharacterRow;
+      const want = def.rows(request, id, locked);
+      const items = await loadItems(q, id, want.items ?? [], want.worn ?? false, want.listed ?? []);
+      const quests = await loadQuests(q, id, want.quests ?? []);
+      const touched = new Set(
+        def.currencies(request, id, { character, items, quests }, locked, ctx),
+      );
+      const { purse, exact } = await loadPurse(q, id, [...touched].sort());
+      const worn = want.worn ? [...items.values()].filter((r) => r.slot !== null) : [];
+      const listingCount = want.listingCount ? await countListings(q, id) : 0;
+      touchedBy.set(id, touched);
+      loaded.set(id, {
+        character,
+        items,
+        worn,
+        quests,
+        purse: purse as Purse,
+        exact: exact as Loaded["exact"],
+        listingCount,
+      });
+    }
     await hooks.afterLoad?.(op);
 
-    const step = def.apply(loaded, request, env);
-    let result: ExecResult;
-    let level: number | undefined;
+    const world: World = { initiator, parties: loaded, listings };
+    const step = def.apply(world, request, env);
+    const results = new Map<string, ExecResult>();
+    const levels = new Map<string, number>();
     if (!step.ok) {
-      result = refuse(step.error).result;
+      for (const id of parties) {
+        results.set(id, { id: op.opId, op: op.name, ok: false, error: step.error });
+      }
     } else {
-      const applied = step.value;
-      const p = plan(loaded, applied, touched, made);
-      const written = await write(q, loaded, applied, p, op.opId);
-      result = {
-        id: op.opId,
-        op: op.name,
-        ok: true,
-        outcome: (applied.outcome ?? {}) as OpOutcome,
-        change: {
-          rev: written.character.rev,
-          ...(written.wallet ? { wallet: written.wallet } : {}),
-          ...(written.materials ? { materials: written.materials } : {}),
-          ...notices(loaded, p),
-          ...(p.removes.length > 0 ? { removed: p.removes } : {}),
-          ...(applied.character
-            ? { progression: progressionView(written.character, ctx.now, ctx.page) }
-            : {}),
-          ...(written.codex.length > 0 ? { codex: written.codex } : {}),
-          ...(applied.quests ? { quests: applied.quests.map(questView) } : {}),
-        },
-      };
-      if (written.character.level !== character.level) level = written.character.level;
+      const answer = step.value;
+      for (const id of answer.parties.keys()) {
+        if (!loaded.has(id)) throw new ContractError(`answers for ${id}, never a party`);
+      }
+      // Items change hands whole: what one party gives, the other receives as it stood.
+      const received = new Map<string, Received[]>(parties.map((id) => [id, []]));
+      for (const [from, applied] of answer.parties) {
+        for (const g of applied.give ?? []) {
+          const row = loaded.get(from)?.items.get(g.id);
+          const into = received.get(g.to);
+          if (!row || !into) throw new ContractError(`gives ${g.id} to ${g.to}, never a party`);
+          into.push({ row: { ...row, slot: null, listing: null, tradableAt: g.tradableAt } });
+        }
+      }
+      const plans = new Map<string, Plan>();
+      for (const id of parties) {
+        const l = loaded.get(id) as Loaded;
+        const applied = answer.parties.get(id) ?? {};
+        plans.set(
+          id,
+          plan(l, applied, touchedBy.get(id) as Set<string>, made, received.get(id) ?? []),
+        );
+      }
+      // Listings first: a listed item points at its listing.
+      await writeListings(q, answer.listings ?? [], listings, made, new Set(parties));
+      for (const [i, id] of parties.entries()) {
+        const l = loaded.get(id) as Loaded;
+        const applied = answer.parties.get(id) ?? {};
+        const p = plans.get(id) as Plan;
+        const written = await write(
+          q,
+          l,
+          applied,
+          p,
+          (records[i] as { opId: string }).opId,
+          op.name === "grant",
+        );
+        const gone = [...p.removes, ...p.gives.map((g) => g.id)];
+        results.set(id, {
+          id: op.opId,
+          op: op.name,
+          ok: true,
+          outcome: (applied.outcome ?? {}) as OpOutcome,
+          change: {
+            rev: written.character.rev,
+            ...(written.wallet ? { wallet: written.wallet } : {}),
+            ...(written.materials ? { materials: written.materials } : {}),
+            ...notices(l, p),
+            ...(gone.length > 0 ? { removed: gone } : {}),
+            ...(applied.character
+              ? { progression: progressionView(written.character, ctx.now, ctx.page) }
+              : {}),
+            ...(written.codex.length > 0 ? { codex: written.codex } : {}),
+            ...(applied.quests ? { quests: applied.quests.map(questView) } : {}),
+          },
+        });
+        if (written.character.level !== l.character.level) levels.set(id, written.character.level);
+      }
+      if (answer.log) await writeLog(q, answer.log, op.opId);
     }
-    await record(q, op, hash, result);
+    for (const r of records) {
+      await record(q, { ...op, ...r }, hash, results.get(r.characterId) as ExecResult);
+    }
     await hooks.beforeCommit?.(op);
-    return level === undefined ? { result } : { result, level };
+    return { results, levels, fresh: true };
+  }
+
+  /** Runs one operation under its id, inside `tx` when the caller owns the transaction. */
+  async function runAll<K extends AnyOp>(
+    characterId: string,
+    opId: string,
+    name: K,
+    request: Requests[K],
+    on: { tx?: Queryable } = {},
+  ): Promise<Map<string, ExecResult>> {
+    if (name === "grant") {
+      const bad = checkGrant(request as GrantRequest);
+      if (bad) throw new ContractError(`grant has a bad ${bad}`);
+    }
+    const op = { characterId, opId, name };
+    const hash = requestHash(name, request);
+    const def = DEFS[name] as PartyOpDef<Requests[K]>;
+    const others = (await def.others(on.tx ?? db, request, characterId)).filter(
+      (id) => id !== characterId,
+    );
+    if (on.tx) return (await run(on.tx, op, request, hash, others)).results;
+    return inLanes([characterId, ...others], () => transact(op, request, hash, others));
   }
 
   /**
-   * Runs one operation under its id. Pass `tx` to run inside a transaction the caller owns
-   * (character creation makes the kit this way); the caller then commits.
+   * Runs one operation under its id and returns the initiator's result. Pass `tx` to run inside
+   * a transaction the caller owns (character creation makes the kit this way); the caller then
+   * commits.
    */
   async function execute<K extends AnyOp>(
     characterId: string,
@@ -618,27 +926,29 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     request: Requests[K],
     on: { tx?: Queryable } = {},
   ): Promise<ExecResult> {
-    if (name === "grant") {
-      const bad = checkGrant(request as GrantRequest);
-      if (bad) throw new ContractError(`grant has a bad ${bad}`);
-    }
-    const op = { characterId, opId, name };
-    const hash = requestHash(name, request);
-    if (on.tx) return (await run(on.tx, op, request, hash)).result;
-    return inLane(characterId, () => transact(op, request, hash));
+    const results = await runAll(characterId, opId, name, request, on);
+    return results.get(characterId) as ExecResult;
   }
 
   async function transact<K extends AnyOp>(
     op: OpContext & { name: K },
     request: Requests[K],
     hash: string,
-  ): Promise<ExecResult> {
+    others: readonly string[],
+  ): Promise<Map<string, ExecResult>> {
     const { characterId, opId, name } = op;
+    const alone = (error: OpError) =>
+      new Map<string, ExecResult>([[characterId, { id: opId, op: name, ok: false, error }]]);
     for (let attempt = 0; ; attempt++) {
       try {
-        const out = await db.transaction((tx) => run(tx, op, request, hash));
-        if (out.level !== undefined) notifyLevel(characterId, out.level);
-        return out.result;
+        const out = await db.transaction((tx) => run(tx, op, request, hash, others));
+        for (const [id, level] of out.levels) notifyLevel(id, level);
+        if (out.fresh) {
+          for (const [id, result] of out.results) {
+            if (id !== characterId && result.ok) notifyChange(id, result.change);
+          }
+        }
+        return out.results;
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);
         // Reachable past the character lock only if a double above 2^53 rounded an
@@ -647,7 +957,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
           code === "23514" &&
           (constraint === "wallets_nonnegative_check" || constraint === "materials_qty_check")
         ) {
-          return { id: opId, op: name, ok: false, error: "insufficient" };
+          return alone("insufficient");
         }
         // Another transaction recorded this id first; its result is the answer.
         if (
@@ -675,7 +985,15 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     }
   }
 
-  return { execute };
+  function notifyChange(characterId: string, change: ChangeNotice): void {
+    try {
+      options.onChange?.(characterId, change);
+    } catch (error) {
+      console.error(`change listener failed: ${describeError(error)}`);
+    }
+  }
+
+  return { execute, executeAll: runAll };
 }
 
 export type Executor = ReturnType<typeof createExecutor>;

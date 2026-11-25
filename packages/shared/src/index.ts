@@ -20,3 +20,4 @@ export * from "./rng.ts";
 export * from "./schema.ts";
 export * from "./sim.ts";
 export * from "./stats.ts";
+export * from "./trade.ts";

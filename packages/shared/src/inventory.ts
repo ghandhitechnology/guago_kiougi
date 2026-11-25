@@ -7,6 +7,7 @@ import type { WorldMessageSchema } from "./chat.ts";
 import type { ItemKind } from "./loadout.ts";
 import type { LogoutPlace, PoolFill } from "./progress.ts";
 import { STAT_IDS, type Stats } from "./stats.ts";
+import { AMOUNT, TRADABLE_STACK, TRADE_ERRORS } from "./trade.ts";
 
 /** Operations a client may request. Names follow PLAN §21 where it names them. */
 export const OPS = [
@@ -23,6 +24,9 @@ export const OPS = [
   "shop.buy",
   "claimPool",
   "quest.claim",
+  "listing.create",
+  "listing.buy",
+  "listing.cancel",
 ] as const;
 export type OpName = (typeof OPS)[number];
 
@@ -43,6 +47,14 @@ export interface OpRequests {
   "shop.buy": { item: string; qty: number };
   claimPool: Record<string, never>;
   "quest.claim": { quest: string };
+  /**
+   * 매점 게시판: one item (`item`) or part of one stack (`stack`, `qty`), at `unitPrice` 솔방울
+   * each. It leaves the bag into the listing; 2% of the whole asking price is paid up front.
+   */
+  "listing.create": { item?: string; stack?: string; qty?: number; unitPrice: string };
+  /** `unitPrice` is the price the buyer saw; `qty` of a unique item is 1. */
+  "listing.buy": { listing: string; qty: number; unitPrice: string };
+  "listing.cancel": { listing: string };
 }
 
 export type OpMessage = { [K in OpName]: { id: string; op: K; req: OpRequests[K] } }[OpName];
@@ -91,6 +103,8 @@ export const OP_ERRORS = [
   "equip_duplicate",
   "equip_minor_slots",
   "equip_not_worn",
+  // Trading (trade.ts)
+  ...TRADE_ERRORS,
 ] as const;
 export type OpError = (typeof OP_ERRORS)[number];
 
@@ -116,6 +130,9 @@ export const OP_RATE: { readonly default: OpRate } & Readonly<Partial<Record<OpN
   craft: { burst: 5, perSecond: 2 },
   "shop.buy": { burst: 5, perSecond: 2 },
   claimPool: { burst: 2, perSecond: 0.2 },
+  "listing.create": { burst: 4, perSecond: 0.5 },
+  "listing.buy": { burst: 5, perSecond: 2 },
+  "listing.cancel": { burst: 5, perSecond: 1 },
 };
 
 // Views ---------------------------------------------------------------------------------------
@@ -333,6 +350,34 @@ const CHECKS: { [K in OpName]: Check<OpRequests[K]> } = {
     only(r, ["quest"]) && typeof r.quest === "string" && /^[a-z0-9:-]{1,64}$/.test(r.quest)
       ? { quest: r.quest }
       : null,
+  "listing.create": (r) => {
+    if (!only(r, ["item", "stack", "qty", "unitPrice"])) return null;
+    const price = r.unitPrice;
+    if (typeof price !== "string" || !AMOUNT.test(price) || price === "0") return null;
+    if (r.item !== undefined) {
+      return isUuid(r.item) && r.stack === undefined && r.qty === undefined
+        ? { item: r.item, unitPrice: price }
+        : null;
+    }
+    return typeof r.stack === "string" &&
+      TRADABLE_STACK.test(r.stack) &&
+      isInt(r.qty, 1, Number.MAX_SAFE_INTEGER)
+      ? { stack: r.stack, qty: r.qty, unitPrice: price }
+      : null;
+  },
+  "listing.buy": (r) => {
+    const price = r.unitPrice;
+    return only(r, ["listing", "qty", "unitPrice"]) &&
+      isUuid(r.listing) &&
+      isInt(r.qty, 1, Number.MAX_SAFE_INTEGER) &&
+      typeof price === "string" &&
+      AMOUNT.test(price) &&
+      price !== "0"
+      ? { listing: r.listing, qty: r.qty, unitPrice: price }
+      : null;
+  },
+  "listing.cancel": (r) =>
+    only(r, ["listing"]) && isUuid(r.listing) ? { listing: r.listing } : null,
 };
 
 export function isOpName(v: unknown): v is OpName {

@@ -46,7 +46,7 @@ export async function readInventory(
           sql`select def_id, qty from materials where character_id = ${characterId} and qty > 0 order by def_id`,
         ),
         await tx.execute(
-          sql`select ${sql.raw(ITEM_COLUMNS)} from items where owner_id = ${characterId} order by created_at, id`,
+          sql`select ${sql.raw(ITEM_COLUMNS)} from items where owner_id = ${characterId} and listing_id is null order by created_at, id`,
         ),
         await tx.execute(
           sql`select entry_id from codex_unlocks where character_id = ${characterId} order by unlocked_at, entry_id`,

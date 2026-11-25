@@ -1,6 +1,7 @@
 /** Tables shaped as PLAN §20. Only what the server uses today; later milestones add columns. */
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -244,6 +245,11 @@ export const items = pgTable(
     tradableAt: at("tradable_at"),
     /** Equipped slot among the items of its kind, null in the bag. */
     slot: smallint("slot"),
+    /**
+     * The live 매점 게시판 listing holding it. A listed item has left the bag: no operation
+     * loads it but the listing's own (buy, cancel, expiry).
+     */
+    listingId: uuid("listing_id").references((): AnyPgColumn => listings.id),
     createdAt: at("created_at").notNull().defaultNow(),
     updatedAt: at("updated_at").notNull().defaultNow(),
   },
@@ -265,6 +271,8 @@ export const items = pgTable(
       sql`jsonb_typeof(${t.affixes}) = 'array' and jsonb_array_length(${t.affixes}) <= 3`,
     ),
     check("items_slot_check", sql`${t.slot} between 0 and 5`),
+    check("items_listing_check", sql`${t.listingId} is null or ${t.slot} is null`),
+    index("items_listing_idx").on(t.listingId).where(sql`${t.listingId} is not null`),
   ],
 );
 
@@ -306,8 +314,12 @@ export const codexUnlocks = pgTable(
 
 /**
  * Every unit that enters or leaves a character, one row per (operation, currency, source or
- * sink). Items are booked as `item:<def>`, +1 when made and -1 when used up, with their id. The
- * `economy_daily` view sums it by Korean calendar day (PLAN §13).
+ * sink). Items are booked as `item:<def>`, +1 when made or received and -1 when used up or
+ * given, with their id. Combat grants are `coalesced`: one row per character, Korean day,
+ * currency and source, which each grant adds to (`entries` counts them), so a horde does not
+ * write a row per player every five seconds. Per-operation rows older than
+ * `LEDGER_RAW_DAYS` are compacted the same way (`ledger.ts`). The `economy_daily` view reads
+ * closed days from `economy_daily_totals` and today from here (PLAN §13).
  */
 export const economyLedger = pgTable(
   "economy_ledger",
@@ -323,12 +335,22 @@ export const economyLedger = pgTable(
     sourceOrSink: text("source_or_sink").notNull(),
     amount: amount("amount").notNull(),
     itemId: uuid("item_id"),
+    coalesced: boolean("coalesced").notNull().default(false),
+    /** Operations summed into this row: 1 unless `coalesced`. */
+    entries: integer("entries").notNull().default(1),
   },
   (t) => [
     index("economy_ledger_day_idx").on(t.day, t.currency, t.sourceOrSink),
+    uniqueIndex("economy_ledger_coalesced_key")
+      .on(t.characterId, t.day, t.currency, t.sourceOrSink)
+      .where(sql`${t.coalesced}`),
     index("economy_ledger_character_idx").on(t.characterId, t.currency),
     index("economy_ledger_item_idx").on(t.itemId).where(sql`${t.itemId} is not null`),
     check("economy_ledger_amount_check", sql`${t.amount} <> 0`),
+    check(
+      "economy_ledger_coalesced_check",
+      sql`${t.entries} >= 1 and (${t.coalesced} or ${t.entries} = 1) and not (${t.coalesced} and ${t.itemId} is not null)`,
+    ),
     check(
       "economy_ledger_item_check",
       sql`(${t.itemId} is null) = (${t.currency} not like 'item:%') and (${t.itemId} is null or ${t.amount} in (1, -1))`,
@@ -354,4 +376,116 @@ export const operations = pgTable(
     at: at("at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.characterId, t.opId] }), index("operations_at_idx").on(t.at)],
+);
+
+/** Closed Korean days of `economy_ledger` summed by currency and source or sink (PLAN §13). */
+export const economyDailyTotals = pgTable(
+  "economy_daily_totals",
+  {
+    day: date("day").notNull(),
+    currency: text("currency").notNull(),
+    sourceOrSink: text("source_or_sink").notNull(),
+    amount: amount("amount").notNull(),
+    entries: bigint("entries", { mode: "number" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.currency, t.sourceOrSink] })],
+);
+
+// Trading (PLAN §13 "Player trading") ---------------------------------------------------------
+
+/**
+ * 매점 게시판 listings. A listing holds what it sells: a unique item (`item_id`, the item row
+ * pointing back through `listing_id`) or `qty` units of a stack taken out of the seller's
+ * materials. `qty` is what is still for sale; it is 0 once the listing is closed, whether sold,
+ * cancelled or expired, and whatever was left has gone back to the seller.
+ */
+export const listings = pgTable(
+  "listings",
+  {
+    id: uuid("id").primaryKey(),
+    sellerId: uuid("seller_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    state: text("state").notNull().default("live"),
+    category: text("category").notNull(),
+    /** A book or tool def, or a stack id. */
+    defId: text("def_id").notNull(),
+    grade: smallint("grade").notNull().default(0),
+    itemId: uuid("item_id"),
+    /** What a unique item shows on the board (`ListedItem`); it cannot change while listed. */
+    item: jsonb("item"),
+    qty: bigint("qty", { mode: "number" }).notNull(),
+    listedQty: bigint("listed_qty", { mode: "number" }).notNull(),
+    unitPrice: amount("unit_price").notNull(),
+    fee: amount("fee").notNull(),
+    createdAt: at("created_at").notNull().defaultNow(),
+    expiresAt: at("expires_at").notNull(),
+    closedAt: at("closed_at"),
+  },
+  (t) => [
+    index("listings_seller_idx").on(t.sellerId, t.createdAt),
+    uniqueIndex("listings_item_key").on(t.itemId).where(sql`${t.state} = 'live'`),
+    index("listings_category_idx")
+      .on(t.category, t.unitPrice, t.id)
+      .where(sql`${t.state} = 'live'`),
+    index("listings_def_idx")
+      .on(t.defId, t.grade, t.unitPrice, t.id)
+      .where(sql`${t.state} = 'live'`),
+    index("listings_expiry_idx").on(t.expiresAt).where(sql`${t.state} = 'live'`),
+    index("listings_closed_idx").on(t.closedAt).where(sql`${t.state} <> 'live'`),
+    check("listings_state_check", sql`${t.state} in ('live', 'sold', 'cancelled', 'expired')`),
+    check(
+      "listings_qty_check",
+      sql`${t.listedQty} >= 1 and ${t.qty} between 0 and ${t.listedQty} and (${t.state} = 'live') = (${t.qty} > 0)`,
+    ),
+    check(
+      "listings_item_check",
+      sql`(${t.itemId} is null) = (${t.item} is null) and (${t.itemId} is null or ${t.listedQty} = 1)`,
+    ),
+    check("listings_price_check", sql`${t.unitPrice} > 0 and ${t.fee} >= 0`),
+    check("listings_closed_check", sql`(${t.state} = 'live') = (${t.closedAt} is null)`),
+  ],
+);
+
+/**
+ * Every completed direct trade and board sale (PLAN §13: kept, searchable from the admin page).
+ * No foreign keys: the log outlives characters. `from_id` is the seller, or the first party of
+ * a direct trade; `item_ids` and `defs` hold everything that changed hands, for search. Board
+ * sales also fill the one good they sold, which the price history reads.
+ */
+export const tradeLog = pgTable(
+  "trade_log",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    kind: text("kind").notNull(),
+    opId: text("op_id").notNull(),
+    at: at("at").notNull().defaultNow(),
+    fromId: uuid("from_id").notNull(),
+    toId: uuid("to_id").notNull(),
+    itemIds: uuid("item_ids").array().notNull(),
+    defs: text("defs").array().notNull(),
+    /** 솔방울 that left the game in tax on this trade. */
+    tax: amount("tax").notNull(),
+    /** Both sides in full: item views, stacks, 솔방울 sent and received. */
+    payload: jsonb("payload").notNull(),
+    listingId: uuid("listing_id"),
+    defId: text("def_id"),
+    grade: smallint("grade"),
+    qty: bigint("qty", { mode: "number" }),
+    unitPrice: amount("unit_price"),
+  },
+  (t) => [
+    uniqueIndex("trade_log_op_key").on(t.kind, t.toId, t.opId),
+    index("trade_log_from_idx").on(t.fromId, t.at),
+    index("trade_log_to_idx").on(t.toId, t.at),
+    index("trade_log_at_idx").on(t.at),
+    index("trade_log_items_idx").using("gin", t.itemIds),
+    index("trade_log_defs_idx").using("gin", t.defs),
+    index("trade_log_price_idx").on(t.defId, t.grade, t.at).where(sql`${t.kind} = 'board'`),
+    check("trade_log_kind_check", sql`${t.kind} in ('board', 'direct')`),
+    check(
+      "trade_log_board_check",
+      sql`(${t.kind} = 'board') = (${t.listingId} is not null and ${t.defId} is not null and ${t.grade} is not null and ${t.qty} > 0 and ${t.unitPrice} > 0)`,
+    ),
+  ],
 );

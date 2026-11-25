@@ -20,6 +20,7 @@ export interface AuditReport {
     materials: number;
     ledger: number;
     operations: number;
+    listings: number;
   };
   violations: Violation[];
 }
@@ -56,23 +57,75 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
     from materials m full join l on l.character_id = m.character_id and l.def_id = m.def_id
     where coalesce(m.qty, 0) <> coalesce(l.total, 0)`,
 
-  // Every item was made once, under its owner, and not used up; every item used up is gone.
+  // Every item was made once, and the ledger of its owner holds it: +1 when made or received,
+  // -1 when used up or given. Everyone else's ledger of it nets to zero.
   items_match_ledger: sql`
     with l as (
-      select character_id, item_id, min(currency) as currency, sum(amount) as total,
-        count(*) filter (where amount > 0) as made
+      select character_id, item_id, min(currency) as currency, sum(amount) as total
       from economy_ledger where item_id is not null group by 1, 2
+    ), m as (
+      select item_id,
+        count(*) filter (where amount > 0 and source_or_sink not like 'trade.%') as made
+      from economy_ledger where item_id is not null group by 1
     )
     select coalesce(i.owner_id, l.character_id) as character_id,
       coalesce(i.id, l.item_id)::text || ': '
-        || case when i.id is null then 'gone, ledger holds ' || l.total::text
-                when l.item_id is null then 'no ledger entry made it'
-                when l.made > 1 then 'made ' || l.made::text || ' times'
+        || case when i.id is null then 'not held, ledger holds ' || l.total::text
+                when l.item_id is null then 'no ledger entry brought it here'
+                when m.made <> 1 then 'made ' || m.made::text || ' times'
                 else 'ledger holds ' || l.total::text || ' of ' || l.currency end as detail
-    from items i full join l on l.item_id = i.id and l.character_id = i.owner_id
+    from items i
+    full join l on l.item_id = i.id and l.character_id = i.owner_id
+    left join m on m.item_id = coalesce(i.id, l.item_id)
     where (i.id is null and l.total <> 0)
-       or (i.id is not null and (l.item_id is null or l.total <> 1 or l.made <> 1
+       or (i.id is not null and (l.item_id is null or l.total <> 1 or m.made <> 1
            or l.currency <> 'item:' || i.def_id))`,
+
+  // What moves between players nets to zero across the game: 솔방울 and stacks of direct
+  // trades, and 솔방울 of board sales (the buyer's out is the seller's in).
+  transfers_net_zero: sql`
+    select null::uuid as character_id,
+      currency || ' ' || source_or_sink || ' nets ' || sum(amount)::text as detail
+    from economy_ledger
+    where item_id is null and (source_or_sink = 'trade.direct'
+      or (source_or_sink = 'trade.board' and currency in ${WALLET_CURRENCIES}))
+    group by currency, source_or_sink
+    having sum(amount) <> 0`,
+
+  // A stack taken into listings is still there, sold to a buyer, or back with its seller.
+  escrow_matches_listings: sql`
+    with moved as (
+      select currency, sum(amount) as total from economy_ledger
+      where item_id is null and currency not in ${WALLET_CURRENCIES}
+        and source_or_sink in ('escrow.board', 'trade.board')
+      group by 1
+    ), held as (
+      select def_id as currency, sum(qty) as total from listings
+      where state = 'live' and item_id is null group by 1
+    )
+    select null::uuid as character_id,
+      coalesce(moved.currency, held.currency) || ': escrow and sales ' || coalesce(moved.total, 0)::text
+        || ', listed ' || coalesce(held.total, 0)::text as detail
+    from moved full join held on held.currency = moved.currency
+    where coalesce(moved.total, 0) + coalesce(held.total, 0) <> 0`,
+
+  // A listed item is in its seller's live listing and nowhere else; a live listing holds it.
+  listings_hold_items: sql`
+    select i.owner_id as character_id, i.id::text || ': listed in a listing that does not hold it' as detail
+    from items i left join listings l on l.id = i.listing_id
+    where i.listing_id is not null
+      and (l.id is null or l.state <> 'live' or l.item_id <> i.id or l.seller_id <> i.owner_id)
+    union all
+    select l.seller_id, 'listing ' || l.id::text || ' does not hold its item'
+    from listings l
+    left join items i on i.id = l.item_id and i.listing_id = l.id and i.owner_id = l.seller_id
+    where l.state = 'live' and l.item_id is not null and i.id is null`,
+
+  // Bound items never change hands (PLAN §13).
+  bound_never_traded: sql`
+    select distinct l.character_id, l.item_id::text || ': bound, but traded' as detail
+    from economy_ledger l join items i on i.id = l.item_id
+    where i.bound and l.source_or_sink like 'trade.%'`,
 
   no_negative_balance: sql`
     select character_id, 'wallet below zero' as detail from wallets
@@ -118,7 +171,8 @@ export async function checkInvariants(q: Queryable): Promise<AuditReport> {
       (select count(*) from items)::int as items,
       (select count(*) from materials)::int as materials,
       (select count(*) from economy_ledger)::int as ledger,
-      (select count(*) from operations)::int as operations`);
+      (select count(*) from operations)::int as operations,
+      (select count(*) from listings where state = 'live')::int as listings`);
   return {
     ok: violations.length === 0,
     counts: rows[0] as AuditReport["counts"],
