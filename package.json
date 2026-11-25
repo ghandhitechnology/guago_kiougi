@@ -14,7 +14,10 @@
     "format": "biome check --write .",
     "test": "vitest run",
     "art:build": "pnpm --filter @guago/art build",
-    "art:sheet": "pnpm --filter @guago/art sheet"
+    "art:sheet": "pnpm --filter @guago/art sheet",
+    "audio:lab": "pnpm --filter @guago/audio lab",
+    "audio:render": "pnpm --filter @guago/audio render",
+    "audio:score": "pnpm --filter @guago/audio score"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
