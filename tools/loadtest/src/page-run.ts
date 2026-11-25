@@ -63,7 +63,8 @@ async function admin(body: Record<string, unknown>): Promise<Record<string, unkn
   return out;
 }
 
-const event = (name: string, ...args: unknown[]) => admin({ cmd: "event", name, args, flush: true });
+const event = (name: string, ...args: unknown[]) =>
+  admin({ cmd: "event", name, args, flush: true });
 
 // The bot ------------------------------------------------------------------------------------
 
@@ -103,7 +104,10 @@ async function join(): Promise<void> {
   for (let i = 0; i < 50 && !me; i++) await new Promise((r) => setTimeout(r, 20));
 }
 
-function next<T extends LivePush["t"]>(t: T, also: (p: Extract<LivePush, { t: T }>) => boolean = () => true) {
+function next<T extends LivePush["t"]>(
+  t: T,
+  also: (p: Extract<LivePush, { t: T }>) => boolean = () => true,
+) {
   return new Promise<Extract<LivePush, { t: T }>>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no ${t} push`)), 5000);
     waiting = {
@@ -161,11 +165,15 @@ await join();
 say(`bot ${myName} (${me}) in the WorldRoom`);
 
 let page = (await read("page")).page;
-say(`page ${page.page} at ${page.milestone}, week ${page.week}, clock ×${page.rate}, maps ${page.maps.join(", ")}`);
+say(
+  `page ${page.page} at ${page.milestone}, week ${page.week}, clock ×${page.rate}, maps ${page.maps.join(", ")}`,
+);
 
 let board: BoardView = (await read("board")).board;
 say(`board day ${board.day}: ${board.daily.map(describe).join(" | ")}`);
-say(`weekly ${board.weekly.map((q) => q.id).join(", ")}; repeat ${board.repeat?.id}; story ${board.story.map((q) => q.id).join(", ")}`);
+say(
+  `weekly ${board.weekly.map((q) => q.id).join(", ")}; repeat ${board.repeat?.id}; story ${board.story.map((q) => q.id).join(", ")}`,
+);
 const first = board.daily[0] as NoticeView;
 const done = next("done", (p) => p.quest.id === first.id);
 await play(first);
@@ -185,7 +193,9 @@ say(`도감 unlock push: ${(await unlock).entries.join(", ")}`);
 const step = async (by: string) => {
   const out = await admin({ cmd: "step", by });
   page = out.page as PageView;
-  say(`step ${by} → week ${page.week}, ${page.milestone}, frontier ${page.frontierLevel}, bosses ${JSON.stringify(page.bosses)}`);
+  say(
+    `step ${by} → week ${page.week}, ${page.milestone}, frontier ${page.frontierLevel}, bosses ${JSON.stringify(page.bosses)}`,
+  );
   await new Promise((r) => setTimeout(r, 150));
 };
 const free = async (boss: string) => {
@@ -198,7 +208,10 @@ await step("2w");
 check(page.milestone === "p1.wide", "fields 3 and 4 at week 2");
 board = (await read("board")).board;
 say(`board reset: day ${board.day}, ${board.daily.map((q) => q.id).join(", ")}`);
-check(board.daily.every((q) => q.id.startsWith(`daily:${board.day}:`)), "today's board");
+check(
+  board.daily.every((q) => q.id.startsWith(`daily:${board.day}:`)),
+  "today's board",
+);
 await step("1w");
 check(page.milestone === "p1.pythagoreans", "mid boss 1 at week 3");
 await free("zeno");
@@ -231,7 +244,9 @@ for (const p of notebook.pages.slice(0, 2)) {
       .join("; ")}`,
   );
 }
-say(`연구노트 stubs: ${notebook.pages.filter((p) => p.state === "stub").length} of ${notebook.pages.length}`);
+say(
+  `연구노트 stubs: ${notebook.pages.filter((p) => p.state === "stub").length} of ${notebook.pages.length}`,
+);
 
 // A logout fills the 자습 pool ------------------------------------------------------------
 const measured = await admin({
@@ -257,7 +272,9 @@ await step("3h");
 await join();
 const inv = await inventory();
 const pool = inv.progression.pool;
-say(`back after 3h: pool ${pool ? `${pool.place}, ${pool.fill.seconds}s of ${pool.cap}s, exp ${pool.fill.exp.toFixed(1)}, 솔방울 ${pool.fill.pinecone.toFixed(1)}` : "none"}`);
+say(
+  `back after 3h: pool ${pool ? `${pool.place}, ${pool.fill.seconds}s of ${pool.cap}s, exp ${pool.fill.exp.toFixed(1)}, 솔방울 ${pool.fill.pinecone.toFixed(1)}` : "none"}`,
+);
 // The clock keeps running at its rate while the bot reconnects, so a little more than 3 hours.
 check((pool?.fill.seconds ?? 0) >= 3 * 3600, "three hours of pool");
 await step("2h");
@@ -265,7 +282,9 @@ const still = (await inventory()).progression.pool;
 say(`two hours online later: pool still ${still?.fill.seconds}s`);
 check(still?.fill.seconds === pool?.fill.seconds, "no fill while online");
 const claimed = await op("claimPool", {});
-say(`claimPool: ${claimed.ok ? `exp ${claimed.outcome.exp}, ${claimed.outcome.seconds}s` : claimed.error}`);
+say(
+  `claimPool: ${claimed.ok ? `exp ${claimed.outcome.exp}, ${claimed.outcome.seconds}s` : claimed.error}`,
+);
 
 // 벌점 to 명령퇴사 ---------------------------------------------------------------------------
 for (let i = 0; i < 10; i++) await event("patrolCaught", me);
@@ -273,7 +292,9 @@ await new Promise((r) => setTimeout(r, 300));
 const home = pushes.find((p) => p.t === "home");
 say(`home push: ${home && home.t === "home" ? `until ${kst(home.until)}` : "none"}`);
 const rules = (await read("rules")).rules;
-say(`rules: 벌점 ${rules.demerits}/${rules.expelAt}, titles ${rules.titles.join(", ")}, penalty until ${rules.penaltyUntil ? kst(rules.penaltyUntil) : "-"}, exp ×${rules.modifiers.exp.toFixed(2)}`);
+say(
+  `rules: 벌점 ${rules.demerits}/${rules.expelAt}, titles ${rules.titles.join(", ")}, penalty until ${rules.penaltyUntil ? kst(rules.penaltyUntil) : "-"}, exp ×${rules.modifiers.exp.toFixed(2)}`,
+);
 check(rules.demerits === 0 && rules.titles.includes("went-home"), "명령퇴사");
 
 await room.leave(true);

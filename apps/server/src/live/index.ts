@@ -663,7 +663,9 @@ export function createLive(db: Db, o: LiveOptions) {
     },
     /** 기절 in a field: +1 벌점. */
     knockout(characterId: string): Promise<void> {
-      return background("knockout", () => conduct(characterId, { kind: "demerit", reason: "knockout" }));
+      return background("knockout", () =>
+        conduct(characterId, { kind: "demerit", reason: "knockout" }),
+      );
     },
     /** One player got another back up: +1 상점, and a `help-revive` notice moves. */
     revive(reviverId: string, revivedId: string): Promise<void> {
@@ -711,11 +713,15 @@ export function createLive(db: Db, o: LiveOptions) {
     },
     /** Spotted by a patrol in a 위험 구역: +2 벌점. */
     patrolCaught(characterId: string): Promise<void> {
-      return background("patrol", () => conduct(characterId, { kind: "demerit", reason: "patrol" }));
+      return background("patrol", () =>
+        conduct(characterId, { kind: "demerit", reason: "patrol" }),
+      );
     },
     /** 권 사감 caught a snack in the 기숙사: +1 벌점. */
     dormSnack(characterId: string): Promise<void> {
-      return background("dorm-food", () => conduct(characterId, { kind: "demerit", reason: "dorm-food" }));
+      return background("dorm-food", () =>
+        conduct(characterId, { kind: "demerit", reason: "dorm-food" }),
+      );
     },
     /** Standing at a 졸방대 began or ended: thirty seconds clear 졸음. */
     atDesk(characterId: string, on: boolean): void {
@@ -726,7 +732,9 @@ export function createLive(db: Db, o: LiveOptions) {
     eat,
     /** The 청소 당번 daily was done: +1 상점. */
     cleaning(characterId: string): Promise<void> {
-      return background("cleaning", () => conduct(characterId, { kind: "merit", reason: "cleaning" }));
+      return background("cleaning", () =>
+        conduct(characterId, { kind: "merit", reason: "cleaning" }),
+      );
     },
 
     // Moderation.

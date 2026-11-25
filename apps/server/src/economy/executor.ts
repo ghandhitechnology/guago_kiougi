@@ -32,8 +32,8 @@ import type {
   QuestView,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
-import { CURRENT_COHORT } from "../auth/service.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
+import { livePage } from "../live/current.ts";
 import { loadLive, writeLive } from "../live/rows.ts";
 import {
   type AnyOp,
@@ -505,8 +505,8 @@ async function record(
 
 // The executor --------------------------------------------------------------------------------
 
-/** The live Page until server state owns it (PLAN §10): the cohort new characters join. */
-export const livePage = (): number => CURRENT_COHORT;
+/** The live Page (PLAN §10): the Page clock's, once the server provided it (live/current.ts). */
+export { livePage };
 
 /**
  * Errors worth retrying unchanged: the connection or the database server failed, not the

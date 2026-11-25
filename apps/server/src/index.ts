@@ -7,6 +7,7 @@ import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
 import { LiveClock } from "./live/clock.ts";
+import { provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
@@ -26,6 +27,7 @@ const db = createDb(config.databaseUrl);
 const clock = new LiveClock({ realMs: Date.now(), gameMs: Date.now(), rate: 1 });
 const page = new PageClock(db, clock);
 await page.load(config.liveClockRate);
+provideLivePage(page.live);
 const economy = createEconomy(db, {
   now: () => clock.date(),
   page: page.live,

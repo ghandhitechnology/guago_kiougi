@@ -5,7 +5,15 @@
  * ends with the economy's invariant check, which includes the conduct ledger.
  */
 import { randomUUID } from "node:crypto";
-import { type Character, catchUp, DAY_MS, HOUR_MS, MINUTE_MS, POOL, poolTerms } from "@guago/shared";
+import {
+  type Character,
+  catchUp,
+  DAY_MS,
+  HOUR_MS,
+  MINUTE_MS,
+  POOL,
+  poolTerms,
+} from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
@@ -52,7 +60,14 @@ async function world() {
 
 type World = Awaited<ReturnType<typeof world>>;
 
-const LOOK = { body: "b", hair: "h", hairColor: "c", face: "f", uniform: "blazer", accessories: [] };
+const LOOK = {
+  body: "b",
+  hair: "h",
+  hairColor: "c",
+  face: "f",
+  uniform: "blazer",
+  accessories: [],
+};
 
 async function character(w: World, level = 1, map = "lawn", x = 0, y = 0): Promise<Character> {
   const n = ++seq;
@@ -194,7 +209,9 @@ describe("수행평가 board", () => {
       winner.id,
     ]);
     expect(wallet.rows[0].merit_points).toBe("1");
-    const notice = await db.pool.query("select state from help_notices where id = $1", [posted.notice]);
+    const notice = await db.pool.query("select state from help_notices where id = $1", [
+      posted.notice,
+    ]);
     expect(notice.rows[0].state).toBe("done");
   });
 });
@@ -211,7 +228,9 @@ describe("벌점 and 상점", () => {
     for (let i = 0; i < 3; i++) await w.live.events.cleaning(c.id);
     let r = await row(c.id);
     expect([r.demerits, r.merits]).toEqual([0, 4]);
-    const wallet = await db.pool.query("select merit_points from wallets where character_id = $1", [c.id]);
+    const wallet = await db.pool.query("select merit_points from wallets where character_id = $1", [
+      c.id,
+    ]);
     // Four 상점 against three 벌점 left: one spare in the wallet.
     expect(wallet.rows[0].merit_points).toBe("1");
 
@@ -232,7 +251,12 @@ describe("자습 pool", () => {
     const c = await character(w);
     await w.live.joined(c, "world", "s1");
     // Twelve minutes of hunting in a field: 50 EXP and 10 솔방울 every five seconds.
-    const source = { kind: "monster", fieldId: "p1-colonnade", monsterId: "odap", rank: "normal" } as const;
+    const source = {
+      kind: "monster",
+      fieldId: "p1-colonnade",
+      monsterId: "odap",
+      rank: "normal",
+    } as const;
     for (let i = 0; i < 144; i++) {
       w.live.credit(c.id, { exp: 50, drops: [{ item: { kind: "coin", amount: 10 }, source }] });
       w.clock.step(5000);

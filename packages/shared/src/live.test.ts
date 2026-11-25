@@ -61,7 +61,11 @@ describe("벌점 and 상점", () => {
   });
 
   it("명령퇴사 at 20 resets to 0", () => {
-    expect(addDemerits({ demerits: 18 }, 1)).toEqual({ demerits: 19, expelled: false, reached: 19 });
+    expect(addDemerits({ demerits: 18 }, 1)).toEqual({
+      demerits: 19,
+      expelled: false,
+      reached: 19,
+    });
     expect(addDemerits({ demerits: 18 }, 2)).toEqual({ demerits: 0, expelled: true, reached: 20 });
     expect(addDemerits({ demerits: 19 }, 3)).toEqual({ demerits: 0, expelled: true, reached: 22 });
     expect(() => addDemerits({ demerits: 0 }, 0)).toThrow();
@@ -90,11 +94,18 @@ describe("rule modifiers", () => {
       },
       5,
     );
-    expect(m.exp).toBeCloseTo((1 + RESTED.bonus + 0.05 + 0.02) * (1 - DROWSY.penalty) * (1 - EXPEL.penalty));
+    expect(m.exp).toBeCloseTo(
+      (1 + RESTED.bonus + 0.05 + 0.02) * (1 - DROWSY.penalty) * (1 - EXPEL.penalty),
+    );
     expect(m.damage).toBeCloseTo(1.02);
     // Everything timed is over at its end.
     const later = modifiers(
-      { ...base, restedUntil: 10, penaltyUntil: 10, meal: { until: 10, stat: "exp", amount: 0.05 } },
+      {
+        ...base,
+        restedUntil: 10,
+        penaltyUntil: 10,
+        meal: { until: 10, stat: "exp", amount: 0.05 },
+      },
       10,
     );
     expect(later.exp).toBe(1);
