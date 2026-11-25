@@ -83,6 +83,35 @@ export default sprite({
         GGGGGGGGGGG
       `,
     },
+    // One front paw up off the ground for the bat: the chest where it was, the paw lifted, then
+    // swatted out to the side.
+    seatedPaw: {
+      at: [3, 10],
+      grid: `
+        .GpwwuuqG..
+        GpwwwuUUqG.
+        GpwwwuUwqqG
+        GppGwwGwqqG
+        GGGGGGGGGGG
+      `,
+    },
+    pawLift: {
+      at: [2, 9],
+      grid: `
+        .GG.
+        GwwG
+        GwwG
+        .GG.
+      `,
+    },
+    pawOut: {
+      at: [0, 10],
+      grid: `
+        .GGG.
+        GwwwG
+        .GGG.
+      `,
+    },
     tail: {
       at: [12, 10],
       grid: `
@@ -332,6 +361,8 @@ export default sprite({
     sit1: ["seated", "flick", "face"],
     blink: ["seated", "tail", "shut"],
     look: ["seated", "tail", "away"],
+    paw0: ["seatedPaw", "tail", "face", "pawLift"],
+    paw1: ["seatedPaw", "flick", "face", "pawOut"],
     sleep0: ["loaf"],
     sleep1: ["breathe"],
     down0: ["chest", "pawsA", ["face", 0, 1]],
@@ -383,6 +414,25 @@ export default sprite({
       fps: 4,
     },
     sleep: { frames: ["sleep0", "sleep0", "sleep1", "sleep1"], fps: 2 },
+    /** Batting at something, unhurried, then looking away as if it never happened. */
+    paw: {
+      frames: [
+        "sit0",
+        "paw0",
+        "paw0",
+        "paw0",
+        "paw1",
+        "paw0",
+        "sit0",
+        "look",
+        "look",
+        "look",
+        "blink",
+        "sit0",
+      ],
+      fps: 4,
+      loop: false,
+    },
     walkDown: { frames: ["down0", "down1", "down2", "down3"], fps: 8 },
     walkUp: { frames: ["up0", "up1", "up2", "up3"], fps: 8 },
     walkSide: { frames: ["side0", "side1", "side2", "side3"], fps: 8 },
