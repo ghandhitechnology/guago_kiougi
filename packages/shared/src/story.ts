@@ -15,7 +15,14 @@ export const STORY_MESSAGES = {
   end: "sceneEnd",
   /** Client: what it did with a scene (`StoryRequest`). */
   story: "story",
+  /** Server: the personal story log, answering `log` (`StoryLog`). */
+  log: "storyLog",
 } as const;
+
+/** Scenes a character can play again (복습): boss scenes its server has reached, beats it saw. */
+export interface StoryLog {
+  readonly scenes: readonly string[];
+}
 
 /** One showing of a scene to one client. */
 export interface SceneStart {
@@ -49,6 +56,8 @@ export type StoryRequest =
   | { readonly t: "reach"; readonly run: number; readonly step: number }
   /** Play a scene again from the story log (a 복습 replay). */
   | { readonly t: "replay"; readonly scene: string }
+  /** The story log, for a replay object's list. */
+  | { readonly t: "log" }
   /** Development servers only: a fight's hook was met (`clear:landing-3f`). */
   | { readonly t: "signal"; readonly until: string };
 
@@ -76,6 +85,8 @@ export const storyMessage: MessageSchema<StoryRequest> = {
           if (!isRun(v.run) || !Number.isInteger(v.step) || (v.step as number) < 0)
             return bad("bad reach");
           return { value: { t: "reach", run: v.run, step: v.step as number } };
+        case "log":
+          return { value: { t: "log" } };
         case "replay":
           return typeof v.scene === "string" && ID.test(v.scene)
             ? { value: { t: "replay", scene: v.scene } }

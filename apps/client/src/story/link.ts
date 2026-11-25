@@ -4,23 +4,53 @@
  * arrives before its map is up waits for it; scenes on one map share its stage.
  */
 import type { Room } from "@colyseus/sdk";
-import { OPENING_SCENES } from "@guago/content";
+import { narrative, OPENING_SCENES } from "@guago/content";
 import {
   type MapState,
   type SceneCue,
   type SceneEnd,
   type SceneStart,
   STORY_MESSAGES,
+  type StoryLog,
   type StoryRequest,
 } from "@guago/shared";
 import { overrideSoundscape } from "../sound/audio.ts";
 import { worldUi } from "../ui/world-ui.ts";
+import { onWorld } from "../world-events.ts";
 import { fillRoom } from "./extras.ts";
 import { SceneRunner } from "./runner.ts";
 import { Stage, type StageHost } from "./stage.ts";
 
 /** A closed curtain no door followed is lifted after this long. */
 const LIFT_AFTER_MS = 900;
+
+/** A scene in the story log: its id and its title, as the narrative names it. */
+export interface LoggedScene {
+  readonly id: string;
+  readonly title: string;
+}
+
+let current: StoryLink | undefined;
+
+/**
+ * The personal story log (PLAN §10 복습) for the panel a replay object opens (`open` with kind
+ * `replay`): the scenes this character can play again, oldest first.
+ */
+export function storyLog(): Promise<readonly LoggedScene[]> {
+  return current ? current.log() : Promise.resolve([]);
+}
+
+/** Plays a scene from the story log again, in a private copy of its map. */
+export function replayScene(id: string): void {
+  current?.replay(id);
+}
+
+const TITLES = new Map(
+  narrative.NARRATIVE.story.flatMap((b) => {
+    const title = narrative.NARRATIVE.ko[b.title] ?? "";
+    return [[b.id, title] as const, ...(b.cutscene ? [[b.cutscene, title] as const] : [])];
+  }),
+);
 
 export class StoryLink {
   private room: Room<unknown, MapState> | undefined;
@@ -31,8 +61,43 @@ export class StoryLink {
   private pending: SceneStart | undefined;
   private readonly playerName: () => string;
 
+  private readonly logWaiters: ((scenes: readonly string[]) => void)[] = [];
+
   constructor(playerName: () => string) {
     this.playerName = playerName;
+    current = this;
+    onWorld((e) => {
+      if (e.t === "open" && e.kind === "replay") void this.offerLog(e.id);
+    });
+  }
+
+  /**
+   * A replay object used: its description, with the story log's scenes to pick from in the
+   * dialogue box. An object the narrative has not described yet offers nothing.
+   */
+  private async offerLog(id: string): Promise<void> {
+    const ko = narrative.NARRATIVE.ko;
+    const d = narrative.NARRATIVE.descriptions.find((x) => x.id === id);
+    const text = d && ko[d.desc];
+    if (!d || !text) return;
+    const scenes = (await this.log()).filter((s) => s.title);
+    const speaker = ko[d.name] ?? "";
+    const picked = await worldUi.say([
+      { speaker, text, ...(scenes.length > 0 ? { choices: scenes.map((s) => s.title) } : {}) },
+    ]);
+    const scene = picked === undefined ? undefined : scenes[picked];
+    if (scene) this.replay(scene.id);
+  }
+
+  /** Asks the server for the story log; resolves with it, or empty if the room goes first. */
+  log(): Promise<readonly LoggedScene[]> {
+    if (!this.room) return Promise.resolve([]);
+    return new Promise((resolve) => {
+      this.logWaiters.push((ids) =>
+        resolve(ids.map((id) => ({ id, title: TITLES.get(id) ?? "" }))),
+      );
+      this.send({ t: "log" });
+    });
   }
 
   /** A room was joined: its story messages come here. Returns the teardown. */
@@ -47,6 +112,10 @@ export class StoryLink {
       room.onMessage(STORY_MESSAGES.cue, (m: SceneCue) => {
         if (this.room === room && this.runner?.run === m.run) this.runner.cue(m.until);
       }),
+      room.onMessage(STORY_MESSAGES.log, (m: StoryLog) => {
+        if (this.room !== room) return;
+        for (const w of this.logWaiters.splice(0)) w(m.scenes);
+      }),
       room.onMessage(STORY_MESSAGES.end, (m: SceneEnd) => {
         if (this.room !== room) return;
         if (this.pending?.run === m.run) this.pending = undefined;
@@ -58,6 +127,7 @@ export class StoryLink {
       if (this.room === room) {
         this.room = undefined;
         this.pending = undefined;
+        for (const w of this.logWaiters.splice(0)) w([]);
         this.runner?.end();
       }
     };

@@ -40,6 +40,7 @@ import {
   type SceneStart,
   SECOND_MS,
   STORY_MESSAGES,
+  type StoryLog,
   type StoryRequest,
 } from "@guago/shared";
 import { background } from "../background.ts";
@@ -523,6 +524,10 @@ class Director {
       background("story replay", this.replay(room, sessionId, characterId, req.scene));
       return;
     }
+    if (req.t === "log") {
+      background("story log", this.log(room, sessionId, characterId));
+      return;
+    }
     const run = this.runs.get(req.run);
     if (!run || run.sessionId !== sessionId) return;
     if (req.t === "walk") {
@@ -638,6 +643,20 @@ class Director {
       write: false,
       via: "story",
     });
+  }
+
+  /**
+   * The personal story log (PLAN §10): every boss scene the server has reached, seen or not, so a
+   * newcomer can watch what happened before them, and every beat this character played through.
+   */
+  private async log(room: StoryRoom, sessionId: string, characterId: string): Promise<void> {
+    const seen = (await this.store?.get(characterId))?.seen ?? new Set<string>();
+    const scenes = narrative.NARRATIVE.story.flatMap((beat) => {
+      if (!reached(beat.after)) return [];
+      if (beat.cutscene && sceneById(beat.cutscene)) return [beat.cutscene];
+      return seen.has(beat.id) && sceneById(beat.id) ? [beat.id] : [];
+    });
+    room.tell(sessionId, STORY_MESSAGES.log, { scenes } satisfies StoryLog);
   }
 
   /** 복습: a scene from the story log, again, in a private copy of its map. */
