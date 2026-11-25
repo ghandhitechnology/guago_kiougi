@@ -104,9 +104,12 @@ export interface ExecutorOptions {
     afterLoad?(op: OpContext): Promise<void> | void;
     beforeCommit?(op: OpContext): Promise<void> | void;
   };
-  /** Called after a commit that changed the character's level. */
+  /** Called after a commit that changed the character's level. Never for a replay. */
   onLevel?(characterId: string, level: number): void;
-  /** Called after every operation that applied, once it committed (the living world listens). */
+  /**
+   * Called after every operation that applied, once it committed (the living world listens).
+   * Never for a replay of a recorded id, so a listener runs once per operation.
+   */
   onApplied?(characterId: string, name: AnyOp, result: ExecResult): void;
 }
 
@@ -512,6 +515,18 @@ export { livePage };
  * Errors worth retrying unchanged: the connection or the database server failed, not the
  * request. Anything else (a broken rule, a refused constraint, a bug) fails the same way again.
  */
+/** Results answered from an operation id's record: nothing was applied by that call. */
+const replays = new WeakSet<object>();
+
+/**
+ * True when `result` is a replay: the executor found the id already recorded and returned its
+ * one result without applying anything. `onApplied` and `onLevel` never fire for a replay;
+ * a caller that acts on a result itself (a buffer pushing a notice) can ask here.
+ */
+export function isReplay(result: ExecResult): boolean {
+  return replays.has(result);
+}
+
 export function isTransient(error: unknown): boolean {
   if (error instanceof ContractError) return false;
   const { code } = pgErrorCode(error);
@@ -547,13 +562,16 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     return result;
   }
 
-  /** Steps 1 to 6 on an open transaction. Returns the result and, if applied, the new level. */
+  /**
+   * Steps 1 to 6 on an open transaction. Returns the result, the new level if it changed, and
+   * whether the result is a replay: the id's recorded answer, with nothing applied this time.
+   */
   async function run<K extends AnyOp>(
     q: Queryable,
     op: OpContext & { name: K },
     request: Requests[K],
     hash: string,
-  ): Promise<{ result: ExecResult; level?: number }> {
+  ): Promise<{ result: ExecResult; level?: number; replayed?: true }> {
     const def = OPS[op.name];
     const refuse = (error: OpError): { result: ExecResult } => ({
       result: { id: op.opId, op: op.name, ok: false, error },
@@ -563,7 +581,9 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     if (!found) return refuse("no_character");
     if (found.recorded) {
       if (found.recorded.request_hash !== hash) return refuse("op_id_reused");
-      return { result: found.recorded.result as ExecResult };
+      const result = found.recorded.result as ExecResult;
+      replays.add(result);
+      return { result, replayed: true };
     }
     const character = characterFromDb(found.character);
     const ctx: Ctx = { now: now(), page: page() };
@@ -654,8 +674,11 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     for (let attempt = 0; ; attempt++) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash));
-        if (out.level !== undefined) notifyLevel(characterId, out.level);
-        if (out.result.ok) notifyApplied(characterId, name, out.result);
+        // A replay applied nothing: listeners hear only what this call changed.
+        if (!out.replayed) {
+          if (out.level !== undefined) notifyLevel(characterId, out.level);
+          if (out.result.ok) notifyApplied(characterId, name, out.result);
+        }
         return out.result;
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);

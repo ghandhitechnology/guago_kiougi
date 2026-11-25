@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type Character,
+  CLUB_EXP_FOR_NOTICE,
   catchUp,
   DAY_MS,
   HOUR_MS,
@@ -15,8 +16,10 @@ import {
   poolTerms,
 } from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { clubActivity } from "../club-activity.ts";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
+import { isReplay } from "../economy/executor.ts";
 import { createEconomy } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { LiveClock } from "./clock.ts";
@@ -40,10 +43,14 @@ beforeEach(async () => {
   await db.pool.query("truncate accounts, server_state, notebook cascade");
 });
 afterEach(async () => {
+  for (const p of pools.splice(0)) await p.pool.end();
   expect((await checkInvariants(db)).violations).toEqual([]);
 });
 
-async function world() {
+/** Extra connection pools a test opened, closed after it. */
+const pools: Db[] = [];
+
+async function world(o: { listen?: (id: string, name: string) => void } = {}) {
   const clock = new LiveClock({ realMs: 0, gameMs: T0, rate: 1 }, () => 0);
   const page = new PageClock(db, clock);
   await page.load(1);
@@ -51,11 +58,24 @@ async function world() {
   const economy = createEconomy(db, {
     now: () => clock.date(),
     page: page.live,
-    onApplied: (id, name, r) => live?.onApplied(id, name, r),
+    onApplied: (id, name, r) => {
+      o.listen?.(id, name);
+      live?.onApplied(id, name, r);
+    },
   });
   live = createLive(db, { clock, page, economy, world: () => undefined, log: () => {} });
   await page.tick();
   return { clock, page, economy, live };
+}
+
+/**
+ * Another server process on the same database: its own connection pool and executor, so its
+ * operations race the first one's at the database's locks, not in one process's lane.
+ */
+function rival(w: World) {
+  const other = createDb(TEST_DATABASE_URL);
+  pools.push(other);
+  return createEconomy(other, { now: () => w.clock.date(), page: w.page.live }).executor;
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -300,5 +320,29 @@ describe("자습 pool", () => {
     await w.live.joined(c, "world", "b");
     const r = await row(c.id);
     expect(new Date(r.rested_until).getTime()).toBe(w.clock.now() + 30 * MINUTE_MS);
+  });
+});
+
+describe("operation ids", () => {
+  it("a replayed id is not heard again by the listeners", async () => {
+    const heard: string[] = [];
+    const w = await world({ listen: (_id, name) => heard.push(name) });
+    const c = await character(w);
+    await w.live.board.ensure(c.id);
+    const day = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    const quest = `weekly:${Math.floor((day + 3) / 7)}:0`;
+    await complete(w, c.id, quest);
+    clubActivity.take();
+    heard.length = 0;
+    const first = await w.economy.executor.execute(c.id, "claim-once", "quest.claim", { quest });
+    expect(first.ok).toBe(true);
+    expect(isReplay(first)).toBe(false);
+    for (let i = 0; i < 5; i++) {
+      const again = await w.economy.executor.execute(c.id, "claim-once", "quest.claim", { quest });
+      expect(again).toEqual(first);
+      expect(isReplay(again)).toBe(true);
+    }
+    expect(heard.filter((n) => n === "quest.claim")).toHaveLength(1);
+    expect(clubActivity.take().get(c.id)).toBe(CLUB_EXP_FOR_NOTICE.weekly);
   });
 });
