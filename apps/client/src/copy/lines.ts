@@ -24,7 +24,14 @@ const BY_ID = new Map([...N.system, ...N.announcements].map((m) => [m.id, m]));
 /** `HH:MM` in the player's clock, for a time a line names. */
 export function clock(ms: number): string {
   const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // A time on another day carries its date: a three-day ban never reads as tonight.
+  const now = new Date();
+  const today =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return today ? hm : `${d.getMonth() + 1}월 ${d.getDate()}일 ${hm}`;
 }
 
 /** The line filed under `id`, filled from `params`; undefined when the narrative has none. */

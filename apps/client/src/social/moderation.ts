@@ -98,9 +98,12 @@ function notice(scene: Phaser.Scene, text: string | undefined, toTitle: () => vo
     sound: "close",
     onPress: () => {
       popScope(scope);
-      root.destroy();
-      dim.destroy();
-      toTitle();
+      // After the press has finished with its own button: then the notice goes and the title comes.
+      scene.time.delayedCall(0, () => {
+        root.destroy();
+        dim.destroy();
+        toTitle();
+      });
     },
   });
   root.add(back);
