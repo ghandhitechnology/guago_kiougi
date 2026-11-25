@@ -41,6 +41,10 @@ export class BootScene extends Phaser.Scene {
     createSpriteAnims(this, meta);
     this.scene.launch(UI_SCENE);
 
+    // Development only: `?fight=<map>` seats a test character in that field (`fight/dev.ts`).
+    if (import.meta.env.DEV && new URLSearchParams(location.search).has("fight")) {
+      await (await import("./fight/dev.ts")).seatTestCharacter(meta).catch((e) => console.error(e));
+    }
     let session = null;
     try {
       session = await (await backend()).me();

@@ -6,7 +6,9 @@
  * The host reserves the floor for a match the hub made, shuts the ring, waits for the fighters
  * to arrive, puts the duel kit on each (`duelKit`), runs the match in the room's own fight step
  * (`DuelFloor`), tells everyone in the room what the floor is doing, and hands the result to the
- * hub, which sends everyone back. Nothing here touches the database.
+ * hub. It only arms and disarms the simulation: every way out of a match goes through the hub,
+ * which puts the character back as it was before (`bracket.ts`). Nothing here touches the
+ * database.
  */
 import {
   type Arena,
@@ -51,8 +53,6 @@ export interface FloorRoom {
   fence(arena: string, on: boolean): void;
   /** The character's duel kit at `mode` from what it wears, or undefined. */
   duelKit(characterId: string, mode: Mode): PlayerKit | undefined;
-  /** Its own kit, level and party, back after a match. */
-  unarm(characterId: string): void;
   /** The control mode changed under the character (the living world counts full auto). */
   modeChanged(characterId: string): void;
   /** Where people watch from: the gallery spot a player is put on when it must leave the floor. */
@@ -68,22 +68,31 @@ export interface FloorMatch {
   readonly names: ReadonlyMap<string, string>;
 }
 
+/** How a fighter leaves its match, as the room or the floor saw it. */
+export type Leaving =
+  /** Its connection dropped; the body stays for the reconnect window. */
+  | "drop"
+  /** Its seat went (a logout, a replaced session): the body goes now. */
+  | "gone"
+  /** A door or the school is carrying it to another map. */
+  | "moving"
+  /** It never reached the floor by the deadline. */
+  | "absent";
+
 /** What the floor tells the hub. */
 export interface FloorEvents {
   over(match: FloorMatch, result: DuelResultView): void;
-  /** The floor let go of its match (after the result, or when it could not start). */
+  /** The floor let go of its match (after the result, or because its room is closing). */
   released(match: FloorMatch): void;
+  /** A fighter is leaving its match; the hub takes it out (`disarm`) and puts it back. */
+  left(match: FloorMatch, characterId: string, how: Leaving): void;
 }
 
-/** A fighter as the floor keeps it: what it had before the match, to give back. */
+/** A fighter wearing the duel's kit, by its session in this room. */
 interface Armed {
   readonly characterId: string;
   readonly player: Player;
   readonly sid: string;
-  readonly level: number;
-  readonly mode: Mode;
-  /** Health as a share of the kit: a duel heals nobody. */
-  readonly hpShare: number;
 }
 
 type HostPhase = "idle" | "arriving" | "live" | "over";
@@ -162,22 +171,21 @@ export class FloorHost {
    * A fighter's seat here is going (a door, a drop, 명령퇴사, a logout): it is out of the match
    * at once and does not come back into it, so pulling the plug never resets a round.
    */
-  leaving(characterId: string): void {
-    if (!this.fights(characterId)) return;
-    this.forfeit(characterId);
+  leaving(characterId: string, how: Leaving): void {
+    if (this.match && this.fights(characterId)) this.events.left(this.match, characterId, how);
   }
 
-  /** A fighter is out for good: conceded, dropped or never arrived. */
-  forfeit(characterId: string): boolean {
+  /**
+   * Takes a fighter out of the match for good, in any phase: its stand-in and side go, and the
+   * duel's kit stays on the body only until the hub puts the character back. Returns false when it
+   * was not fighting here.
+   */
+  disarm(characterId: string): boolean {
     if (!this.fights(characterId)) return false;
     this.gone.add(characterId);
     const a = this.armed.get(characterId);
-    if (a && this.phase === "live") {
-      this.floor.forfeit(this.room.world, a.sid);
-      this.giveBack(a);
-      // Off the floor and into the gallery, where everyone else watches from.
-      if (a.player.joined && a.player.id === a.sid) this.put(a.player, this.room.gallery);
-    }
+    this.armed.delete(characterId);
+    if (a && this.phase === "live") this.floor.forfeit(this.room.world, a.sid);
     if (this.phase === "arriving") this.tryStart();
     this.tell();
     return true;
@@ -187,9 +195,10 @@ export class FloorHost {
   tick(): void {
     const w = this.room.world;
     if (this.phase === "idle") return;
-    if (this.phase === "arriving" && w.tick >= this.deadline) {
-      for (const id of [...(this.match?.sides[0] ?? []), ...(this.match?.sides[1] ?? [])]) {
-        if (!this.room.bodyOf(id)) this.gone.add(id);
+    if (this.phase === "arriving" && w.tick >= this.deadline && this.match) {
+      const m = this.match;
+      for (const id of [...m.sides[0], ...m.sides[1]]) {
+        if (this.fights(id) && !this.room.bodyOf(id)) this.events.left(m, id, "absent");
       }
       this.tryStart();
     }
@@ -204,10 +213,12 @@ export class FloorHost {
     }
   }
 
-  /** Gives the fighters back their own kits and lets go of the floor. The hub sends them home. */
+  /**
+   * Lets go of the floor: the simulation forgets the match first, then the hub puts every fighter
+   * back as it was (so nothing the floor clears can undo what the hub restores).
+   */
   release(): void {
     const match = this.match;
-    for (const a of this.armed.values()) this.giveBack(a);
     this.armed.clear();
     this.floor.clear(this.room.world);
     this.floor.changed = false;
@@ -217,6 +228,11 @@ export class FloorHost {
     this.room.fence(this.arena.id, false);
     this.tell();
     if (match) this.events.released(match);
+  }
+
+  /** The room is closing: whatever match it holds ends here and everyone goes back. */
+  abandon(): void {
+    if (this.busy) this.release();
   }
 
   /** What the floor looks like now, for everyone in the room. */
@@ -291,14 +307,7 @@ export class FloorHost {
       const kit = this.room.duelKit(id, mode);
       if (!kit) continue;
       this.sessions.set(body.sid, id);
-      this.armed.set(id, {
-        characterId: id,
-        player: p,
-        sid: body.sid,
-        level: p.level,
-        mode: p.mode,
-        hpShare: p.down ? 1 : p.hp / p.kit.maxHp,
-      });
+      this.armed.set(id, { characterId: id, player: p, sid: body.sid });
       // 완전 자동 and 스킬 수동 fight in 반자동: the server never moves a fighter.
       p.mode = mode;
       p.level = DUEL_NORMS.level;
@@ -360,21 +369,6 @@ export class FloorHost {
     this.deadline = this.room.world.tick + ticks(DUEL_RESULT_SECONDS);
     this.tell();
     this.events.over(m, this.result);
-  }
-
-  /** A fighter's own kit, level, mode and health back. */
-  private giveBack(a: Armed): void {
-    if (!this.armed.has(a.characterId)) return;
-    this.armed.delete(a.characterId);
-    const p = a.player;
-    if (!p.joined || p.id !== a.sid) return;
-    p.level = a.level;
-    p.mode = a.mode;
-    p.casts = 0;
-    this.room.unarm(a.characterId);
-    p.hp = Math.max(1, Math.min(p.kit.maxHp, a.hpShare * p.kit.maxHp));
-    p.downAt = -1;
-    p.shield = 0;
   }
 
   /** Nobody but the fighters stands on a floor with a match on it. */
