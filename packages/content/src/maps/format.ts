@@ -112,7 +112,12 @@ export type Zone =
       readonly density: number;
     }
   /** A place a group naturally stands around: the client may seat idle players here. */
-  | { readonly kind: "gather"; readonly id: string; readonly rect: TileRect };
+  | { readonly kind: "gather"; readonly id: string; readonly rect: TileRect }
+  /**
+   * A named room or place inside the map, shown on entering it. Its id is the name the story
+   * stages scenes in (`study-hall`, `gym`), so a scene's place resolves to a map and an area.
+   */
+  | { readonly kind: "room"; readonly id: string; readonly rect: TileRect; readonly name: string };
 
 // Source ---------------------------------------------------------------------------------------
 
@@ -234,7 +239,16 @@ export interface MapSource extends Layers {
     | (Omit<Extract<Zone, { kind: "logout" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "monsters" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "gather" }>, "rect"> & { readonly rect: TileRect | string })
+    | (Omit<Extract<Zone, { kind: "room" }>, "rect"> & { readonly rect: TileRect | string })
   )[];
+  /** Named spots scenes refer to (`cooler`, `landing-3f`), at a tile; solid tiles allowed. */
+  readonly marks?: Readonly<Record<string, Vec>>;
+  /** Where cast members stand when they are around, by speaker id, at a walkable tile. */
+  readonly npcs?: readonly {
+    readonly speaker: string;
+    readonly tile: Vec;
+    readonly facing?: Spawn["facing"];
+  }[];
 }
 
 // Built ----------------------------------------------------------------------------------------
@@ -257,4 +271,15 @@ export interface BuiltMap {
   readonly portals: readonly Portal[];
   readonly interactables: readonly Interactable[];
   readonly zones: readonly Zone[];
+  /** Named spots for scenes, the centre of their tile in world pixels. */
+  readonly marks: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
+  /** Cast stand points: speaker id, feet in world pixels, facing. */
+  readonly npcs: readonly NpcSpot[];
+}
+
+export interface NpcSpot {
+  readonly speaker: string;
+  readonly x: number;
+  readonly y: number;
+  readonly facing: Spawn["facing"];
 }
