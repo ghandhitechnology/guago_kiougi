@@ -417,6 +417,16 @@ export interface EasterEgg {
   readonly nod: string;
 }
 
+/** One module's share of the live-world copy, merged into the bundle by `index.ts`. */
+export interface CopyPart {
+  readonly system?: readonly SystemMessage[];
+  readonly announcements?: readonly SystemMessage[];
+  readonly descriptions?: readonly Description[];
+  readonly terms?: readonly Term[];
+  readonly chores?: readonly ChoreNotice[];
+  readonly ko: Strings;
+}
+
 /** Everything the narrative lane ships, with its locale. */
 export interface Narrative {
   readonly speakers: readonly Speaker[];
