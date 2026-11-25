@@ -17,6 +17,8 @@ export interface BookItem {
   readonly pilgi: number;
   /** Failures since the last success; each adds `PILGI_PITY` to the next attempt. */
   readonly pilgiFails: number;
+  /** Set once the book has evolved (PLAN §8); grade, level and 필기 carry over. */
+  readonly evolved?: boolean;
 }
 
 export interface ToolItem {
@@ -110,21 +112,18 @@ export function bindCost(book: string, page: number): Amounts {
   };
 }
 
+/** A fresh 교과서 copy at level 1, as 제본 and the starter kit make it. */
+export function textbook(id: string, def: string): BookItem {
+  return { id, def, grade: BookGrade.Textbook, level: 1, exp: 0, pilgi: 0, pilgiFails: 0 };
+}
+
 export function bind(
   purse: Purse,
   request: { readonly id: string; readonly def: string; readonly page: number },
 ): Outcome<Holding<BookItem>> {
   const paid = pay(purse, bindCost(request.def, request.page), "sink.bind");
   if (!paid) return { ok: false, error: "bind_cost" };
-  const item: BookItem = {
-    id: request.id,
-    def: request.def,
-    grade: BookGrade.Textbook,
-    level: 1,
-    exp: 0,
-    pilgi: 0,
-    pilgiFails: 0,
-  };
+  const item = textbook(request.id, request.def);
   return { ok: true, state: { item, purse: paid.purse }, ledger: paid.ledger };
 }
 
@@ -164,6 +163,8 @@ export function forge(
     grade: (a.grade + 1) as BookGrade,
     pilgi: pen.pilgi,
     pilgiFails: pen.pilgiFails,
+    // An evolution, once earned, is not forged away.
+    ...(copies.some((x) => x.evolved) ? { evolved: true } : {}),
   };
   return {
     ok: true,
@@ -258,4 +259,18 @@ export function canEvolve(
     tool?.def === linkedTool &&
     tool.level >= EVOLUTION.toolLevel
   );
+}
+
+/** Evolves a book in place. Its linked tool stays as it is. */
+export function evolve(
+  book: BookItem,
+  tool: ToolItem | undefined,
+  linkedTool: string,
+  evolutionUnlocked: boolean,
+): Outcome<BookItem> {
+  if (book.evolved) return { ok: false, error: "evolve_done" };
+  if (!canEvolve(book, tool, linkedTool, evolutionUnlocked)) {
+    return { ok: false, error: "evolve_requirements" };
+  }
+  return { ok: true, state: { ...book, evolved: true }, ledger: [] };
 }
