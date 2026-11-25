@@ -10,7 +10,8 @@ import type * as Phaser from "phaser";
 
 const files = import.meta.glob<string>(
   [
-    "../../../../packages/art/dist/{art,core,effects}.{png,json}",
+    "../../../../packages/art/dist/*.{png,json}",
+    "!../../../../packages/art/dist/tiles-*",
     "../../../../packages/art/dist/maps/*.{png,json}",
   ],
   { query: "?url", import: "default", eager: true },
@@ -34,7 +35,7 @@ export const KEYS = {
   masks: (id: string) => `masks:${id}`,
 } as const;
 
-/** Atlases every map draws from. */
+/** Atlases every map draws from: props, monsters and characters, and entity shadows. */
 export const SHARED_ATLASES = ["core", "effects"] as const;
 
 /**
@@ -46,7 +47,31 @@ export function litTheme(map: BuiltMap): string {
   return map.ambient.unlit ?? map.scene.theme;
 }
 
-/** Every file a map loads, by path inside the art build, for size reports. */
+/** Every atlas a map's art is drawn from: the shared ones and any its placements name. */
+export function mapAtlases(meta: ArtMetadata, map: BuiltMap): string[] {
+  const out = new Set<string>(SHARED_ATLASES);
+  const s = map.scene;
+  const things = [
+    ...(s.backdrop ?? []),
+    ...(s.details ?? []),
+    ...(s.shadows ?? []),
+    ...s.objects,
+    ...(s.overhead ?? []),
+    ...(s.atmosphere ?? []),
+  ];
+  for (const t of things) {
+    const name = "prop" in t ? t.prop : "actor" in t ? t.actor : null;
+    const atlas = name ? meta.sprites[name]?.atlas : "rig" in t ? meta.rigs[t.rig]?.atlas : null;
+    if (atlas) out.add(atlas);
+  }
+  for (const e of s.emitters ?? []) {
+    const atlas = meta.sprites[e.sprite]?.atlas;
+    if (atlas) out.add(atlas);
+  }
+  return [...out];
+}
+
+/** Every file a map loads besides the shared atlases, by path inside the art build. */
 export function mapFiles(id: string): string[] {
   return [`maps/${id}.json`, `maps/${id}-ground.png`, `maps/${id}-masks.png`];
 }
@@ -57,18 +82,30 @@ export function sharedFiles(): string[] {
 }
 
 /**
- * Queues everything map `id` needs on the scene's loader, skipping what is already loaded.
- * Start the loader after calling.
+ * Queues everything map `id` needs on the scene's loader, skipping what is already loaded: the
+ * metadata, the map, its baked images, then, once both JSON files are in, every atlas the map's
+ * art names. Start the loader after calling.
  */
 export function loadMap(scene: Phaser.Scene, id: string): void {
   const { load, cache, textures } = scene;
-  if (!cache.json.exists(KEYS.meta)) load.json(KEYS.meta, url("art.json"));
-  for (const atlas of SHARED_ATLASES) {
-    if (!textures.exists(atlas)) load.atlas(atlas, url(`${atlas}.png`), url(`${atlas}.json`));
+  const atlases = () => {
+    if (!cache.json.exists(KEYS.meta) || !cache.json.exists(KEYS.map(id))) return;
+    const map = cache.json.get(KEYS.map(id)) as BuiltMap;
+    for (const atlas of mapAtlases(artMetadata(scene), map)) {
+      if (!textures.exists(atlas)) load.atlas(atlas, url(`${atlas}.png`), url(`${atlas}.json`));
+    }
+  };
+  if (!cache.json.exists(KEYS.meta)) {
+    load.json(KEYS.meta, url("art.json"));
+    load.once(`filecomplete-json-${KEYS.meta}`, atlases);
+  }
+  if (!cache.json.exists(KEYS.map(id))) {
+    load.json(KEYS.map(id), url(`maps/${id}.json`));
+    load.once(`filecomplete-json-${KEYS.map(id)}`, atlases);
   }
   if (!textures.exists(KEYS.masks(id))) load.image(KEYS.masks(id), url(`maps/${id}-masks.png`));
   if (!textures.exists(KEYS.ground(id))) load.image(KEYS.ground(id), url(`maps/${id}-ground.png`));
-  if (!cache.json.exists(KEYS.map(id))) load.json(KEYS.map(id), url(`maps/${id}.json`));
+  atlases();
 }
 
 /** Whether a built map exists for `id`. */
@@ -86,26 +123,33 @@ export function artMetadata(scene: Phaser.Scene): ArtMetadata {
   return scene.cache.json.get(KEYS.meta) as ArtMetadata;
 }
 
-/** Drops everything only map `id` used. Shared atlases and themed copies other maps use stay. */
-export function unloadMap(scene: Phaser.Scene, id: string, keepThemes: readonly string[] = []) {
+/**
+ * Drops what only map `id` used: its baked images, its JSON and the themed atlas copies made
+ * for its theme, unless a map in `keep` (the one being entered) lights the same theme. Shared
+ * and interior atlases stay; the next map is likely to want them.
+ */
+export function unloadMap(scene: Phaser.Scene, id: string, keep: readonly string[] = []): void {
   const { textures, cache } = scene;
-  for (const key of [KEYS.ground(id), KEYS.masks(id)])
+  for (const key of [KEYS.ground(id), KEYS.masks(id)]) {
     if (textures.exists(key)) textures.remove(key);
+  }
   const map = cache.json.get(KEYS.map(id)) as BuiltMap | undefined;
   if (map) {
-    for (const key of themedKeys(litTheme(map))) {
-      if (keepThemes.includes(litTheme(map))) continue;
-      if (textures.exists(key)) textures.remove(key);
+    const theme = litTheme(map);
+    const shared = keep.some((k) => {
+      const other = cache.json.get(KEYS.map(k)) as BuiltMap | undefined;
+      return other !== undefined && litTheme(other) === theme;
+    });
+    if (!shared) {
+      for (const key of textures.getTextureKeys()) {
+        if (key.includes(`@${theme}`)) textures.remove(key);
+      }
     }
   }
   cache.json.remove(KEYS.map(id));
 }
 
-// Themed copies of the sprite atlas -----------------------------------------------------------
-
-function themedKeys(theme: string): string[] {
-  return [`core@${theme}`, `core@${theme}:glow`];
-}
+// Themed copies of sprite atlases ------------------------------------------------------------
 
 function hexKey(hex: string): number {
   return Number.parseInt(hex.slice(1), 16);
@@ -137,7 +181,7 @@ function atlasPixels(scene: Phaser.Scene, atlas: string) {
 }
 
 export interface ThemedAtlas {
-  /** Texture key of the sprite atlas recoloured into the theme, or `core` when it changes nothing. */
+  /** Texture key of the atlas recoloured into the theme, or the atlas itself when nothing changes. */
   readonly key: string;
   /**
    * Texture key of the atlas holding only the pixels that glow when the theme paints night (lit
@@ -163,17 +207,19 @@ const GLOW_STEPS = ["gold.light", "gold.pale", "sea.light", "sea.pale"] as const
 export function themedAtlas(
   scene: Phaser.Scene,
   meta: ArtMetadata,
+  atlas: string,
   theme: string,
   paintedNight: string | null,
 ): ThemedAtlas {
-  const [key, glowKey] = themedKeys(theme) as [string, string];
+  const key = `${atlas}@${theme}`;
+  const glowKey = `${atlas}@${theme}:glow`;
   const recolor = meta.recolor[theme] ?? {};
   const textures = scene.textures;
-  const source = textures.get("core");
-  let base = "core";
+  const source = textures.get(atlas);
+  let base = atlas;
   if (Object.keys(recolor).length > 0) {
     if (!textures.exists(key)) {
-      const { canvas, ctx, pixels } = atlasPixels(scene, "core");
+      const { canvas, ctx, pixels } = atlasPixels(scene, atlas);
       const map = new Map(Object.entries(recolor).map(([a, b]) => [hexKey(a), hexKey(b)]));
       const d = pixels.data;
       for (let i = 0; i < d.length; i += 4) {

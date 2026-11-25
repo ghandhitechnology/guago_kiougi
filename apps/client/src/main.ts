@@ -1,5 +1,9 @@
 import { INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
 import * as Phaser from "phaser";
+import { BootScene } from "./boot-scene.ts";
+import { FrontScene } from "./front/front-scene.ts";
+import { typingOnPhone } from "./ui/keyboard-room.ts";
+import { UiScene } from "./ui/ui-scene.ts";
 import { WorldScene } from "./world-scene.ts";
 
 /** The map viewer replaces the game under the dev server when the URL asks for it. */
@@ -17,7 +21,8 @@ const game = new Phaser.Game({
   banner: false,
   render: { pixelArt: true },
   scale: { mode: Phaser.Scale.NONE },
-  scene: viewer ? [viewer] : [WorldScene],
+  // Back to front; the UI scene stays on top of the world.
+  scene: viewer ? [viewer] : [BootScene, FrontScene, WorldScene, UiScene],
 });
 
 /**
@@ -25,6 +30,8 @@ const game = new Phaser.Game({
  * it on whole device pixels so fractional device pixel ratios cannot smear a pixel column.
  */
 function fit(): void {
+  // A phone keyboard coming up shrinks the viewport; the page lifts instead of rescaling.
+  if (typingOnPhone()) return;
   const dpr = window.devicePixelRatio || 1;
   const vw = window.innerWidth * dpr;
   const vh = window.innerHeight * dpr;

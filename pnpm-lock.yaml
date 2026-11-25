@@ -105,6 +105,21 @@ importers:
         specifier: ^6.0.5
         version: 6.0.5
 
+  packages/audio:
+    devDependencies:
+      '@guago/content':
+        specifier: workspace:*
+        version: link:../content
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      galmuri:
+        specifier: ^2.40.3
+        version: 2.40.3
+      vite:
+        specifier: 8.3.8
+        version: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)
+
   packages/content:
     dependencies:
       '@guago/shared':
@@ -119,6 +134,28 @@ importers:
 
   tools/balance-sim:
     dependencies:
+      '@guago/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
+      '@guago/content':
+        specifier: workspace:*
+        version: link:../../packages/content
+      '@guago/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+
+  tools/loadtest:
+    dependencies:
+      '@colyseus/schema':
+        specifier: 5.0.51
+        version: 5.0.51(typescript@7.0.2)
+      '@colyseus/sdk':
+        specifier: 0.18.10
+        version: 0.18.10(@colyseus/core@0.18.29)(typescript@7.0.2)
       '@guago/content':
         specifier: workspace:*
         version: link:../../packages/content

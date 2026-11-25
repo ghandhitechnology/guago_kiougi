@@ -53,6 +53,12 @@ export function scene(def: SceneDef): SceneDef {
   return def;
 }
 
+/**
+ * An actor drawn at a whole-number scale about its anchor, like an elite at the client's double
+ * size. Review scenes only: the map format does not carry a scale yet.
+ */
+export type ScaledActor = Actor & { readonly scale?: number };
+
 interface Rect {
   readonly x: number;
   readonly y: number;
@@ -692,7 +698,7 @@ function pickFrame(
   return frames.find((f) => f !== skip) ?? frames[0];
 }
 
-/** Draws a frame with its anchor at `at`, restoring trimmed offsets. */
+/** Draws a frame with its anchor at `at`, restoring trimmed offsets, at a whole-number scale. */
 function place(
   target: Canvas,
   found: { atlas: SceneAtlas; f: AtlasFrame },
@@ -700,11 +706,36 @@ function place(
   at: Vec,
   map: ColorMap,
   flip: boolean,
+  scale = 1,
 ): void {
   const { f, atlas } = found;
-  const left = flip ? at[0] - (f.sourceSize.w - 1 - origin[0]) : at[0] - origin[0];
   const sx = flip ? f.sourceSize.w - f.spriteSourceSize.x - f.frame.w : f.spriteSourceSize.x;
-  target.blit(atlas, f.frame, left + sx, at[1] - origin[1] + f.spriteSourceSize.y, map, flip);
+  const ox = flip ? f.sourceSize.w - 1 - origin[0] : origin[0];
+  if (scale === 1) {
+    target.blit(
+      atlas,
+      f.frame,
+      at[0] - ox + sx,
+      at[1] - origin[1] + f.spriteSourceSize.y,
+      map,
+      flip,
+    );
+    return;
+  }
+  // Each source pixel becomes a scale×scale block; the anchor pixel's bottom-centre stays put.
+  const left = at[0] - ox * scale - Math.floor((scale - 1) / 2);
+  const top = at[1] - origin[1] * scale - (scale - 1);
+  for (let y = 0; y < f.frame.h; y++) {
+    for (let x = 0; x < f.frame.w; x++) {
+      const px = flip ? f.frame.w - 1 - x : x;
+      const one: Rect = { x: f.frame.x + px, y: f.frame.y + y, w: 1, h: 1 };
+      for (let k = 0; k < scale * scale; k++) {
+        const dx = left + (sx + x) * scale + (k % scale);
+        const dy = top + (f.spriteSourceSize.y + y) * scale + Math.floor(k / scale);
+        target.blit(atlas, one, dx, dy, map);
+      }
+    }
+  }
 }
 
 /** Draws a prop or actor (or its shadow into a mask), repeated as asked. */
@@ -739,8 +770,10 @@ function drawThing(
   const found = key ? frameOf(ctx, atlas, key) : undefined;
   if (!found) return;
   const [ax, ay] = placeAt(t, ctx.time);
+  const scale = "scale" in t ? ((t as ScaledActor).scale ?? 1) : 1;
   for (let k = 0; k < (t.repeat ?? 1); k++) {
-    place(out, found, origin, [ax + k * found.f.sourceSize.w, ay], map, t.flip ?? false);
+    const at: Vec = [ax + k * found.f.sourceSize.w, ay];
+    place(out, found, origin, at, map, t.flip ?? false, scale);
   }
 }
 

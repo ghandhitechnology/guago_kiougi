@@ -521,6 +521,7 @@ const map: MapSource = {
   spawns: {
     main: { tile: [17, 21] },
     "gaseol-1f": { tile: [18, 20] },
+    "gaseol-side": { tile: [30, 20] },
     "gaseol-2f": { tile: [10, 22] },
     "gaseol-4f": { tile: [2, 20] },
     jeungmyeong: { tile: [47, 20] },
@@ -532,7 +533,8 @@ const map: MapSource = {
   },
   landmark: { name: "해솔", tile: PINE },
   portals: [
-    { id: "gaseol-1f", rect: "gaseol:door", to: "gaseol-1f", spawn: "yard" },
+    { id: "gaseol-front", rect: "gaseol:door", to: "gaseolgwan-stairs", spawn: "front-door" },
+    { id: "gaseol-side", rect: "gaseol:side-door", to: "gaseol-1f", spawn: "yard" },
     { id: "gaseol-2f", rect: { x: 9, y: 22, w: 3, h: 1 }, to: "gaseol-2f", spawn: "yard" },
     { id: "gaseol-4f", rect: { x: 1, y: 19, w: 2, h: 1 }, to: "gaseol-4f", spawn: "fire-escape" },
     { id: "jeungmyeong", rect: "jeungmyeong:door", to: "jeungmyeong", spawn: "yard" },

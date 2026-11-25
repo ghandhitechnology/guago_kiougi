@@ -16,7 +16,7 @@
  * never lags the camera by a frame. Positions are world pixels; an entity's `x, y` is its feet.
  */
 import type { ArtMetadata, SpriteMeta } from "@guago/art";
-import { emitterParticle } from "@guago/art";
+import { emitterParticle, valueNoise } from "@guago/art";
 import type {
   Actor,
   BuiltMap,
@@ -174,6 +174,8 @@ interface Light {
   /** Light added at the centre this frame, after flicker. */
   level: number;
   objectLight: Phaser.GameObjects.Light | null;
+  /** A light with a drawn shape (a window's spill): its texture's place and alpha per pixel. */
+  shape: { readonly rect: Rect; readonly alpha: Uint8Array } | null;
 }
 
 interface Particles {
@@ -209,7 +211,9 @@ export class MapView {
   private tierName: Tier;
   private tier: TierSettings;
   private lighting: LightingMode;
-  private readonly themed: ThemedAtlas;
+  private readonly theme: string;
+  private readonly paintedNight: string | null;
+  private readonly themedAtlases = new Map<string, ThemedAtlas>();
   private readonly masks: MapMasks;
 
   private readonly world: Phaser.GameObjects.Layer;
@@ -256,6 +260,7 @@ export class MapView {
   private readonly lightScale: number;
   private readonly shadeTint: Rgb;
   private readonly animKeys = new Set<string>();
+  private readonly textureKeys: string[] = [];
   private readonly hidden = new Set<LayerName>();
   private readonly offs: (() => void)[] = [];
   private time = 0;
@@ -279,9 +284,8 @@ export class MapView {
     registerComposite(scene);
     registerCutaway(scene);
 
-    const theme = litTheme(this.map);
-    const paintedNight = theme !== this.map.scene.theme ? this.map.scene.theme : null;
-    this.themed = themedAtlas(scene, this.meta, theme, paintedNight);
+    this.theme = litTheme(this.map);
+    this.paintedNight = this.theme !== this.map.scene.theme ? this.map.scene.theme : null;
     this.masks = readMasks(scene, KEYS.masks(id));
     const W = this.camera.width;
     const H = this.camera.height;
@@ -363,7 +367,9 @@ export class MapView {
     // Lights: the rift's region first, then every point light on top of it.
     this.region = this.buildRegion();
     this.regionImages = this.region ? this.buildRegionImages(this.region) : null;
-    for (const source of this.map.lights) if (!source.paint?.region) this.addMapLight(source);
+    this.map.lights.forEach((source, i) => {
+      if (!source.paint?.region) this.addMapLight(source, i);
+    });
     this.lightRT.preserve(true);
     this.lightRT.capture(this.lightLayer, { camera: this.camera });
 
@@ -504,6 +510,16 @@ export class MapView {
     }
     for (const l of this.lights) {
       if (l.level <= 0) continue;
+      if (l.shape) {
+        const { rect, alpha } = l.shape;
+        const lx = xi - rect.x;
+        const ly = yi - rect.y;
+        if (lx < 0 || ly < 0 || lx >= rect.w || ly >= rect.h) continue;
+        const v = ((alpha[ly * rect.w + lx] ?? 0) / 255) * l.level;
+        const col = rgbOf(l.spec.color);
+        for (let c = 0; c < 3; c++) out[c] = (out[c] as number) + (col[c] as number) * v;
+        continue;
+      }
       const R = l.spec.radius;
       const dx = (x - l.x) / R;
       const dy = (y - l.y) / (R * (l.spec.squash ?? 0.58));
@@ -650,7 +666,7 @@ export class MapView {
     this.world.destroy();
     this.lightLayer.destroy();
     this.lightRT.destroy();
-    for (const key of [this.lutKey, ...(this.region?.keys ?? [])]) {
+    for (const key of [this.lutKey, ...this.textureKeys, ...(this.region?.keys ?? [])]) {
       if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
     }
     for (const key of this.animKeys) this.scene.anims.remove(key);
@@ -669,6 +685,16 @@ export class MapView {
       },
       remove: () => this.dropLight(light),
     };
+  }
+
+  /** An atlas recoloured into the map's theme, made once per atlas. */
+  private themed(atlas: string): ThemedAtlas {
+    let t = this.themedAtlases.get(atlas);
+    if (!t) {
+      t = themedAtlas(this.scene, this.meta, atlas, this.theme, this.paintedNight);
+      this.themedAtlases.set(atlas, t);
+    }
+    return t;
   }
 
   /** Animation key for a sprite's animation drawn from one texture. */
@@ -723,7 +749,8 @@ export class MapView {
     const sp = this.meta.sprites[name];
     if (!sp) return null;
     const raw = !("prop" in t) || t.raw === true;
-    const texture = raw || sp.atlas !== "core" ? sp.atlas : this.themed.key;
+    const themed = raw ? null : this.themed(sp.atlas);
+    const texture = themed ? themed.key : sp.atlas;
     const { frame, anim, start } = this.pick(name, sp, t);
     const tex = this.scene.textures.get(texture);
     if (!tex.has(frame)) return null;
@@ -767,8 +794,8 @@ export class MapView {
           phase: t.drift.phase ?? 0,
         });
       }
-      if (!raw && this.themed.glow && sp.frames.some((fr) => this.themed.glowing.has(fr))) {
-        this.makeGlow(sprite, sp, flip, ox, oy, W, placed.bounds, layer);
+      if (themed?.glow && sp.frames.some((fr) => themed.glowing.has(fr))) {
+        this.makeGlow(sprite, sp, themed.glow, flip, ox, oy, W, placed.bounds, layer);
       }
       first ??= placed;
     }
@@ -823,6 +850,7 @@ export class MapView {
   private makeGlow(
     prop: Phaser.GameObjects.Sprite,
     sp: SpriteMeta,
+    glowKey: string,
     flip: boolean,
     ox: number,
     oy: number,
@@ -830,7 +858,6 @@ export class MapView {
     bounds: Rect,
     layer: Phaser.GameObjects.Layer,
   ): void {
-    const glowKey = this.themed.glow as string;
     const overlay = new Phaser.GameObjects.Sprite(this.scene, 0, 0, glowKey, prop.frame.name);
     overlay
       .setFlipX(flip)
@@ -975,19 +1002,23 @@ export class MapView {
     return { inside, spill, glow, motes, color: [...rgbOf(color)] as Rgb };
   }
 
-  private addMapLight(source: LightSource): void {
+  private addMapLight(source: LightSource, index: number): void {
+    // A pool lies where the contact sheet paints it, as flat as it paints it.
+    const paint = source.paint;
+    const at = paint?.at ?? source.at;
     const light = this.createLight(
       {
         radius: source.radius,
         color: paletteColor(this.meta, source.color),
         intensity: source.intensity,
-        squash: 0.58,
+        squash: paint?.r ? paint.r[1] / paint.r[0] : 0.58,
         ...(source.flicker ? { flicker: source.flicker } : {}),
       },
-      source.at[0],
-      source.at[1],
+      at[0],
+      at[1],
       null,
     );
+    if (paint?.spill) this.shapeSpill(light, paint.spill, index);
     // A light standing at a prop that switches itself on and off follows the prop's frames.
     let best: Glow | null = null;
     let bestD = 48;
@@ -1000,6 +1031,54 @@ export class MapView {
       }
     }
     light.follows = best;
+  }
+
+  /**
+   * Gives a light the shape of a window's spill: a trapezoid falling from the sill, brightest at
+   * the top and centre, its edges broken by the same seeded noise as the sheet's painted light.
+   */
+  private shapeSpill(
+    light: Light,
+    spill: NonNullable<NonNullable<LightSource["paint"]>["spill"]>,
+    index: number,
+  ): void {
+    const { top, bottom } = spill;
+    const pad = 3;
+    const x0 = Math.floor(Math.min(top[0], bottom[0])) - pad;
+    const x1 = Math.ceil(Math.max(top[1], bottom[1])) + pad;
+    const rect: Rect = { x: x0, y: top[2], w: x1 - x0, h: bottom[2] - top[2] + pad };
+    const key = `render:spill:${this.map.id}:${index}`;
+    const alpha = new Uint8Array(rect.w * rect.h);
+    if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
+    const tex = this.scene.textures.createCanvas(key, rect.w, rect.h);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    const img = ctx.createImageData(rect.w, rect.h);
+    const span = Math.max(1, bottom[2] - top[2]);
+    for (let y = 0; y < rect.h; y++) {
+      const v = y / span;
+      const a = top[0] + (bottom[0] - top[0]) * Math.min(1, v);
+      const b = top[1] + (bottom[1] - top[1]) * Math.min(1, v);
+      const half = Math.max(1, (b - a) / 2);
+      for (let x = 0; x < rect.w; x++) {
+        const wx = rect.x + x + 0.5;
+        const n = (valueNoise(wx, rect.y + y, 3, this.map.scene.seed + index) - 0.5) * 0.25;
+        const f = Math.max(Math.abs(wx - (a + b) / 2) / half, v) + n;
+        const value = f >= 1 ? 0 : (1 - f) ** 1.1;
+        const o = (y * rect.w + x) * 4;
+        const q = Math.round(value * 255);
+        img.data[o] = 255;
+        img.data[o + 1] = 255;
+        img.data[o + 2] = 255;
+        img.data[o + 3] = q;
+        alpha[y * rect.w + x] = q;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    tex.refresh();
+    this.textureKeys.push(key);
+    light.image.setTexture(key).setOrigin(0).setPosition(rect.x, rect.y);
+    light.shape = { rect, alpha };
   }
 
   private defaultShadow(obj: Lit): { texture: string; frame: string } | null {
@@ -1026,6 +1105,7 @@ export class MapView {
       follows: null,
       level: 0,
       objectLight: null,
+      shape: null,
     };
     this.lights.add(light);
     this.syncObjectLight(light);
@@ -1205,12 +1285,11 @@ export class MapView {
       if (l.follows) k *= 0.08 + 0.92 * l.follows.level;
       if (l.owner && (!allowed.has(l) || !l.owner.visible)) k = 0;
       l.level = Math.max(0, Math.min(2, spec.intensity * k * this.lightScale));
-      const size = spec.radius * 2;
-      l.image
-        .setPosition(l.x, l.y)
-        .setDisplaySize(size, size * (spec.squash ?? 0.58))
-        .setTint(spec.color)
-        .setAlpha(l.level / 2);
+      l.image.setTint(spec.color).setAlpha(l.level / 2);
+      if (!l.shape) {
+        const size = spec.radius * 2;
+        l.image.setPosition(l.x, l.y).setDisplaySize(size, size * (spec.squash ?? 0.58));
+      }
       if (l.objectLight) {
         l.objectLight.setPosition(l.x, l.y);
         l.objectLight.setIntensity(l.level * 1.6);

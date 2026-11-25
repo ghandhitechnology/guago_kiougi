@@ -3,13 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sanity": "node src/sanity.ts",
+    "balance": "node src/main.ts",
+    "cues": "node src/cues.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"
   },
   "dependencies": {
+    "@guago/audio": "workspace:*",
     "@guago/content": "workspace:*",
     "@guago/shared": "workspace:*"
   }
