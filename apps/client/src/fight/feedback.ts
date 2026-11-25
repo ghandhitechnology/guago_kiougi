@@ -312,7 +312,6 @@ export class Feedback {
 
   /** A monster's death pop begins: the burst, debris, and the sound when it was not ours. */
   died(b: Body): void {
-    const cat = this.ctx.cat;
     const art = b.art;
     if (!art) return;
     const mine = b.mineUntil > this.ctx.now;
@@ -391,7 +390,7 @@ export class Feedback {
   }
 
   /** A public burst. */
-  burst(kind: number, x: number, y: number, radius: number, owner: number): void {
+  burst(kind: number, x: number, y: number, _radius: number, owner: number): void {
     const cat = this.ctx.cat;
     const mine = owner === this.ctx.selfId && owner !== 0;
     const near = Math.hypot(x - this.ctx.selfX, y - this.ctx.selfY) < 260;
