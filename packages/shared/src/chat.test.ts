@@ -31,7 +31,13 @@ describe("cleanChatText", () => {
   });
 
   it("keeps what emoji need", () => {
-    for (const emoji of ["👩\u200d💻", "❤\ufe0f", "👍🏽", "🏴\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}", "👨\u200d👩\u200d👧\u200d👦"])
+    for (const emoji of [
+      "👩\u200d💻",
+      "❤\ufe0f",
+      "👍🏽",
+      "🏴\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}",
+      "👨\u200d👩\u200d👧\u200d👦",
+    ])
       expect(clean(`좋아 ${emoji}`)).toBe(`좋아 ${emoji}`);
   });
 
