@@ -3,17 +3,22 @@
  *
  * ```ts
  * preload() { FightView.preload(this); }
- * create()  { this.fight = FightView.attach(this, mapView, room, { self: () => drawn, mover }); }
+ * // on joining a room: a reader of its own, which reads every snapshot from the first
+ * this.reader = new SnapshotReader();
+ * // once the map view is built (behind the curtain):
+ * this.fight = FightView.attach(this, mapView, room, this.reader, { self: () => drawn, mover });
+ * // every snapshot, in order, attached or not:
+ * this.fight ? this.fight.read(bytes) : this.reader.read(bytes, sink);
  * update(time, delta) { ...move and place the camera...; this.fight.update(time, delta); }
- * // leaving: this.fight.detach();
+ * // leaving through a door: this.fight.detach();
  * ```
  *
- * It decodes the room's fight snapshots, draws every monster, other player, minion, effect,
- * tell and drop in the map view with the hit feel of PLAN §6, plays the fight's sound, takes
- * the fight's controls, and keeps `state` for the HUD with `actions` for its buttons.
+ * It draws every monster, other player, minion, effect, tell and drop the room's snapshots
+ * carry in the map view with the hit feel of PLAN §6, plays the fight's sound, takes the fight's
+ * controls, and keeps `state` for the HUD with `actions` for its buttons.
  */
 import type { Room } from "@colyseus/sdk";
-import { BOOKS, FIELD_PACING, mapById } from "@guago/content";
+import { BOOKS, FIELD_PACING } from "@guago/content";
 import {
   AIM_MESSAGE,
   CONTROL_MODES,
@@ -29,12 +34,9 @@ import {
   type PlayerState,
   Priv,
   REVIVE_MESSAGE,
-  SNAP_CELL_TILES,
-  SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   type SnapshotSink,
   TICK_MS,
-  TILE_SIZE,
   type WireDrop,
   type WireFx,
   type WireHit,
@@ -73,8 +75,13 @@ export interface FightOptions {
   /** The own body from each snapshot's Self record, for the mover to reconcile against. */
   readonly onSelf?: (me: WireSelf) => void;
   readonly tier?: Tier;
-  /** Play the field's music and follow the waves with it. Default true. */
-  readonly music?: boolean;
+  /**
+   * A field with monsters (default true): the reticle and the mouse's aim are on and the music
+   * follows the waves. A town keeps the default cursor and leaves the music alone.
+   */
+  readonly field?: boolean;
+  /** A student's foot landed, at their feet. */
+  readonly onStep?: (x: number, y: number, self: boolean) => void;
   /** Keyboard and mouse. Default true; the HUD's touch controls call `actions` instead. */
   readonly controls?: boolean;
   /** The bar under the player's feet. Default true; off when the HUD draws its own. */
@@ -116,7 +123,7 @@ export class FightView {
   private readonly pickups: Pickups;
   private readonly overlays: Overlays;
   private readonly feedback: Feedback;
-  private readonly reader = new SnapshotReader();
+  private readonly reader: SnapshotReader;
   private readonly clock = new TickClock();
   /** The own body's health and shield, from the Self record. */
   private selfHp = 0;
@@ -152,7 +159,6 @@ export class FightView {
   private wasDown = false;
   private modeSentAt = -1e9;
   private sentMode = -1;
-  private mapReady = false;
   private otherSoundAt = 0;
   /** Development numbers. */
   readonly counters = {
@@ -171,24 +177,31 @@ export class FightView {
     loadArt(scene, { atlases: ATLASES, fonts: true });
   }
 
+  /**
+   * Starts drawing the fight of `room` in `view`. `reader` is the room's own, which has read
+   * every snapshot since the join; whoever it already holds comes into view at once.
+   */
   static attach(
     scene: Phaser.Scene,
     view: MapView,
     room: Room<unknown, MapState>,
+    reader: SnapshotReader,
     options: FightOptions = {},
   ): FightView {
-    return new FightView(scene, view, room, options);
+    return new FightView(scene, view, room, reader, options);
   }
 
   private constructor(
     scene: Phaser.Scene,
     view: MapView,
     room: Room<unknown, MapState>,
+    reader: SnapshotReader,
     options: FightOptions,
   ) {
     this.scene = scene;
     this.view = view;
     this.room = room;
+    this.reader = reader;
     this.options = options;
     const meta = view.meta;
     createSpriteAnims(scene, meta);
@@ -221,6 +234,7 @@ export class FightView {
       look: (slot) => this.lookOf(slot),
       died: (b) => this.feedback.died(b),
       gone: () => {},
+      step: (b) => options.onStep?.(b.x, b.y, b.self),
     });
     this.effects = new Effects(this.ctx, this.bodies, {
       body: (id) => this.bodies.get(id),
@@ -276,6 +290,7 @@ export class FightView {
       .setDropShadow(1, 1, this.cat.color("ink.deep"), 1)
       .setVisible(false);
 
+    const field = options.field ?? true;
     const controls = options.controls ?? true;
     const sinkControls: ControlSink = {
       aim: (dx, dy, on) => this.room.send(AIM_MESSAGE, on ? [dx, dy] : []),
@@ -286,11 +301,11 @@ export class FightView {
     };
     this.aimSink = sinkControls;
     this.keys = controls ? new FightKeys(sinkControls) : null;
-    this.aim = controls ? new MouseAim(scene) : null;
-    this.reticle = controls
+    this.aim = controls && field ? new MouseAim(scene) : null;
+    this.reticle = this.aim
       ? scene.add.image(0, 0, "ui", "reticle/idle").setDepth(DEPTH_RETICLE).setVisible(false)
       : null;
-    if (controls) scene.input.setDefaultCursor("none");
+    if (this.aim) scene.input.setDefaultCursor("none");
 
     this.actions = {
       cast: (slot) => this.cast(slot),
@@ -310,26 +325,23 @@ export class FightView {
       y: this.ctx.selfY,
     }));
 
-    this.offs.push(room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => this.onSnapshot(bytes)));
     const onState = (s: MapState) => this.onState(s);
     room.onStateChange(onState);
     this.offs.push(() => room.onStateChange.remove(onState));
     if (room.state) this.onState(room.state);
-    this.ctx.sound.start(options.music ?? true);
+    // Whoever the reader already holds came in before the view was up: they enter now, and the
+    // own health is the last Self record's (the next one comes only when it changes).
+    for (const m of reader.members.values()) this.bodies.enter(m, reader.tick);
+    if (reader.hasSelf) {
+      this.selfHp = reader.me.hp;
+      this.selfShield = reader.me.shield;
+    }
+    this.ctx.sound.start(field);
   }
 
   // Room ---------------------------------------------------------------------------------------
 
   private onState(state: MapState): void {
-    if (!this.mapReady && state.map) {
-      const map = mapById(state.map);
-      if (map) {
-        const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((map.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((map.collision.h * TILE_SIZE) / cell);
-        this.mapReady = true;
-      }
-    }
     let own = this.selfSlotKey ? state.players.get(this.selfSlotKey) : undefined;
     if (own?.sid !== this.room.sessionId) {
       own = undefined;
@@ -338,6 +350,7 @@ export class FightView {
         this.selfSlotKey = slot;
         own = p;
         this.ctx.selfSlot = Number(slot);
+        this.bodies.markSelf(this.ctx.selfSlot);
       }
     }
     this.own = own;
@@ -387,8 +400,8 @@ export class FightView {
     return this.looks.get(slot)?.key ?? this.defaultLook;
   }
 
-  private onSnapshot(bytes: Uint8Array): void {
-    if (!this.mapReady) return;
+  /** One snapshot message of the room, read in order: every one from the attach on comes here. */
+  read(bytes: Uint8Array): void {
     this.counters.snapshots++;
     this.counters.bytes += bytes.byteLength;
     this.feedback.mineThisMessage.clear();
@@ -983,6 +996,21 @@ export class FightView {
     this.ctx.lights.setTier(tier);
   }
 
+  /** Every student drawn this frame, the local player included: for name plates and the minimap. */
+  forEachStudent(fn: (slot: number, x: number, y: number, self: boolean) => void): void {
+    for (const b of this.bodies.byId.values()) {
+      if (b.cat === Cat.Player) fn(b.slot, b.sprite.x, b.sprite.y, b.self);
+    }
+  }
+
+  /** The sprite of the student in `slot`, for an emote. */
+  studentSprite(slot: number): Phaser.GameObjects.Sprite | undefined {
+    for (const b of this.bodies.byId.values()) {
+      if (b.cat === Cat.Player && b.slot === slot) return b.sprite;
+    }
+    return undefined;
+  }
+
   /** Numbers for development checks; never drawn. */
   stats() {
     return {
@@ -1023,6 +1051,5 @@ export class FightView {
     for (const a of this.arrows) a.destroy();
     this.dim.destroy();
     this.banner.destroy();
-    this.reader.reset();
   }
 }

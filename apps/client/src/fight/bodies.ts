@@ -143,6 +143,8 @@ export interface BodiesHooks {
   died(b: Body): void;
   /** A body is about to leave for good. */
   gone(b: Body): void;
+  /** A student's foot landed. */
+  step(b: Body): void;
 }
 
 export class Bodies {
@@ -175,6 +177,16 @@ export class Bodies {
 
   get(id: number): Body | undefined {
     return this.byId.get(id);
+  }
+
+  /** The local player's slot became known: its body, if already in view, is the local player's. */
+  markSelf(slot: number): void {
+    for (const b of this.byId.values()) {
+      if (b.cat !== Cat.Player || b.self === (b.slot === slot)) continue;
+      b.self = b.slot === slot;
+      if (b.self) this.self = b;
+      else if (this.self === b) this.self = null;
+    }
   }
 
   /** A member came into view. */
@@ -560,9 +572,11 @@ export class Bodies {
     } else if (now - b.hurtAt < HURT_MS) {
       frames = rig.hit;
     } else if (moved > 0.02) {
+      const before = Math.floor((b.walk / STRIDE) * 4);
       b.walk = (b.walk + moved) % STRIDE;
       frames = rig.walk;
       i = Math.floor((b.walk / STRIDE) * 4);
+      if (i !== before && i % 2 === 0) this.hooks.step(b);
       b.idleAt = now;
     } else {
       frames = rig.idle;
@@ -576,7 +590,8 @@ export class Bodies {
     const frame = frames?.[i];
     if (frame && s.frame.name !== frame) s.setFrame(frame, false, false);
     const sq = b.squash;
-    s.setScale(1 + sq * 0.22, 1 - sq * 0.22);
+    // An emote's tween owns the scale while it plays.
+    if (!this.ctx.scene.tweens.isTweening(s)) s.setScale(1 + sq * 0.22, 1 - sq * 0.22);
     s.setFlipX(b.facing === 2);
     s.setPosition(Math.round(b.x + b.kickX), Math.round(b.y + b.kickY));
     // Others fade a little so the local player always reads first, who also stands in a ring.

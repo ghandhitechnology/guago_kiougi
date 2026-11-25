@@ -20,12 +20,16 @@ export class FightSound {
   lx = 0;
   ly = 0;
 
-  start(music: boolean): void {
+  /**
+   * `field`: the map's song (the soundscape plays it) follows the waves and the kill streak
+   * through its stems. A town leaves the song alone.
+   */
+  start(field: boolean): void {
     audio.unlock();
     audio.preload("combat");
-    audio.preload("page1");
-    this.music = music;
-    if (music) audio.music("agora", { fade: 2, stems: this.stems() });
+    if (field) audio.preload("page1");
+    this.music = field;
+    this.restem(2);
   }
 
   hit(
@@ -118,7 +122,10 @@ export class FightSound {
     for (const [name, level] of Object.entries(this.stems())) audio.stem(name, level, fade);
   }
 
+  /** The song's stems back to full, for whatever plays next. */
   stop(): void {
-    if (this.music) audio.music(null, { fade: 1.5 });
+    if (!this.music) return;
+    for (const name of Object.keys(this.stems())) audio.stem(name, 1, 1.5);
+    this.music = false;
   }
 }

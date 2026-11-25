@@ -2,10 +2,10 @@ import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
 import { mapById } from "@guago/content";
 import {
+  ENTER_PATH,
   encodeInput,
   type Facing,
   INPUT_MESSAGE,
-  MAP_ROOM,
   MapState,
   MODE_MESSAGE,
   MOVE_MAX,
@@ -14,6 +14,7 @@ import {
   Predictor,
   Q,
   REVIVE_MESSAGE,
+  type Seating,
   SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
   SnapshotReader,
@@ -31,7 +32,10 @@ import { signIn } from "./account.ts";
  * that student, circle, and come back when they stray. When the student is knocked out, the
  * nearest bots walk over and revive them.
  *
- *   node tools/loadtest/src/crowd.ts --bots 40 --url ws://localhost:2573 --follow 무대수학
+ *   node tools/loadtest/src/crowd.ts --bots 40 --url ws://localhost:2573 --follow 무대수학 --map p1-colonnade
+ *
+ * Bots enter through `POST /api/enter` like the browser; `--map` seats them on that map when the
+ * server runs with ALLOW_MAP_OPTION=1.
  */
 
 const { values } = parseArgs({
@@ -41,6 +45,7 @@ const { values } = parseArgs({
     follow: { type: "string", default: "" },
     accounts: { type: "string", default: "cw" },
     revive: { type: "string", default: "1" },
+    map: { type: "string", default: "" },
   },
 });
 
@@ -209,8 +214,15 @@ console.log(`crowd: ${BOTS} bots following ${values.follow || "nobody"} at ${val
 const bots: CrowdBot[] = [];
 for (let i = 0; i < BOTS; i++) {
   const cookie = await signIn(`http://${target.host}`, values.accounts, i + 1);
+  const res = await fetch(`http://${target.host}${ENTER_PATH}`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify(values.map ? { map: values.map } : {}),
+  });
+  if (!res.ok) throw new Error(`enter answered ${res.status}`);
+  const { seat } = (await res.json()) as Seating;
   const client = new Client(values.url, { headers: { cookie } });
-  const room = await client.joinOrCreate(MAP_ROOM, {}, MapState);
+  const room = await client.consumeSeatReservation(seat, MapState);
   bots.push(new CrowdBot(room, i));
 }
 

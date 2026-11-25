@@ -4,8 +4,8 @@ import path from "node:path";
 import type { Plugin } from "vite";
 
 /**
- * Development only: the fight stage (`?fight=<map>&bots=<n>`) asks the dev server for a crowd of
- * fighting bots around its student, and this starts them (`tools/loadtest/src/crowd.ts`) against
+ * Development only: the test shortcut (`?fight=<map>&bots=<n>`) asks the dev server for a crowd
+ * of fighting bots around its student, and this starts them (`tools/loadtest/src/crowd.ts`) against
  * the game server the dev server proxies to. One crowd at a time; asking again replaces it, `n=0`
  * stops it, and so does closing the dev server.
  */
@@ -32,6 +32,7 @@ export function fightBots(gameServer: string): Plugin {
         const q = new URL(req.url ?? "", "http://x").searchParams;
         const n = Math.max(0, Math.min(120, Number(q.get("n")) || 0));
         const follow = q.get("follow") ?? "";
+        const map = q.get("map") ?? "";
         stop();
         if (n > 0) {
           mkdirSync(path.join(root, ".local"), { recursive: true });
@@ -41,7 +42,7 @@ export function fightBots(gameServer: string): Plugin {
             process.execPath,
             [
               "tools/loadtest/src/crowd.ts",
-              ...["--bots", String(n), "--url", ws, "--follow", follow],
+              ...["--bots", String(n), "--url", ws, "--follow", follow, "--map", map],
             ],
             { cwd: root, stdio: ["ignore", log, log] },
           );
