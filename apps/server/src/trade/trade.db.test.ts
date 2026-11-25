@@ -880,6 +880,69 @@ describe("direct trade commits under racing requests", () => {
     expect(await tradeLogs()).toBe(1);
   });
 
+  it("one commit id resent 50 times by each side, and one purchase id 50 times, apply and notify once", async () => {
+    const heard: string[] = [];
+    const listen = (tag: string): ExecutorOptions => ({
+      onApplied: (id, name) => heard.push(`${tag} applied ${name} ${id}`),
+      onChange: (id) => heard.push(`${tag} change ${id}`),
+      onLevel: (id) => heard.push(`${tag} level ${id}`),
+    });
+    const eco = economy();
+    const [a, b, c] = [await student(eco), await student(eco), await student(eco)];
+    const item = await book(eco, a);
+    await fund(eco, b, { pinecone: 1000 });
+    await fund(eco, a, { ink: 5, pinecone: 100 });
+    const req = await commitOf({ [a]: { items: [item] }, [b]: { pinecone: 1000 } });
+    const opId = tradeId();
+    const rs = [0, 1, 2].map((i) => economy(listen(`e${i}`), pools[i]));
+    const before = await census();
+    const sends = Array.from({ length: 100 }, (_, i) =>
+      trade(rs[i % 3] as Economy, i % 2 ? a : b, req, opId),
+    );
+    const results = await Promise.all(sends);
+    for (const r of results) {
+      expect(r.get(a)).toEqual(results[0]?.get(a));
+      expect(r.get(b)).toEqual(results[0]?.get(b));
+    }
+    expect(results[0]?.get(a)?.ok).toBe(true);
+    expect(await tradeLogs()).toBe(1);
+    // The window reports a trade itself, so a commit pushes no change notice; each side's
+    // operation listener hears it exactly once.
+    expect(
+      heard
+        .filter((h) => h.includes("applied"))
+        .map((h) => h.split(" ").slice(1).join(" "))
+        .sort(),
+    ).toEqual([`applied trade.commit ${a}`, `applied trade.commit ${b}`].sort());
+    expect(heard.filter((h) => !h.includes("applied"))).toEqual([]);
+    expectConserved(before, await census(), true);
+
+    heard.length = 0;
+    const listing = await listed(eco, a, { stack: "ink", qty: 5, unitPrice: "10" });
+    await fund(eco, c, { pinecone: 1000 });
+    const ledger = async () =>
+      Number((await db.pool.query("select count(*) from economy_ledger")).rows[0].count);
+    const buyId = randomUUID();
+    const once = { listing, qty: 2, unitPrice: "10" };
+    const first = await rs[0]?.executor.execute(c, buyId, "listing.buy", once);
+    expect(first?.ok).toBe(true);
+    const rows = await ledger();
+    const again = await Promise.all(
+      Array.from({ length: 50 }, (_, i) =>
+        rs[i % 3]?.executor.execute(c, buyId, "listing.buy", once),
+      ),
+    );
+    for (const r of again) expect(r).toEqual(first);
+    expect(await ledger()).toBe(rows);
+    expect(await tradeLogs()).toBe(2);
+    expect(await stack(c, "ink")).toBe(2);
+    const history = await (await import("./board.ts")).priceHistory(db, { def: "ink" });
+    expect(history[0]?.volume).toBe(2);
+    expect(heard.map((h) => h.split(" ").slice(1).join(" ")).sort()).toEqual(
+      [`applied listing.buy ${a}`, `applied listing.buy ${c}`, `change ${a}`].sort(),
+    );
+  });
+
   it("a crash between applying and committing leaves nothing; the retry applies once", async () => {
     const crashing = economy({
       hooks: {

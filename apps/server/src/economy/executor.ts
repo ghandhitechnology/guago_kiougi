@@ -775,8 +775,11 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     results: Map<string, ExecResult>;
     /** Parties whose level changed. */
     levels: Map<string, number>;
-    /** Applied now, not read back from a record. */
-    fresh: boolean;
+    /**
+     * Read back from the id's record: nothing was applied now, so no listener hears it again
+     * (a resent claim or purchase must not notify, count or credit twice).
+     */
+    replayed: boolean;
   }
 
   /** Steps 1 to 6 on an open transaction. */
@@ -792,7 +795,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     const unrecorded = (error: OpError): Ran => ({
       results: new Map([[initiator, { id: op.opId, op: op.name, ok: false, error }]]),
       levels: new Map(),
-      fresh: false,
+      replayed: false,
     });
     const parties = [...new Set([initiator, ...others])].sort();
     // Each party's record: the shared id, or the initiator's id under the initiator's name.
@@ -809,7 +812,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       return {
         results: new Map(recorded.map((r) => [r.character_id, r.result])),
         levels: new Map(),
-        fresh: false,
+        replayed: true,
       };
     }
 
@@ -939,7 +942,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       await record(q, { ...op, ...r }, hash, results.get(r.characterId) as ExecResult);
     }
     await hooks.beforeCommit?.(op);
-    return { results, levels, fresh: true };
+    return { results, levels, replayed: false };
   }
 
   /** Runs one operation under its id, inside `tx` when the caller owns the transaction. */
@@ -992,14 +995,13 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     for (let attempt = 0; ; attempt++) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash, others));
-        for (const [id, level] of out.levels) notifyLevel(id, level);
-        const applied = out.results.get(characterId);
-        if (applied?.ok) notifyApplied(characterId, name, applied);
-        if (out.fresh && !DEFS[name].quiet) {
+        // Listeners hear what was applied, once: never a result read back from its record.
+        if (!out.replayed) {
+          for (const [id, level] of out.levels) notifyLevel(id, level);
           for (const [id, result] of out.results) {
-            if (id === characterId || !result.ok) continue;
+            if (!result.ok) continue;
             notifyApplied(id, name, result);
-            notifyChange(id, result.change);
+            if (id !== characterId && !DEFS[name].quiet) notifyChange(id, result.change);
           }
         }
         return out.results;
