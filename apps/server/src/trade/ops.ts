@@ -6,13 +6,15 @@
  * holds nothing anywhere.
  */
 import {
+  boardFloors,
   type Currency,
   directTax,
+  koreanDay,
   listingFee,
   MAX_TRADE_AMOUNT,
   type OpError,
   type Purse,
-  saleTax,
+  purchaseTax,
   stackCategory,
   TRADABLE_STACK,
   TRADE,
@@ -20,11 +22,14 @@ import {
   type TradeErrorCode,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import type { Queryable } from "../economy/executor.ts";
 import type {
   Applied,
+  Ctx,
   ExactEntry,
   Give,
   Loaded,
+  Locked,
   PartyApplied,
   PartyOpDef,
   PartyStep,
@@ -244,10 +249,31 @@ const commit: PartyOpDef<TradeCommitRequest> = {
 
 // 매점 게시판 ----------------------------------------------------------------------------------
 
+/**
+ * Board operations the character made today (Korean day, server clock): listings created,
+ * listings cancelled and purchases. Read under the character's lock, so two at once count right.
+ */
+async function boardToday(q: Queryable, id: string, now: Date): Promise<number> {
+  const start = new Date(`${koreanDay(now.getTime())}T00:00:00+09:00`).toISOString();
+  const { rows } = await q.execute(sql`
+    select
+      (select count(*) from listings where seller_id = ${id} and created_at >= ${start}::timestamptz)
+      + (select count(*) from listings where seller_id = ${id} and state = 'cancelled'
+          and closed_at >= ${start}::timestamptz)
+      + (select count(*) from trade_log where kind = 'board' and to_id = ${id}
+          and at >= ${start}::timestamptz) as n`);
+  return Number(rows[0]?.n ?? 0);
+}
+
+const today = (q: Queryable, locked: Locked, ctx: Ctx) => boardToday(q, locked.initiator, ctx.now);
+const spent = (world: { facts: Readonly<Record<string, boolean | number>> }) =>
+  Number(world.facts.today ?? 0) >= TRADE.board.dailyOps;
+
 const create: PartyOpDef<Requests["listing.create"]> = {
   client: true,
   others: async () => [],
   rows: (req) => ({ items: req.item ? [req.item] : [], listingCount: true }),
+  facts: async (q, _req, locked, ctx) => ({ today: await today(q, locked, ctx) }),
   currencies: (req) => ["pinecone", ...(req.stack ? [req.stack] : [])],
   apply(world, req, env) {
     const me = world.initiator;
@@ -258,6 +284,9 @@ const create: PartyOpDef<Requests["listing.create"]> = {
     const qty = req.item ? 1 : (req.qty ?? 0);
     const total = unit * BigInt(qty);
     if (unit <= 0n || qty <= 0 || total > MAX_TRADE_AMOUNT) return refuse("listing_price");
+    const floors = boardFloors(env.page);
+    if (unit < floors.unit || total < floors.purchase) return refuse("listing_small");
+    if (spent(world)) return refuse("listing_daily");
     const fee = listingFee(total);
     const id = env.newId();
     const base = {
@@ -338,12 +367,13 @@ const buy: PartyOpDef<Requests["listing.buy"]> = {
   listings: (req) => [req.listing],
   rows: (req, party, locked) => listedRows(locked.listings.get(req.listing), party),
   // A seller the buyer blocked is off the board for them (PLAN §12 "Block hides … trades").
-  async facts(q, req, locked) {
+  async facts(q, req, locked, ctx) {
     const seller = locked.listings.get(req.listing)?.sellerId;
-    if (!seller) return { blocked: false };
+    const count = await today(q, locked, ctx);
+    if (!seller) return { blocked: false, today: count };
     const { rows } = await q.execute(sql`
       select 1 from blocks where character_id = ${locked.initiator} and other_id = ${seller}`);
-    return { blocked: rows.length > 0 };
+    return { blocked: rows.length > 0, today: count };
   },
   currencies(req, party, _loaded, locked) {
     const listing = locked.listings.get(req.listing);
@@ -366,8 +396,16 @@ const buy: PartyOpDef<Requests["listing.buy"]> = {
     if (BigInt(req.unitPrice) !== listing.unitPrice) return refuse("listing_price");
     if (req.qty > listing.qty) return refuse("listing_qty");
     const total = listing.unitPrice * BigInt(req.qty);
+    // Each purchase is a trade log row; one worth a single 솔방울 must not buy one.
+    if (total < boardFloors(env.page).purchase && req.qty !== listing.qty) {
+      return refuse("listing_small");
+    }
+    if (spent(world)) return refuse("listing_daily");
     if (has(buyer, "pinecone") < total) return refuse("listing_funds");
-    const tax = saleTax(total);
+    // Taxed on the running total: rounding up per purchase would let the buyer's split choose
+    // the seller's tax.
+    const soldBefore = BigInt(listing.listedQty - listing.qty) * listing.unitPrice;
+    const tax = purchaseTax(soldBefore, total);
 
     const buys = [entry("pinecone", -total, TRADE_KEYS.board)];
     const sells = [
@@ -450,6 +488,14 @@ function close(state: "cancelled" | "expired"): PartyOpDef<{ listing: string }> 
     others: async () => [],
     listings: (req) => [req.listing],
     rows: (req, party, locked) => listedRows(locked.listings.get(req.listing), party),
+    // Cancels count toward the day's board operations; expiry is the board's own, not the player's.
+    ...(state === "cancelled"
+      ? {
+          facts: async (q: Queryable, _req: unknown, locked: Locked, ctx: Ctx) => ({
+            today: await today(q, locked, ctx),
+          }),
+        }
+      : {}),
     currencies(req, _party, _loaded, locked) {
       const listing = locked.listings.get(req.listing);
       return listing && !listing.itemId ? [listing.def] : [];
@@ -459,6 +505,7 @@ function close(state: "cancelled" | "expired"): PartyOpDef<{ listing: string }> 
       const listing = world.listings.get(req.listing);
       if (!listing || listing.sellerId !== me) return refuse("listing_missing");
       if (listing.state !== "live") return refuse("listing_closed");
+      if (state === "cancelled" && spent(world)) return refuse("listing_daily");
       if (state === "expired" && !listing.expired) {
         // The sweeper only asks once the database says so; a refusal here would be recorded
         // under the listing's one expiry id and block it for good, so it is a bug, not a result.
