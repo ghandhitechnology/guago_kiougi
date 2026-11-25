@@ -1,0 +1,21 @@
+{
+  "name": "@guago/audio",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lab": "node src/lab/server.ts",
+    "render": "node src/tools/render.ts",
+    "score": "node src/tools/score.ts",
+    "perf": "node src/tools/perf.ts",
+    "size": "node src/tools/size.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "galmuri": "^2.40.3",
+    "vite": "8.3.8"
+  }
+}
