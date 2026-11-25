@@ -2,10 +2,9 @@ import { type Legend, sprite } from "../../format.ts";
 import { Pic } from "../../paint.ts";
 
 /**
- * The 체육관 stage for the morning assembly, the minimum the gym needs on top of the interior
- * kit's floor, walls, windows and doors: the stage itself in 16-pixel pieces, its side steps,
- * the wine-red curtain, the school banner, the podium with its microphone, and the court lines
- * painted on the wood. The banner and the podium carry shapes, never words.
+ * Dressing for the 체육관 on top of the interior kit's floor, walls, stage and curtain: steps up
+ * to the stage, the school banner, the podium with its microphone, and the court lines painted
+ * on the wood. The banner and the podium carry shapes, never words.
  */
 
 const palette: Legend = {
@@ -39,46 +38,9 @@ const palette: Legend = {
   h: "grass.mid",
 };
 
-// Stage ---------------------------------------------------------------------------------------
+// Steps ---------------------------------------------------------------------------------------
 
-const TOP = 24;
-const STAGE_H = 44;
-
-/**
- * One 16-pixel column of stage: the boards on top, seams staggered, the bright nosing of the
- * lip, then the dark panelled front. `edge` closes the left or right end.
- */
-function stagePiece(edge: "l" | "r" | null, worn = false): string {
-  const p = Pic.blank(16, STAGE_H);
-  for (let y = 0; y < STAGE_H; y++) {
-    for (let x = 0; x < 16; x++) {
-      let c: string;
-      if (y === 0) c = "W";
-      else if (y < TOP) {
-        const plank = Math.floor((y - 1) / 4);
-        const seam = (y - 1) % 4 === 3;
-        const joint = x === (plank % 2 === 0 ? 4 : 12);
-        c = seam ? "B" : joint && (y - 1) % 4 !== 0 ? "B" : (y - 1) % 4 === 0 ? "p" : "b";
-        if (worn && plank === 2 && x > 5 && x < 11 && !seam) c = "o";
-      } else if (y === TOP) c = "p";
-      else if (y === TOP + 1) c = "B";
-      else if (y === STAGE_H - 1) c = "W";
-      else {
-        const stile = x === 0 || x === 15;
-        const rail = y === TOP + 2 || y === STAGE_H - 2;
-        c = stile || rail ? "B" : y === TOP + 3 || x === 1 ? "o" : "B";
-        if (!stile && !rail && x > 1 && x < 15 && y > TOP + 3 && y < STAGE_H - 2) c = "o";
-        if (!stile && !rail && x > 2 && x < 14 && y > TOP + 4 && y < STAGE_H - 3) c = "B";
-      }
-      p.set(x, y, c);
-    }
-  }
-  if (edge === "l") for (let y = 0; y < STAGE_H; y++) p.set(0, y, "W");
-  if (edge === "r") for (let y = 0; y < STAGE_H; y++) p.set(15, y, "W");
-  return p.toString();
-}
-
-/** Three steps down from the stage's lip to the floor, seen from the front. */
+/** Three steps up to the stage's lip, seen from the front. */
 function steps(): string {
   const w = 24;
   const h = 22;
@@ -100,22 +62,6 @@ function steps(): string {
   return p.toString();
 }
 
-const stage = sprite({
-  name: "stage",
-  group: "cast",
-  size: [16, STAGE_H],
-  origin: [0, STAGE_H - 1],
-  palette,
-  outline: false,
-  frames: {
-    run: stagePiece(null),
-    worn: stagePiece(null, true),
-    "end-l": stagePiece("l"),
-    "end-r": stagePiece("r"),
-  },
-  anim: { idle: { frames: ["run"], fps: 1 } },
-});
-
 const stageSteps = sprite({
   name: "stage-steps",
   group: "cast",
@@ -124,61 +70,6 @@ const stageSteps = sprite({
   palette,
   frames: { still: steps() },
   anim: { idle: { frames: ["still"], fps: 1 } },
-});
-
-// Curtain -------------------------------------------------------------------------------------
-
-/** The valance: one swag of wine velvet with its gold fringe, repeating every 16 pixels. */
-function valance(): string {
-  const p = Pic.blank(16, 16);
-  for (let x = 0; x < 16; x++) {
-    const sag = Math.round(3 * Math.sin((Math.PI * (x + 0.5)) / 16));
-    const bottom = 8 + sag;
-    for (let y = 0; y <= bottom; y++) {
-      let c = y === 0 ? "R" : y < 3 ? "m" : "r";
-      if (y >= 3 && y < bottom - 1 && (x === 3 || x === 4) && y < 6) c = "M";
-      if (y === bottom) c = "R";
-      p.set(x, y, c);
-    }
-    p.set(x, bottom + 1, "a");
-    p.set(x, bottom + 2, "a");
-    if (x % 4 < 2) p.set(x, bottom + 3, "D");
-  }
-  return p.toString();
-}
-
-/** A side curtain: pleats lit from the left, pooled where it meets the stage. */
-function drape(h: number, flip: boolean): string {
-  const w = 14;
-  const p = Pic.blank(w, h);
-  const pleat = ["R", "M", "m", "m", "r", "R", "m", "m", "r", "r", "R", "m", "r", "R"];
-  for (let y = 0; y < h; y++) {
-    const pool = y > h - 5 ? y - (h - 5) : 0;
-    for (let x = 0; x < w; x++) {
-      const xx = flip ? w - 1 - x : x;
-      if (pool && (xx < pool - 1 || xx > w - pool)) continue;
-      let c = pleat[x] as string;
-      if (x === 0 || x === w - 1 || y === 0 || y === h - 1) c = "R";
-      p.set(xx, y, c);
-    }
-  }
-  return p.toString();
-}
-
-const curtain = sprite({
-  name: "stage-curtain",
-  group: "cast",
-  size: [16, 92],
-  origin: [0, 0],
-  palette,
-  outline: false,
-  parts: {
-    swag: valance(),
-    left: drape(92, false),
-    right: { at: [2, 0], grid: drape(92, true) },
-  },
-  frames: { valance: ["swag"], "side-l": ["left"], "side-r": ["right"] },
-  anim: { idle: { frames: ["valance"], fps: 1 } },
 });
 
 // Banner --------------------------------------------------------------------------------------
@@ -234,39 +125,37 @@ const schoolBanner = sprite({
 
 // Podium --------------------------------------------------------------------------------------
 
-/** The podium: a wooden stand with the school roundel, and a gooseneck microphone. */
+/**
+ * The podium: a low wooden stand with the school roundel, its gooseneck microphone at the near
+ * corner so the speaker's face stays clear.
+ */
 function podium(): string {
   const w = 24;
-  const h = 26;
+  const h = 20;
   const p = Pic.blank(w, h);
-  // Gooseneck and microphone head.
   p.put(
     `
-      .zz
-      zeez
-      zeez
-      .zz.
+      zz..
+      eez.
+      eez.
+      .z..
+      .z..
       ..z.
-      ..z.
-      ...z
-      ...z
     `,
-    14,
+    0,
     0,
   );
-  // Slanted top.
   for (let x = 1; x < w - 1; x++) {
-    p.set(x, 8, "W");
-    p.set(x, 9, x < 6 ? "p" : "b");
-    p.set(x, 10, "o");
-    p.set(x, 11, "W");
+    p.set(x, 6, "W");
+    p.set(x, 7, x < 6 ? "p" : "b");
+    p.set(x, 8, "o");
+    p.set(x, 9, "W");
   }
-  p.set(0, 9, "W")
-    .set(0, 10, "W")
-    .set(w - 1, 9, "W")
-    .set(w - 1, 10, "W");
-  // Front panel.
-  for (let y = 12; y < h; y++) {
+  p.set(0, 7, "W")
+    .set(0, 8, "W")
+    .set(w - 1, 7, "W")
+    .set(w - 1, 8, "W");
+  for (let y = 10; y < h; y++) {
     for (let x = 2; x < w - 2; x++) {
       const edge = x === 2 || x === w - 3 || y === h - 1;
       p.set(x, y, edge ? "W" : x < 5 ? "b" : x > w - 6 ? "B" : "o");
@@ -276,12 +165,11 @@ function podium(): string {
     `
       .NNNN.
       NvhhvN
-      NvhhvN
       NvWWvN
       .NNNN.
     `,
     9,
-    15,
+    12,
   );
   return p.toString();
 }
@@ -289,8 +177,8 @@ function podium(): string {
 const podiumSprite = sprite({
   name: "gym-podium",
   group: "cast",
-  size: [24, 26],
-  origin: [12, 25],
+  size: [24, 20],
+  origin: [12, 19],
   palette,
   frames: { still: podium() },
   anim: { idle: { frames: ["still"], fps: 1 } },
@@ -334,4 +222,4 @@ const courtRing = sprite({
   anim: { idle: { frames: ["still"], fps: 1 } },
 });
 
-export default [stage, stageSteps, curtain, schoolBanner, podiumSprite, courtLine, courtRing];
+export default [stageSteps, schoolBanner, podiumSprite, courtLine, courtRing];

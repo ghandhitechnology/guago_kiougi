@@ -16,7 +16,7 @@ const WALL_Y = 63;
 const MOUNT_Y = WALL_Y + 1;
 const STAGE_X = 112;
 const STAGE_W = 16;
-const STAGE_FRONT = 107;
+const STAGE_FRONT = 95;
 
 function wallRun(prop: string, x0: number, x1: number, worn: readonly number[] = []): Prop[] {
   const out: Prop[] = [];
@@ -27,22 +27,18 @@ function wallRun(prop: string, x0: number, x1: number, worn: readonly number[] =
   return out;
 }
 
-/** The stage: sixteen pieces of boards and panelled front, a scuffed one where the podium goes. */
+/** The stage: the interior kit's varnished front in sixteen-pixel pieces, its red curtain behind. */
 const stage: Prop[] = Array.from({ length: STAGE_W }, (_, i) => ({
   prop: "stage",
-  frame: i === 0 ? "end-l" : i === STAGE_W - 1 ? "end-r" : i === 8 ? "worn" : "run",
+  frame: i === 0 ? "l" : i === STAGE_W - 1 ? "r" : "m",
   at: [STAGE_X + i * 16, STAGE_FRONT],
 }));
 
-const curtain: Prop[] = [
-  ...Array.from({ length: STAGE_W }, (_, i) => ({
-    prop: "stage-curtain",
-    frame: "valance",
-    at: [STAGE_X + i * 16, 16] as const,
-  })),
-  { prop: "stage-curtain", frame: "side-l", at: [STAGE_X, 16] },
-  { prop: "stage-curtain", frame: "side-r", at: [STAGE_X + (STAGE_W - 1) * 16, 16] },
-];
+const curtain: Prop[] = Array.from({ length: STAGE_W }, (_, i) => ({
+  prop: "stage-curtain",
+  frame: i === 0 ? "l" : i === STAGE_W - 1 ? "r" : "m",
+  at: [STAGE_X + i * 16, MOUNT_Y],
+}));
 
 /** Morning through the high windows: a long pane falling across the floor. */
 const sun = (cx: number, lean: number): Light => ({
@@ -52,7 +48,7 @@ const sun = (cx: number, lean: number): Light => ({
 });
 
 const COLS = [72, 104, 136, 168, 200, 232, 264, 296, 328, 360, 392];
-const ROWS = [156, 186, 216, 246];
+const ROWS = [150, 180, 210, 240];
 /** Mostly black and brown hair, the odd dyed head. */
 const LOOKS = [
   "blazer",
@@ -163,8 +159,9 @@ export default scene({
   edges: [{ overlay: "wall-top", inside: "#" }],
   details: [
     // Court lines on the boards, mostly under the rows.
-    { prop: "court-line", frame: "h", at: [0, 130], repeat: 30 },
-    { prop: "court-line", frame: "v", at: [239, 130], repeat: 1 },
+    { prop: "court-line", frame: "h", at: [0, 122], repeat: 30 },
+    { prop: "court-line", frame: "v", at: [239, 130] },
+    { prop: "court-line", frame: "v", at: [239, 123] },
     { prop: "court-line", frame: "v", at: [239, 146] },
     { prop: "court-line", frame: "v", at: [239, 162] },
     { prop: "court-line", frame: "v", at: [239, 178] },
@@ -173,12 +170,13 @@ export default scene({
     { prop: "court-line", frame: "v", at: [239, 226] },
     { prop: "court-line", frame: "v", at: [239, 242] },
     { prop: "court-line", frame: "v", at: [239, 258] },
-    { prop: "court-ring", at: [240, 204] },
+    { prop: "court-ring", at: [240, 198] },
     ...stage,
-    { prop: "stage-steps", at: [88, 109] },
+    { prop: "stage-steps", at: [88, STAGE_FRONT] },
   ],
   objects: [
     ...wallRun("wall-cream", 0, 480, [192, 336]),
+    ...curtain,
     { prop: "window", frame: "day", at: [28, MOUNT_Y] },
     { prop: "window", frame: "day-curtain", at: [72, MOUNT_Y] },
     { prop: "window", frame: "day", at: [404, MOUNT_Y] },
@@ -193,13 +191,13 @@ export default scene({
       anim: "announce",
       play: true,
       index: 3,
-      at: [240, 80],
+      at: [240, 70],
     },
-    { prop: "gym-podium", at: [240, 87] },
-    { rig: "mo", look: "teacher", dir: "down", anim: "idle", play: true, at: [176, 82] },
-    { actor: "entropy", anim: "idle", play: true, at: [344, 92] },
+    { prop: "gym-podium", at: [240, 76] },
+    { rig: "mo", look: "teacher", dir: "down", anim: "idle", play: true, at: [176, 72] },
+    { actor: "entropy", anim: "idle", play: true, at: [344, 80] },
     // At the side: 권 사감 at the steps, the 보건 선생님 by the door, the 조리사님 looking in.
-    { rig: "sagam", look: "duty", dir: "side", anim: "idle", play: true, at: [70, 128] },
+    { rig: "sagam", look: "duty", dir: "side", anim: "idle", play: true, at: [70, 120] },
     {
       rig: "nurse",
       look: "nurse",
@@ -220,13 +218,13 @@ export default scene({
     },
     ...rows,
   ],
-  overhead: [...curtain, { prop: "school-banner", at: [240, 30] }],
+  overhead: [{ prop: "school-banner", at: [240, 26] }],
   lights: [
     sun(28, -8),
     sun(72, -4),
     sun(404, 8),
     // The stage is lit from the front.
-    { bands: ["campus"], at: [240, 80], r: [130, 26], ragged: 3 },
+    { bands: ["campus"], at: [240, 76], r: [130, 24], ragged: 3 },
   ],
   atmosphere: [
     { actor: "mote", anim: "drift", play: true, at: [34, 96] },
