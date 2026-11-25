@@ -2,11 +2,19 @@ import type { ArtMetadata } from "@guago/art";
 import { hash2, pickTiles, scatterDecals } from "@guago/art";
 import * as Phaser from "phaser";
 import { spriteAnim } from "../art.ts";
+import { MAX_W, screen } from "../ui/screen.ts";
 import { paint } from "../ui/theme.ts";
 import { themedSprites } from "./themed.ts";
 
 const W = 480;
 const H = 270;
+/**
+ * The scene is composed on 480 and built out to each side far enough for the widest view
+ * (ui/screen.ts); the front scene's camera centres the composition on whatever width there is.
+ */
+const SIDE = (MAX_W - W) / 2;
+/** Ground tiles added to each side for that. */
+const SIDE_COLS = Math.ceil(SIDE / 16);
 /** Where the sky meets the water. */
 const HORIZON = 148;
 /** Top of the sea wall, and of the promenade behind it. */
@@ -76,16 +84,16 @@ export class NightBackdrop {
     this.skyBands(sky);
     this.layer(sky, 0, 0, 0.04);
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = -1; i < 5; i++) {
       const s = scene.add.sprite(i * 160 - 40, 0, "core", "night-stars/twinkle0").setOrigin(0);
-      s.play({ key: spriteAnim("night-stars", "twinkle"), startFrame: i % 2 });
+      s.play({ key: spriteAnim("night-stars", "twinkle"), startFrame: (i + 2) % 2 });
       this.layer(s, s.x, 0, 0.08);
       // A second, fainter field lower down: the same stars upside down so they do not repeat.
       const low = scene.add.sprite(i * 160 + 40, 40, "core", "night-stars/twinkle0").setOrigin(0);
       low
         .setFlipY(true)
         .setFlipX(true)
-        .play({ key: spriteAnim("night-stars", "twinkle"), startFrame: (i + 1) % 2 });
+        .play({ key: spriteAnim("night-stars", "twinkle"), startFrame: (i + 3) % 2 });
       this.layer(low, low.x, 40, 0.1);
     }
     const moon = scene.add.image(402, 24, "core", "night-moon/still").setOrigin(0);
@@ -107,26 +115,31 @@ export class NightBackdrop {
 
     // The city across the water and the sea, both endless, drifting slowly.
     const city = scene.add
-      .tileSprite(0, HORIZON - 30, W + 32, 30, "core", "night-city/still")
+      .tileSprite(0, HORIZON - 30, W + 32 + 2 * SIDE, 30, "core", "night-city/still")
       .setOrigin(0);
     this.tiles.push({ obj: city, speed: 1.2, pos: 0 });
-    this.layer(city, -16, HORIZON - 30, FAR);
+    this.layer(city, -16 - SIDE, HORIZON - 30, FAR);
     this.sea = scene.add
-      .tileSprite(0, HORIZON, W + 32, 34, "core", "night-sea/ripple0")
+      .tileSprite(0, HORIZON, W + 32 + 2 * SIDE, 34, "core", "night-sea/ripple0")
       .setOrigin(0);
     this.tiles.push({ obj: this.sea, speed: 2.6, pos: 0 });
-    this.layer(this.sea, -16, HORIZON, FAR);
+    this.layer(this.sea, -16 - SIDE, HORIZON, FAR);
     // Deep water under the sea strip, so tilting the view never opens a gap above the wall.
     const seaFill = scene.add
-      .rectangle(0, HORIZON + 32, W + 32, 220, paint("ink.deep"))
+      .rectangle(0, HORIZON + 32, W + 32 + 2 * SIDE, 220, paint("ink.deep"))
       .setOrigin(0);
-    this.layer(seaFill, -16, HORIZON + 32, FAR);
+    this.layer(seaFill, -16 - SIDE, HORIZON + 32, FAR);
 
     // The sea wall and the promenade, the lawn going down from it.
-    const wall = scene.add.tileSprite(0, WALL, W + 32, 14, night, "seawall/run").setOrigin(0);
-    this.layer(wall, -16, WALL, 1);
-    const ground = scene.add.image(-16, GROUND - 4, this.groundTexture(scene, meta)).setOrigin(0);
-    this.layer(ground, -16, GROUND - 4, 1);
+    const wall = scene.add
+      .tileSprite(0, WALL, W + 32 + 2 * SIDE, 14, night, "seawall/run")
+      .setOrigin(0);
+    this.layer(wall, -16 - SIDE, WALL, 1);
+    const groundX = -16 - SIDE_COLS * 16;
+    const ground = scene.add
+      .image(groundX, GROUND - 4, this.groundTexture(scene, meta))
+      .setOrigin(0);
+    this.layer(ground, groundX, GROUND - 4, 1);
 
     // 가설관, three floors, every one still lit.
     this.building(night);
@@ -165,11 +178,14 @@ export class NightBackdrop {
       this.layer(n, x, y, 1);
     }
 
-    this.dim = scene.add.rectangle(0, 0, W, H, paint("ink.deep")).setOrigin(0).setAlpha(0);
+    this.dim = scene.add
+      .rectangle(-SIDE, -H, W + 2 * SIDE, H * 4, paint("ink.deep"))
+      .setOrigin(0)
+      .setAlpha(0);
 
     scene.input.on(Phaser.Input.Events.POINTER_MOVE, (p: Phaser.Input.Pointer) => {
       if (p.wasTouch) return;
-      this.pointerX = Phaser.Math.Clamp((p.x - W / 2) / (W / 2), -1, 1);
+      this.pointerX = Phaser.Math.Clamp((p.x - screen.w / 2) / (screen.w / 2), -1, 1);
     });
     this.apply();
   }
@@ -209,8 +225,8 @@ export class NightBackdrop {
     }
     for (const p of this.pages) {
       p.x += p.speed * dt;
-      if (p.x > W + 20) {
-        p.x = -20;
+      if (p.x > W + SIDE + 20) {
+        p.x = -SIDE - 20;
         p.baseY = 30 + ((hash2(Math.round(time), 7, 3) % 90) | 0);
       }
       const y = p.baseY + Math.sin(time / 1300 + p.phase) * p.bob + this.view.y * 0.2;
@@ -265,8 +281,8 @@ export class NightBackdrop {
     const blend = 18;
     const top = -70;
     const bottom = HORIZON + 40;
-    const left = -16;
-    const right = W + 16;
+    const left = -16 - SIDE;
+    const right = W + 16 + SIDE;
     for (let y = top; y < bottom; y++) {
       // Which two stops this row lies between, and how far.
       let i = stops.findIndex(([, at]) => y < at);
@@ -310,13 +326,14 @@ export class NightBackdrop {
     if (scene.textures.exists(key)) return key;
     const tileset = meta.tilesets["lawn-walk"];
     if (!tileset) throw new Error("art has no lawn-walk terrain");
-    const cols = 33;
+    const cols = 33 + 2 * SIDE_COLS;
     const rows = 8;
     // 1 is grass, 0 the paved walk: a promenade two cells deep, a path down to the bottom.
     const cells = new Uint8Array(cols * rows);
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
-        const walk = y < 2 || (x >= 14 && x <= 18 && !(y >= 3 && (x === 14 || x === 18)));
+        const px = x - SIDE_COLS;
+        const walk = y < 2 || (px >= 14 && px <= 18 && !(y >= 3 && (px === 14 || px === 18)));
         cells[y * cols + x] = walk ? 0 : 1;
       }
     }

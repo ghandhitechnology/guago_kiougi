@@ -33,6 +33,9 @@ export interface Flow {
   recovered(loginId: string, code: string): void;
   /** Signed in: on to the creator, or into the world when a character exists. */
   signedIn(session: Session): void;
+  /** Still signed in from last time, with a character: back into the world on one press. */
+  readonly returning: boolean;
+  resume(): void;
 }
 
 /**
@@ -434,7 +437,10 @@ export class CodeScreen extends Screen {
   }
 }
 
-/** The title's two doors: back to school, or in for the first time. */
+/**
+ * The title's doors: back to school, or in for the first time. A player still signed in from last
+ * time gets one door, 이어하기, and that press is also what lets the game's sound start.
+ */
 export class TitleScreen extends Screen {
   private readonly buttons: Phaser.GameObjects.Container;
   private readonly login: Button;
@@ -442,6 +448,21 @@ export class TitleScreen extends Screen {
 
   constructor(scene: Phaser.Scene, flow: Flow) {
     super(scene);
+    if (flow.returning) {
+      const w = 112;
+      this.login = new Button(this.ctx, 0, 0, {
+        label: t("title.continue"),
+        kind: "ink",
+        w,
+        h: 23,
+        sound: "confirm",
+        onPress: () => flow.resume(),
+      });
+      this.rest = { x: Math.round((W - w) / 2), y: 222 };
+      this.buttons = scene.add.container(this.rest.x, this.rest.y, [this.login]);
+      this.buttons.setVisible(false);
+      return;
+    }
     const w = 84;
     const gap = 10;
     this.login = new Button(this.ctx, 0, 0, {

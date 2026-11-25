@@ -6,6 +6,7 @@
 export const ko = {
   "title.login": "등교하기",
   "title.signup": "입학하기",
+  "title.continue": "이어하기",
 
   "login.title": "등교",
   "login.id": "아이디",

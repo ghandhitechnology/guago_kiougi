@@ -2,6 +2,7 @@ import { MODES, narrative } from "@guago/content";
 import * as Phaser from "phaser";
 import { t } from "../i18n/index.ts";
 import { fade, slide } from "../ui/motion.ts";
+import { edges } from "../ui/screen.ts";
 import { sound } from "../ui/sound.ts";
 import { Label } from "../ui/text.ts";
 import { paint, sliceOf } from "../ui/theme.ts";
@@ -15,9 +16,9 @@ import { type BookSlot, type HudData, hud } from "./store.ts";
  * its source does; nothing here invents a number.
  */
 
-const W = 480;
-const H = 270;
 const PLATE = "hud-plate";
+/** From the thumb cluster's centre to the screen's bottom right corner. */
+const CLUSTER = 34;
 
 /** What the HUD's buttons ask of whoever is listening. */
 export interface HudActions {
@@ -64,13 +65,17 @@ class Lifted {
 class Piece {
   readonly root: Phaser.GameObjects.Container;
   private readonly rest: { x: number; y: number };
-  private readonly away: { x: number; y: number };
+  private readonly from: { dx: number; dy: number };
   live = false;
 
   constructor(scene: Phaser.Scene, x: number, y: number, from: { dx: number; dy: number }) {
     this.root = scene.add.container(x, y).setVisible(false).setAlpha(0);
     this.rest = { x, y };
-    this.away = { x: x + from.dx, y: y + from.dy };
+    this.from = from;
+  }
+
+  private get away(): { x: number; y: number } {
+    return { x: this.rest.x + this.from.dx, y: this.rest.y + this.from.dy };
   }
 
   moveTo(x: number, y: number): void {
@@ -133,6 +138,7 @@ export class Hud {
   private readonly interact: Piece;
   private readonly chat: Piece;
   private lagTimer: Phaser.Time.TimerEvent | undefined;
+  private cluster = { x: 0, y: 0 };
   private lastHp: number | undefined;
   private readonly unwatch: () => void;
   private readonly unmap: () => void;
@@ -200,7 +206,7 @@ export class Hud {
     this.minimapPiece = new Piece(scene, 0, 0, { dx: 70, dy: 0 });
     this.minimap = new Minimap(scene);
     this.minimapPiece.root.add(this.minimap.root);
-    this.menu = new Piece(scene, MINIMAP.x - 24, 6, { dx: 0, dy: -30 });
+    this.menu = new Piece(scene, 0, 0, { dx: 0, dy: -30 });
     this.menu.root.add([
       plate(scene, 0, 0, 22, 22),
       scene.add.image(3, 3, "ui", "menu/notebook").setOrigin(0),
@@ -214,15 +220,14 @@ export class Hud {
     );
 
     // 벌점 and the 자습 pool, left of the notebook.
-    const left = MINIMAP.x - 24 - 4 - 62;
-    this.demerits = new Piece(scene, left, 6, { dx: 0, dy: -30 });
+    this.demerits = new Piece(scene, 0, 0, { dx: 0, dy: -30 });
     this.demeritText = new Label(scene, 18, 4, "", { font: "galmuri9", color: "stone.bright" });
     this.demerits.root.add([
       plate(scene, 0, 0, 62, 16),
       scene.add.image(3, 2, "ui", "icon/whistle").setOrigin(0),
       this.demeritText.obj,
     ]);
-    this.pool = new Piece(scene, left, 24, { dx: 0, dy: -50 });
+    this.pool = new Piece(scene, 0, 0, { dx: 0, dy: -50 });
     const [pl, pr, pt, pb] = sliceOf("fill-thin");
     this.poolFill = scene.add
       .nineslice(19, 6, "ui", "fill-thin/pool", 38, 3, pl, pr, pt, pb)
@@ -236,7 +241,7 @@ export class Hud {
 
     // The right thumb's cluster: the dodge in the corner, books around it, interact below.
     this.books = new Piece(scene, 0, 0, { dx: 60, dy: 30 });
-    this.dodge = new Piece(scene, 440 - 17, 230 - 17, { dx: 60, dy: 0 });
+    this.dodge = new Piece(scene, 0, 0, { dx: 60, dy: 0 });
     this.dodge.root.add([
       scene.add.image(0, 0, "ui", "touch-main/idle").setOrigin(0),
       scene.add.image(10, 10, "ui", "touch-icon/dodge").setOrigin(0),
@@ -250,7 +255,7 @@ export class Hud {
     );
     this.buildBooks();
     // 멘토 찬스: the big gold button above the fan; it lights and pops when the call comes back.
-    this.mentor = new Piece(scene, 440 - 17, 230 - 64 - 12 - 8 - 34, { dx: 60, dy: 0 });
+    this.mentor = new Piece(scene, 0, 0, { dx: 60, dy: 0 });
     this.mentorIcon = scene.add.image(10, 10, "ui", "touch-icon/mentor").setOrigin(0);
     this.mentor.root.add([
       scene.add.image(0, 0, "ui", "touch-main/mentor").setOrigin(0),
@@ -309,6 +314,7 @@ export class Hud {
     ]) {
       p.root.setDepth(100);
     }
+    this.layout();
     this.unwatch = hud.watch((data, changed) => this.apply(data, changed));
     this.unmap = worldView.onMap((map) => {
       this.minimap.setMap(map);
@@ -324,6 +330,29 @@ export class Hud {
     this.unwatch();
     this.unmap();
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
+  }
+
+  /**
+   * Puts every piece against the real screen edges, inside the safe area: the card and its column
+   * top left, the map and its neighbours top right, the thumb's cluster bottom right.
+   */
+  layout(): void {
+    const e = edges();
+    this.card.moveTo(e.left, e.top);
+    const mapX = e.right - MINIMAP.size;
+    this.minimapPiece.moveTo(mapX, e.top);
+    this.menu.moveTo(mapX - 24, e.top);
+    this.demerits.moveTo(mapX - 24 - 4 - 62, e.top);
+    this.pool.moveTo(mapX - 24 - 4 - 62, e.top + 18);
+    const cx = e.right - CLUSTER;
+    const cy = e.bottom - CLUSTER;
+    this.cluster = { x: cx, y: cy };
+    // Phones: the fan sits around the cluster's centre. Desktops: the row ends at the corner.
+    this.books.moveTo(this.touch ? cx : e.right, this.touch ? cy : e.bottom);
+    this.dodge.moveTo(cx - 17, cy - 17);
+    this.mentor.moveTo(cx - 17, cy - 64 - 12 - 8 - 34);
+    this.layoutLeft();
+    this.applyInteract(hud.get());
   }
 
   /** Hides or shows the whole HUD, as when the notebook opens over it. */
@@ -397,9 +426,9 @@ export class Hud {
 
   private buildBooks(): void {
     // Phones: a fan around the dodge under the right thumb. Desktops: a row in the corner,
-    // each slot marked with the number key that casts it.
-    const cx = 440;
-    const cy = 230;
+    // each slot marked with the number key that casts it. Both relative to the books' anchor.
+    const cx = 0;
+    const cy = 0;
     const at = (r: number, deg: number) => [
       Math.round(cx + r * Math.cos((deg * Math.PI) / 180)) - 12,
       Math.round(cy + r * Math.sin((deg * Math.PI) / 180)) - 12,
@@ -414,7 +443,7 @@ export class Hud {
     ];
     const spots = this.touch
       ? ring.map(([r, deg]) => at(r, deg) as [number, number])
-      : ring.map((_, i): [number, number] => [W - 6 - 6 * 24 - 5 * 3 + i * 27, H - 6 - 24]);
+      : ring.map((_, i): [number, number] => [-(6 * 24 + 5 * 3) + i * 27, -24]);
     spots.forEach(([x, y], i) => {
       const back = this.scene.add.image(x, y, "ui", "book-slot/idle").setOrigin(0);
       const dim = this.scene.add.image(x + 4, y + 4, "ui", "book-dim/wangdo").setOrigin(0);
@@ -440,16 +469,17 @@ export class Hud {
 
   /** The left column stacks what is live: card, vitals, mode, chat button. */
   private layoutLeft(): void {
-    let y = 27;
+    const e = edges();
+    let y = e.top + 21;
     if (this.vitals.live) {
-      this.vitals.moveTo(6, y);
+      this.vitals.moveTo(e.left, y);
       y += 22;
     }
     if (this.mode.live) {
-      this.mode.moveTo(6, y);
+      this.mode.moveTo(e.left, y);
       y += 17;
     }
-    this.chat.moveTo(6, y);
+    this.chat.moveTo(e.left, y);
   }
 
   private apply(data: Partial<HudData>, changed: ReadonlySet<keyof HudData>): void {
@@ -570,11 +600,10 @@ export class Hud {
   private applyInteract(data: Partial<HudData>): void {
     // The interact button sits below the cluster, or alone in the corner without books.
     const withBooks = data.books !== undefined;
-    const x = withBooks ? 440 + Math.round(64 * Math.cos((157.5 * Math.PI) / 180)) - 14 : 440 - 14;
-    const y = withBooks ? 230 + Math.round(64 * Math.sin((157.5 * Math.PI) / 180)) - 14 : 230 - 14;
+    const { x: cx, y: cy } = this.cluster;
+    const x = withBooks ? cx + Math.round(64 * Math.cos((157.5 * Math.PI) / 180)) - 14 : cx - 14;
+    const y = withBooks ? cy + Math.round(64 * Math.sin((157.5 * Math.PI) / 180)) - 14 : cy - 14;
     this.interact.moveTo(x, y);
     this.interact.show(this.touch && data.interact !== undefined);
   }
 }
-
-export { H, W };

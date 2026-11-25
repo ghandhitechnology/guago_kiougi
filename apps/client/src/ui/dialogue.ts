@@ -3,6 +3,7 @@ import * as Phaser from "phaser";
 import { Button } from "./button.ts";
 import { FocusScope, popScope, pushScope } from "./focus.ts";
 import { layDown, pickUp } from "./motion.ts";
+import { screen } from "./screen.ts";
 import { sound } from "./sound.ts";
 import { Label, wrap } from "./text.ts";
 import { sliceOf } from "./theme.ts";
@@ -27,7 +28,9 @@ export interface DialogueLine {
   readonly choices?: readonly string[];
 }
 
-const BOX = { x: 8, y: 198, w: 464, h: 66 } as const;
+const BOX = { w: 464, h: 66 } as const;
+/** Centred along the bottom of the screen, whatever its width. */
+const boxAt = () => ({ x: Math.round((screen.w - BOX.w) / 2), y: screen.h - 6 - BOX.h });
 /** Text starts past the margin line and stops before the caret (`DIALOGUE_BOX` in the narrative). */
 const TEXT_X = 78;
 const TEXT_W = narrative.DIALOGUE_BOX.px;
@@ -103,7 +106,7 @@ export class DialogueBox {
     }
     this.caret.play("ui-caret-bob").setVisible(false);
     this.root = scene.add
-      .container(BOX.x, BOX.y, [
+      .container(boxAt().x, boxAt().y, [
         this.tab,
         this.name.obj,
         page,
@@ -120,7 +123,7 @@ export class DialogueBox {
     this.scope.onBack = () => this.advance();
     // Enter and Space turn the page; they reach the page through the scope's one item.
     this.scope.add({
-      bounds: () => ({ x: BOX.x, y: BOX.y, w: BOX.w, h: BOX.h }),
+      bounds: () => ({ ...boxAt(), w: BOX.w, h: BOX.h }),
       enabled: () => this.resolve !== undefined && !this.choiceBox,
       setFocus: () => undefined,
       activate: () => this.advance(),
@@ -146,7 +149,7 @@ export class DialogueBox {
       this.onOpenChange?.(true);
     }
     this.scope.focus(this.scope.first(), "key");
-    if (!this.root.visible) layDown(this.root, { x: BOX.x, y: BOX.y });
+    if (!this.root.visible) layDown(this.root, boxAt());
     sound("open");
     this.show();
     return done;
@@ -241,8 +244,8 @@ export class DialogueBox {
     const w = Math.max(...buttons.map((b) => b.bounds().w)) + 12;
     const h = buttons.length * 22 + 8;
     const [l, r, t, b] = sliceOf("dialog");
-    const x = BOX.x + BOX.w - w;
-    const y = BOX.y - h - 18;
+    const x = boxAt().x + BOX.w - w;
+    const y = boxAt().y - h - 18;
     box.add(this.scene.add.nineslice(0, 0, "ui", "dialog/idle", w, h, l, r, t, b).setOrigin(0));
     buttons.forEach((btn, i) => {
       btn.setPosition(6, 5 + i * 22);
@@ -259,7 +262,7 @@ export class DialogueBox {
     const r = this.resolve;
     this.resolve = undefined;
     sound("close");
-    pickUp(this.root, { x: BOX.x, y: BOX.y });
+    pickUp(this.root, boxAt());
     this.onOpenChange?.(false);
     r?.(choice);
   }

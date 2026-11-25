@@ -14,6 +14,7 @@ import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
 import { setIdleKeys } from "./focus.ts";
 import { setToaster, Toaster } from "./overlay.ts";
+import { onScreen } from "./screen.ts";
 import { setWorldUiHost, worldUi } from "./world-ui.ts";
 
 /**
@@ -66,7 +67,6 @@ export class UiScene extends Phaser.Scene {
     const link = session.link;
     const touch = touchScreen();
     const chat = link ? new ChatPanel(this, link, { top: touch, rows: touch ? 5 : 7 }) : undefined;
-    chat?.setFoldedButton(!touch);
     const notebook = new Notebook(this, () => hudView.setVisible(true));
     const hudView = new Hud(
       this,
@@ -96,13 +96,18 @@ export class UiScene extends Phaser.Scene {
       move?.setEnabled(!talking);
       aim?.setEnabled(!talking && fighting);
     };
-    if (move && aim) {
-      sticks.push(move, aim);
-      unfight = watchFight((live) => {
-        fighting = live;
-        enableSticks();
-      });
-    }
+    if (move && aim) sticks.push(move, aim);
+    unfight = watchFight((live) => {
+      fighting = live;
+      enableSticks();
+      chat?.setFight(live);
+    });
+    // A rotated phone or a resized window: everything finds the screen's edges again.
+    const unscreen = onScreen(() => {
+      hudView.layout();
+      chat?.relayout();
+      for (const s of sticks) s.layout();
+    });
     setIdleKeys((e) => {
       if (e.key === "Enter" && chat) {
         chat.open();
@@ -139,6 +144,7 @@ export class UiScene extends Phaser.Scene {
       stop: () => {
         unplace();
         unfight();
+        unscreen();
         stopFeed();
       },
     };
