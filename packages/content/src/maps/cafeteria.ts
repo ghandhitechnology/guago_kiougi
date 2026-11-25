@@ -100,7 +100,6 @@ const lights: LightSource[] = [
     radius: 44,
     color: "gold.light",
     intensity: 0.2,
-    paint: { bands: ["campus"], at: [264, 74], r: [40, 14], ragged: 2 },
   },
   ...TABLE_ROWS.flatMap((row) =>
     RUNS.map(

@@ -114,12 +114,6 @@ function blurField(src: Float32Array, w: number, h: number, r: number): Float32A
   return b;
 }
 
-/** Ragged-edge noise in pixels, as the contact sheet breaks its painted bands. */
-function ragged(x: number, y: number, amount: number, seed: number): number {
-  const n = 0.65 * valueNoise(x, y, 7, seed) + 0.35 * valueNoise(x, y, 2.5, seed + 9);
-  return (n - 0.5) * 2 * amount;
-}
-
 function makeCanvasTexture(
   scene: Phaser.Scene,
   key: string,

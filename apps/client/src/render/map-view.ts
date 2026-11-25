@@ -598,7 +598,7 @@ export class MapView {
       patrol,
       key,
       options.color ?? paletteColor(this.meta, "gold.light"),
-      options.intensity ?? 1.1,
+      options.intensity ?? 0.8,
       () => this.cones.delete(cone),
     );
     this.cones.add(cone);
