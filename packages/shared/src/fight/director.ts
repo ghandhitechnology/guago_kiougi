@@ -307,7 +307,7 @@ export function stepDirector(w: FightWorld): void {
     w.event(Ev.Phase).d = surge ? 1 : 0;
     if (surge) d.openingDone = false;
   }
-  const population = pacing.population(players);
+  const population = Math.min(pacing.population(players), field.populationMax);
   let alive = aliveCount(w);
   d.alive = alive;
   const cap = pacing.refillCap(players, surge);
