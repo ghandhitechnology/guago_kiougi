@@ -7,6 +7,7 @@
     "netsim": "node src/netsim.ts",
     "typecheck": "tsc -p tsconfig.json",
     "page-run": "node src/page-run.ts",
+    "raid-run": "node src/raid-run.ts",
     "opening-check": "node src/opening-check.ts"
   },
   "devDependencies": {

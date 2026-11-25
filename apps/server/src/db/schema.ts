@@ -982,7 +982,7 @@ export const duelRecords = pgTable(
 // Bosses and the raid (PLAN §10 era boss raid rules, §19 persistence) ------------------------
 
 /**
- * One boss standing on one Page's run (`id` = page, boss and the game ms its rift opened, so a
+ * One boss standing on one run of a Page (`id` = page, the game ms its rift opened and the boss, so a
  * test server's restarted Page fights it again): the phase, the persistent HP bar and the shield
  * as last written (every 10 seconds and at each phase change), and when it was freed.
  */

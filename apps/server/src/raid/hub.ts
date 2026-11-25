@@ -231,6 +231,8 @@ export class RaidHub {
   private readonly loading = new Set<string>();
   /** Freed raids whose Page clock call or titles have not gone through yet. */
   private readonly unannounced = new Set<string>();
+  /** Of those, the ones being announced now. */
+  private readonly announcing = new Set<string>();
   /** Damage by Page hour not yet written. */
   private buckets = new Map<number, Bucket>();
   private lastPoll = 0;
@@ -310,8 +312,15 @@ export class RaidHub {
     const page = this.o.page;
     const progress = page.progress(now);
     const life = lifecycleOf(progress.page);
+    const run = runOf(progress.page, page.view().openedAt);
     let standing = false;
-    for (const r of this.raids.values()) {
+    for (const [id, r] of this.raids) {
+      // A test server started its Page over: the last run's bosses are gone with it.
+      if (!id.startsWith(run)) {
+        this.raids.delete(id);
+        this.unannounced.delete(id);
+        continue;
+      }
       if (r.freed) continue;
       // Freed by someone else (an admin, a test): it leaves the arena with no rewards to settle.
       if (progress.bosses[r.def.id] === "freed" && !r.emptied) {
@@ -340,13 +349,13 @@ export class RaidHub {
     }
     for (const id of this.unannounced) {
       const r = this.raids.get(id);
-      if (r) await this.announce(r);
+      if (r && !this.announcing.has(id)) this.track("raid freed", this.announce(r));
     }
   }
 
   /** The boss's raid row for this run of the Page, made with its first phase calibrated. */
   private async open(def: RaidBossDef, page: number, openedAt: number): Promise<void> {
-    const id = `${page}:${def.id}:${Math.round(openedAt)}`;
+    const id = `${runOf(page, openedAt)}${def.id}`;
     if (this.raids.has(id)) return;
     const now = this.o.clock.now();
     let row = await this.readRaid(id);
@@ -414,8 +423,9 @@ export class RaidHub {
   /** At start: the live Page's raids, then whatever a crash left unpaid or unannounced. */
   private async load(): Promise<void> {
     const page = this.o.page.live();
+    const run = runOf(page, this.o.page.view().openedAt);
     const { rows } = await this.o.db.execute(
-      sql`select id from raids where page = ${page} order by started_at`,
+      sql`select id from raids where starts_with(id, ${run}) order by started_at`,
     );
     for (const row of rows) {
       const r = await this.readRaid(row.id as string);
@@ -611,7 +621,7 @@ export class RaidHub {
     this.pay(r.id, ended, r.def);
     if (last) {
       this.unannounced.add(r.id);
-      this.track("raid freed", this.announce(r));
+      if (!this.announcing.has(r.id)) this.track("raid freed", this.announce(r));
     }
   }
 
@@ -699,6 +709,15 @@ export class RaidHub {
    * the poll until it went through.
    */
   private async announce(r: Raid): Promise<void> {
+    this.announcing.add(r.id);
+    try {
+      await this.announceOnce(r);
+    } finally {
+      this.announcing.delete(r.id);
+    }
+  }
+
+  private async announceOnce(r: Raid): Promise<void> {
     const live = this.o.live();
     if (!live) return;
     const { rows } = await this.o.db.execute(sql`
@@ -782,6 +801,14 @@ export class RaidHub {
       ...(r.emptied ? { emptied: true } : {}),
     }));
   }
+}
+
+/**
+ * The prefix of every raid id of one run of a Page: the Page and the game ms its rift opened, so
+ * a test server's restarted Page puts up its bosses again. A raid's id is this and the boss id.
+ */
+function runOf(page: number, openedAt: number): string {
+  return `${page}:${Math.round(openedAt)}:`;
 }
 
 /** Adds one batch of participation to its phase's rows. */
