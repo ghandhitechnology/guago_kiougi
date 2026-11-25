@@ -1,12 +1,4 @@
-import {
-  boxShadow,
-  finish,
-  frames,
-  hline,
-  mounted,
-  rect,
-  vline,
-} from "../../interior.ts";
+import { boxShadow, finish, frames, hline, mounted, rect, vline } from "../../interior.ts";
 import { Pic } from "../../paint.ts";
 
 /**
