@@ -1,82 +1,166 @@
 import { Client, type Room } from "@colyseus/sdk";
-import { CLOSE_SESSION_REPLACED, MAP_ROOM, MapState, ROOMS_PATH } from "@guago/shared";
+import {
+  closeEnd,
+  ENTER_PATH,
+  type LinkEnd,
+  MAP_MESSAGES,
+  MapState,
+  ROOMS_PATH,
+  type Seating,
+  type SeatTicket,
+  type Transfer,
+} from "@guago/shared";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Which map room to sit in; the server ignores it outside development. */
-export interface MapChoice {
-  readonly map?: string;
+/** A map room the client sits in, with where the server seated it. */
+export interface MapSeat {
+  readonly room: Room<unknown, MapState>;
+  readonly seating: Seating;
+  /** The door the player came through, when they did. */
+  readonly via: string | undefined;
 }
 
-export type JoinMap = (choice: MapChoice) => Promise<Room<unknown, MapState>>;
-
-export interface MapLink {
-  /** Leaves the map room the player is in and joins the next one; never read as a replaced seat. */
-  moveTo(choice: MapChoice): Promise<void>;
-  /** Settles when the link gives up for good: another tab or device took the seat. */
-  readonly ended: Promise<"replaced">;
+export interface MapLinkHandlers {
+  /** A new room is joined: register its callbacks now. Returns the teardown. */
+  arrive(seat: MapSeat): () => void;
+  /** The server is sending the player through a door; the next `arrive` is the far side. */
+  depart(transfer: Transfer): void;
+  /**
+   * The link gave up for good: another tab or device took the seat, an admin closed the session,
+   * the account was banned, or the session is gone. Final.
+   */
+  ended(why: LinkEnd | "signedOut"): void;
 }
 
-const joinOnPage: JoinMap = (() => {
-  let client: Client | undefined;
-  return (choice) => {
-    client ??= new Client(ROOMS_PATH);
-    return client.joinOrCreate(MAP_ROOM, choice, MapState);
-  };
-})();
+export type Entered = { seating: Seating } | { final: "signedOut" } | { retry: true };
+
+/** How the link reaches the server; the page's own, unless a test hands in another. */
+export interface MapLinkTransport {
+  enter(): Promise<Entered>;
+  consume(seat: SeatTicket): Promise<Room<unknown, MapState>>;
+}
 
 /**
- * Keeps one seat in a map room for as long as the page lives. Rooms are reached on the page's
- * own origin under ROOMS_PATH, so the session cookie goes along. `attach` wires a joined room and
- * returns a teardown; a failed join or a dropped seat waits and tries again, quietly, and short
- * drops are bridged by the SDK's own reconnection inside the room's 30 second window. A seat
- * taken over by another tab or device ends the link: rejoining would only take it back and start
- * the two pages trading it forever.
+ * In development, `?map=<id>` asks to be seated on that map; the server honours it only when it
+ * runs with ALLOW_MAP_OPTION=1, and ignores it everywhere else.
+ */
+const devChoice = (): Record<string, unknown> => {
+  if (!import.meta.env?.DEV) return {};
+  const map = new URLSearchParams(location.search).get("map");
+  return map ? { map } : {};
+};
+
+/** Asks the server where this character stands and for a seat there. */
+async function enterOnPage(): Promise<Entered> {
+  try {
+    const res = await fetch(ENTER_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(devChoice()),
+      credentials: "same-origin",
+    });
+    if (res.status === 401 || res.status === 403) return { final: "signedOut" };
+    if (!res.ok) return { retry: true };
+    return { seating: (await res.json()) as Seating };
+  } catch {
+    return { retry: true };
+  }
+}
+
+function pageTransport(): MapLinkTransport {
+  let client: Client | undefined;
+  return {
+    enter: enterOnPage,
+    consume: (seat) => {
+      client ??= new Client(`${location.origin}${ROOMS_PATH}`);
+      return client.consumeSeatReservation(seat, MapState);
+    },
+  };
+}
+
+/**
+ * Keeps the player in a map room for as long as the page lives (PLAN §19). The server decides
+ * which: `POST /api/enter` seats the character where it was saved, and a door hands over a seat
+ * on the far side. A door's seat is taken before the old room is left (consented): the server
+ * let go of the account's old map seat before it handed the new one out, so the new room never
+ * evicts the old one and nothing reads as a replaced session, and presence never shows the
+ * player nowhere. Short drops are bridged by the SDK's own reconnection inside the room's
+ * 30 second window; anything longer enters again, quietly. A seat taken over by another tab or
+ * device ends the link: entering again would only take it back.
  */
 export function stayConnected(
-  attach: (room: Room<unknown, MapState>) => () => void,
-  join: JoinMap = joinOnPage,
-  first: MapChoice = {},
-): MapLink {
-  let choice: MapChoice = first;
+  handlers: MapLinkHandlers,
+  transport: MapLinkTransport = pageTransport(),
+): () => void {
+  let stopped = false;
   let current: Room<unknown, MapState> | undefined;
-  let moving = false;
 
-  const run = async (): Promise<"replaced"> => {
+  async function run(): Promise<void> {
+    let next: Transfer | undefined;
+    let leaving: { room: Room<unknown, MapState>; detach: () => void } | undefined;
+    const letGo = () => {
+      leaving?.detach();
+      void leaving?.room.leave(true);
+      leaving = undefined;
+    };
     let wait = 1000;
-    for (;;) {
+    while (!stopped) {
+      let seating: Seating;
+      if (next) {
+        seating = next;
+      } else {
+        const entered = await transport.enter();
+        if ("final" in entered) return handlers.ended(entered.final);
+        if ("retry" in entered) {
+          await sleep(wait);
+          wait = Math.min(wait * 2, 8000);
+          continue;
+        }
+        seating = entered.seating;
+      }
+      const via = next?.via;
+      next = undefined;
       let room: Room<unknown, MapState>;
       try {
-        room = await join(choice);
-      } catch (error) {
-        if ((error as { code?: unknown }).code === 409) return "replaced";
-        // No session yet, or the server is restarting; the ground stays up and we try again.
-        await sleep(wait);
-        wait = Math.min(wait * 2, 8000);
+        room = await transport.consume(seating.seat);
+      } catch {
+        // The seat lapsed or the server restarted: the far side is saved, so entering lands there.
+        letGo();
+        await sleep(300);
         continue;
+      }
+      letGo();
+      if (stopped) {
+        void room.leave(true);
+        return;
       }
       wait = 1000;
       current = room;
-      const detach = attach(room);
-      const code = await new Promise<number>((resolve) => room.onLeave((c) => resolve(c)));
-      detach();
-      current = undefined;
-      if (code === CLOSE_SESSION_REPLACED) return "replaced";
-      if (moving) {
-        moving = false;
+      const detach = handlers.arrive({ room, seating, via });
+      const outcome = await new Promise<{ transfer: Transfer } | { code: number }>((resolve) => {
+        room.onMessage(MAP_MESSAGES.transfer, (transfer: Transfer) => resolve({ transfer }));
+        room.onLeave((code) => resolve({ code }));
+      });
+      if ("transfer" in outcome) {
+        // The far side is saved already; a drop of this room no longer matters.
+        room.reconnection.enabled = false;
+        handlers.depart(outcome.transfer);
+        next = outcome.transfer;
+        leaving = { room, detach };
         continue;
       }
-      await sleep(wait);
+      detach();
+      current = undefined;
+      const end = closeEnd(outcome.code);
+      if (end) return handlers.ended(end);
+      if (!stopped) await sleep(200);
     }
-  };
+  }
 
-  return {
-    ended: run(),
-    async moveTo(next) {
-      choice = next;
-      moving = true;
-      // A consented leave first, so the old room is gone before the next one seats us.
-      await current?.leave(true);
-    },
+  void run();
+  return () => {
+    stopped = true;
+    void current?.leave(true);
   };
 }

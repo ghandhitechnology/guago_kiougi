@@ -127,7 +127,7 @@ export async function priceHistory(
 /** Returns expired listings to their sellers; returns how many it returned. */
 export async function sweepListings(
   db: Db,
-  executor: Pick<Executor, "execute">,
+  executor: Pick<Executor, "executeAll">,
   clock: () => Date = () => new Date(),
   notify?: (characterId: string, change: ChangeNotice) => void,
 ): Promise<number> {
@@ -141,10 +141,15 @@ export async function sweepListings(
     const seller = r.seller_id as string;
     const id = r.id as string;
     try {
-      const result = await executor.execute(seller, `expire:${id}`, "listing.expire", {
-        listing: id,
-      });
-      if (result.ok) {
+      const { results, replayed } = await executor.executeAll(
+        seller,
+        `expire:${id}`,
+        "listing.expire",
+        { listing: id },
+      );
+      const result = results.get(seller);
+      // Another sweeper (a second process, the CLI) returned it first: nothing to count or tell.
+      if (result?.ok && !replayed) {
         returned++;
         notify?.(seller, result.change);
       }
@@ -162,7 +167,7 @@ export async function sweepListings(
 /** Sweeps now and every 30 seconds of real time (the clock decides what is due). Returns the stop. */
 export function startListingSweeper(
   db: Db,
-  executor: Pick<Executor, "execute">,
+  executor: Pick<Executor, "executeAll">,
   clock: () => Date,
   notify?: (characterId: string, change: ChangeNotice) => void,
 ): () => void {

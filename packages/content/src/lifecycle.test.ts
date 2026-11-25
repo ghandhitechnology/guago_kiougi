@@ -1,6 +1,7 @@
 import { WEEK_MS } from "@guago/shared";
 import { describe, expect, it } from "vitest";
 import { milestonesBetween, pageProgress } from "./lifecycle.ts";
+import { MEALS, mealOf } from "./live.ts";
 
 const T0 = 1_800_000_000_000;
 const at = (weeks: number) => T0 + weeks * WEEK_MS;
@@ -54,5 +55,14 @@ describe("Page 1 lifecycle (PLAN §10)", () => {
   it("lists every milestone passed in order", () => {
     expect(milestonesBetween("p1.open", "p1.pythagoreans")).toEqual(["p1.wide", "p1.pythagoreans"]);
     expect(milestonesBetween("p1.wide", "p1.wide")).toEqual([]);
+  });
+});
+
+describe("급식 rotation", () => {
+  it("serves 짜장면 on Wednesday, the day its broadcast names", () => {
+    // 2026-11-25 is a Wednesday; noon KST.
+    const wednesday = Date.UTC(2026, 10, 25, 3);
+    expect(mealOf(wednesday)).toMatchObject({ id: "jjajang", announce: "menu-wednesday" });
+    expect(MEALS.filter((m) => m.announce)).toHaveLength(1);
   });
 });

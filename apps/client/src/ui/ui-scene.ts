@@ -10,6 +10,7 @@ import { hud } from "../hud/store.ts";
 import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { session } from "../world/session.ts";
+import { worldView } from "../world/view.ts";
 import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
 import { setIdleKeys } from "./focus.ts";
@@ -80,6 +81,7 @@ export class UiScene extends Phaser.Scene {
         dodge: () => fight()?.dodge(),
         cast: (slot) => fight()?.cast(slot),
         mentor: () => fight()?.mentor(),
+        interact: () => worldView.interact?.(),
       },
       touch,
     );
@@ -111,6 +113,11 @@ export class UiScene extends Phaser.Scene {
       if (e.key === "Escape") {
         hudView.setVisible(false);
         notebook.open();
+        return true;
+      }
+      // The world's interact key (PLAN §6), by its place on the keyboard under any layout.
+      if (e.code === "KeyE") {
+        worldView.interact?.();
         return true;
       }
       return false;

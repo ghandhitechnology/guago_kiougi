@@ -14,6 +14,7 @@
  */
 import type { WorldMessageSchema } from "./chat.ts";
 import type { ChangeNotice, ItemView, OpError } from "./inventory.ts";
+import { pageScale } from "./items.ts";
 import type { ItemKind } from "./loadout.ts";
 
 export const TRADE = {
@@ -41,8 +42,26 @@ export const TRADE = {
     taxPercent: 5,
     historyDays: 14,
     pageSize: 20,
+    /**
+     * Page 1 floors, ×10 a Page like every fee: the lowest unit price, and the least one
+     * purchase (or one listing as a whole) may be worth. A purchase that takes all a listing has
+     * left may be smaller. A 매점 does not sell anything for one 솔방울.
+     */
+    minUnitPrice: 10,
+    minPurchase: 100,
+    /** Creates, purchases and cancels one character may make in a Korean day. */
+    dailyOps: 200,
   },
 } as const;
+
+/** The board's floors on Page `page` (`TRADE.board.minUnitPrice`, `minPurchase`). */
+export function boardFloors(page: number): { unit: bigint; purchase: bigint } {
+  const scale = BigInt(pageScale(page));
+  return {
+    unit: BigInt(TRADE.board.minUnitPrice) * scale,
+    purchase: BigInt(TRADE.board.minPurchase) * scale,
+  };
+}
 
 /**
  * `source_or_sink` keys of trading. `trade.*` and `escrow.*` move units between players and net
@@ -74,6 +93,14 @@ export function percentUp(amount: bigint, percent: number): bigint {
 export const directTax = (moved: bigint) => percentUp(moved, TRADE.directTaxPercent);
 export const listingFee = (total: bigint) => percentUp(total, TRADE.board.feePercent);
 export const saleTax = (total: bigint) => percentUp(total, TRADE.board.taxPercent);
+
+/**
+ * The tax on one purchase from a listing that has already sold `soldBefore` worth: the tax on
+ * the listing's running total less what earlier purchases paid. However a buyer splits a listing,
+ * the seller pays `saleTax` of what sold, exactly as for one whole purchase.
+ */
+export const purchaseTax = (soldBefore: bigint, total: bigint) =>
+  saleTax(soldBefore + total) - saleTax(soldBefore);
 
 /**
  * Stacks a player may trade or list by quantity: 잉크, 제본 재료, 낱장 and 자판기 goods. 상점
@@ -116,6 +143,10 @@ export const TRADE_ERRORS = [
   "listing_qty",
   "listing_price",
   "listing_funds",
+  /** Under the board's floor: a unit price, a listing or a purchase worth too little. */
+  "listing_small",
+  /** The day's board operations are used up. */
+  "listing_daily",
 ] as const;
 export type TradeErrorCode = (typeof TRADE_ERRORS)[number];
 
