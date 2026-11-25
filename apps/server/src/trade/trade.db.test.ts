@@ -13,6 +13,7 @@ import {
   bindCost,
   directTax,
   forgeFee,
+  koreanDay,
   listingFee,
   type Major,
   pilgiCost,
@@ -582,6 +583,27 @@ describe("매점 게시판 under racing requests", () => {
     expect(swept[0] + swept[1]).toBeGreaterThanOrEqual(3);
     expect(await stack(seller, "ink")).toBe(30);
     expectConserved(before, await census(), true);
+  });
+
+  it("a server clock running ahead expires listings and books ledger days by its own time", async () => {
+    let at = Date.now() + 30 * 86_400_000;
+    const eco = economy({ now: () => new Date(at) });
+    const [seller, buyer] = [await student(eco), await student(eco)];
+    await fund(eco, seller, { ink: 4, pinecone: 100 });
+    await fund(eco, buyer, { pinecone: 100 });
+    const listing = await listed(eco, seller, { stack: "ink", qty: 4, unitPrice: "5" });
+    const days = await db.pool.query(
+      "select distinct day::text as day from economy_ledger where character_id = $1",
+      [seller],
+    );
+    expect(days.rows.map((r) => r.day)).toEqual([koreanDay(at)]);
+    // Real time has not moved; the server clock has.
+    expect(await sweepListings(db, eco.executor, () => new Date(at))).toBe(0);
+    at += (TRADE.board.hours + 1) * 3600_000;
+    expect(await buy(eco, buyer, listing, "5", 1)).toMatchObject({ error: "listing_expired" });
+    expect(await sweepListings(db, eco.executor)).toBe(0);
+    expect(await sweepListings(db, eco.executor, () => new Date(at))).toBe(1);
+    expect(await stack(seller, "ink")).toBe(4);
   });
 
   it("a seller the buyer blocked is off the board for them: not shown, not buyable", async () => {
