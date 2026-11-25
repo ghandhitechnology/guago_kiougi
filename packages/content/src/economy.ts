@@ -1,0 +1,111 @@
+import {
+  type Currency,
+  type LedgerEntry,
+  type Outcome,
+  type Purse,
+  pageScale,
+  pay,
+} from "@guago/shared";
+
+/**
+ * Materials and the 자판기 (PLAN §13). Names and bag text are the narrative's item descriptions,
+ * referenced by `description` id.
+ */
+export interface MaterialDef {
+  readonly currency: Currency | "sheet";
+  readonly description: string;
+  /** Where it comes from, for the economy report. */
+  readonly sources: readonly ("drop" | "pool" | "quest" | "shop" | "rules")[];
+  /** What spends it. */
+  readonly sinks: readonly string[];
+}
+
+export const MATERIALS: readonly MaterialDef[] = [
+  {
+    currency: "pinecone",
+    description: "pinecone",
+    sources: ["drop", "pool", "quest"],
+    sinks: ["sink.pilgi", "sink.bind", "sink.forge", "sink.shop", "sink.stat-reset"],
+  },
+  {
+    currency: "sheet",
+    description: "sheet",
+    sources: ["drop", "pool", "quest"],
+    sinks: ["sink.bind", "sink.feed"],
+  },
+  { currency: "ink", description: "ink", sources: ["drop", "quest"], sinks: ["sink.pilgi"] },
+  { currency: "binding", description: "binding", sources: ["drop", "quest"], sinks: ["sink.bind"] },
+  { currency: "merit", description: "merit", sources: ["rules"], sinks: ["sink.council-shop"] },
+  { currency: "token", description: "token", sources: ["rules"], sinks: ["sink.research-shop"] },
+];
+
+export type ShopEffect =
+  | { readonly kind: "heal"; readonly share: number }
+  | {
+      readonly kind: "buff";
+      readonly stat: "exp" | "pinecone" | "damage" | "moveSpeed" | "regen";
+      readonly amount: number;
+      readonly seconds: number;
+    }
+  | { readonly kind: "clearDrowsy" };
+
+export interface ShopItem {
+  readonly id: string;
+  /** Narrative description id: `snack:water`, or the hub's `energy-drink`. */
+  readonly description: string;
+  /** 솔방울 on Page 1; each later Page's stock costs ×10 (`pageScale`). */
+  readonly price: number;
+  readonly effect: ShopEffect;
+  readonly icon: string;
+}
+
+const snack = (
+  id: string,
+  price: number,
+  effect: ShopEffect,
+  description = `snack:${id}`,
+): ShopItem => ({
+  id,
+  description,
+  price,
+  effect,
+  icon: `snack/${id}`,
+});
+
+/**
+ * Fixed stock and fixed prices; no random boxes (PLAN §13). Once a week one special from
+ * `weekly` takes the last slot. A potion costs about half a minute of same-level hunting coin
+ * at the middle of the Page.
+ */
+export const VENDING = {
+  fixed: [
+    snack("water", 30, { kind: "heal", share: 0.15 }),
+    snack("banana-milk", 80, { kind: "heal", share: 0.35 }),
+    snack("energy-drink", 150, { kind: "clearDrowsy" }, "energy-drink"),
+    snack("kimbap", 120, { kind: "buff", stat: "regen", amount: 0.01, seconds: 300 }),
+    snack("choco-bar", 200, { kind: "buff", stat: "damage", amount: 0.05, seconds: 600 }),
+  ],
+  weekly: [
+    snack("cup-ramen", 600, { kind: "buff", stat: "exp", amount: 0.1, seconds: 900 }),
+    snack("pudding", 600, { kind: "buff", stat: "pinecone", amount: 0.1, seconds: 900 }),
+    snack("ice-pop", 400, { kind: "buff", stat: "moveSpeed", amount: 0.1, seconds: 900 }),
+  ],
+} as const;
+
+export function shopPrice(item: ShopItem, page: number): number {
+  return item.price * pageScale(page);
+}
+
+/** Buying from the 자판기: the price leaves the economy as `sink.shop`. */
+export function buy(
+  purse: Purse,
+  item: ShopItem,
+  qty: number,
+  page: number,
+): Outcome<{ purse: Purse; item: string; qty: number }> {
+  if (!Number.isInteger(qty) || qty <= 0) return { ok: false, error: "buy_qty" };
+  const paid = pay(purse, { pinecone: shopPrice(item, page) * qty }, "sink.shop");
+  if (!paid) return { ok: false, error: "buy_cost" };
+  const ledger: LedgerEntry[] = paid.ledger;
+  return { ok: true, state: { purse: paid.purse, item: item.id, qty }, ledger };
+}

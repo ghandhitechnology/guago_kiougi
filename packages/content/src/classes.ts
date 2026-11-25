@@ -1,16 +1,16 @@
+import { MAJORS, type Major } from "@guago/shared";
 import type { StatusApply } from "./attacks.ts";
+import type { TextKey } from "./narrative/schema.ts";
+import { termKey } from "./narrative/study.ts";
 import type { StatusId } from "./statuses.ts";
 
-export const CLASS_IDS = ["math", "physics", "chemistry", "biology", "earth"] as const;
-export type ClassId = (typeof CLASS_IDS)[number];
+/** The five majors. One list for the whole project: `MAJORS` in `@guago/shared`. */
+export const CLASS_IDS = MAJORS;
+export type ClassId = Major;
 
-export const CLASS_NAMES: Readonly<Record<ClassId, string>> = {
-  math: "수학",
-  physics: "물리",
-  chemistry: "화학",
-  biology: "생명",
-  earth: "지구과학",
-};
+export const CLASS_NAMES: Readonly<Record<ClassId, TextKey>> = Object.fromEntries(
+  CLASS_IDS.map((id) => [id, termKey("class", id)]),
+) as Record<ClassId, TextKey>;
 
 /** A 부전공 runs its class mechanic at half strength (PLAN §7). */
 export const MINOR_STRENGTH = 0.5;
@@ -73,7 +73,7 @@ export type ReactionEffect =
 
 export interface Reaction {
   readonly id: string;
-  readonly name: string;
+  readonly name: TextKey;
   readonly from: readonly [StatusId, StatusId];
   /** `damage` multiplies the hit that completed the pair; `hpShare` the reactor's max HP. */
   readonly effect: ReactionEffect;
@@ -88,14 +88,14 @@ export interface Reaction {
 export const REACTIONS: readonly Reaction[] = [
   {
     id: "neutralize",
-    name: "중화",
+    name: termKey("reaction", "neutralize"),
     from: ["acid", "base"],
     effect: { kind: "shield", hpShare: 0.1, duration: 5 },
     cue: { vfx: "fx-neutralize", sfx: "sfx.reaction.neutralize" },
   },
   {
     id: "combustion",
-    name: "연소",
+    name: termKey("reaction", "combustion"),
     from: ["flammable", "burn"],
     effect: {
       kind: "burst",
@@ -108,14 +108,14 @@ export const REACTIONS: readonly Reaction[] = [
   },
   {
     id: "corrosion",
-    name: "부식",
+    name: termKey("reaction", "corrosion"),
     from: ["metal", "acid"],
     effect: { kind: "status", status: { id: "armorBreak", stacks: 3, chance: 1 } },
     cue: { vfx: "fx-corrosion", sfx: "sfx.reaction.corrosion" },
   },
   {
     id: "explosion",
-    name: "폭발",
+    name: termKey("reaction", "explosion"),
     from: ["wet", "sodium"],
     effect: { kind: "burst", radius: 40, damage: 3, knock: 200 },
     cue: { vfx: "fx-explosion", sfx: "sfx.reaction.explosion" },

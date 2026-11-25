@@ -16,7 +16,7 @@ export function combatCues(): { art: string[]; sounds: string[] } {
   const add = (...values: (string | undefined)[]) => {
     for (const v of values) if (v) ids.add(v);
   };
-  for (const b of BOOKS) add(...Object.values(b.cues));
+  for (const b of BOOKS) add(...Object.values(b.cues), ...Object.values(b.evolution.cues));
   for (const t of TOOLS) add(t.icon);
   for (const m of MONSTERS) {
     add(m.sprite, ...Object.values(m.cues));
@@ -45,9 +45,15 @@ export function checkCombatContent(): string[] {
     if (bookIds.has(b.id)) problems.push(`book ${b.id} is defined twice`);
     bookIds.add(b.id);
     if (!toolIds.has(b.tool)) problems.push(`book ${b.id} links unknown tool ${b.tool}`);
-    const a = b.attack;
-    if (a.kind === "orbit" && a.duration > a.cooldown)
-      problems.push(`book ${b.id} orbits longer than its cooldown`);
+    for (const [form, a] of [
+      [b.id, b.attack],
+      [b.evolution.id, b.evolution.attack],
+    ] as const) {
+      if (a === null && !b.signature)
+        problems.push(`book ${form} has neither attack nor signature`);
+      if (a?.kind === "orbit" && a.duration > a.cooldown)
+        problems.push(`book ${form} orbits longer than its cooldown`);
+    }
     let last = 0;
     for (const step of b.levels) {
       if (step.at <= last) problems.push(`book ${b.id} level steps are out of order`);

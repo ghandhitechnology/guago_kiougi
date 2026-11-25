@@ -153,6 +153,7 @@ function play(cls: ClassId, books: readonly BookDef[]) {
     let single = 0;
     let aoe = 0;
     for (const b of books) {
+      if (!b.attack) continue;
       const r = resolveAttack(b.attack, b.levels, {
         bookLevel: level,
         tools: [],
@@ -237,6 +238,7 @@ console.log(`  ${killsTo100} same-level kills from 1 to 100`);
     const books = BOOKS.filter((b) => b.subject === cls);
     let single = 0;
     for (const b of books) {
+      if (!b.attack) continue;
       const r = resolveAttack(b.attack, b.levels, {
         bookLevel: level,
         tools: [],
