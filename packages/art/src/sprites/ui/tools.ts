@@ -228,6 +228,75 @@ const PHYSICS_TOOLS = {
   ),
 };
 
+const CHEMISTRY_TOOLS = {
+  /** 원소 카드: a card off the table, sodium. */
+  "element-card": sealed(
+    "",
+    "..WWWWWWWWWW",
+    "..W33333333W",
+    "..WWWWWWWWWW",
+    "..WWqWWqWWWW",
+    "..WWqqWqWWWW",
+    "..WWqWqqWqqW",
+    "..WWqWWqWqqW",
+    "..WWWWWWWqqW",
+    "..WWWWWWWWWW",
+    "..W4444WWWWW",
+    "..WWWWWWWWWW",
+    "..ssssssssss",
+  ),
+  /** 분자 모형: balls and sticks, a carbon and its neighbours. */
+  "molecule-kit": sealed(
+    "",
+    "..WWW",
+    ".WWWW......xxx",
+    ".WWWS.....xRrx",
+    "..SS......xrrx",
+    "....S...SS.xx",
+    ".....kkkS",
+    "....kkmkk",
+    "....kmmkk",
+    "....kkkkk",
+    "...S.kkk.S",
+    "..S.......S",
+    ".444......444",
+    "4444.....4444",
+    "4433.....4433",
+  ),
+  /** 전자저울: a scale, its pan and its readout. */
+  scale: sealed(
+    "",
+    "",
+    "..SSSSSSSSSSSS",
+    "..WWWWWWWWWWWW",
+    ".......SS",
+    ".......SS",
+    "..nnnnnnnnnnnn",
+    "..nHHHHHHHHHnn",
+    "..nHFFHFFHFHnn",
+    "..nHHHHHHHHHnn",
+    "..nnnnnnnnnnnn",
+    "..nnWWnnnnWWnn",
+    "..NNNNNNNNNNNN",
+  ),
+  /** 지시약: an indicator bottle and the strip it turned. */
+  indicator: sealed(
+    "......SS",
+    "......SS",
+    ".....WWWW",
+    ".....W44W......",
+    "....WWWWWW",
+    "....W5555W....",
+    "....W5PP5W..jj",
+    "....W5PP5W..jj",
+    "....W5555W..HH",
+    "....W5555W..44",
+    "....WWWWWW..33",
+    ".............PP",
+    ".............RR",
+  ),
+};
+
 const tool = sprite({
   ...ui,
   name: "tool",
@@ -238,6 +307,7 @@ const tool = sprite({
   frames: {
     ...MATH_TOOLS,
     ...PHYSICS_TOOLS,
+    ...CHEMISTRY_TOOLS,
     /** 컴퍼스: a drawing compass, needle leg and pencil leg. */
     compass: compass(),
     /** 모눈자: a clear ruler printed with a grid and ticks. */

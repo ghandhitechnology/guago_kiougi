@@ -235,6 +235,64 @@ const PHYSICS = {
   ),
 };
 
+// 화학 ------------------------------------------------------------------------------------
+
+const CHEMISTRY = {
+  /** 주기율표 브로마이드: the table's blocks, one lit. */
+  "periodic-table": book(
+    SEA_DEEP,
+    stack("w.....w", "ww...ww", "wwwwwww", "www44ww", "......."),
+    [5, 5],
+  ),
+  /** 유기화학 노트: a benzene ring. */
+  organic: book(
+    SEA,
+    stack("...w...", ".ww.ww.", "w.....w", "w..w..w", "w.....w", ".ww.ww.", "...w..."),
+    [5, 4],
+  ),
+  /** 몰 계산 문제집: a heap of particles too many to count. */
+  mole: book(
+    SEA_PALE,
+    stack("3.3..3.", ".3.33.3", "3.3.3..", ".33.3.3", "3..3.33", ".3.3.3."),
+    [5, 4],
+  ),
+  /** 산·염기 적정 노트: a burette and the pink drop at its tip. */
+  titration: book(
+    SEA_DEEP,
+    stack("..ww...", "..w4...", "..w4...", "..w4...", "..ww...", "...w...", "..PP..."),
+    [5, 4],
+  ),
+
+  /** 왕수: the flask, gold going under in it. */
+  "aqua-regia": evolved(
+    SEA,
+    stack("..www..", "..w.w..", "..w.w..", ".w...w.", "w5YY55w", "w5YY55w", "wwwwwww"),
+    [5, 5],
+  ),
+  /** 멘델레예프의 꿈: the table with no gaps, its last block gold. */
+  mendeleev: evolved(
+    SEA_DEEP,
+    stack("w.....Y", "ww...wY", "wwwwwww", "wwwwwww", "......."),
+    [5, 5],
+  ),
+  /** 고분자: two rings chained. */
+  polymer: evolved(SEA, stack(".ww..ww", "w..ww..", "w..ww..", ".ww..ww", "......."), [5, 5]),
+  /** 테르밋: the flame, and the molten iron under it. */
+  thermite: evolved(
+    SEA_PALE,
+    stack("...3...", "..33...", "..343..", ".34443.", "..333..", "YYYYYY."),
+    [5, 4],
+  ),
+  /** 아보가드로 수: particles packed solid. */
+  avogadro: evolved(
+    SEA_PALE,
+    stack("33.33.3", "33.33.3", ".......", "3.33.33", "3.33.33", "......."),
+    [5, 4],
+  ),
+  /** 완충 용액: the two drops held together. */
+  buffer: evolved(SEA_DEEP, stack(".HH.PP.", "HHHHPPP", "HHHHPPP", ".HH.PP."), [5, 6]),
+};
+
 const books = sprite({
   ...ui,
   name: "book",
@@ -244,6 +302,7 @@ const books = sprite({
   frames: {
     ...MATH,
     ...PHYSICS,
+    ...CHEMISTRY,
     /** 홀리데이 일반물리: the heavy plum tome with its gold band and a thrown arc. */
     "holiday-physics": over(
       book(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),
