@@ -122,7 +122,9 @@ function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => 
   const digests: string[] = [];
   plan.forEach((tick, t) => {
     const inputs = new Map<string, FightInput[]>();
-    tick.forEach((list, i) => inputs.set(`p${i}`, list));
+    tick.forEach((list, i) => {
+      inputs.set(`p${i}`, list);
+    });
     stepFight(w, inputs);
     check?.(w);
     if (t % 100 === 99) digests.push(digest(w));

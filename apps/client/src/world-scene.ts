@@ -1,15 +1,21 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { LAWN } from "@guago/content";
+import { LAWN, simRules } from "@guago/content";
 import {
   type Collidable,
   encodeInput,
-  type Facing,
+  Facing,
   INPUT_MESSAGE,
   type MapState,
+  NULL_SINK,
   PLAYER_SPEED,
-  POS_SCALE,
+  Q,
+  SNAP_CELL_TILES,
+  SNAPSHOT_MESSAGE,
+  SnapshotReader,
   TILE_SIZE,
+  WireMinion,
+  WirePlayer,
 } from "@guago/shared";
 import * as Phaser from "phaser";
 import { MonsterActor, PlayerActor } from "./actors.ts";
@@ -52,8 +58,11 @@ export class WorldScene extends Phaser.Scene {
   private camera!: CameraRig;
   private keys!: KeyboardMove;
   private readonly clock = new ServerClock();
-  private readonly monsters = new Map<string, Remote<MonsterActor>>();
-  private readonly players = new Map<string, Remote<PlayerActor>>();
+  private readonly monsters = new Map<number, Remote<MonsterActor>>();
+  private readonly players = new Map<number, Remote<PlayerActor>>();
+  /** The fight snapshot as this client holds it (`fight/wire.ts`). */
+  private reader = new SnapshotReader();
+  private selfSlot = -1;
   private self: SelfMover | undefined;
   private selfActor: PlayerActor | undefined;
   private selfId: string | undefined;
@@ -109,7 +118,12 @@ export class WorldScene extends Phaser.Scene {
     this.selfId = room.sessionId;
     this.live = true;
     this.self = new SelfMover(this.walls, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
+    const cell = SNAP_CELL_TILES * TILE_SIZE;
+    this.reader = new SnapshotReader();
+    this.reader.cols = Math.ceil((this.walls.collision.w * TILE_SIZE) / cell);
+    this.reader.rows = Math.ceil((this.walls.collision.h * TILE_SIZE) / cell);
     room.onStateChange((state) => this.onPatch(state));
+    room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => this.onSnapshot(bytes));
     room.onDrop(() => {
       this.live = false;
     });
@@ -117,6 +131,7 @@ export class WorldScene extends Phaser.Scene {
       this.live = true;
       this.self?.resync();
       this.clock.reset();
+      this.reader.reset();
     });
     if (import.meta.env.DEV) exposeDevStats(this);
     return () => {
@@ -132,37 +147,55 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 
+  /** Who this client is among the bodies; the bodies themselves come in the snapshot. */
   private onPatch(state: MapState): void {
-    this.clock.observe(state.tick, performance.now());
-    for (const [id, m] of state.monsters) {
-      let r = this.monsters.get(id);
-      if (!r) {
-        r = {
-          track: new Track(),
-          actor: new MonsterActor(this, this.meta, m.kind, this.lookKey()),
-        };
-        this.monsters.set(id, r);
-      }
-      r.track.push(state.tick, m.x / POS_SCALE, m.y / POS_SCALE, m.facing);
+    for (const [slot, p] of state.players) {
+      if (p.sid === this.selfId) this.selfSlot = Number(slot);
     }
-    // Bodies are pooled by slot; who is in one is its session id.
-    const seated = new Set<string>();
-    for (const p of state.players.values()) {
-      if (!p.sid) continue;
-      if (p.sid === this.selfId) {
-        this.self?.onServer(p);
-        continue;
+  }
+
+  /**
+   * One tick of the fight: the own body for prediction, then every other player and monster
+   * the snapshot holds. Minions, effects and events are the presentation's to draw.
+   */
+  private onSnapshot(bytes: Uint8Array): void {
+    const reader = this.reader;
+    reader.read(bytes, {
+      ...NULL_SINK,
+      self: (me) => this.self?.onServer({ x: me.x, y: me.y, facing: me.facing, seq: me.seq }),
+    });
+    const tick = reader.tick;
+    this.clock.observe(tick, performance.now());
+    const rules = simRules();
+    for (const m of reader.members.values()) {
+      const x = m.qx / Q;
+      const y = m.qy / Q;
+      if (m.kind === WirePlayer) {
+        if (m.slot === this.selfSlot) continue;
+        let r = this.players.get(m.id);
+        if (!r) {
+          r = { track: new Track(), actor: this.playerActor() };
+          this.players.set(m.id, r);
+        }
+        r.track.push(tick, x, y, m.state & 3);
+      } else if (m.kind !== WireMinion) {
+        let r = this.monsters.get(m.id);
+        if (!r) {
+          const kind = rules.monsters[m.kind];
+          if (!kind) continue;
+          const elite = `${kind.sprite}-elite`;
+          const sprite = m.state & 32 && this.meta.sprites[elite] ? elite : kind.sprite;
+          r = {
+            track: new Track(),
+            actor: new MonsterActor(this, this.meta, sprite, this.lookKey()),
+          };
+          this.monsters.set(m.id, r);
+        }
+        r.track.push(tick, x, y, m.state & 16 ? Facing.Right : Facing.Left);
       }
-      seated.add(p.sid);
-      let r = this.players.get(p.sid);
-      if (!r) {
-        r = { track: new Track(), actor: this.playerActor() };
-        this.players.set(p.sid, r);
-      }
-      r.track.push(state.tick, p.x / POS_SCALE, p.y / POS_SCALE, p.facing);
     }
-    prune(this.monsters, state.monsters);
-    prune(this.players, seated);
+    prune(this.monsters, reader.members);
+    prune(this.players, reader.members);
   }
 
   private playerActor(look = this.look): PlayerActor {
@@ -215,8 +248,8 @@ export class WorldScene extends Phaser.Scene {
 }
 
 function prune<A extends { destroy(): void }>(
-  views: Map<string, Remote<A>>,
-  live: { has(id: string): boolean },
+  views: Map<number, Remote<A>>,
+  live: { has(id: number): boolean },
 ): void {
   for (const [id, r] of views) {
     if (live.has(id)) continue;

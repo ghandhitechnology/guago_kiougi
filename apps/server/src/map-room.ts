@@ -570,7 +570,6 @@ export class MapRoom extends Room<{ state: MapState }> {
     const cpu = process.threadCpuUsage();
     // Ticks lost to a stall keep their numbers, so the stamps on every message keep wall time.
     if (skip > 0) this.world.tick += skip;
-    let ticks = 0;
     let simMs = 0;
     let netMs = 0;
     for (let i = 0; i < run; i++) {
@@ -597,7 +596,6 @@ export class MapRoom extends Room<{ state: MapState }> {
       simMs += s1 - s0;
       netMs += s2 - s1;
       this.metrics.countTick(this.world, this.net);
-      ticks++;
     }
     this.sync();
     const patchStart = performance.now();
