@@ -1,4 +1,5 @@
 import {
+  type Arrival,
   addPlayer,
   arrivalAt,
   createWorld,
@@ -49,7 +50,7 @@ describe("every door in the game", () => {
         let world = addPlayer(createWorld(walls, [], 1), "p", spawn.x, spawn.y);
         let inside = new Map<string, number>();
         const arrival = arrivalAt(to.portals, spawn.x, spawn.y);
-        let arrivals = new Map(arrival ? [["p", arrival] as const] : []);
+        let arrivals = new Map<string, Arrival>(arrival ? [["p", arrival]] : []);
         let fired = 0;
         for (let t = 1; t <= HELD_TICKS; t++) {
           world = step(world, walls, new Map([["p", [key(t)]]]));
