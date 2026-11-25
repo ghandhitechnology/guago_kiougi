@@ -8,6 +8,9 @@ import { audio, EFFECT_IDS, type EffectId } from "../index.ts";
 import { fingerprint } from "../tools/fingerprint.ts";
 import { compileSong } from "../tracker/compile.ts";
 import { SongPlayer } from "../tracker/player.ts";
+import { Horde } from "./horde.ts";
+
+let horde: Horde | null = null;
 
 declare global {
   interface Window {
@@ -19,14 +22,23 @@ const api = {
   unlock(): void {
     audio.unlock();
   },
-  start(): void {
+  start(mode: "simple" | "horde" = "simple"): void {
+    if (mode === "horde") {
+      audio.music("agora", { fade: 0.05 });
+      audio.ambient("campus-afternoon", { fade: 0.05 });
+      horde = new Horde(audio, { players: 5, ownClass: "math", surge: 50, lull: 12 });
+      horde.start();
+      return;
+    }
     audio.music("hub", { fade: 0.05 });
     audio.ambient("campus-afternoon", { fade: 0.05 });
   },
   stop(): void {
+    horde?.stop();
     audio.music(null, { fade: 0.05 });
     audio.ambient(null, { fade: 0.05 });
   },
+  horde: () => (horde ? { ...horde.stats } : null),
   stats: () => audio.debug.stats(),
   /** Records frame intervals for `ms`, firing an effect every `every` ms if given. */
   frames(ms: number, every = 0): Promise<{ intervals: number[]; longTasks: number[] }> {

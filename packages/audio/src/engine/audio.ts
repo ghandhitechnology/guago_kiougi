@@ -247,10 +247,18 @@ export class GameAudio {
   proof(stack: number): void {
     const now = this.graph().ctx.currentTime;
     const s = Math.max(1, Math.min(10, Math.round(stack)));
-    if (now - this.lastProof.at < 0.05 && s <= this.lastProof.stack) return;
+    if (s === 10) {
+      this.lastProof = { at: now, stack: 10 };
+      this.cue("class.math.proof.10");
+      this.cue("class.math.qed");
+      return;
+    }
+    // Stacks climb on many targets at once: voice at most one step every 120 ms, never a lower
+    // one right after a higher one.
+    if (now - this.lastProof.at < 0.12) return;
+    if (now - this.lastProof.at < 0.4 && s < this.lastProof.stack) return;
     this.lastProof = { at: now, stack: s };
     this.cue(`class.math.proof.${s}`);
-    if (s === 10) this.cue("class.math.qed");
   }
 
   /** 물리's 운동량: link 1 to 3 of a knockback collision chain. */

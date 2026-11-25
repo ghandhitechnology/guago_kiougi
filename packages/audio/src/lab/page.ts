@@ -1,20 +1,20 @@
 /** The audio lab page. A tool, not game UI: names only, no decoration. */
 
-import { BEDS, EFFECTS, SONGS } from "../content/index.ts";
+import { BOOK_TABLE } from "../content/effects/books.ts";
+import { BEDS, EFFECTS, JINGLES, SONGS } from "../content/index.ts";
 import {
   AMBIENT_IDS,
   type AmbientId,
   audio,
   BUSES,
   type Bus,
-  EFFECT_IDS,
-  type EffectId,
   SONG_IDS,
   type SongId,
 } from "../index.ts";
 import { type CompiledSong, compileSong } from "../tracker/compile.ts";
 import { type Cell, flatKey, noteName } from "../tracker/parse.ts";
 import { songShape } from "../tracker/schedule.ts";
+import { Horde } from "./horde.ts";
 
 audio.unlock();
 
@@ -134,6 +134,11 @@ function refreshMusic(): void {
     stemLevels.set(name, 1);
     b.classList.add("on");
     stemRow.append(b);
+  }
+  const parts = Object.keys(SONGS[playing].parts ?? {});
+  if (parts.length) {
+    stemRow.append(el("span", { cls: "dim", textContent: "parts" }));
+    for (const name of parts) stemRow.append(button(name, () => audio.part(name)));
   }
 }
 
@@ -290,53 +295,55 @@ function tickMeter(): void {
     `voices ${s.voices}/8 · stolen ${s.stolen} · dropped ${s.dropped}`,
     `duck ${(20 * Math.log10(s.duck)).toFixed(1)} dB`,
     `blocks ${s.blocks} · late ${s.late} · worker ${(load * 100).toFixed(1)}%`,
-    `sounds ready ${s.ready}/${s.sounds}`,
+    `sounds ready ${s.ready}/${s.sounds} · ${(s.bufferBytes / 1048576).toFixed(1)} MB`,
+    `hits ${s.hits.events} · heard ${s.hits.played} · merged ${s.hits.merged} · limited ${s.hits.limited} · culled ${s.hits.culled}`,
   ].join("\n");
+  if (horde)
+    hordeStats.textContent = `events ${(horde.stats.events / Math.max(1, horde.stats.seconds)).toFixed(0)}/s · calls ${(horde.stats.callMs / Math.max(1, horde.stats.seconds)).toFixed(1)} ms/s`;
 }
 
-// Effects.
+// Effects: every sound the library has, grouped by its id.
 let pan = 0;
 let pitch = 0;
 const fx = el("section", {}, el("h2", { textContent: "효과음" }));
-const panValue = el("span", { textContent: "0" });
-const panInput = el("input", {
-  type: "range",
-  min: "-1",
-  max: "1",
-  step: "0.1",
-  value: "0",
-  oninput: () => {
-    pan = Number(panInput.value);
-    panValue.textContent = pan.toFixed(1);
-  },
-});
-const pitchValue = el("span", { textContent: "0" });
-const pitchInput = el("input", {
-  type: "range",
-  min: "-12",
-  max: "12",
-  step: "1",
-  value: "0",
-  oninput: () => {
-    pitch = Number(pitchInput.value);
-    pitchValue.textContent = String(pitch);
-  },
-});
+const slider = (name: string, min: number, max: number, step: number, set: (v: number) => void) => {
+  const value = el("span", { textContent: "0" });
+  const input = el("input", {
+    type: "range",
+    min: String(min),
+    max: String(max),
+    step: String(step),
+    value: "0",
+    oninput: () => {
+      set(Number(input.value));
+      value.textContent = input.value;
+    },
+  });
+  return el("label", { cls: "slider" }, el("span", { textContent: name }), input, value);
+};
 fx.append(
-  el("label", { cls: "slider" }, el("span", { textContent: "pan" }), panInput, panValue),
-  el("label", { cls: "slider" }, el("span", { textContent: "pitch" }), pitchInput, pitchValue),
+  slider("pan", -1, 1, 0.1, (v) => {
+    pan = v;
+  }),
+  slider("pitch", -12, 12, 1, (v) => {
+    pitch = v;
+  }),
 );
-const loops = new Map<EffectId, { stop(): void }>();
+const groupOf = (id: string) => {
+  const parts = id.split(".");
+  return parts[0] === "sfx" ? `${parts[0]}.${parts[1]}` : (parts[0] as string);
+};
+const loops = new Map<string, { stop(): void }>();
 const groups = new Map<string, HTMLDivElement>();
-for (const id of EFFECT_IDS) {
-  const group = id.split(".")[0] as string;
+for (const id of [...Object.keys(EFFECTS), ...Object.keys(JINGLES)]) {
+  const group = groupOf(id);
   let grid = groups.get(group);
   if (!grid) {
     grid = el("div", { cls: "grid" });
     groups.set(group, grid);
     fx.append(el("div", { cls: "group" }, el("div", { textContent: group }), grid));
   }
-  const looping = (EFFECTS[id] as { loop?: number }).loop !== undefined;
+  const looping = (EFFECTS[id] as { loop?: number } | undefined)?.loop !== undefined;
   const b = button(id.slice(group.length + 1), () => {
     if (looping) {
       const on = loops.get(id);
@@ -346,34 +353,102 @@ for (const id of EFFECT_IDS) {
         b.classList.remove("on");
         return;
       }
-      const s = audio.play(id, { pan, pitch });
+      const s = audio.cue(id, { pan, pitch });
       if (s) {
         loops.set(id, s);
         b.classList.add("on");
       }
       return;
     }
-    audio.play(id, { pan, pitch });
+    audio.cue(id, { pan, pitch });
   });
+  b.title = id;
   grid.append(b);
 }
 fx.append(
   el(
     "div",
     { cls: "row" },
-    button("burst", () => {
-      const pool = EFFECT_IDS.filter(
-        (id) => (EFFECTS[id] as { loop?: number }).loop === undefined && id !== "sagam.whistle",
-      );
-      for (let i = 0; i < 24; i++)
-        setTimeout(() => {
-          audio.play(pool[Math.floor(Math.random() * pool.length)] as EffectId, {
-            pan: Math.random() * 2 - 1,
-          });
-        }, i * 25);
-    }),
+    button("preload page1", () => audio.preload("page1")),
   ),
 );
+
+// Combat: the hit system, class signatures and the horde.
+let own = true;
+let distance = 0;
+let proofStack = 0;
+const combat = el("section", {}, el("h2", { textContent: "전투" }));
+const ownButton = button("own", () => {
+  own = !own;
+  ownButton.textContent = own ? "own" : "other";
+  ownButton.classList.toggle("on", own);
+});
+ownButton.classList.add("on");
+combat.append(
+  el("div", { cls: "row" }, ownButton),
+  slider("distance", 0, 400, 10, (v) => {
+    distance = v;
+  }),
+);
+for (const cls of ["math", "physics", "chemistry", "biology", "earth"] as const) {
+  const book = BOOK_TABLE.find((b) => b.cls === cls);
+  const hit = (o: { heavy?: boolean; crit?: boolean; kill?: boolean }) =>
+    audio.hit({
+      cls,
+      own,
+      dx: distance * (pan < 0 ? -1 : 1),
+      ...o,
+      ...(book ? { impact: `sfx.book.${book.id}.${book.hit}` } : {}),
+      material: "sfx.monster.odap.hit",
+      death: "sfx.monster.odap.die",
+    });
+  combat.append(
+    el(
+      "div",
+      { cls: "row" },
+      el("span", { cls: "dim", textContent: cls }),
+      button("light", () => hit({})),
+      button("heavy", () => hit({ heavy: true })),
+      button("crit", () => hit({ crit: true })),
+      button("kill", () => hit({ kill: true })),
+      button("×12", () => {
+        for (let i = 0; i < 12; i++) setTimeout(() => hit({}), i * 15);
+      }),
+    ),
+  );
+}
+const proofButton = button("증명 1", () => {
+  proofStack = (proofStack % 10) + 1;
+  audio.proof(proofStack);
+  proofButton.textContent = `증명 ${(proofStack % 10) + 1}`;
+});
+combat.append(
+  el(
+    "div",
+    { cls: "row" },
+    proofButton,
+    button("충돌 1", () => audio.collide(1)),
+    button("충돌 2", () => audio.collide(2)),
+    button("충돌 3", () => audio.collide(3)),
+    button("예보 1.2s", () => audio.forecast({ delay: 1.2 })),
+    button("예보 0.8s", () => audio.forecast({ delay: 0.8 })),
+  ),
+);
+let horde: Horde | null = null;
+const hordeStats = el("pre");
+const hordeButton = button("horde: 150 monsters, 5 players", () => {
+  if (horde?.running) {
+    horde.stop();
+    hordeButton.classList.remove("on");
+    return;
+  }
+  audio.music("agora", { fade: 1 });
+  audio.ambient("campus-afternoon");
+  horde = new Horde(audio, { players: 5, ownClass: "math", surge: 20, lull: 6 });
+  horde.start();
+  hordeButton.classList.add("on");
+});
+combat.append(el("div", { cls: "row" }, hordeButton), hordeStats);
 
 // Ambient.
 let bed: AmbientId | null = null;
@@ -394,7 +469,12 @@ ambient.append(bedRow);
 
 document.body.append(
   el("h1", { textContent: "과고키우기 audio" }),
-  el("main", {}, el("div", {}, musicSection, patternSection), el("div", {}, mixer, fx, ambient)),
+  el(
+    "main",
+    {},
+    el("div", {}, musicSection, patternSection, combat),
+    el("div", {}, mixer, ambient, fx),
+  ),
 );
 
 function frame(): void {

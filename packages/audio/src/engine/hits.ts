@@ -72,11 +72,11 @@ export const HIT_RULES: HitRules = {
   hearing: 360,
   falloff: 160,
   panWidth: 240,
-  ownRate: 24,
-  otherRate: 10,
-  materialRate: 8,
-  ownDeathRate: 12,
-  otherDeathRate: 4,
+  ownRate: 16,
+  otherRate: 6,
+  materialRate: 5,
+  ownDeathRate: 8,
+  otherDeathRate: 3,
   materialGap: 0.09,
 };
 

@@ -90,19 +90,38 @@ try {
     return { script: get("ScriptDuration"), task: get("TaskDuration") };
   };
 
-  async function run(label: string, audioOn: boolean, seconds: number) {
+  async function run(label: string, mode: "silent" | "simple" | "horde", seconds: number) {
+    const audioOn = mode !== "silent";
     if (audioOn) {
-      await page.evaluate(() => window.perf.start());
+      await page.evaluate((m) => window.perf.start(m), mode);
       await page.waitForTimeout(2500);
     }
     const before = await page.evaluate(() => window.perf.stats());
+    const hordeBefore = await page.evaluate(() => window.perf.horde());
     const m0 = await metric();
     const { intervals, longTasks } = await page.evaluate(
       ([ms, every]) => window.perf.frames(ms, every),
-      [seconds * 1000, audioOn ? 80 : 0] as const,
+      [seconds * 1000, mode === "simple" ? 80 : 0] as const,
     );
     const m1 = await metric();
     const after = await page.evaluate(() => window.perf.stats());
+    const hordeAfter = await page.evaluate(() => window.perf.horde());
+    const hordeRow =
+      mode === "horde" && hordeBefore && hordeAfter
+        ? {
+            eventsPerSecond: (hordeAfter.events - hordeBefore.events) / seconds,
+            callMsPerSecond: (hordeAfter.callMs - hordeBefore.callMs) / seconds,
+            hitsPerSecond: (after.hits.events - before.hits.events) / seconds,
+            hitsHeardPerSecond: (after.hits.played - before.hits.played) / seconds,
+            voicesPerSecond: (after.started - before.started) / seconds,
+            merged: after.hits.merged - before.hits.merged,
+            limited: after.hits.limited - before.hits.limited,
+            culled: after.hits.culled - before.hits.culled,
+            stolen: after.stolen - before.stolen,
+            dropped: after.dropped - before.dropped,
+            bufferMB: after.bufferBytes / 1048576,
+          }
+        : null;
     if (audioOn) await page.evaluate(() => window.perf.stop());
     await page.waitForTimeout(500);
     const row = {
@@ -121,21 +140,30 @@ try {
       voicesStolen: after.stolen - before.stolen,
       state: after.state,
       sampleRate: after.sampleRate,
+      horde: hordeRow,
     };
     console.log(
       `${label.padEnd(26)} p50 ${row.p50.toFixed(1)} p95 ${row.p95.toFixed(1)} max ${row.max.toFixed(1)} ms · ` +
         `>33 ms ${row.over33} · long tasks ${row.longTasks} · script ${row.scriptMsPerSecond.toFixed(1)} ms/s · ` +
         `worker ${(row.workerShare * 100).toFixed(1)}% · late ${row.lateBlocks} · ${row.state} ${row.sampleRate} Hz`,
     );
+    if (hordeRow)
+      console.log(
+        `${"".padEnd(26)} events ${hordeRow.eventsPerSecond.toFixed(0)}/s, hit events ${hordeRow.hitsPerSecond.toFixed(0)}/s, heard ${hordeRow.hitsHeardPerSecond.toFixed(0)}/s, ` +
+          `voices started ${hordeRow.voicesPerSecond.toFixed(0)}/s, audio calls ${hordeRow.callMsPerSecond.toFixed(1)} ms/s, ` +
+          `merged ${hordeRow.merged}, limited ${hordeRow.limited}, culled ${hordeRow.culled}, stolen ${hordeRow.stolen}, dropped ${hordeRow.dropped}, buffers ${hordeRow.bufferMB.toFixed(1)} MB`,
+      );
     return row;
   }
 
   const rows = [];
-  rows.push(await run("silent", false, 8));
-  rows.push(await run("music+ambient+effects", true, 15));
+  rows.push(await run("silent", "silent", 8));
+  rows.push(await run("music+ambient+effects", "simple", 15));
+  rows.push(await run("horde", "horde", 20));
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-  rows.push(await run("silent, 4x throttle", false, 8));
-  rows.push(await run("audio, 4x throttle", true, 15));
+  rows.push(await run("silent, 4x throttle", "silent", 8));
+  rows.push(await run("audio, 4x throttle", "simple", 15));
+  rows.push(await run("horde, 4x throttle", "horde", 20));
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
   results.runs = rows;
   results.errors = errors;
