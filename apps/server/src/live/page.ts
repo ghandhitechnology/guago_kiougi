@@ -24,7 +24,7 @@ import {
   weekStart,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
-import type { Db } from "../db/index.ts";
+import { type Db, describeError } from "../db/index.ts";
 import { timeFromDb } from "../economy/rows.ts";
 import type { LiveClock } from "./clock.ts";
 
@@ -187,23 +187,54 @@ export class PageClock {
       }
       await this.hooks.milestone(m);
     }
-    const day = boardDay(now);
-    const week = boardWeek(now);
-    if (day !== r.lastDay || week !== r.lastWeek) {
-      const previousWeek = r.lastWeek;
-      const turnedDay = day !== r.lastDay;
-      r.lastDay = day;
-      r.lastWeek = week;
+    await this.turn(boardDay(now), boardWeek(now));
+  }
+
+  /**
+   * Turns the board week over once for every week passed, in order, then the day. Each turn is
+   * stored only after its hook finished, and the hooks are idempotent by the rows they write, so
+   * a crash anywhere in a turnover reruns it on the next pass and pays nothing twice. A failing
+   * week hook stops the weeks (retried on the next pass) but never the day.
+   */
+  private async turn(day: number, week: number): Promise<void> {
+    const r = this.state;
+    while (r.lastWeek < week) {
+      const next = r.lastWeek + 1;
+      try {
+        await this.hooks.week(next, r.lastWeek);
+      } catch (error) {
+        this.log(`week ${next} turnover failed, retried on the next pass: ${describeError(error)}`);
+        break;
+      }
+      await this.fault?.(`week:${next}:done`);
       await this.db.execute(
-        sql`update server_state set last_day = ${day}, last_week = ${week}, updated_at = now() where id = 1`,
+        sql`update server_state set last_week = ${next}, updated_at = now() where id = 1`,
       );
-      if (week !== previousWeek) await this.hooks.week(week, previousWeek);
-      if (turnedDay) {
+      r.lastWeek = next;
+    }
+    if (day !== r.lastDay) {
+      try {
+        await this.fault?.("day:start");
         this.hooks.announce("daily-reset");
         await this.hooks.day(day);
+      } catch (error) {
+        this.log(`day ${day} turnover failed, retried on the next pass: ${describeError(error)}`);
+        return;
       }
+      await this.fault?.("day:done");
+      await this.db.execute(
+        sql`update server_state set last_day = ${day}, updated_at = now() where id = 1`,
+      );
+      r.lastDay = day;
     }
   }
+
+  /**
+   * Test seam: awaited between the statements of a turnover. A fault that never resolves stands
+   * for the process dying there.
+   */
+  fault?: (point: string) => Promise<void> | void;
+  log: (line: string) => void = (line) => console.error(line);
 
   /** The era change names the player who landed the final hit on the era boss. */
   private announceParams(key: string): Record<string, string> | undefined {

@@ -16,9 +16,11 @@ import {
   type DemeritReason,
   EXPEL,
   earn,
+  HELP_PAIR_DAILY,
   type LedgerEntry,
   type LogoutPlace,
   MEAL,
+  MERITS,
   type MeritReason,
   mayHelp,
   mayPostHelp,
@@ -26,9 +28,10 @@ import {
   type Purse,
   pay,
   type Rate,
-  RESTED,
+  restedSeconds,
   SECOND_MS,
   sheet,
+  tallyCredit,
 } from "@guago/shared";
 import type { Applied, CharacterChange, Loaded, OpDef, Step } from "../economy/ops.ts";
 import {
@@ -61,15 +64,21 @@ export interface ProgressRequest {
   /** Story beats played; bosses cleared (a 복습 fight or the live one). */
   story: string[];
   bosses: string[];
+  /** Chores done in place (`cleaning`). */
+  chores: string[];
   /** `help:` quest rows to move, with how far. */
   help: Record<string, number>;
   visit: string[];
   met: string[];
   /** The 도움 notice behind the `help:` row, when there is one. */
   notice?: string;
+  /** Board day of the batch, for the daily 상점 caps. */
+  day: number;
 }
 
 export interface LogoutRequest {
+  /** The world seat's session id, the one its login recorded. */
+  session: string;
   place: LogoutPlace;
   /** The session's best measured rate, in the field `field`, when a full window was measured. */
   measured: (Rate & { field: string; sheetBook: string | null }) | null;
@@ -77,19 +86,39 @@ export interface LogoutRequest {
 }
 
 export type ConductRequest =
-  | { kind: "demerit"; reason: DemeritReason; amount: number }
-  | { kind: "merit"; reason: MeritReason; amount: number; neat: boolean; week: number };
+  | {
+      kind: "demerit";
+      reason: DemeritReason;
+      amount: number;
+      /**
+       * The caller's own key for this 벌점 (a moderation strike id). Its conduct rows are booked
+       * under it, so a later call with the same key changes nothing, however long after.
+       */
+      key?: string;
+    }
+  | {
+      kind: "merit";
+      reason: MeritReason;
+      amount: number;
+      neat: boolean;
+      week: number;
+      /** Board day, for the daily tally caps. */
+      day: number;
+    };
 
 export interface LiveRequests {
   "live.board": { quests: PostedQuest[] };
   "live.progress": ProgressRequest;
   "live.codex": { entries: string[] };
   "live.conduct": ConductRequest;
-  "live.login": Record<string, never>;
+  /** `session` is the world seat's session id. */
+  "live.login": { session: string };
   "live.logout": LogoutRequest;
   "live.meal": { meal: string; week: number };
   "live.drowsy": { drowsy: boolean };
   "live.award": { award: string };
+  /** 층장 of board week `week`: +5 상점, paid once by the row's `paid` flag. */
+  "live.floorLeader": { week: number };
   "live.boardDay": { day: number };
   "live.helpPost": {
     notice: {
@@ -105,6 +134,8 @@ export interface LiveRequests {
   };
   "live.helpTake": { notice: string; quest: PostedQuest };
   "live.helpCancel": { notice: string };
+  /** The helper gives a taken notice back: it is open again, their row ends unpaid. */
+  "live.helpDrop": { notice: string };
 }
 
 /** The 도움 row of a helper: `help:<notice id>`. */
@@ -136,8 +167,10 @@ function earnMerits(
   purse: Purse,
   amount: number,
   reason: string,
-  week: number,
+  /** The board week, and how many of `amount` count toward its 층장 tally. */
+  tally: { week: number; counted: number },
 ): { purse: Purse; ledger: LedgerEntry[]; live: LiveWrite; cancelled: number; spare: number } {
+  const { week, counted } = tally;
   const m = addMerits({ demerits: c.demerits }, amount);
   const paid = earn(purse, { merit: m.spare }, `merit.${reason}`);
   return {
@@ -151,9 +184,15 @@ function earnMerits(
         { kind: "merit", amount, reason },
         { kind: "demerit", amount: -m.cancelled, reason: "merit.cancel" },
       ],
-      tally: [{ week, kind: "merit", n: amount }],
+      tally: counted > 0 ? [{ week, kind: "merit", n: counted }] : [],
     },
   };
+}
+
+/** What of `amount` counts toward the tally today, and the `merit_daily` row recording it. */
+function counted(l: Loaded, reason: MeritReason, amount: number, day: number) {
+  const n = tallyCredit(reason, amount, l.live.daily.get(reason) ?? 0);
+  return { n, daily: { day, key: reason, n } };
 }
 
 function mergeLive(a: LiveWrite, b: LiveWrite): LiveWrite {
@@ -163,6 +202,7 @@ function mergeLive(a: LiveWrite, b: LiveWrite): LiveWrite {
     character: { ...a.character, ...b.character },
     conduct: [...(a.conduct ?? []), ...(b.conduct ?? [])],
     tally: [...(a.tally ?? []), ...(b.tally ?? [])],
+    daily: [...(a.daily ?? []), ...(b.daily ?? [])],
   };
 }
 
@@ -173,6 +213,7 @@ function increment(q: QuestRow, r: ProgressRequest): number {
   const o = q.offer;
   const slot = (k: string) => o.slots?.[k];
   if (o.cadence === "help") return r.help[q.id] ?? 0;
+  if (o.cadence === "chore") return Number(r.chores.includes(o.template ?? ""));
   if (o.cadence === "story") {
     const boss = o.kind === "boss" ? String(slot("boss") ?? "") : "";
     return boss ? Number(r.bosses.includes(boss)) : Number(r.story.includes(o.template ?? ""));
@@ -223,11 +264,13 @@ export function liveOps(h: Helpers): Defs {
       rows: (req) => ({
         quests: req.quests,
         live: {
+          tallyDay: req.day,
           kills: Object.keys(req.kills),
           ...(req.notice ? { notice: req.notice } : {}),
         },
       }),
-      currencies: (req) => (Object.keys(req.help).length > 0 ? ["merit"] : []),
+      currencies: (req) =>
+        Object.keys(req.help).length > 0 || req.chores.length > 0 ? ["merit"] : [],
       apply(l, req, env) {
         const now = env.now.getTime();
         const changed: QuestRow[] = [];
@@ -246,24 +289,51 @@ export function liveOps(h: Helpers): Defs {
             continue;
           }
           done.push(q.id);
+          if (q.offer.cadence === "chore") {
+            // A chore pays its 상점 when it is done, once: the row goes straight to claimed.
+            changed.push({ ...q, progress, state: "claimed" });
+            if (q.offer.merit) {
+              const c = counted(l, "cleaning", q.offer.merit, req.day);
+              const m = earnMerits(
+                { ...l.character, ...live.character } as CharacterRow,
+                purse,
+                q.offer.merit,
+                "cleaning",
+                { week: boardWeek(now), counted: c.n },
+              );
+              purse = m.purse;
+              ledger.push(...m.ledger);
+              live = mergeLive(live, { ...m.live, daily: [c.daily] });
+            }
+            continue;
+          }
           if (q.offer.cadence !== "help") {
             changed.push({ ...q, progress, state: "done" });
             continue;
           }
           // A 도움 notice pays the helper on the spot, once: the row goes straight to claimed.
           changed.push({ ...q, progress, state: "claimed" });
-          if (!q.offer.merit) continue;
-          const m = earnMerits(
-            { ...l.character, ...live.character } as CharacterRow,
-            purse,
-            q.offer.merit ?? 0,
-            "help",
-            boardWeek(now),
-          );
-          purse = m.purse;
-          ledger.push(...m.ledger);
-          live = mergeLive(live, m.live);
           const n = l.live.notice;
+          // The same helper and poster are paid once a board day; the notice still counts done.
+          const pair = n ? `help:${n.posterId}` : "";
+          const paidPair =
+            (l.live.daily.get(pair) ?? 0) + (live.daily ?? []).filter((d) => d.key === pair).length;
+          if (q.offer.merit && n && paidPair < HELP_PAIR_DAILY) {
+            const c = counted(l, "help", q.offer.merit, req.day);
+            const m = earnMerits(
+              { ...l.character, ...live.character } as CharacterRow,
+              purse,
+              q.offer.merit,
+              "help",
+              { week: boardWeek(now), counted: c.n },
+            );
+            purse = m.purse;
+            ledger.push(...m.ledger);
+            live = mergeLive(live, {
+              ...m.live,
+              daily: [c.daily, { day: req.day, key: pair, n: 1 }],
+            });
+          }
           if (
             n &&
             n.id === q.offer.notice &&
@@ -307,7 +377,12 @@ export function liveOps(h: Helpers): Defs {
 
     "live.conduct": {
       client: false,
-      rows: () => ({}),
+      rows: (req) =>
+        req.kind === "merit"
+          ? { live: { tallyDay: req.day } }
+          : req.key
+            ? { live: { conductKey: req.key } }
+            : {},
       currencies: (req) => (req.kind === "merit" ? ["merit"] : []),
       apply(l, req, env) {
         const c = l.character;
@@ -315,12 +390,14 @@ export function liveOps(h: Helpers): Defs {
         if (req.kind === "merit") {
           const rolls = Array.from({ length: req.amount }, () => env.roll());
           const extra = req.neat ? neatBonus(req.amount, rolls) : 0;
-          const m = earnMerits(c, l.purse, req.amount + extra, req.reason, req.week);
+          const total = req.amount + extra;
+          const t = counted(l, req.reason, total, req.day);
+          const m = earnMerits(c, l.purse, total, req.reason, { week: req.week, counted: t.n });
           return ok({
             character: {},
             purse: m.purse,
             ledger: m.ledger,
-            live: m.live,
+            live: { ...m.live, daily: [t.daily] },
             outcome: {
               cancelled: m.cancelled,
               spare: m.spare,
@@ -329,6 +406,8 @@ export function liveOps(h: Helpers): Defs {
             },
           });
         }
+        // Booked under this key already (its conduct rows carry it as their operation id).
+        if (l.live.keyed) return ok({ outcome: { already: true, demerits: c.demerits } });
         const d = addDemerits({ demerits: c.demerits }, req.amount);
         const ch: LiveCharacter = { demerits: d.demerits };
         const conduct: { kind: "demerit" | "merit"; amount: number; reason: string }[] = [
@@ -351,7 +430,7 @@ export function liveOps(h: Helpers): Defs {
         if (titles !== c.titles) ch.titles = titles;
         return ok({
           character: {},
-          live: { character: ch, conduct },
+          live: { character: ch, conduct, ...(req.key ? { conductKey: req.key } : {}) },
           outcome: {
             demerits: d.demerits,
             expelled: d.expelled,
@@ -366,14 +445,18 @@ export function liveOps(h: Helpers): Defs {
       client: false,
       rows: () => ({}),
       currencies: () => [],
-      apply(l, _req, env) {
+      apply(l, req, env) {
         const c = l.character;
-        const ch: LiveCharacter = {};
+        const ch: LiveCharacter = { liveSession: req.session };
         const away = c.poolStartedAt !== null && c.poolStoppedAt === null;
         if (away) ch.poolStoppedAt = env.now;
-        // 숙면: the first 30 minutes after logging out in the 기숙사.
-        const rested = away && c.poolPlace === "dorm";
-        if (rested) ch.restedUntil = at(env.now.getTime() + RESTED.seconds * SECOND_MS);
+        // 숙면, earned by how long the player actually slept in the 기숙사.
+        const slept =
+          away && c.poolPlace === "dorm" && c.poolStartedAt
+            ? restedSeconds((env.now.getTime() - c.poolStartedAt.getTime()) / SECOND_MS)
+            : 0;
+        const rested = slept > 0;
+        if (rested) ch.restedUntil = at(env.now.getTime() + slept * SECOND_MS);
         return ok({ character: {}, live: { character: ch }, outcome: { rested } });
       },
     },
@@ -388,6 +471,8 @@ export function liveOps(h: Helpers): Defs {
       ],
       apply(l, req, env) {
         const c = l.character;
+        // A newer session logged in before this one's logout ran: the player is online.
+        if (c.liveSession !== null && c.liveSession !== req.session) return no("session_replaced");
         // A pool left unclaimed is paid out before the new one starts, so no fill is lost.
         const old = poolNow(c, env.now, env.page);
         let purse = l.purse;
@@ -491,6 +576,33 @@ export function liveOps(h: Helpers): Defs {
       },
     },
 
+    "live.floorLeader": {
+      client: false,
+      rows: (req) => ({ live: { leader: req.week } }),
+      currencies: () => ["merit"],
+      apply(l, req) {
+        const row = l.live.leader;
+        if (!row) return no("not_leader");
+        if (row.paid) return ok({ outcome: { paid: false } });
+        // The 층장's own +5 never counts toward choosing the next 층장.
+        const m = earnMerits(l.character, l.purse, MERITS["floor-leader"], "floor-leader", {
+          week: req.week,
+          counted: 0,
+        });
+        return ok({
+          character: {},
+          purse: m.purse,
+          ledger: m.ledger,
+          live: { ...m.live, leaderPaid: req.week },
+          outcome: {
+            paid: true,
+            cancelled: m.cancelled,
+            demerits: l.character.demerits - m.cancelled,
+          },
+        });
+      },
+    },
+
     "live.boardDay": {
       client: false,
       rows: (req) => ({ quests: dailyIds(req.day) }),
@@ -547,12 +659,14 @@ export function liveOps(h: Helpers): Defs {
 
     "live.helpTake": {
       client: false,
-      rows: (req) => ({ live: { notice: req.notice, helpState: true } }),
+      rows: (req) => ({ quests: [req.quest.id], live: { notice: req.notice, helpState: true } }),
       currencies: () => [],
       apply(l, req, env) {
         const n = l.live.notice;
         if (n?.state !== "open" || n.expiresAt.getTime() <= env.now.getTime())
           return no("help_gone");
+        // A helper who gave this notice back does not take it again.
+        if (l.quests.has(req.quest.id)) return no("help_gone");
         if (n.posterId === l.character.id) return no("help_self");
         if (!mayHelp(l.character.level, n.posterLevel)) return no("help_helper_level");
         if (l.live.helping) return no("help_busy");
@@ -583,6 +697,25 @@ export function liveOps(h: Helpers): Defs {
         if (n.state !== "open") return no("help_gone");
         return ok({
           live: { notice: { update: { id: n.id, state: "cancelled", helperId: null } } },
+          outcome: { notice: n.id },
+        });
+      },
+    },
+
+    "live.helpDrop": {
+      client: false,
+      rows: (req) => ({ quests: [helpQuestId(req.notice)], live: { notice: req.notice } }),
+      currencies: () => [],
+      apply(l) {
+        const n = l.live.notice;
+        const q = l.quests.get(helpQuestId(n?.id ?? ""));
+        if (n?.state !== "taken" || n.helperId !== l.character.id || q?.state !== "active") {
+          return no("help_gone");
+        }
+        return ok({
+          // Claimed with nothing paid: the row is over and blocks taking the notice again.
+          quests: [{ ...q, state: "claimed", progress: q.target }],
+          live: { notice: { update: { id: n.id, state: "open", helperId: null } } },
           outcome: { notice: n.id },
         });
       },

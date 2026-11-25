@@ -5,6 +5,9 @@ import {
   boardDay,
   boardStreak,
   boardWeek,
+  CLOCK_MAX_RATE,
+  CLOCK_MAX_STEP_MS,
+  checkAnchor,
   clockAt,
   DAY_MS,
   dayStart,
@@ -30,6 +33,16 @@ describe("server clock", () => {
     expect(clockAt(c, 3000)).toBe(clockAt(b, 3000));
     expect(clockAt(c, 4000)).toBe(clockAt(b, 3000) + 1000);
     expect(() => reanchor(a, 0, { rate: 0 })).toThrow();
+  });
+
+  it("refuses a step or anchor that would leave the clock unusable", () => {
+    const a = { realMs: 0, gameMs: 50_000, rate: 1 };
+    expect(() => reanchor(a, 0, { stepMs: Number.POSITIVE_INFINITY })).toThrow();
+    expect(() => reanchor(a, 0, { stepMs: Number.NaN })).toThrow();
+    expect(() => reanchor(a, 0, { stepMs: CLOCK_MAX_STEP_MS + 1 })).toThrow();
+    expect(reanchor(a, 0, { stepMs: CLOCK_MAX_STEP_MS }).gameMs).toBe(50_000 + CLOCK_MAX_STEP_MS);
+    expect(() => checkAnchor({ realMs: 0, gameMs: Number.POSITIVE_INFINITY, rate: 1 })).toThrow();
+    expect(() => checkAnchor({ realMs: 0, gameMs: 0, rate: CLOCK_MAX_RATE + 1 })).toThrow();
   });
 
   it("thirteen weeks at rate 1456 take about ninety minutes", () => {

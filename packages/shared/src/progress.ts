@@ -127,7 +127,10 @@ export interface PoolFill extends Rate {
   readonly seconds: number;
 }
 
-/** What a pool holds after `offlineSeconds`. Sheets and 잉크 stay fractional until claimed. */
+/**
+ * What a pool holds after `offlineSeconds`, in whole units: what a claim would pay. The fraction
+ * below one unit of each is not paid (at most one EXP, 솔방울, 낱장 and 잉크 a pool).
+ */
 export function poolFill(
   rate: Rate,
   offlineSeconds: number,
@@ -139,10 +142,10 @@ export function poolFill(
   const seconds = Math.min(cap, Math.max(0, offlineSeconds));
   const k = share * seconds;
   return {
-    exp: rate.exp * k * catchUpMult,
-    pinecone: rate.pinecone * k,
-    sheets: rate.sheets * k,
-    ink: rate.ink * k,
+    exp: Math.floor(rate.exp * k * catchUpMult),
+    pinecone: Math.floor(rate.pinecone * k),
+    sheets: Math.floor(rate.sheets * k),
+    ink: Math.floor(rate.ink * k),
     seconds,
   };
 }
@@ -203,8 +206,17 @@ export function catchUp(level: number, frontierPage: number): number {
   return Math.min(CATCH_UP_MAX, 1 + ((CATCH_UP_MAX - 1) * below) / CATCH_UP_FADE);
 }
 
-/** 숙면: logging out in the 기숙사 gives +50% EXP for the first 30 minutes of the next session. */
-export const RESTED = { bonus: 0.5, seconds: 1800 } as const;
+/**
+ * 숙면: logging out in the 기숙사 gives +50% EXP for the first 30 minutes of the next session,
+ * earned by sleep: nothing for less than an hour away, the full 30 minutes from six hours.
+ */
+export const RESTED = { bonus: 0.5, seconds: 1800, minAway: 3600, fullAway: 6 * 3600 } as const;
+
+/** Seconds of 숙면 a night of `awaySeconds` in the 기숙사 earns: linear from one hour to six. */
+export function restedSeconds(awaySeconds: number): number {
+  const share = (awaySeconds - RESTED.minAway) / (RESTED.fullAway - RESTED.minAway);
+  return Math.floor(RESTED.seconds * Math.min(1, Math.max(0, share)));
+}
 /** 졸음: two hours of unbroken full-auto hunting costs 10% EXP until cleared. */
 export const DROWSY = { afterSeconds: 7200, penalty: 0.1 } as const;
 
@@ -268,7 +280,10 @@ export function questReward(
   const r = QUEST_REWARD[cadence];
   const share = cadence === "repeat" ? repeatShare(completedToday) : 1;
   return {
-    exp: monsterEXP(level, 1) * r.kills * share * expFalloff(playerLevel, level) * catchUpMult,
+    // Whole EXP: the fraction of the last point is not paid.
+    exp: Math.floor(
+      monsterEXP(level, 1) * r.kills * share * expFalloff(playerLevel, level) * catchUpMult,
+    ),
     pinecone: Math.round(monsterCoin(level, 1) * r.kills * share),
     ink: r.ink,
     binding: r.binding,
@@ -293,7 +308,7 @@ export function storyReward(
 export function completeQuest(
   purse: Purse,
   reward: QuestReward,
-  cadence: Cadence | "story" | "help",
+  cadence: Cadence | "story" | "help" | "chore",
   sheetBook: string,
 ): Outcome<{ purse: Purse; exp: number }> {
   const gain: Amounts = { pinecone: reward.pinecone, ink: reward.ink, binding: reward.binding };
