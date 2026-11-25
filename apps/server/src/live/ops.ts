@@ -64,6 +64,8 @@ export interface ProgressRequest {
   /** Story beats played; bosses cleared (a 복습 fight or the live one). */
   story: string[];
   bosses: string[];
+  /** Chores done in place (`cleaning`). */
+  chores: string[];
   /** `help:` quest rows to move, with how far. */
   help: Record<string, number>;
   visit: string[];
@@ -202,6 +204,7 @@ function increment(q: QuestRow, r: ProgressRequest): number {
   const o = q.offer;
   const slot = (k: string) => o.slots?.[k];
   if (o.cadence === "help") return r.help[q.id] ?? 0;
+  if (o.cadence === "chore") return Number(r.chores.includes(o.template ?? ""));
   if (o.cadence === "story") {
     const boss = o.kind === "boss" ? String(slot("boss") ?? "") : "";
     return boss ? Number(r.bosses.includes(boss)) : Number(r.story.includes(o.template ?? ""));
@@ -257,7 +260,8 @@ export function liveOps(h: Helpers): Defs {
           ...(req.notice ? { notice: req.notice } : {}),
         },
       }),
-      currencies: (req) => (Object.keys(req.help).length > 0 ? ["merit"] : []),
+      currencies: (req) =>
+        Object.keys(req.help).length > 0 || req.chores.length > 0 ? ["merit"] : [],
       apply(l, req, env) {
         const now = env.now.getTime();
         const changed: QuestRow[] = [];
@@ -276,6 +280,24 @@ export function liveOps(h: Helpers): Defs {
             continue;
           }
           done.push(q.id);
+          if (q.offer.cadence === "chore") {
+            // A chore pays its 상점 when it is done, once: the row goes straight to claimed.
+            changed.push({ ...q, progress, state: "claimed" });
+            if (q.offer.merit) {
+              const c = counted(l, "cleaning", q.offer.merit, req.day);
+              const m = earnMerits(
+                { ...l.character, ...live.character } as CharacterRow,
+                purse,
+                q.offer.merit,
+                "cleaning",
+                { week: boardWeek(now), counted: c.n },
+              );
+              purse = m.purse;
+              ledger.push(...m.ledger);
+              live = mergeLive(live, { ...m.live, daily: [c.daily] });
+            }
+            continue;
+          }
           if (q.offer.cadence !== "help") {
             changed.push({ ...q, progress, state: "done" });
             continue;

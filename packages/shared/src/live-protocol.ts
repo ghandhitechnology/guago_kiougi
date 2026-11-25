@@ -113,7 +113,7 @@ export interface PageView {
   nextWeekly: number;
 }
 
-export type NoticeCadence = "daily" | "weekly" | "repeat" | "story" | "help";
+export type NoticeCadence = "daily" | "weekly" | "repeat" | "story" | "help" | "chore";
 
 /** A notice on a player's board: the quest row and what it was drawn as. */
 export interface NoticeView extends QuestView {
@@ -155,6 +155,8 @@ export interface BoardView {
   /** Repeatables claimed today, for the step-down. */
   repeatsToday: number;
   story: NoticeView[];
+  /** Today's chores (청소 당번): finished in place, they pay their 상점 at once. */
+  chores: NoticeView[];
   help: {
     /** The notice this player posted, while it is up. */
     mine: HelpNoticeView | null;
@@ -235,7 +237,9 @@ export type LivePush =
   /** 명령퇴사: home until then (game ms). */
   | { t: "home"; until: number }
   /** An award was given (`narrative.awards` id). */
-  | { t: "award"; award: string };
+  | { t: "award"; award: string }
+  /** A scene's `play` condition the server met (`home-minute:3` in the home scene). */
+  | { t: "scene"; until: string };
 
 // Validators --------------------------------------------------------------------------------
 

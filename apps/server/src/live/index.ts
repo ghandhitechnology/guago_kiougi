@@ -17,6 +17,7 @@ import {
   mealById,
   mealOf,
   NEAT,
+  narrative,
 } from "@guago/content";
 import {
   boardDay,
@@ -29,6 +30,7 @@ import {
   DESK_CURE_SECONDS,
   type DemeritReason,
   DROWSY,
+  dayStart,
   EXPEL,
   FLOOR_LEADERS,
   type HelpTemplate,
@@ -46,6 +48,7 @@ import {
   liveReadSchema,
   MERITS,
   type MeritReason,
+  MINUTE_MS,
   type Modifiers,
   modifiers,
   NO_MODIFIERS,
@@ -156,6 +159,8 @@ export function createLive(db: Db, o: LiveOptions) {
   const autoSince = new Map<string, number>();
   const deskSince = new Map<string, number>();
   const homeUntil = new Map<string, number>();
+  /** The last `home-minute` sent to each player at home. */
+  const homeMinute = new Map<string, number>();
   const sentHome = new Set<(characterId: string, until: number) => void>();
   let floorLeaders = { week: -1, ids: new Set<string>() };
   const buckets = new Buckets();
@@ -176,6 +181,30 @@ export function createLive(db: Db, o: LiveOptions) {
         () => {},
         (error) => log(`live ${what} failed: ${describeError(error)}`),
       );
+
+  /**
+   * An award given: the 상장 to the player, and the principal's line to everyone when the
+   * narrative has one (`award.given.<id>`; 집에 갔상 has its own, `expel.title`).
+   */
+  async function award(characterId: string, id: string): Promise<void> {
+    push(characterId, { t: "award", award: id });
+    const key = id === "went-home" ? "expel.title" : `award.given.${id}`;
+    if (!SYSTEM_KEYS.has(key)) return;
+    const name = online.get(characterId)?.name ?? (await character(characterId))?.name ?? "";
+    line(key, { player: name });
+  }
+
+  /** 도감 entries unlocked: the push, the line for every set they completed, the new bonus. */
+  async function unlockedNow(characterId: string, entries: readonly string[]): Promise<void> {
+    if (entries.length === 0) return;
+    push(characterId, { t: "unlock", entries: [...entries] });
+    const all = new Set((await unlocked(characterId)).map((u) => u.id));
+    for (const set of completedSets(all)) {
+      if (set.entries.some((e) => entries.includes(e)))
+        line(`codex-set.${set.id}`, undefined, characterId);
+    }
+    await refreshRules(characterId);
+  }
 
   /** Runs a server operation, retrying a dropped connection under the same id. */
   async function run<K extends AnyOp>(
@@ -317,6 +346,10 @@ export function createLive(db: Db, o: LiveOptions) {
     for (const id of done) {
       const q = await board.quest(characterId, id);
       if (q) push(characterId, { t: "done", quest: noticeView(q) });
+      if (id.startsWith("chore:")) {
+        line("merit.cleaning", undefined, characterId);
+        void refreshRules(characterId);
+      }
       if (id.startsWith("help:")) {
         const h = helping.get(characterId);
         helping.delete(characterId);
@@ -350,10 +383,7 @@ export function createLive(db: Db, o: LiveOptions) {
       notify(characterId, result);
       const done = (result.outcome.done as readonly string[] | undefined) ?? [];
       const codex = result.change.codex ?? [];
-      if (codex.length > 0) {
-        push(characterId, { t: "unlock", entries: [...codex] });
-        background("rules", () => refreshRules(characterId));
-      }
+      if (codex.length > 0) background("unlock", () => unlockedNow(characterId, codex));
       if (done.length > 0) background("done", () => finished(characterId, done));
     },
   });
@@ -433,26 +463,28 @@ export function createLive(db: Db, o: LiveOptions) {
         }
       }
     }
-    for (const award of (out.titles as readonly string[] | undefined) ?? []) {
-      push(characterId, { t: "award", award });
-      if (award === "went-home") {
-        const name = online.get(characterId)?.name ?? (await character(characterId))?.name ?? "";
-        line("expel.title", { player: name });
-      }
-    }
+    for (const id of (out.titles as readonly string[] | undefined) ?? [])
+      await award(characterId, id);
     await refreshRules(characterId);
     return result;
   }
 
   async function eat(characterId: string): Promise<"ok" | "meal_full" | "sent_home"> {
-    if ((homeUntil.get(characterId) ?? 0) > now()) return "sent_home";
+    if ((homeUntil.get(characterId) ?? 0) > now()) {
+      line("meal.sent-home", undefined, characterId);
+      return "sent_home";
+    }
     const t = now();
     const meal = mealOf(t);
     const result = await run(characterId, `meal:${randomUUID()}`, "live.meal", {
       meal: meal.id,
       week: boardWeek(t),
     });
-    if (!result.ok) return "meal_full";
+    if (!result.ok) {
+      line("meal.full", undefined, characterId);
+      return "meal_full";
+    }
+    line(`meal.eat.${meal.id}`, undefined, characterId);
     notify(characterId, result);
     await refreshRules(characterId);
     return "ok";
@@ -461,6 +493,7 @@ export function createLive(db: Db, o: LiveOptions) {
   async function setDrowsy(characterId: string, drowsy: boolean): Promise<void> {
     const r = await run(characterId, `drowsy:${randomUUID()}`, "live.drowsy", { drowsy });
     notify(characterId, r);
+    if (r.ok) line(drowsy ? "rule.drowsy" : "rule.drowsy-desk", undefined, characterId);
     await refreshRules(characterId);
   }
 
@@ -482,10 +515,21 @@ export function createLive(db: Db, o: LiveOptions) {
     }
   }
 
+  /**
+   * 명령퇴사: one `home-minute:<n>` a minute to the player at home (the home scene waits on
+   * them, one line from the parent each), then the return line.
+   */
   function checkHome(t: number): void {
     for (const [id, until] of homeUntil) {
+      const start = until - EXPEL.homeSeconds * SECOND_MS;
+      const due = Math.min(HOME_MINUTES, Math.floor((t - start) / MINUTE_MS));
+      for (let n = (homeMinute.get(id) ?? 0) + 1; n <= due; n++) {
+        push(id, { t: "scene", until: `home-minute:${n}` });
+        homeMinute.set(id, n);
+      }
       if (until > t) continue;
       homeUntil.delete(id);
+      homeMinute.delete(id);
       if (online.has(id)) line("expel.return", undefined, id);
     }
   }
@@ -506,10 +550,7 @@ export function createLive(db: Db, o: LiveOptions) {
     );
     notify(characterId, r);
     const codex = r.ok ? (r.change.codex ?? []) : [];
-    if (codex.length > 0) {
-      push(characterId, { t: "unlock", entries: [...codex] });
-      await refreshRules(characterId);
-    }
+    await unlockedNow(characterId, codex);
   }
 
   // Sessions ----------------------------------------------------------------------------------
@@ -525,6 +566,7 @@ export function createLive(db: Db, o: LiveOptions) {
     });
     const login = await run(c.id, `login:${sessionId}`, "live.login", { session: sessionId });
     notify(c.id, login);
+    if (login.ok && login.outcome.rested) line("rule.rested", undefined, c.id);
     push(c.id, { t: "page", page: page.view() });
     await freedCodex(c.id);
     await ensureBoard(c.id, false);
@@ -580,7 +622,10 @@ export function createLive(db: Db, o: LiveOptions) {
     for (const id of online.keys()) background("codex", () => freedCodex(id));
   }
 
-  async function onDay(): Promise<void> {
+  async function onDay(day: number): Promise<void> {
+    // A menu with its own broadcast (수요 특식) is announced as its day begins.
+    const menu = mealOf(dayStart(day));
+    if (menu.announce) line(menu.announce);
     await board.sweep();
     for (const id of online.keys()) background("board", () => ensureBoard(id, true));
   }
@@ -615,10 +660,12 @@ export function createLive(db: Db, o: LiveOptions) {
     );
     const ids = rows.rows.map((r) => r.character_id as string);
     if (week === boardWeek(now())) floorLeaders = { week, ids: new Set(ids) };
+    let announce = false;
     for (const r of rows.rows.filter((x) => x.paid !== true)) {
       const id = r.character_id as string;
       const paid = await run(id, `floor-leader:${week}`, "live.floorLeader", { week });
       if (paid.ok && paid.outcome.paid) {
+        announce = true;
         notify(id, paid);
         line("merit.floor-leader", undefined, id);
         if (Number(paid.outcome.cancelled) > 0) {
@@ -628,6 +675,12 @@ export function createLive(db: Db, o: LiveOptions) {
       }
       await fault(`paid:${id}`);
     }
+    if (announce) {
+      const named = await db.execute(sql`
+        select c.name from floor_leaders f join characters c on c.id = f.character_id
+        where f.week = ${week} order by f.rank`);
+      line("floor-leaders", { names: named.rows.map((r) => r.name as string).join(", ") });
+    }
     const meals = await db.execute(sql`
       select character_id from weekly_tally where week = ${previous} and kind = 'meal' and n > 0
       order by n desc, character_id limit 1`);
@@ -636,7 +689,7 @@ export function createLive(db: Db, o: LiveOptions) {
       const r = await run(eater, `award:ate-it-all:${week}`, "live.award", { award: "ate-it-all" });
       if (r.ok && r.outcome.award) {
         notify(eater, r);
-        push(eater, { t: "award", award: "ate-it-all" });
+        await award(eater, "ate-it-all");
       }
     }
     await fault("awarded");
@@ -659,20 +712,20 @@ export function createLive(db: Db, o: LiveOptions) {
             day: Number(day),
           });
           notify(characterId, r);
-          if (r.ok && r.outcome.award)
-            push(characterId, { t: "award", award: String(r.outcome.award) });
+          if (r.ok && r.outcome.award) await award(characterId, String(r.outcome.award));
         });
       }
       if (kind === "repeat") background("board", () => ensureBoard(characterId, true));
     }
     if (name === "craft" && (result.change.codex ?? []).length > 0) {
-      push(characterId, { t: "unlock", entries: [...(result.change.codex ?? [])] });
-      background("rules", () => refreshRules(characterId));
+      const entries = result.change.codex ?? [];
+      background("unlock", () => unlockedNow(characterId, entries));
     }
     if (name === "drowsy.drink") {
       const me = online.get(characterId);
       if (me) me.rules = { ...me.rules, drowsy: false };
       if (autoSince.has(characterId)) autoSince.set(characterId, now());
+      line("rule.drowsy-drink", undefined, characterId);
       background("rules", () => refreshRules(characterId));
     }
   }
@@ -770,11 +823,9 @@ export function createLive(db: Db, o: LiveOptions) {
     },
     /** Ate at the 급식실: today's menu as a 30-minute buff. */
     eat,
-    /** The 청소 당번 daily was done: +1 상점. */
-    cleaning(characterId: string): Promise<void> {
-      return background("cleaning", () =>
-        conduct(characterId, { kind: "merit", reason: "cleaning" }),
-      );
+    /** The 청소 당번 chore was done where its notice said: +1 상점 once a day, with the notice. */
+    cleaning(characterId: string): void {
+      progress.mark(characterId, "chores", "cleaning");
     },
 
     // Moderation.
@@ -1148,6 +1199,11 @@ export type Live = ReturnType<typeof createLive>;
 
 /** Every map a Page's lifecycle opens; anything else is campus and always open. */
 const ERA_MAPS = new Set(LIFECYCLES.flatMap((l) => l.steps.flatMap((s) => s.maps ?? [])));
+
+/** Every system line id the narrative words; a line is sent only when it has one. */
+const SYSTEM_KEYS = new Set(narrative.NARRATIVE.system.map((m) => m.id));
+/** The home scene's minutes (`home-minute:1` … `:10`): one a minute of 명령퇴사. */
+const HOME_MINUTES = EXPEL.homeSeconds / 60;
 
 /** Admin commands a live server answers; the rest are for test servers. */
 const ADMIN_READS = new Set(["state", "notebook"]);

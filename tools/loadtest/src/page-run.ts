@@ -190,6 +190,16 @@ const unlock = next("unlock");
 await event("visit", me, "study-hall");
 say(`도감 unlock push: ${(await unlock).entries.join(", ")}`);
 
+// 급식 and the 청소 당번 chore.
+say(`eat: ${String((await event("eat", me)).result)}`);
+say(`eat again: ${String((await event("eat", me)).result)}`);
+await event("cleaning", me);
+await new Promise((r) => setTimeout(r, 200));
+board = (await read("board")).board;
+say(
+  `chores: ${board.chores.map((q) => `${q.id} ${JSON.stringify(q.slots)} ${q.state}`).join(", ")}`,
+);
+
 // Week 0 to 시대 전환 --------------------------------------------------------------------
 const step = async (by: string) => {
   const out = await admin({ cmd: "step", by });
@@ -291,6 +301,11 @@ say(
 for (let i = 0; i < 10; i++) await event("patrolCaught", me);
 await new Promise((r) => setTimeout(r, 300));
 const home = pushes.find((p) => p.t === "home");
+await admin({ cmd: "step", by: "11m" });
+await new Promise((r) => setTimeout(r, 1300));
+const minutes = pushes.flatMap((p) => (p.t === "scene" ? [p.until] : []));
+say(`home scene: ${minutes.join(", ")}`);
+check(minutes.length === 10, "one home minute a minute");
 say(`home push: ${home && home.t === "home" ? `until ${kst(home.until)}` : "none"}`);
 const rules = (await read("rules")).rules;
 say(

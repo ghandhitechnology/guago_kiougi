@@ -308,7 +308,7 @@ export function storyReward(
 export function completeQuest(
   purse: Purse,
   reward: QuestReward,
-  cadence: Cadence | "story" | "help",
+  cadence: Cadence | "story" | "help" | "chore",
   sheetBook: string,
 ): Outcome<{ purse: Purse; exp: number }> {
   const gain: Amounts = { pinecone: reward.pinecone, ink: reward.ink, binding: reward.binding };

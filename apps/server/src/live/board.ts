@@ -9,11 +9,13 @@
 import { randomUUID } from "node:crypto";
 import {
   boardField,
+  CHORE_PLACES,
   drawHelp,
   drawNotices,
   type FieldDef,
   type Milestone,
   milestoneReached,
+  narrative,
   type QuestOffer,
   STARTER_BOOKS,
   STORY_CHAPTERS,
@@ -47,6 +49,9 @@ import { noticeFromDb } from "./rows.ts";
 
 /** How long a notice's row is kept after it came down. */
 export const BOARD_KEEP_MS = 7 * DAY_MS;
+
+/** 상점 a chore pays when it is done, by chore id. */
+const CHORE_MERITS: Readonly<Record<string, number>> = { cleaning: MERITS.cleaning };
 
 const NO_REWARD: QuestReward = { exp: 0, pinecone: 0, ink: 0, binding: 0, sheets: 0 };
 
@@ -135,7 +140,8 @@ export class Board {
       select quest_id, state from quest_progress
       where character_id = ${who.id}
         and (quest_id like ${`daily:${day}:%`} or quest_id like ${`weekly:${week}:%`}
-          or quest_id like ${`repeat:${day}:%`} or quest_id like 'story:%')`);
+          or quest_id like ${`repeat:${day}:%`} or quest_id like 'story:%'
+          or quest_id like ${`chore:${day}:%`})`);
     const have = new Map(rows.map((r) => [r.quest_id as string, r.state as string]));
     const out: PostedQuest[] = [];
     const milestone = this.ctx.milestone();
@@ -194,6 +200,30 @@ export class Board {
           });
       }
     }
+    // Today's chores: the 청소 당번 notice, at a campus place drawn from the day's seed.
+    for (const chore of narrative.NARRATIVE.chores ?? []) {
+      const id = `chore:${day}:${chore.id}`;
+      if (have.has(id)) continue;
+      const end = dayStart(day + 1);
+      const random = new Random(seedOf(`${who.id}:${id}`));
+      const slots: Record<string, string> = {};
+      if (chore.slots.includes("place")) slots.place = random.pick(CHORE_PLACES);
+      out.push({
+        id,
+        target: 1,
+        offer: {
+          cadence: "chore",
+          reward: NO_REWARD,
+          sheetBook: who.book,
+          template: chore.id,
+          kind: "chore",
+          slots,
+          merit: CHORE_MERITS[chore.id] ?? 0,
+          expiresAt: end,
+        },
+        resetAt: end,
+      });
+    }
     // Story chapters the server has reached, each played once for its first-clear reward.
     const level = field ? clamp(who.level, field) : who.level;
     for (const ch of STORY_CHAPTERS) {
@@ -235,7 +265,8 @@ export class Board {
       select quest_id, state, progress, target, offer from quest_progress
       where character_id = ${characterId}
         and (quest_id like ${`daily:${day}:%`} or quest_id like ${`weekly:${week}:%`}
-          or quest_id like ${`repeat:${day}:%`} or quest_id like 'story:%')
+          or quest_id like ${`repeat:${day}:%`} or quest_id like 'story:%'
+          or quest_id like ${`chore:${day}:%`})
       order by quest_id`);
     const quests = rows.map((r) => questFromDb(r));
     const repeats = quests.filter((q) => q.id.startsWith("repeat:"));
@@ -253,6 +284,7 @@ export class Board {
       })(),
       repeatsToday: repeats.filter((q) => q.state === "claimed").length,
       story: quests.filter((q) => q.id.startsWith("story:")).map(noticeView),
+      chores: quests.filter((q) => q.id.startsWith("chore:")).map(noticeView),
       help,
     };
   }
@@ -428,7 +460,7 @@ export class Board {
       delete from quest_progress
       where reset_at < ${cutoff}::timestamptz
         and (quest_id like 'daily:%' or quest_id like 'weekly:%' or quest_id like 'repeat:%'
-          or quest_id like 'help:%')`);
+          or quest_id like 'help:%' or quest_id like 'chore:%')`);
   }
 }
 

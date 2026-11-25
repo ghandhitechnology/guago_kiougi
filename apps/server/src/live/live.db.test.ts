@@ -269,7 +269,7 @@ describe("벌점 and 상점", () => {
     expect((await row(c.id)).demerits).toBe(3);
     await w.live.events.revive(c.id, friend.id);
     expect((await row(c.id)).demerits).toBe(2);
-    for (let i = 0; i < 3; i++) await w.live.events.cleaning(c.id);
+    for (let i = 0; i < 3; i++) await w.live.events.revive(c.id, friend.id);
     let r = await row(c.id);
     expect([r.demerits, r.merits]).toEqual([0, 4]);
     const wallet = await db.pool.query("select merit_points from wallets where character_id = $1", [
@@ -606,7 +606,8 @@ describe("상점 farming", () => {
   it("never counts a 층장's own +5 toward the next 층장", async () => {
     const w = await world();
     const c = await character(w);
-    await w.live.events.cleaning(c.id);
+    const friend = await character(w);
+    await w.live.events.revive(c.id, friend.id);
     w.clock.step(5 * DAY_MS);
     await w.page.tick();
     w.clock.step(7 * DAY_MS);
@@ -704,5 +705,26 @@ describe("board rows", () => {
     expect(ids.some((id) => id.startsWith(`daily:${day}:`))).toBe(false);
     expect(ids.some((id) => id.startsWith(`daily:${day + 3}:`))).toBe(true);
     expect(ids.some((id) => id.startsWith("story:"))).toBe(true);
+  });
+});
+
+describe("청소 당번", () => {
+  it("is a daily notice that pays its 상점 once, when it is done", async () => {
+    const w = await world();
+    const c = await character(w);
+    w.live.events.cleaning(c.id);
+    await w.live.progress.flush(c.id);
+    expect((await row(c.id)).merits).toBe(0);
+    await w.live.board.ensure(c.id);
+    const day = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    const chore = await w.live.board.quest(c.id, `chore:${day}:cleaning`);
+    expect(chore?.offer.slots?.place).toBeTruthy();
+    for (let i = 0; i < 3; i++) {
+      w.live.events.cleaning(c.id);
+      await w.live.progress.flush(c.id);
+    }
+    expect((await w.live.board.quest(c.id, `chore:${day}:cleaning`))?.state).toBe("claimed");
+    expect((await row(c.id)).merits).toBe(1);
+    expect(await ledgerCount(c.id, "merit.cleaning")).toBe(1);
   });
 });
