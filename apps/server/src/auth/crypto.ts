@@ -98,7 +98,34 @@ const hmac = (secret: string, purpose: string, value: string) =>
 
 /** Keyed hash of a client IP: lets limits count per IP without storing the address. */
 export function ipHash(ip: string, secret: string): string {
-  return hmac(secret, "ip", ip).toString("hex");
+  return hmac(secret, "ip", ipKey(ip)).toString("hex");
+}
+
+/**
+ * What one address counts as: an IPv4 address itself (also when written IPv4-mapped), an IPv6
+ * address by its /64, the network one home or phone holds while its privacy addresses rotate.
+ */
+export function ipKey(ip: string): string {
+  const raw = ip
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(raw);
+  if (mapped?.[1]) return mapped[1];
+  if (!raw.includes(":")) return raw;
+  const [head = "", tail] = raw.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups =
+    tail === undefined
+      ? left
+      : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  if (groups.length !== 8) return raw;
+  return `${groups
+    .slice(0, 4)
+    .map((g) => (Number.parseInt(g || "0", 16) || 0).toString(16))
+    .join(":")}::/64`;
 }
 
 /**

@@ -2,7 +2,9 @@
  * `chat_log` writes and retention (PLAN §12, §20). Lines are queued in memory and written as one
  * multi-row insert a second, so a busy room never waits on the database.
  */
+
 import type { ChatChannel } from "@guago/shared";
+import { background } from "../background.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
 import { chatLog } from "../db/schema.ts";
 
@@ -113,7 +115,7 @@ export class ChatLog implements ChatSink {
   constructor(db: Db, options: ChatLogOptions = {}) {
     this.db = db;
     this.onMissingPartition = options.onMissingPartition;
-    this.timer = setInterval(() => void this.flush(), FLUSH_EVERY_MS);
+    this.timer = setInterval(() => background("chat log flush", this.flush()), FLUSH_EVERY_MS);
     this.timer.unref();
   }
 

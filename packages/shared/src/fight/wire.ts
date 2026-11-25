@@ -17,6 +17,8 @@
  * keyframe block is a member count, full records, then every effect worth seeing.
  */
 
+import { TILE_SIZE } from "../constants.ts";
+
 /** Snapshot interest cells: 8×8 tiles. A client's window is the cells around its screen. */
 export const SNAP_CELL_TILES = 8;
 
@@ -207,7 +209,9 @@ export class ByteReader {
     return this.buf.length - this.n;
   }
 
+  /** Throws past the end: a reader that lost its place must fail, never spin. */
   u8(): number {
+    if (this.n >= this.buf.length) throw new RangeError("snapshot read past the end");
     return this.buf[this.n++] as number;
   }
 
@@ -721,8 +725,19 @@ export class SnapshotReader {
   tick = 0;
   private lowTick = -1;
   /** Map size in snapshot cells (`SNAP_CELL_TILES`), needed to place the window. */
-  cols = 1;
-  rows = 1;
+  readonly cols: number;
+  readonly rows: number;
+
+  /**
+   * A reader for a map `cols` × `rows` snapshot cells big; `snapshotReaderFor(map)` works them
+   * out from the map, the same way the server's encoder does.
+   */
+  constructor(cols: number, rows: number) {
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1)
+      throw new RangeError(`a snapshot reader needs the map size in cells, not ${cols} × ${rows}`);
+    this.cols = cols;
+    this.rows = rows;
+  }
 
   /** Forgets everything, as after a reconnect: the next message brings keyframes. */
   reset(): void {
@@ -1044,6 +1059,28 @@ export class SnapshotReader {
       }
     }
   }
+}
+
+/** A map's size in snapshot cells, as the server's encoder cuts it (`FightNet`). */
+export function snapshotCells(map: {
+  readonly collision: { readonly w: number; readonly h: number };
+}): {
+  cols: number;
+  rows: number;
+} {
+  const cell = SNAP_CELL_TILES * TILE_SIZE;
+  return {
+    cols: Math.max(1, Math.ceil((map.collision.w * TILE_SIZE) / cell)),
+    rows: Math.max(1, Math.ceil((map.collision.h * TILE_SIZE) / cell)),
+  };
+}
+
+/** The reader a client of this map needs: the one way every client sets one up. */
+export function snapshotReaderFor(map: {
+  readonly collision: { readonly w: number; readonly h: number };
+}): SnapshotReader {
+  const { cols, rows } = snapshotCells(map);
+  return new SnapshotReader(cols, rows);
 }
 
 /** A sink that ignores everything, for tools that only count bytes. */

@@ -10,6 +10,7 @@
  * (asked once). It is never taken as an argument, so it
  * stays out of shell history and the process list.
  */
+import { userInfo } from "node:os";
 import { createInterface } from "node:readline";
 import { config } from "../config.ts";
 import { createDb } from "../db/index.ts";
@@ -24,6 +25,8 @@ import {
 const [command, login, role] = process.argv.slice(2);
 const db = createDb(process.env.DATABASE_URL ?? config.databaseUrl);
 const admins = createAdminAuth(db, config.serverSecret);
+/** Who ran the command, for the audit row: the machine user, since there is no admin session. */
+const OPERATOR = userInfo().username;
 
 function askHidden(prompt: string): Promise<string> {
   const input = process.stdin;
@@ -97,7 +100,7 @@ async function main(): Promise<number> {
       const password = await newPassword();
       if (!password) return 2;
       try {
-        await admins.create(id, password, role as AdminRole);
+        await admins.create(id, password, role as AdminRole, OPERATOR);
       } catch (error) {
         if ((error as { cause?: { code?: string } }).cause?.code === "23505") {
           console.error(`admin ${id} exists`);
@@ -113,7 +116,7 @@ async function main(): Promise<number> {
       if (!id) return 2;
       const password = await newPassword();
       if (!password) return 2;
-      if (!(await admins.setPassword(id, password))) {
+      if (!(await admins.setPassword(id, password, OPERATOR))) {
         console.error(`no admin ${id}`);
         return 1;
       }
@@ -124,7 +127,11 @@ async function main(): Promise<number> {
     case "enable": {
       const id = loginId();
       if (!id) return 2;
-      const done = await admins.setStatus(id, command === "disable" ? "disabled" : "active");
+      const done = await admins.setStatus(
+        id,
+        command === "disable" ? "disabled" : "active",
+        OPERATOR,
+      );
       if (!done) {
         console.error(`no admin ${id}`);
         return 1;

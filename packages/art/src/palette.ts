@@ -219,6 +219,53 @@ const SLOT_OPTIONS = {
     violet: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
     mustard: ["wood.dark", "gold.dark", "gold.mid", "gold.light"],
     ash: ["ink.dark", "ink.mid", "ink.light", "stone.light"],
+    teal: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    orange: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+  },
+  /**
+   * A club emblem's shape colour (`Emblem.shapeColor`): option names are the content's
+   * `EMBLEM_COLORS` ids, each a ramp's run from dark to light.
+   */
+  emblem: {
+    ink: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
+    stone: ["stone.dark", "stone.light", "stone.pale", "stone.bright"],
+    red: ["red.deep", "red.dark", "red.mid", "red.light"],
+    gold: ["gold.dark", "gold.mid", "gold.light", "gold.pale"],
+    grass: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
+    navy: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
+    plum: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
+    rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    sea: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    wood: ["wood.deep", "wood.dark", "wood.mid", "wood.light"],
+    clay: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+    board: ["board.deep", "board.dark", "board.mid", "board.light"],
+    olive: ["olive.deep", "olive.dark", "olive.mid", "olive.light"],
+  },
+  /** The emblem symbol's colour (`Emblem.symbolColor`), from the same list. */
+  mark: {
+    ink: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
+    stone: ["stone.dark", "stone.light", "stone.pale", "stone.bright"],
+    red: ["red.deep", "red.dark", "red.mid", "red.light"],
+    gold: ["gold.dark", "gold.mid", "gold.light", "gold.pale"],
+    grass: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
+    navy: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
+    plum: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
+    rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    sea: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    wood: ["wood.deep", "wood.dark", "wood.mid", "wood.light"],
+    clay: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+    board: ["board.deep", "board.dark", "board.mid", "board.light"],
+    olive: ["olive.deep", "olive.dark", "olive.mid", "olive.light"],
+  },
+  /** A cohort's colour, worn as the stripe across the 체육복: one per Page a 기수 signed up in. */
+  cohort: {
+    gold: ["gold.deep", "gold.mid", "gold.light", "gold.pale"],
+    crimson: ["red.deep", "red.mid", "red.light", "red.pale"],
+    green: ["grass.deep", "grass.mid", "grass.light", "grass.pale"],
+    rose: ["rose.deep", "rose.mid", "rose.light", "rose.pale"],
+    violet: ["plum.deep", "plum.mid", "plum.light", "plum.pale"],
+    white: ["stone.dark", "stone.pale", "stone.bright", "stone.bright"],
   },
 } as const satisfies Record<string, Record<string, Four>>;
 
