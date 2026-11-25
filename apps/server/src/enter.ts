@@ -113,10 +113,9 @@ export function enterRoute(): Middleware {
     // Sent home (명령퇴사) lands in the 집 until the time is up; after it, never there.
     const sentHome = (await live()?.homeUntil(character.id)) != null;
     const map = belongsOn(character, sentHome);
-    const seating: Seating = await channels.seat(
+    const seating: Seating = await channels.enter(
       map,
       auth,
-      {},
       choice.monsters ? { monsters: choice.monsters } : {},
     );
     send(res, 200, seating);

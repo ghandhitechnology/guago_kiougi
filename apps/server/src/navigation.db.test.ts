@@ -494,6 +494,33 @@ describe("a seat is good only where the character belongs", () => {
 });
 
 describe("channels", () => {
+  it("count players, not spare tickets or sockets left behind at a door", async () => {
+    const a = await player("hoarder");
+    const b = await player("newcomer");
+    const c = await player("latecomer");
+    const ra = await joinMap(base, a.jar);
+    ra.room.onMessage("*", () => {});
+    // Asking to enter again and again holds one ticket: the same one comes back.
+    const first = (await enter(base, a.jar)).seating;
+    const again = (await enter(base, a.jar)).seating;
+    expect(again?.seat.sessionId).toBe(first?.seat.sessionId);
+    // Through the door, keeping the yard's socket open and never taking the far seat.
+    const end = closed(ra.room);
+    const door = await walkUpToDoor(ra.room);
+    // Two newcomers still find channel 1 of the yard, which holds two.
+    const rb = await joinMap(base, b.jar);
+    const rc = await joinMap(base, c.jar);
+    for (const r of [rb, rc]) r.room.onMessage("*", () => {});
+    expect([rb.seating.channel, rc.seating.channel]).toEqual([1, 1]);
+    // The socket left at the door is closed soon after.
+    expect(await within(end, 5000, "the old socket to close")).toBe(CLOSE_MAP_CHANGED);
+    await rb.room.leave();
+    await rc.room.leave();
+    // The spare ticket is for where the hoarder no longer belongs; the far seat is taken at last.
+    expect(await refused((first as NonNullable<typeof first>).seat, a.jar)).toBe(true);
+    await (await sdk(base, a.jar).consumeSeatReservation(door.seat, MapState)).leave();
+  });
+
   it("open the next channel when one is full, fill the lowest first and close when empty", async () => {
     const a = await player("chana");
     const b = await player("chanb");

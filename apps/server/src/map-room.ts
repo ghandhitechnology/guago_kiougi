@@ -54,14 +54,14 @@ import {
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
-import { channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
+import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubTags } from "./club-tags.ts";
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
-import { RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
 import {
   belongsOn,
@@ -96,8 +96,15 @@ const LOG_EVERY_MS = 30_000;
  * keeps every tick within a few milliseconds of its time.
  */
 const POLL_MS = 5;
-/** A seat whose player went through a door is closed if its socket is still open after this. */
-const MOVED_SOCKET_MS = 20_000;
+/**
+ * A socket whose player went through a door is closed if still open after this: the client takes
+ * its new seat at once, and an old connection kept open counts for nothing anyway.
+ */
+const MOVED_SOCKET_MS = 3000;
+/** A character goes through at most one door this often; a door walked into sooner waits. */
+const DOOR_EVERY_MS = 1000;
+/** When each character last went through a door, across the process's rooms. */
+const lastDoor = new Map<string, number>();
 /** Interact requests closer together than this are not answered. */
 const INTERACT_COOLDOWN_MS = 250;
 /** Pressing against a shut door rattles it at most this often per player. */
@@ -185,7 +192,7 @@ function facingToward(x: number, y: number, tx: number, ty: number): Facing {
  * can reconcile its prediction. Doors, zones, the cast and what is in reach are worked out from
  * the server's own positions.
  */
-export class MapRoom extends Room<{ state: MapState }> {
+export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
   override maxClients = MAP_SEATS;
@@ -231,7 +238,6 @@ export class MapRoom extends Room<{ state: MapState }> {
     // Its own copy: closed doors change it as the Page clock opens maps.
     this.map = { collision: roomCollision(def).collision };
     this.patrols = def.patrols;
-    this.maxClients = Math.max(1, Math.min(MAP_SEATS, options.seats));
     this.graceMs = options.grace * 1000;
     const { w, h } = def.collision;
     if (w * TILE_SIZE > MAX_MAP_PX || h * TILE_SIZE > MAX_MAP_PX) {
@@ -302,6 +308,15 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   get channel(): number {
     return this.state.channel;
+  }
+
+  /** Accounts with a body standing here: what fills a channel (`channels.occupancy`). */
+  accountsHere(): ReadonlySet<string> {
+    const out = new Set<string>();
+    for (const pawn of this.pawns.values()) {
+      if (!pawn.leaving) out.add((pawn.client.auth as RoomAuth).accountId);
+    }
+    return out;
   }
 
   /** Ids of the characters standing here, for tests and tools. */
@@ -566,12 +581,18 @@ export class MapRoom extends Room<{ state: MapState }> {
     const walkers = this.world.players.filter((p) => !this.pawns.get(p.id)?.leaving);
     const doors = stepDoors(this.inside, walkers, this.def.portals);
     this.inside = new Map(doors.inside);
+    const now = Date.now();
     for (const { id, portal } of doors.entered) {
       const pawn = this.pawns.get(id);
       const p = this.def.portals[portal];
-      if (pawn && p?.built) void this.walkThrough(pawn, p.id, p.to, p.spawn);
+      if (!pawn || !p?.built) continue;
+      // Too soon after the last door: it counts as walked into again next tick, until it may open.
+      if (now - (lastDoor.get(pawn.character.id) ?? 0) < DOOR_EVERY_MS) {
+        this.inside.set(id, -1);
+        continue;
+      }
+      void this.walkThrough(pawn, p.id, p.to, p.spawn);
     }
-    const now = Date.now();
     const was = new Map(before.players.map((p) => [p.id, p]));
     for (const p of walkers) {
       const pawn = this.pawns.get(p.id);
@@ -654,6 +675,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     const { client } = pawn;
     const id = client.sessionId;
     const at = this.placeOf(id);
+    noteDoor(pawn.character.id);
     pawn.leaving = true;
     pawn.queue.clear();
     this.removeBody(id);
@@ -930,5 +952,14 @@ function oneBody(characterId: string, here: MapRoom): void {
         `character ${characterId} has a body in ${room.mapId}#${room.channel} while seated in ${here.mapId}#${here.channel}`,
       );
     }
+  }
+}
+
+/** Remembers a character's door; old entries go once there are many. */
+function noteDoor(characterId: string): void {
+  const now = Date.now();
+  lastDoor.set(characterId, now);
+  if (lastDoor.size > 10_000) {
+    for (const [id, at] of lastDoor) if (now - at > DOOR_EVERY_MS) lastDoor.delete(id);
   }
 }
