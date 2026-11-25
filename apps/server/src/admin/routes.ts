@@ -300,6 +300,27 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     return { result: filters.test(b.text) };
   });
 
+  // 대자보 posts and club notices ------------------------------------------------------------
+
+  route("GET", "/posts", async (req) => {
+    await record(db, { adminId: req.admin.id, action: "posts.read", target: "posts" });
+    return await reads.posts();
+  });
+
+  route("POST", "/posts/board/:id/remove", async (req, [id]) => {
+    const n = Number(id);
+    if (!Number.isSafeInteger(n) || n < 1) throw bad();
+    done(await moderation.removePost(req.admin.id, n, reason(obj(req.body))));
+    return { ok: true };
+  });
+
+  route("POST", "/posts/notice/:id/remove", async (req, [id]) => {
+    const n = Number(id);
+    if (!Number.isSafeInteger(n) || n < 1) throw bad();
+    done(await moderation.removeClubNotice(req.admin.id, n, reason(obj(req.body))));
+    return { ok: true };
+  });
+
   // Server -------------------------------------------------------------------------------------
 
   route("POST", "/broadcast", async (req) => {

@@ -8,7 +8,7 @@ import { request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
-import { API, CLOSE_BANNED, MAP_ROOM, WORLD_ROOM } from "@guago/shared";
+import { API, CLOSE_BANNED, MAP_ROOM, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGameServer } from "../app.ts";
@@ -20,6 +20,8 @@ import { provideLive } from "../live/current.ts";
 import type { Live } from "../live/index.ts";
 import { studentLooks } from "../looks.ts";
 import { evictAccount } from "../seats.ts";
+import { executorFees } from "../social/fees.ts";
+import { createSocial } from "../social/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { call, cookieHeader, type Jar, remember, waitFor, within } from "../test/http.ts";
 import { createModerationStack, type ModerationStack } from "./index.ts";
@@ -118,13 +120,22 @@ let owner: Awaited<ReturnType<typeof adminSession>>;
 beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
   const economy = createEconomy(db);
-  stack = await createModerationStack({ db, executor: economy.executor, secret: "test" });
+  const social = createSocial(db, {
+    fees: executorFees(db, economy.executor),
+    jackets: () => ["navy"],
+  });
+  stack = await createModerationStack({
+    db,
+    executor: economy.executor,
+    secret: "test",
+    clubs: { vacate: (id, on) => social.vacate(id, on), announce: social.announce },
+  });
   auth = createAuthService({ db, gate: stack.moderation.gate, onSessionsRevoked: evictAccount });
   server = createGameServer(
     auth,
     SETTINGS,
     studentLooks,
-    { filter: stack.filter },
+    { filter: stack.filter, social },
     { ops: economy.ops, routes: economy.routes(auth) },
   );
   const port = await freePort();
@@ -415,5 +426,92 @@ describe("the admin API", () => {
     });
     // No Origin on a state change: refused.
     expect(post.status).toBe(403);
+  });
+});
+
+/** Sends one world request and waits for its one answer: `done` data or the refusal code. */
+async function ask(room: Room, type: string, req: Record<string, unknown>) {
+  const n = Math.floor(Math.random() * 1e9);
+  return within(
+    new Promise<string>((resolve) => {
+      room.onMessage(WORLD_MESSAGES.refused, (r: { n?: number; code: string }) => {
+        if (r.n === n) resolve(r.code);
+      });
+      room.onMessage(WORLD_MESSAGES.done, (r: { n?: number }) => {
+        if (r.n === n) resolve("done");
+      });
+      room.onMessage(WORLD_MESSAGES.chat, (r: { n?: number }) => {
+        if (r.n === n) resolve("sent");
+      });
+      room.send(type, { ...req, n });
+    }),
+    5000,
+    type,
+  );
+}
+
+const quiet = (room: Room) => {
+  for (const t of [WORLD_MESSAGES.presence, WORLD_MESSAGES.system, "social", "live", "change"]) {
+    room.onMessage(t, () => {});
+  }
+};
+
+describe("a mute", () => {
+  const EMBLEM = { shape: "shield", shapeColor: "navy", symbol: "atom", symbolColor: "gold" };
+
+  it("holds on every text other players see, from an admin or the filter", async () => {
+    const p = await player("muted1");
+    const other = await player("muted1b");
+    const room = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
+    const otherRoom = await sdk(other.jar).joinOrCreate(WORLD_ROOM);
+    quiet(room);
+    quiet(otherRoom);
+    otherRoom.onMessage(WORLD_MESSAGES.chat, () => {});
+    const texts: [string, Record<string, unknown>][] = [
+      ["board.post", { cat: "chat", text: "골드 싸게 팝니다" }],
+      ["board.pin", { text: "공지 아님" }],
+      ["club.notice", { text: "공지" }],
+      [
+        "club.create",
+        { op: "found-0001", name: "도배동아리", joinRule: "open", jacket: "navy", emblem: EMBLEM },
+      ],
+    ];
+
+    await owner.send(`/players/${p.accountId}/mute`, { reason: "도배", minutes: 60 });
+    for (const [type, req] of texts)
+      expect([type, await ask(room, type, req)]).toEqual([type, "muted"]);
+    await owner.send(`/players/${p.accountId}/unmute`, { reason: "해제" });
+    expect(await ask(room, "board.post", texts[0]?.[1] ?? {})).toBe("done");
+
+    // Two masked lines within ten minutes: the filter's own mute covers the same paths.
+    const swear = { ch: "whisper", to: "muted1b", text: "시발 진짜" };
+    expect(await ask(room, WORLD_MESSAGES.chat, swear)).toBe("sent");
+    expect(await ask(room, WORLD_MESSAGES.chat, swear)).toBe("sent");
+    expect(await ask(room, "board.post", { cat: "trade", text: "또 팝니다" })).toBe("muted");
+    expect(await ask(room, "club.notice", { text: "공지" })).toBe("muted");
+    await room.leave();
+    await otherRoom.leave();
+  });
+
+  it("leaves a post an admin can read and take down, audited", async () => {
+    const p = await player("poster1");
+    const room = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
+    quiet(room);
+    expect(await ask(room, "board.post", { cat: "chat", text: "현질 하실 분 연락" })).toBe("done");
+    const listed = await owner.send("/posts");
+    const post = (listed.body.board as { id: number; body: string }[]).find(
+      (b) => b.body === "현질 하실 분 연락",
+    );
+    expect(post).toBeDefined();
+    expect(
+      (await owner.send(`/posts/board/${post?.id}/remove`, { reason: "현금 거래" })).status,
+    ).toBe(200);
+    const left = await db.execute(sql`select 1 from board_posts where id = ${post?.id}`);
+    expect(left.rows).toEqual([]);
+    const audit = await db.execute(
+      sql`select detail from admin_actions where action = 'post.remove' and target = ${`character:${p.characterId}`}`,
+    );
+    expect(audit.rows[0]?.detail).toMatchObject({ body: "현질 하실 분 연락" });
+    await room.leave();
   });
 });

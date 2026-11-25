@@ -9,6 +9,7 @@ import { economyScreen, tradesScreen } from "./screens/economy.ts";
 import { filterScreen } from "./screens/filter.ts";
 import { characterRedirect, playerScreen } from "./screens/player.ts";
 import { playersScreen } from "./screens/players.ts";
+import { postsScreen } from "./screens/posts.ts";
 import { reportScreen, reportsScreen } from "./screens/reports.ts";
 
 type Screen = (ctx: Ctx, arg: string) => Promise<Node>;
@@ -21,6 +22,7 @@ const ROUTES: [RegExp, Screen, string][] = [
   [/^chat$/, chatScreen, "chat"],
   [/^reports$/, reportsScreen, "reports"],
   [/^report\/(\d+)$/, reportScreen, "reports"],
+  [/^posts$/, postsScreen, "posts"],
   [/^filter$/, filterScreen, "filter"],
   [/^economy$/, economyScreen, "economy"],
   [/^trades$/, tradesScreen, "trades"],
@@ -34,6 +36,7 @@ const NAV: [string, string, string][] = [
   ["players", "Players", "p"],
   ["chat", "Chat", "c"],
   ["reports", "Reports", "r"],
+  ["posts", "Posts", "o"],
   ["filter", "Filter", "f"],
   ["economy", "Economy", "e"],
   ["trades", "Trades", "t"],

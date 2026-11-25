@@ -23,7 +23,19 @@ export type AuditAction =
   | "report.resolve"
   | "chat.read"
   | "inventory.read"
-  | "admin.edit";
+  | "admin.edit"
+  | "post.remove"
+  | "notice.remove"
+  | "posts.read"
+  | "player.read"
+  | "player.search"
+  | "reports.read"
+  | "trades.read"
+  | "login.failed"
+  | "cli.create"
+  | "cli.password"
+  | "cli.enable"
+  | "cli.disable";
 
 export interface AuditEntry {
   adminId: string;

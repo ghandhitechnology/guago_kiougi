@@ -36,7 +36,7 @@ import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import type { WorldHandler } from "./live/index.ts";
-import { adminMutes } from "./moderation/mutes.ts";
+import { mutedUntil, mutes } from "./moderation/mutes.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
@@ -425,12 +425,10 @@ export class WorldRoom extends Room {
     if (!cleaned.ok) return { code: cleaned.code };
     const now = Date.now();
     const standing = this.standingOf(me.characterId, now);
-    // An admin mute and the filter's own stack: refused until the later one ends. A mute until
-    // lifted carries no end.
-    const mutedUntil = Math.max(standing.mutedUntil, adminMutes.until(me.characterId, now));
-    if (mutedUntil > now) {
-      return { code: "muted", ...(Number.isFinite(mutedUntil) ? { until: mutedUntil } : {}) };
-    }
+    // An admin mute and the filter's own stack (moderation/mutes.ts): refused until the later
+    // one ends. A mute until lifted carries no end.
+    const until = mutedUntil(me.characterId, now);
+    if (until > now) return { code: "muted", ...(Number.isFinite(until) ? { until } : {}) };
 
     let recipients: Member[];
     let target: string | null = null;
@@ -494,6 +492,7 @@ export class WorldRoom extends Room {
       // A second hit within the window mutes; the masked line itself still goes out.
       if (now - standing.lastHit <= FILTER_REPEAT_MS) {
         standing.mutedUntil = now + FILTER_MUTE_MS;
+        mutes.filtered(me.characterId, standing.mutedUntil);
       }
       standing.lastHit = now;
     }

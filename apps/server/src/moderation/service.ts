@@ -28,7 +28,7 @@ import { live } from "../live/current.ts";
 import type { ClubChange } from "../social/clubs.ts";
 import type { Tx } from "../social/tx.ts";
 import { record, target } from "./audit.ts";
-import { adminMutes } from "./mutes.ts";
+import { mutes } from "./mutes.ts";
 
 export type ModError =
   | "not_found"
@@ -230,8 +230,9 @@ export function createModeration(deps: ModerationDeps) {
       ips = rows.map((r) => r.ip_hash as string);
     }
     const { rows } = await tx.execute(sql`
-      insert into account_bans (account_id, reason, ends_at, ip_hashes, admin_id)
-      values (${accountId}, ${o.reason}, ${endsAt(o.minutes)}, ${sql.param(ips)}::text[], ${adminId})
+      insert into account_bans (account_id, reason, told, ends_at, ip_hashes, ip_scope, admin_id)
+      values (${accountId}, ${o.reason}, ${o.told ?? o.reason}, ${endsAt(o.minutes)},
+              ${sql.param(ips)}::text[], ${ips.length > 0 ? "all" : "none"}, ${adminId})
       returning id, ends_at`);
     const ban = rows[0] as { id: string; ends_at: string | null };
     await tx.execute(sql`update accounts set status = 'banned' where id = ${accountId}`);
@@ -279,31 +280,32 @@ export function createModeration(deps: ModerationDeps) {
 
   async function muteIn(tx: Queryable, adminId: string, characterId: string, o: MuteOptions) {
     const { rows } = await tx.execute(sql`
-      insert into mutes (character_id, reason, ends_at, admin_id)
-      select id, ${o.reason}, ${endsAt(o.minutes)}, ${adminId} from characters
+      insert into mutes (character_id, reason, told, ends_at, admin_id)
+      select id, ${o.reason}, ${o.told ?? o.reason}, ${endsAt(o.minutes)}, ${adminId} from characters
       where id = ${characterId}
-      returning id`);
-    const mute = rows[0] as { id: string } | undefined;
+      returning id, floor(extract(epoch from coalesce(ends_at, 'infinity'::timestamptz))::float8 * 1000) as end_ms`);
+    const mute = rows[0] as { id: string; end_ms: number } | undefined;
     if (!mute) return fail("not_found");
     await record(tx, {
       adminId,
       action: "mute",
       target: target.character(characterId),
       reason: o.reason,
-      detail: { mute: Number(mute.id), minutes: o.minutes },
+      detail: { mute: Number(mute.id), minutes: o.minutes, told: o.told ?? o.reason },
     });
     return {
       ok: true as const,
       after: async () => {
-        await adminMutes.refresh(db, characterId);
+        // Holds at once; the re-read confirms it (or a later one wins).
+        mutes.muted(characterId, Number(mute.end_ms));
+        void mutes.refresh(db, characterId).catch(() => {});
         // The player learns the action, its end and the reason they are told; never who asked.
-        const until = adminMutes.until(characterId);
+        const until = mutes.adminUntil(characterId);
         const reason = o.told ?? o.reason;
         deps.system(
-          {
-            key: "moderation.muted",
-            params: Number.isFinite(until) ? { until, reason } : { reason },
-          },
+          Number.isFinite(until)
+            ? { key: "moderation.muted", params: { until, reason } }
+            : { key: "moderation.muted-permanent", params: { reason } },
           characterId,
         );
       },
@@ -377,7 +379,13 @@ export function createModeration(deps: ModerationDeps) {
           reason,
           detail: { mutes: rows.map((r) => Number(r.id)) },
         });
-        return { ok: true, after: () => adminMutes.refresh(db, characterId) };
+        return {
+          ok: true,
+          after: () => {
+            mutes.unmuted(characterId);
+            void mutes.refresh(db, characterId).catch(() => {});
+          },
+        };
       }),
 
     /** Closes the session: the player is out and may log in again. */
@@ -491,6 +499,42 @@ export function createModeration(deps: ModerationDeps) {
       if ("change" in out && out.change) deps.notify(characterId, out.change);
       return { ok: true, replayed: out.replayed, items: out.items };
     },
+
+    /** Takes down a 대자보 post (the 층장 notice included). Its text stays in the audit row. */
+    removePost: (adminId: string, postId: number, reason: string) =>
+      run(async (tx) => {
+        const { rows } = await tx.execute(sql`
+          delete from board_posts where id = ${postId}
+          returning author_id, category, body`);
+        const post = rows[0] as { author_id: string; category: string; body: string } | undefined;
+        if (!post) return fail("not_found");
+        await record(tx, {
+          adminId,
+          action: "post.remove",
+          target: target.character(post.author_id),
+          reason,
+          detail: { post: postId, category: post.category, body: post.body },
+        });
+        return { ok: true };
+      }),
+
+    /** Takes down a club notice; the club's members see it gone at once. */
+    removeClubNotice: (adminId: string, noticeId: number, reason: string) =>
+      run(async (tx) => {
+        const { rows } = await tx.execute(sql`
+          delete from club_notices where id = ${noticeId}
+          returning club_id, author_id, body`);
+        const notice = rows[0] as { club_id: number; author_id: string; body: string } | undefined;
+        if (!notice) return fail("not_found");
+        await record(tx, {
+          adminId,
+          action: "notice.remove",
+          target: target.character(notice.author_id),
+          reason,
+          detail: { notice: noticeId, club: notice.club_id, body: notice.body },
+        });
+        return { ok: true, after: () => deps.clubs?.announce({ club: notice.club_id }) };
+      }),
 
     /** A notice on the system channel. Audited first: no row, no notice. */
     async broadcast(adminId: string, text: string): Promise<ModResult> {

@@ -8,7 +8,7 @@ import { type AuditReport, checkInvariants, dailyTotals } from "../economy/audit
 import { livePage } from "../economy/executor.ts";
 import { LEDGER_RAW_DAYS } from "../economy/ledger.ts";
 import { readInventory } from "../economy/reads.ts";
-import { adminMutes } from "../moderation/mutes.ts";
+import { mutes as muteStore } from "../moderation/mutes.ts";
 import { searchTrades, type TradeSearch, tradePartners } from "../trade/log.ts";
 
 const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
@@ -205,7 +205,7 @@ export function createReads(db: Db) {
         ).rows;
       }
       const now = Date.now();
-      const muteEnd = characterId ? adminMutes.until(characterId, now) : 0;
+      const muteEnd = characterId ? muteStore.adminUntil(characterId, now) : 0;
       return {
         ...player,
         ageConfirmed: Boolean(r.age_confirmed),
@@ -384,6 +384,46 @@ export function createReads(db: Db) {
       const to = today.toISOString().slice(0, 10);
       const from = new Date(today.getTime() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
       return { from, to, rows: await dailyTotals(db, { from, to }) };
+    },
+
+    /** Live 대자보 posts and every club notice, newest first, with their authors. */
+    async posts() {
+      const board = await db.execute(sql`
+        select p.id, p.category, p.body, p.pinned, p.created_at, p.expires_at, p.author_id,
+          c.name, c.account_id
+        from board_posts p join characters c on c.id = p.author_id
+        where p.expires_at > now()
+        order by p.id desc limit 300`);
+      const notices = await db.execute(sql`
+        select n.id, n.club_id, k.name as club, n.body, n.created_at, n.author_id,
+          c.name, c.account_id
+        from club_notices n join clubs k on k.id = n.club_id
+        join characters c on c.id = n.author_id
+        order by n.id desc limit 300`);
+      const author = (r: Record<string, unknown>) => ({
+        authorId: r.author_id as string,
+        author: r.name as string,
+        account: r.account_id as string,
+      });
+      return {
+        board: board.rows.map((r) => ({
+          id: Number(r.id),
+          category: r.category as string,
+          body: r.body as string,
+          pinned: Boolean(r.pinned),
+          at: iso(r.created_at) as string,
+          expiresAt: iso(r.expires_at) as string,
+          ...author(r),
+        })),
+        notices: notices.rows.map((r) => ({
+          id: Number(r.id),
+          clubId: Number(r.club_id),
+          club: r.club as string,
+          body: r.body as string,
+          at: iso(r.created_at) as string,
+          ...author(r),
+        })),
+      };
     },
 
     /**

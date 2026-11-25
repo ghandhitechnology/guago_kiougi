@@ -9,7 +9,7 @@ import { ChatFilter } from "../chat/filter.ts";
 import type { Db } from "../db/index.ts";
 import type { Executor } from "../economy/executor.ts";
 import { createFilterList } from "../moderation/filter-list.ts";
-import { adminMutes } from "../moderation/mutes.ts";
+import { mutes } from "../moderation/mutes.ts";
 import { createModeration, type ModerationDeps } from "../moderation/service.ts";
 import { evictAccount, isSeated } from "../seats.ts";
 import { worldRoom } from "../world-room.ts";
@@ -35,7 +35,7 @@ export async function createModerationStack(o: StackOptions) {
   const filter = new ChatFilter({});
   const filters = createFilterList(o.db, filter);
   await filters.apply();
-  await adminMutes.load(o.db);
+  await mutes.load(o.db);
   const moderation = createModeration({
     db: o.db,
     executor: o.executor,
@@ -79,6 +79,7 @@ export async function createModerationStack(o: StackOptions) {
     async sweep(): Promise<void> {
       await moderation.sweep();
       await auth.sweep();
+      await mutes.load(o.db);
     },
   };
 }

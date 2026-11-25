@@ -64,6 +64,13 @@
       "when": 1795591145503,
       "tag": "0008_live_review",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795594787938,
+      "tag": "0009_moderation_review",
+      "breakpoints": true
     }
   ]
 }

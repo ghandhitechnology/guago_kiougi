@@ -92,6 +92,8 @@ export const adminActions = pgTable(
     reason: text("reason"),
     detail: jsonb("detail").notNull().default({}),
     opId: text("op_id"),
+    /** Keyed hash of the admin's address (the same hash the auth paths use); null from the CLI. */
+    ipHash: text("ip_hash"),
     at: at("at").notNull().defaultNow(),
   },
   (t) => [
@@ -117,9 +119,16 @@ export const accountBans = pgTable(
       .notNull()
       .references(() => accounts.id, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
+    /** What the player is told (`moderation.banned`); the reason unless a report said otherwise. */
+    told: text("told"),
     startsAt: at("starts_at").notNull().defaultNow(),
     endsAt: at("ends_at"),
     ipHashes: text("ip_hashes").array().notNull().default(sql`'{}'::text[]`),
+    /**
+     * What the IP hashes refuse: `signup` new accounts only (the default; a dormitory shares one
+     * address), `all` also logins and room joins of every account from them.
+     */
+    ipScope: text("ip_scope").notNull().default("none"),
     adminId: adminRef("admin_id").notNull(),
     liftedAt: at("lifted_at"),
     liftedBy: adminRef("lifted_by"),
@@ -129,6 +138,10 @@ export const accountBans = pgTable(
     index("account_bans_account_idx").on(t.accountId, t.startsAt),
     index("account_bans_ip_idx").using("gin", t.ipHashes),
     check("account_bans_end_check", sql`${t.endsAt} is null or ${t.endsAt} > ${t.startsAt}`),
+    check(
+      "account_bans_ip_scope_check",
+      sql`${t.ipScope} in ('none', 'signup', 'all') and (${t.ipScope} = 'none') = (cardinality(${t.ipHashes}) = 0)`,
+    ),
     check(
       "account_bans_lift_check",
       sql`(${t.liftedAt} is null) = (${t.liftReason} is null) and (${t.liftedBy} is null or ${t.liftedAt} is not null)`,
@@ -145,6 +158,7 @@ export const mutes = pgTable(
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
     reason: text("reason").notNull(),
+    told: text("told"),
     startsAt: at("starts_at").notNull().defaultNow(),
     endsAt: at("ends_at"),
     adminId: adminRef("admin_id").notNull(),
@@ -175,7 +189,8 @@ export const accountIps = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.accountId, t.ipHash] }),
-    index("account_ips_ip_idx").on(t.ipHash),
+    index("account_ips_ip_idx").on(t.ipHash, t.lastSeen),
+    index("account_ips_seen_idx").on(t.lastSeen),
   ],
 );
 
@@ -193,10 +208,13 @@ export const filterStrikes = pgTable(
     demerits: integer("demerits").notNull(),
     adminId: adminRef("admin_id").notNull(),
     at: at("at").notNull().defaultNow(),
+    /** When the living world took the 벌점; null until it has, and retried until then. */
+    demeritAt: at("demerit_at"),
   },
   (t) => [
     uniqueIndex("filter_strikes_line_key").on(t.lineId, t.lineAt),
     index("filter_strikes_character_idx").on(t.characterId, t.at),
+    index("filter_strikes_pending_idx").on(t.at).where(sql`${t.demeritAt} is null`),
   ],
 );
 
