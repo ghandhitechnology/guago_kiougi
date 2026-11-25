@@ -102,9 +102,36 @@ const DOWN_DIM = 0.28;
 /** An elite arriving this close shakes the screen; farther ones are heard and pointed at. */
 const ELITE_NEAR = 260;
 
+/** A seat's look as last composed: its parts, and the texture they made. */
 interface Look {
-  sig: string;
+  body: string;
+  hair: string;
+  hairColor: string;
+  face: string;
+  uniform: string;
+  accessories: string[];
   key: string;
+}
+
+type LookState = NonNullable<PlayerState["look"]>;
+
+const BLANK_LOOK = { body: "", hair: "", hairColor: "", face: "", uniform: "" } as const;
+
+/** Whether a seat's look is the one already composed, compared part by part with no strings made. */
+function sameLook(a: Look, b: LookState): boolean {
+  if (
+    a.body !== b.body ||
+    a.hair !== b.hair ||
+    a.hairColor !== b.hairColor ||
+    a.face !== b.face ||
+    a.uniform !== b.uniform ||
+    a.accessories.length !== b.accessories.length
+  )
+    return false;
+  for (let i = 0; i < a.accessories.length; i++) {
+    if (a.accessories[i] !== b.accessories[i]) return false;
+  }
+  return true;
 }
 
 export class FightView {
@@ -358,19 +385,23 @@ export class FightView {
     this.own = own;
     if (own) {
       this.ctx.selfClass = own.major || "math";
-      const books = [...own.books].map((id) => this.cat.rules.books.indexOf(id));
-      if (books.join() !== this.ownBooks.join()) this.ownBooks = books;
+      // Patches come twenty times a second for everyone; the books are compared in place.
+      let changed = own.books.length !== this.ownBooks.length;
+      for (let i = 0; !changed && i < own.books.length; i++) {
+        changed = this.cat.rules.books.indexOf(own.books[i] ?? "") !== this.ownBooks[i];
+      }
+      if (changed) this.ownBooks = [...own.books].map((id) => this.cat.rules.books.indexOf(id));
     }
     // Looks of everyone seated, composed a few a frame.
     for (const [slot, p] of state.players) {
       if (!p.sid || !p.look) continue;
       const n = Number(slot);
-      const look = p.look;
-      const sig = `${look.body}|${look.hair}|${look.hairColor}|${look.face}|${look.uniform}|${[...look.accessories].join("+")}`;
       const had = this.looks.get(n);
-      if (had?.sig === sig) continue;
-      if (!had) this.looks.set(n, { sig: "", key: this.defaultLook });
-      if (!this.lookQueue.includes(n)) this.lookQueue.push(n);
+      if (had && sameLook(had, p.look)) continue;
+      if (this.lookQueue.includes(n)) continue;
+      // The default look stands in until the seat's own is composed.
+      if (!had) this.looks.set(n, { ...BLANK_LOOK, accessories: [], key: this.defaultLook });
+      this.lookQueue.push(n);
     }
   }
 
@@ -381,7 +412,6 @@ export class FightView {
       const p = state?.players.get(String(slot));
       const look = p?.look;
       if (!look) continue;
-      const sig = `${look.body}|${look.hair}|${look.hairColor}|${look.face}|${look.uniform}|${[...look.accessories].join("+")}`;
       const key = composeDoll(
         this.scene,
         this.view.meta,
@@ -394,7 +424,15 @@ export class FightView {
           accessories: [...look.accessories],
         }),
       );
-      this.looks.set(slot, { sig, key });
+      this.looks.set(slot, {
+        body: look.body,
+        hair: look.hair,
+        hairColor: look.hairColor,
+        face: look.face,
+        uniform: look.uniform,
+        accessories: [...look.accessories],
+        key,
+      });
     }
   }
 
