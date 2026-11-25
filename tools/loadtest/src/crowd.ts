@@ -66,12 +66,15 @@ class CrowdBot {
   private reviveAt = 0;
   private readonly ring: number;
   private readonly side: number;
+  /** This bot's own place around the student, so the crowd spreads instead of clumping. */
+  private readonly angle: number;
   readonly room: Room<unknown, MapState>;
 
   constructor(room: Room<unknown, MapState>, index: number) {
     this.room = room;
-    this.ring = 50 + ((index * 37) % 90);
+    this.ring = 50 + ((index * 37) % 100);
     this.side = index % 2 === 0 ? 1 : -1;
+    this.angle = index * 2.399963;
     room.reconnection.enabled = false;
     room.onMessage("*", () => {});
     const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
@@ -158,7 +161,9 @@ class CrowdBot {
       this.steer(sx, sy);
       return;
     }
-    // Hunt the monster nearest this bot among those close to the student.
+    // Hunt the monster nearest this bot's own place among those close to the student.
+    const hx = s.x + Math.cos(this.angle) * this.ring;
+    const hy = s.y + Math.sin(this.angle) * this.ring * 0.7;
     let best = Number.POSITIVE_INFINITY;
     let mx = 0;
     let my = 0;
@@ -166,7 +171,7 @@ class CrowdBot {
       if (m.kind >= WirePlayer) continue;
       const x = m.qx / Q;
       const y = m.qy / Q;
-      if (Math.hypot(x - s.x, y - s.y) > HUNT) continue;
+      if (Math.hypot(x - s.x, y - s.y) > HUNT || Math.hypot(x - hx, y - hy) > 70) continue;
       const d = (x - px) ** 2 + (y - py) ** 2;
       if (d < best) {
         best = d;
@@ -184,8 +189,8 @@ class CrowdBot {
       else this.steer(-uy * side, ux * side);
       return;
     }
-    // Nothing to hunt: circle the student at this bot's own distance.
-    const ang = Math.atan2(-sy, -sx) + 0.4 * this.side;
+    // Nothing to hunt: drift to this bot's place around the student, which turns slowly.
+    const ang = this.angle + n * 0.002 * this.side;
     const gx = s.x + Math.cos(ang) * this.ring - px;
     const gy = s.y + Math.sin(ang) * this.ring * 0.7 - py;
     if (Math.hypot(gx, gy) < 6) this.dir = [0, 0];

@@ -27,7 +27,11 @@ const game = new Phaser.Game({
   render: { pixelArt: true },
   scale: { mode: Phaser.Scale.NONE },
   // Back to front; the UI scene stays on top of the world.
-  scene: viewer ? [viewer] : stage ? [stage] : [BootScene, FrontScene, WorldScene, UiScene],
+  scene: viewer
+    ? [viewer]
+    : stage
+      ? [stage, UiScene]
+      : [BootScene, FrontScene, WorldScene, UiScene],
 });
 
 /**
