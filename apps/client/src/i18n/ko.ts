@@ -187,6 +187,7 @@ export const ko = {
   "character.demerits": "벌점",
   "character.merits": "상점",
   "character.rested": "숙면",
+  "character.cohort": "{n}기",
   "character.drowsy": "졸음",
   "board.kind.daily": "일일",
   "board.kind.weekly": "주간",

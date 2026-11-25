@@ -5,6 +5,7 @@ import { amount } from "../items/catalog.ts";
 import { inventory } from "../state/inventory.ts";
 import { fade, slide } from "../ui/motion.ts";
 import { Label, type LabelStyle, wrap } from "../ui/text.ts";
+import { paint } from "../ui/theme.ts";
 import type { OpCall } from "../world-link.ts";
 
 /**
@@ -66,13 +67,27 @@ export class SaidLine {
     this.root.removeAll(true);
     if (!line) return;
     let x = 0;
+    // A speaker the art has a face for delivers the line with it, in a small pasted frame.
+    const face = `portrait-${line.voice}/neutral`;
+    const portraits = this.scene.textures.exists("portraits")
+      ? this.scene.textures.get("portraits")
+      : undefined;
+    if (line.voice !== "narrator" && portraits?.has(face)) {
+      const frame = this.scene.add.rectangle(0, -2, 22, 22, paint("stone.bright")).setOrigin(0);
+      frame.setStrokeStyle(1, paint("stone.mid"));
+      const img = this.scene.add.image(0, 0, "portraits", face).setOrigin(0);
+      const cx = Math.round((img.width - 20) / 2);
+      img.setCrop(cx, 6, 20, 20).setPosition(1 - cx, -7);
+      this.root.add([frame, img]);
+      x = 26;
+    }
     if (line.voice !== "narrator") {
-      const name = new Label(this.scene, 0, 0, speakerName(line.voice), {
+      const name = new Label(this.scene, x, 0, speakerName(line.voice), {
         font: "galmuri9",
         color: "red.dark",
       });
       this.root.add(name.obj);
-      x = name.width + 4;
+      x += name.width + 4;
     }
     const rows = wrap(this.scene, "galmuri9", line.text, this.w - x).slice(0, 2);
     const text = new Label(this.scene, x, 0, rows.join("\n"), {

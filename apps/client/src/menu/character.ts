@@ -13,7 +13,7 @@ import { Label } from "../ui/text.ts";
 import { paint } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
 import { session } from "../world/session.ts";
-import { onGone, opRefusal, SaidLine } from "./common.ts";
+import { onGone, opRefusal, rightLabel, SaidLine } from "./common.ts";
 import { registerMenuTab } from "./notebook.ts";
 
 /**
@@ -115,7 +115,13 @@ class CharacterPage {
         s,
         8,
         20,
-        `${termName("class", entry.character.major)} · ${tier ? termName("tier", tier.id) : ""}`,
+        [
+          termName("class", entry.character.major),
+          tier ? termName("tier", tier.id) : "",
+          entry.character.cohort ? t("character.cohort", { n: entry.character.cohort }) : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
         {
           font: "galmuri9",
           color: "ink.mid",
@@ -271,6 +277,42 @@ class CharacterPage {
       }
       y += 16;
     }
+    this.ladder(rx, this.size.h - 6, prog.tier);
+  }
+
+  /**
+   * The 전직 ladder at the foot of the right page, earliest at the bottom: each tier at its
+   * level, those passed in ink, the current one ringed in red pen, the ones ahead in pencil.
+   */
+  private ladder(x: number, bottom: number, current: number): void {
+    const s = this.ctx.scene;
+    const row = 13;
+    const g = s.add.graphics();
+    this.body.add(g);
+    TIERS.forEach((tier, i) => {
+      const y = bottom - (i + 1) * row;
+      const passed = i < current;
+      const here = i === current;
+      const color = here ? "red.dark" : passed ? "ink.dark" : "stone.mid";
+      // The rung: a short rule joining this tier to the next.
+      g.fillStyle(paint(passed ? "ink.mid" : "stone.light")).fillRect(x + 4, y - 3, 1, row - 6);
+      g.fillStyle(paint(here ? "red.mid" : passed ? "ink.mid" : "stone.light")).fillRect(
+        x + 2,
+        y + 3,
+        5,
+        5,
+      );
+      const lv = rightLabel(s, x + 40, y + 2, `${tier.level}`, {
+        font: "galmuri9",
+        color: "stone.mid",
+      });
+      const name = new Label(s, x + 46, y + 2, termName("tier", tier.id), {
+        font: "galmuri9",
+        color,
+      });
+      this.body.add([lv.obj, name.obj]);
+      if (here) g.lineStyle(1, paint("red.mid")).strokeRect(x + 43.5, y - 0.5, name.width + 6, 12);
+    });
   }
 
   private async allocate(): Promise<void> {
