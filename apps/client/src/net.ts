@@ -1,5 +1,5 @@
 import { Client, type Room } from "@colyseus/sdk";
-import { CLOSE_SESSION_REPLACED, MAP_ROOM, MapState, ROOMS_PATH } from "@guago/shared";
+import { closeEnd, type LinkEnd, MAP_ROOM, MapState, ROOMS_PATH } from "@guago/shared";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -13,8 +13,11 @@ export type JoinMap = (choice: MapChoice) => Promise<Room<unknown, MapState>>;
 export interface MapLink {
   /** Leaves the map room the player is in and joins the next one; never read as a replaced seat. */
   moveTo(choice: MapChoice): Promise<void>;
-  /** Settles when the link gives up for good: another tab or device took the seat. */
-  readonly ended: Promise<"replaced">;
+  /**
+   * Settles when the link gives up for good: another tab or device took the seat, an admin
+   * closed the session, or the account was banned.
+   */
+  readonly ended: Promise<LinkEnd>;
 }
 
 const joinOnPage: JoinMap = (() => {
@@ -42,7 +45,7 @@ export function stayConnected(
   let current: Room<unknown, MapState> | undefined;
   let moving = false;
 
-  const run = async (): Promise<"replaced"> => {
+  const run = async (): Promise<LinkEnd> => {
     let wait = 1000;
     for (;;) {
       let room: Room<unknown, MapState>;
@@ -61,7 +64,8 @@ export function stayConnected(
       const code = await new Promise<number>((resolve) => room.onLeave((c) => resolve(c)));
       detach();
       current = undefined;
-      if (code === CLOSE_SESSION_REPLACED) return "replaced";
+      const end = closeEnd(code);
+      if (end) return end;
       if (moving) {
         moving = false;
         continue;

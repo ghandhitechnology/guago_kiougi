@@ -10,6 +10,7 @@
  * the database refuse is logged whole and dropped.
  */
 import { randomUUID } from "node:crypto";
+import { boardDay } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
 import { describeError } from "../db/index.ts";
@@ -28,6 +29,7 @@ interface Pending {
   nohit: Counts;
   help: Counts;
   story: Set<string>;
+  chores: Set<string>;
   bosses: Set<string>;
   visit: Set<string>;
   met: Set<string>;
@@ -42,6 +44,7 @@ const empty = (): Pending => ({
   nohit: {},
   help: {},
   story: new Set(),
+  chores: new Set(),
   bosses: new Set(),
   visit: new Set(),
   met: new Set(),
@@ -110,7 +113,11 @@ export class ProgressBuffer {
     return true;
   }
 
-  mark(characterId: string, kind: "story" | "bosses" | "visit" | "met", id: string): boolean {
+  mark(
+    characterId: string,
+    kind: "story" | "bosses" | "visit" | "met" | "chores",
+    id: string,
+  ): boolean {
     if (!ID.test(id)) {
       this.log(`progress refused (${kind}): ${JSON.stringify({ characterId, id })}`);
       return false;
@@ -180,10 +187,12 @@ export class ProgressBuffer {
         nohit: p.nohit,
         story: [...p.story],
         bosses: [...p.bosses],
+        chores: [...p.chores],
         help: p.help,
         visit: [...p.visit],
         met: [...p.met],
         ...(p.notice ? { notice: p.notice } : {}),
+        day: boardDay(this.now().getTime()),
       },
     };
   }
@@ -226,7 +235,7 @@ export class ProgressBuffer {
     for (const k of ["kills", "collect", "deliver", "escort", "nohit", "help"] as const) {
       for (const [id, n] of Object.entries(p[k])) bump(into[k], id, n);
     }
-    for (const k of ["story", "bosses", "visit", "met"] as const) {
+    for (const k of ["story", "bosses", "visit", "met", "chores"] as const) {
       for (const id of p[k]) into[k].add(id);
     }
     if (p.notice) into.notice = p.notice;

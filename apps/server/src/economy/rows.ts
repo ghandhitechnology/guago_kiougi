@@ -86,6 +86,8 @@ export interface CharacterRow {
   expulsions: number;
   boardStreak: number;
   boardStreakDay: number | null;
+  /** The world session that logged in last (`live.login`); a logout from another is stale. */
+  liveSession: string | null;
 }
 
 /** The best income rate last measured, in the last field hunted (`hunt_rates`). */
@@ -164,7 +166,7 @@ export const CHARACTER_COLUMNS = `c.id, c.major, c.minor, c.level, c.exp, c.tier
   c.stat_understanding, c.stat_memory, c.stat_focus, c.stat_vitality, c.stat_agility, c.stat_luck,
   c.pool_started_at, c.pool_rates, c.pool_place, c.pool_sheet_book, c.rested_until, c.rev,
   c.pool_stopped_at, c.hunt_rates, c.home_until, c.penalty_until, c.drowsy, c.meal_id,
-  c.meal_until, c.titles, c.patrol_catches, c.expulsions, c.board_streak, c.board_streak_day`;
+  c.meal_until, c.titles, c.patrol_catches, c.expulsions, c.board_streak, c.board_streak_day, c.live_session`;
 
 export function characterFromDb(r: Record<string, unknown>): CharacterRow {
   return {
@@ -205,6 +207,7 @@ export function characterFromDb(r: Record<string, unknown>): CharacterRow {
       r.board_streak_day === null || r.board_streak_day === undefined
         ? null
         : Number(r.board_streak_day),
+    liveSession: (r.live_session as string | null) ?? null,
   };
 }
 
