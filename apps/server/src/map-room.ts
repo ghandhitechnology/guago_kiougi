@@ -103,6 +103,7 @@ import { TickClock } from "./tick-clock.ts";
 import {
   belongsOn,
   builtMap,
+  clearSpot,
   describe,
   HOME_MAP,
   isDesk,
@@ -689,10 +690,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private async seat(client: Client, character: Character, options: SeatOptions): Promise<void> {
     const id = client.sessionId;
     if (invariants.on) oneBody(character.id, this);
-    const start =
+    const place =
       character.mapId === this.def.id
         ? validPlace(this.def.id, character.x, character.y)
         : spawnPlace(this.def, "main");
+    // Clear of the walls as they stand now, doors the Page clock shut included.
+    const start = { ...place, ...clearSpot(this.def, place.x, place.y, this.map) };
     const facing =
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)

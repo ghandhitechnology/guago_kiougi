@@ -71,11 +71,18 @@ export function startPlace(): Place {
 /** Pixels a blocked spot may be moved to find room for the feet. */
 const NUDGE_PX = 12;
 
-/** The spot, or the nearest one within a few pixels where the feet fit. */
-function clearSpot(map: BuiltMap, x: number, y: number): { x: number; y: number } | undefined {
+/**
+ * The spot, or the nearest one within a few pixels where the feet fit, on `walls` (the map's own
+ * with doors to unbuilt maps shut, unless a room passes its current walls).
+ */
+export function clearSpot(
+  map: BuiltMap,
+  x: number,
+  y: number,
+  walls: Collidable = roomCollision(map),
+): { x: number; y: number } | undefined {
   if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) return undefined;
   if (x >= map.w * TILE_SIZE || y >= map.h * TILE_SIZE) return undefined;
-  const walls = roomCollision(map);
   for (let r = 0; r <= NUDGE_PX; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
