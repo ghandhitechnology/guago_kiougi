@@ -5,13 +5,12 @@
 import { createServer } from "node:net";
 import { ClientState, matchMaker } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { Client, type Room } from "@colyseus/sdk";
+import type { Room } from "@colyseus/sdk";
 import {
   API,
   type Character,
   encodeInput,
   INPUT_MESSAGE,
-  MAP_ROOM,
   MAP_SEATS,
   MOVE_MAX,
   NEAR_CHAT_TILES,
@@ -31,7 +30,8 @@ import { serveMetrics } from "./metrics-server.ts";
 import { places } from "./places.ts";
 import { evictAccount } from "./seats.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
-import { call, cookieHeader, type Jar, remember, waitFor, within } from "./test/http.ts";
+import { sdk as client, joinMap } from "./test/enter.ts";
+import { call, type Jar, remember, waitFor, within } from "./test/http.ts";
 import { worldRoom } from "./world-room.ts";
 
 const SETTINGS = {
@@ -82,7 +82,8 @@ async function player(loginId: string): Promise<{ jar: Jar; character: Character
   return { jar, character: (made.body as { character: Character }).character };
 }
 
-const sdk = (jar: Jar) => new Client(base, { headers: { cookie: cookieHeader(jar) } });
+const sdk = (jar: Jar) => client(base, jar);
+const joinMapRoom = async (jar: Jar) => (await joinMap(base, jar)).room;
 
 const mapRoom = (room: Room) => matchMaker.getLocalRoomById(room.roomId) as MapRoom;
 
@@ -106,7 +107,7 @@ describe("map room", () => {
   it("frees the body slot and the account seat when a join fails half way", async () => {
     const { jar } = await player("halfway");
     // Someone already in the room keeps it open, so the second try lands in the same one.
-    const anchor = await sdk((await player("anchor")).jar).joinOrCreate(MAP_ROOM);
+    const anchor = await joinMapRoom((await player("anchor")).jar);
     // Fails the join where the owner's fields are given to its view, before the room's own
     // bookkeeping has the player.
     const add = StateView.prototype.add;
@@ -115,11 +116,11 @@ describe("map room", () => {
       return add.call(this, obj, tag, ...rest);
     };
     try {
-      await expect(sdk(jar).joinOrCreate(MAP_ROOM)).rejects.toBeTruthy();
+      await expect(joinMapRoom(jar)).rejects.toBeTruthy();
     } finally {
       StateView.prototype.add = add;
     }
-    const room = await within(sdk(jar).joinOrCreate(MAP_ROOM), 3000, "join again at once");
+    const room = await within(joinMapRoom(jar), 3000, "join again at once");
     expect(room.roomId).toBe(anchor.roomId);
     await waitFor(() => mapRoom(room)?.playerCount === 2);
     const free = [...mapRoom(room).state.players.values()].filter((p) => !p.sid).length;
@@ -129,7 +130,7 @@ describe("map room", () => {
 
   it("keeps a client whose stalled link delivers hundreds of inputs at once, and counts what overflowed", async () => {
     const { jar } = await player("stalled");
-    const room = await sdk(jar).joinOrCreate(MAP_ROOM);
+    const room = await joinMapRoom(jar);
     room.reconnection.enabled = false;
     await waitFor(() => mapRoom(room)?.clients[0]?.state === ClientState.JOINED);
     const left = new Promise<number>((resolve) => room.onLeave((code) => resolve(code)));
@@ -160,19 +161,21 @@ describe("map room", () => {
   });
 
   it("delivers a nearby line to a player eleven tiles away and not to one thirteen tiles away", async () => {
-    const y = 2 * TILE_SIZE + 8;
+    // An open stretch of the yard: row 5 from tile 33 walks clear for fifteen tiles.
+    const x0 = 33 * TILE_SIZE + 8;
+    const y = 5 * TILE_SIZE + 8;
     const speaker = await player("speaker");
     const near = await player("nearby");
     const far = await player("faraway");
     const at = (c: Character, tiles: number) =>
-      auth.saveCharacterPlace(c.id, "lawn", 40 + tiles * TILE_SIZE, y);
+      auth.saveCharacterPlace(c.id, "campus-yard", x0 + tiles * TILE_SIZE, y);
     await at(speaker.character, 0);
     await at(near.character, NEAR_CHAT_TILES - 1);
     await at(far.character, NEAR_CHAT_TILES + 1);
     const people = [speaker, near, far];
-    const maps = await Promise.all(people.map((p) => sdk(p.jar).joinOrCreate(MAP_ROOM)));
+    const maps = await Promise.all(people.map((p) => joinMapRoom(p.jar)));
     await waitFor(() => people.every((p) => places.get(p.character.id) !== undefined));
-    expect(places.get(near.character.id)?.at()).toEqual({ x: 40 + 11 * TILE_SIZE, y });
+    expect(places.get(near.character.id)?.at()).toEqual({ x: x0 + 11 * TILE_SIZE, y });
     const worlds = await Promise.all(people.map((p) => sdk(p.jar).joinOrCreate(WORLD_ROOM)));
     const heard = worlds.map(() => [] as string[]);
     worlds.forEach((w, i) => {

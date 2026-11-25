@@ -102,6 +102,7 @@ export interface SceneMeta {
   readonly slots: Table<{ readonly keys: Table<string>; readonly options: Table<Table<string>> }>;
   readonly sprites: Table<{
     readonly atlas: string;
+    readonly size?: Vec;
     readonly origin: Vec;
     readonly shadow: string | null;
     readonly frames: readonly string[];

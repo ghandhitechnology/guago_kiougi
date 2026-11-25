@@ -23,7 +23,8 @@ export function serveMetrics(
       return;
     }
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ rooms: allRooms() }));
+    const { rss, heapUsed } = process.memoryUsage();
+    res.end(JSON.stringify({ rooms: allRooms(), memory: { rss, heapUsed } }));
   });
   return new Promise((resolve) => server.listen(port, host, () => resolve(server)));
 }

@@ -364,18 +364,18 @@ const details: (Decal | Prop)[] = [
 const lights: LightSource[] = [
   {
     at: [FIRE[0] * T + 8, FIRE[1] * T],
-    radius: 170,
+    radius: 190,
     color: "gold.light",
-    intensity: 1.1,
-    flicker: { amount: 0.12, period: 0.6 },
+    intensity: 1.25,
+    flicker: { amount: 0.16, period: 0.6 },
   },
   ...[CAVE[0] - 3, CAVE[0] + 2].map(
     (tx): LightSource => ({
       at: [tx * T + 8, 10 * T - 20],
-      radius: 60,
+      radius: 64,
       color: "gold.light",
-      intensity: 0.7,
-      flicker: { amount: 0.18, period: 0.45 },
+      intensity: 0.95,
+      flicker: { amount: 0.2, period: 0.45 },
     }),
   ),
   // The guards' lamp under the awning.
@@ -395,7 +395,7 @@ const map: MapSource = {
   time: { clock: "19:20", phase: "dusk", weather: "clear" },
   theme: "greece-dusk",
   sky: "plum.dark",
-  ambient: { color: "plum.light", intensity: 0.62, unlit: "greece" },
+  ambient: { color: "plum.light", intensity: 0.5, unlit: "greece" },
   plan: PLAN,
   legend: fieldLegend("slab"),
   backdrop: [{ prop: "dusk-sky", at: [0, 0], repeat: 6, raw: true }],
