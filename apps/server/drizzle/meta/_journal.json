@@ -68,8 +68,15 @@
     {
       "idx": 9,
       "version": "7",
-      "when": 1795594787938,
-      "tag": "0009_moderation_review",
+      "when": 1795594456125,
+      "tag": "0009_trading_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795595131914,
+      "tag": "0010_moderation_review",
       "breakpoints": true
     }
   ]

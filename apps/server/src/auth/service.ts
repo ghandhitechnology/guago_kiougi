@@ -2,7 +2,6 @@
  * Accounts, sessions and the one character per account (PLAN §20, §22). Every method returns
  * either a result or an `ApiErrorCode`; nothing here knows about HTTP.
  */
-import { LAWN } from "@guago/content";
 import {
   type Account,
   type ApiErrorCode,
@@ -21,6 +20,7 @@ import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { type Db, pgErrorCode } from "../db/index.ts";
 import { accounts, characters, loginFailures, sessions } from "../db/schema.ts";
 import { livePage } from "../live/current.ts";
+import { startPlace } from "../world-maps.ts";
 import {
   dummyHash,
   HashBusy,
@@ -43,7 +43,8 @@ export const DEFAULT_LIMITS = {
 };
 export type Limits = typeof DEFAULT_LIMITS;
 /** Where a new character first stands. */
-export const START_MAP = LAWN;
+/** Where new characters stand: where the story starts. */
+const start = startPlace();
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: ApiErrorCode };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
@@ -347,9 +348,9 @@ export function createAuthService({
               name: req.name,
               major: req.major,
               look: req.look,
-              mapId: START_MAP.id,
-              x: START_MAP.spawn.x,
-              y: START_MAP.spawn.y,
+              mapId: start.map.id,
+              x: start.x,
+              y: start.y,
               cohort: livePage(),
             })
             .returning();

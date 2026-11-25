@@ -1,5 +1,5 @@
 {
-  "id": "80bcab08-0f35-4b1c-bd81-9eff50c82aa5",
+  "id": "4f91261d-a27e-44e6-aa6f-84f7a0366032",
   "prevId": "68b9da29-4846-4204-8647-fe9b39922bb2",
   "version": "7",
   "dialect": "postgresql",
@@ -1747,7 +1747,7 @@
       "checkConstraints": {
         "economy_ledger_amount_check": {
           "name": "economy_ledger_amount_check",
-          "value": "\"economy_ledger\".\"amount\" <> 0"
+          "value": "\"economy_ledger\".\"amount\" <> 0 or \"economy_ledger\".\"coalesced\""
         },
         "economy_ledger_coalesced_check": {
           "name": "economy_ledger_coalesced_check",
@@ -2574,6 +2574,28 @@
             }
           ],
           "isUnique": true,
+          "where": "\"listings\".\"state\" = 'live'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "listings_price_idx": {
+          "name": "listings_price_idx",
+          "columns": [
+            {
+              "expression": "unit_price",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "where": "\"listings\".\"state\" = 'live'",
           "concurrently": false,
           "method": "btree",
@@ -3669,6 +3691,13 @@
           "notNull": true,
           "default": "now()"
         },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
         "from_id": {
           "name": "from_id",
           "type": "uuid",
@@ -3821,6 +3850,21 @@
           "method": "btree",
           "with": {}
         },
+        "trade_log_recorded_idx": {
+          "name": "trade_log_recorded_idx",
+          "columns": [
+            {
+              "expression": "recorded_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "trade_log_items_idx": {
           "name": "trade_log_items_idx",
           "columns": [
@@ -3892,6 +3936,126 @@
         "trade_log_board_check": {
           "name": "trade_log_board_check",
           "value": "(\"trade_log\".\"kind\" = 'board') = (\"trade_log\".\"listing_id\" is not null and \"trade_log\".\"def_id\" is not null and \"trade_log\".\"grade\" is not null and \"trade_log\".\"qty\" > 0 and \"trade_log\".\"unit_price\" > 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.trade_pairs": {
+      "name": "trade_pairs",
+      "schema": "",
+      "columns": {
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "a": {
+          "name": "a",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "b": {
+          "name": "b",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "trades": {
+          "name": "trades",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "a_sent": {
+          "name": "a_sent",
+          "type": "numeric(40, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "b_sent": {
+          "name": "b_sent",
+          "type": "numeric(40, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "items": {
+          "name": "items",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax": {
+          "name": "tax",
+          "type": "numeric(40, 0)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "trade_pairs_a_idx": {
+          "name": "trade_pairs_a_idx",
+          "columns": [
+            {
+              "expression": "a",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "day",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "trade_pairs_b_idx": {
+          "name": "trade_pairs_b_idx",
+          "columns": [
+            {
+              "expression": "b",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "day",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "trade_pairs_day_a_b_kind_pk": {
+          "name": "trade_pairs_day_a_b_kind_pk",
+          "columns": ["day", "a", "b", "kind"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "trade_pairs_order_check": {
+          "name": "trade_pairs_order_check",
+          "value": "\"trade_pairs\".\"a\" < \"trade_pairs\".\"b\""
         }
       },
       "isRLSEnabled": false
@@ -4069,12 +4233,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "told": {
-          "name": "told",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "starts_at": {
           "name": "starts_at",
           "type": "timestamp with time zone",
@@ -4094,13 +4252,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::text[]"
-        },
-        "ip_scope": {
-          "name": "ip_scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'none'"
         },
         "admin_id": {
           "name": "admin_id",
@@ -4202,10 +4353,6 @@
           "name": "account_bans_end_check",
           "value": "\"account_bans\".\"ends_at\" is null or \"account_bans\".\"ends_at\" > \"account_bans\".\"starts_at\""
         },
-        "account_bans_ip_scope_check": {
-          "name": "account_bans_ip_scope_check",
-          "value": "\"account_bans\".\"ip_scope\" in ('none', 'signup', 'all') and (\"account_bans\".\"ip_scope\" = 'none') = (cardinality(\"account_bans\".\"ip_hashes\") = 0)"
-        },
         "account_bans_lift_check": {
           "name": "account_bans_lift_check",
           "value": "(\"account_bans\".\"lifted_at\" is null) = (\"account_bans\".\"lift_reason\" is null) and (\"account_bans\".\"lifted_by\" is null or \"account_bans\".\"lifted_at\" is not null)"
@@ -4250,27 +4397,6 @@
           "columns": [
             {
               "expression": "ip_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "last_seen",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "account_ips_seen_idx": {
-          "name": "account_ips_seen_idx",
-          "columns": [
-            {
-              "expression": "last_seen",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -4431,12 +4557,6 @@
         },
         "op_id": {
           "name": "op_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ip_hash": {
-          "name": "ip_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -4848,12 +4968,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "demerit_at": {
-          "name": "demerit_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -4895,22 +5009,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "filter_strikes_pending_idx": {
-          "name": "filter_strikes_pending_idx",
-          "columns": [
-            {
-              "expression": "at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"filter_strikes\".\"demerit_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4974,12 +5072,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "told": {
-          "name": "told",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "starts_at": {
           "name": "starts_at",

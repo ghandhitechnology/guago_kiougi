@@ -42,7 +42,7 @@ async function character(level = 1): Promise<PresenceEntry> {
       values (${`hub${k}`}, 'x', true, 'ip') returning id)
     insert into characters (account_id, name, major, look, map_id, x, y, cohort, level)
     select id, ${name}, 'math', '{}'::jsonb, 'lawn', 0, 0, 1, ${level} from a returning id`);
-  return { id: rows[0]?.id as string, name, major: "math", level, map: "" };
+  return { id: rows[0]?.id as string, name, major: "math", level, map: "", ch: 0 };
 }
 
 /** Signs a character in the way the WorldRoom does: load, then the seat, then join. */

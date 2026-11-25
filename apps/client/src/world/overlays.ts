@@ -18,6 +18,13 @@ const HEAD = 29;
 const BUBBLE_MAX_W = 104;
 /** Older lines from the same speaker that stay up above the newest. */
 const STACK = 2;
+/** A head as bubbles keep clear of it: the width of a student's hair, feet to crown. */
+const HEAD_W = 14;
+
+const overlaps = (
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 interface Plate {
   readonly root: Phaser.GameObjects.Container;
@@ -187,32 +194,49 @@ export class WorldOverlays {
     b.root.setPosition(p.x - Math.floor(b.w / 2), p.y - HEAD - b.h - Math.round(b.shown));
   }
 
+  /**
+   * Puts every bubble over its speaker so that none covers another person's head or another
+   * bubble: oldest first, each newer one steps up above whatever it would cover. It glides to
+   * its new height rather than jumping, so a crowd's bubbles settle instead of flickering.
+   */
+  private placeBubbles(delta: number): void {
+    const heads = [...this.plates.entries()].map(([id, p]) => ({
+      id,
+      x: p.x - HEAD_W / 2,
+      y: p.y - HEAD,
+      w: HEAD_W,
+      h: HEAD - 2,
+    }));
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const glide = Math.min(1, delta / 70);
+    for (const b of this.bubbles) {
+      if (b.leaving) continue;
+      const p = this.plates.get(b.owner);
+      if (!p) continue;
+      b.shown += (b.lift - b.shown) * Math.min(1, delta / 80);
+      const x = p.x - Math.floor(b.w / 2);
+      let y = p.y - HEAD - b.h - Math.round(b.shown);
+      const box = () => ({ x, y, w: b.w, h: b.h });
+      for (let tries = 0; tries < 24; tries++) {
+        const hit =
+          heads.find((h) => h.id !== b.owner && overlaps(box(), h)) ??
+          placed.find((r) => overlaps(box(), r));
+        if (!hit) break;
+        y = hit.y - b.h - 2;
+      }
+      placed.push(box());
+      const settled = Math.abs(b.root.y - y) < 0.5 || b.root.alpha === 0;
+      b.root.setPosition(x, settled ? y : b.root.y + (y - b.root.y) * glide);
+    }
+  }
+
   private tick(_time: number, delta: number): void {
     this.clock += delta;
     if (this.prompt) {
       const bob = Math.sin(this.clock / 260) > 0 ? 0 : 1;
       this.prompt.setPosition(this.promptAt.x, this.promptAt.y - bob);
     }
-    // Bubbles from different people that would overlap: the later one steps up.
-    const live = this.bubbles.filter((b) => !b.leaving);
-    for (const b of live) {
-      const p = this.plates.get(b.owner);
-      if (!p) continue;
-      b.shown += (b.lift - b.shown) * Math.min(1, delta / 80);
-      this.layoutBubble(b, p);
-    }
-    for (let i = 0; i < live.length; i++) {
-      const a = live[i] as Bubble;
-      for (let j = i + 1; j < live.length; j++) {
-        const c = live[j] as Bubble;
-        if (a.owner === c.owner) continue;
-        const ar = a.root;
-        const cr = c.root;
-        const overlap =
-          ar.x < cr.x + c.w && cr.x < ar.x + a.w && ar.y < cr.y + c.h && cr.y < ar.y + a.h;
-        if (overlap) cr.y = Math.min(cr.y, ar.y - c.h - 2);
-      }
-    }
+    this.placeBubbles(delta);
     for (const b of [...this.bubbles]) {
       if (b.leaving || this.clock < b.expires) continue;
       b.leaving = true;
