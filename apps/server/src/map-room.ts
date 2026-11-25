@@ -32,9 +32,9 @@ import {
   removePlayer,
   type SimWorld,
   shutDoorAhead,
+  skipTicks,
   step,
   stepDoors,
-  TICK_MS,
   TILE_SIZE,
   type Transfer,
   type Usable,
@@ -46,6 +46,7 @@ import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
 import { RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { TickClock } from "./tick-clock.ts";
 import {
   builtMap,
   describe,
@@ -56,12 +57,15 @@ import {
   validPlace,
 } from "./world-maps.ts";
 
-/** Messages a second past which a client is dropped; inputs are 20 a second. */
-const MAX_MESSAGES_PER_SECOND = 120;
+/**
+ * Messages a second past which a client is dropped. Inputs come 20 a second, but a link that
+ * stalls delivers all it held at once, and the server drops a link silent for more than about
+ * nine seconds anyway: 400 lets every stall the connection survives through, and the input queue
+ * already bounds what a burst can buy.
+ */
+const MAX_MESSAGES_PER_SECOND = 400;
 /** How often each room logs its numbers. */
 const LOG_EVERY_MS = 30_000;
-/** Ticks the loop will run back to back to catch up after a stall before it lets time go. */
-const MAX_CATCH_UP = 3;
 /**
  * The loop wakes this often and steps whenever a tick is due. A 50 ms interval timer drifts late
  * by a millisecond or so each time and then has to double-step, so patches would leave up to a
@@ -159,8 +163,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   private usable: Thing[] = [];
   private retireTimer: Delayed | undefined;
   private graceMs = 30_000;
-  private acc = 0;
-  private lastLoop = 0;
+  private ticks!: TickClock;
 
   /**
    * Map rooms are never matchmade by a client: every seat is reserved by the server for a
@@ -182,9 +185,11 @@ export class MapRoom extends Room<{ state: MapState }> {
       throw new Error(`map ${def.id} is larger than positions can address (${MAX_MAP_PX} px)`);
     }
     const seed = (Math.random() * 2 ** 32) >>> 0;
-    this.world = createWorld(this.map, [], seed);
+    // Monsters only for load tests; field monsters arrive with the combat simulation.
+    const monsters = options.monsters ? [{ kind: "odap", count: options.monsters }] : [];
+    this.world = createWorld(this.map, monsters, seed);
     this.grid = new InterestGrid(this.world.width, this.world.height);
-    this.metrics = new RoomMetrics(this.roomId, `${def.id}#${options.channel}`);
+    this.metrics = new RoomMetrics(this.roomId, def.id);
     this.seats = new RoomSeats(def.id, (id) => this.placeOf(id));
     this.state.map = def.id;
     this.state.channel = options.channel;
@@ -200,14 +205,14 @@ export class MapRoom extends Room<{ state: MapState }> {
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: MoveInput) => {
       const pawn = this.pawns.get(client.sessionId);
-      if (pawn && !pawn.leaving && !pawn.queue.push(input)) this.metrics.inputsDropped++;
+      if (pawn && !pawn.leaving) this.metrics.inputsDropped += pawn.queue.push(input);
     });
     this.onMessage(MAP_MESSAGES.interact, interactMessage, (client, n: number) => {
       this.interact(client, n);
     });
 
     // Patches go out right after each step, so every patch is exactly one tick of the world.
-    this.lastLoop = performance.now();
+    this.ticks = new TickClock(performance.now());
     this.setTimestep(() => this.loop(), POLL_MS);
     this.patchRate = 0;
     this.clock.setInterval(() => {
@@ -264,6 +269,19 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.retireTimer?.clear();
     this.retireTimer = undefined;
     const character = await this.seats.join(client);
+    try {
+      this.seat(client, character, options);
+    } catch (error) {
+      // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
+      this.removeBody(client.sessionId);
+      client.view?.dispose();
+      await this.seats.leave(client);
+      throw error;
+    }
+  }
+
+  /** Puts a joined character's body into the world and the client's view around it. */
+  private seat(client: Client, character: Character, options: SeatOptions): void {
     const id = client.sessionId;
     const start =
       character.mapId === this.def.id
@@ -273,10 +291,29 @@ export class MapRoom extends Room<{ state: MapState }> {
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)
         : start.facing;
+    const view = new StateView();
+    client.view = view;
     const slot = this.free.shift();
     const state = slot === undefined ? undefined : this.state.players.get(slot);
-    if (slot === undefined || !state)
+    if (slot === undefined || !state) {
       throw new Error("no free body; maxClients should have refused the join");
+    }
+    const viewer: Viewer = { view, cell: undefined };
+    // Recorded at once, so removeBody finds and frees the slot whatever fails below.
+    const pawn: Pawn = {
+      slot,
+      client,
+      character,
+      state,
+      viewer,
+      queue: new InputQueue(),
+      leaving: false,
+      zones: [],
+      zoneTile: -1,
+      lastInteract: 0,
+      lastRattle: 0,
+    };
+    this.pawns.set(id, pawn);
     this.world = addPlayer(this.world, id, start.x, start.y);
     this.world = {
       ...this.world,
@@ -290,30 +327,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.facing = player.facing;
     state.seq = 0;
     dressPlayer(state, character);
-
-    const view = new StateView();
-    client.view = view;
     view.add(state, OWNER_TAG);
-    const viewer: Viewer = { view, cell: undefined };
-    const zones = zonesAt(this.def.zones, player.x, player.y);
-    const pawn: Pawn = {
-      slot,
-      client,
-      character,
-      state,
-      viewer,
-      queue: new InputQueue(),
-      leaving: false,
-      zones,
-      zoneTile: this.tileOf(player.x, player.y),
-      lastInteract: 0,
-      lastRattle: 0,
-    };
-    this.pawns.set(id, pawn);
+    pawn.zones = zonesAt(this.def.zones, player.x, player.y);
+    pawn.zoneTile = this.tileOf(player.x, player.y);
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
-    client.send(MAP_MESSAGES.zones, { zones } satisfies ZoneUpdate);
+    client.send(MAP_MESSAGES.zones, { zones: pawn.zones } satisfies ZoneUpdate);
     places.enter(character.id, {
       mapId: this.def.id,
       channel: this.state.channel,
@@ -343,7 +363,6 @@ export class MapRoom extends Room<{ state: MapState }> {
     await this.seats.leave(client);
     this.removeBody(client.sessionId);
     client.view?.dispose();
-    this.metrics.forget(client.sessionId);
   }
 
   override onDispose(): void {
@@ -363,6 +382,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
     this.inside.delete(id);
     this.world = removePlayer(this.world, id);
+    this.metrics.forget(id);
   }
 
   /** Counts every frame sent to this client toward the room's bytes-per-client figure. */
@@ -378,22 +398,19 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   private loop(): void {
     const now = performance.now();
-    this.acc = Math.min(this.acc + now - this.lastLoop, TICK_MS * MAX_CATCH_UP);
-    this.lastLoop = now;
-    if (this.acc < TICK_MS) return;
+    const { run, skip } = this.ticks.advance(now);
+    if (run === 0) return;
     const start = now;
     const cpu = process.threadCpuUsage();
-    let ticks = 0;
-    while (this.acc >= TICK_MS) {
-      this.acc -= TICK_MS;
+    // Ticks lost to a stall keep their numbers, so the stamps on patches keep wall time.
+    if (skip > 0) this.world = skipTicks(this.world, skip);
+    for (let i = 0; i < run; i++) {
       const inputs = new Map<string, MoveInput[]>();
       for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take());
       const before = this.world;
       this.world = step(this.world, this.map, inputs);
       this.afterStep(before, inputs);
-      ticks++;
     }
-    if (ticks === 0) return;
     this.sync();
     const patchStart = performance.now();
     this.broadcastPatch();
@@ -537,7 +554,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.y = wire(y);
     dressPlayer(state, pawn.character);
     const back: Pawn = { ...pawn, slot, state, leaving: false, queue: new InputQueue() };
-    back.viewer.view.add(state, OWNER_TAG);
+    pawn.client.view?.add(state, OWNER_TAG);
     this.pawns.set(id, back);
     const cell = this.grid.place(state, x, y);
     this.grid.watch(back.viewer, cell ?? this.grid.cellOfEntity(state));

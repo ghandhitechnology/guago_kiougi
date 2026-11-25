@@ -62,8 +62,6 @@ export class PlayerActor extends Actor {
   private fidgeting = false;
   private lastX: number | undefined;
   private lastY: number | undefined;
-  /** Called when a foot lands, with the feet position. */
-  onStep: ((x: number, y: number) => void) | undefined;
 
   constructor(scene: Phaser.Scene, meta: ArtMetadata, rig: string, look: string, speed: number) {
     super(scene.add.sprite(-100, -100, lookTexture(rig, look)));
@@ -111,12 +109,9 @@ export class PlayerActor extends Actor {
         this.phase = 0;
         this.body.anims.stop();
       }
-      const before = Math.floor(this.phase * this.walkFrames.length);
       this.phase = (this.phase + dist / this.stride) % 1;
       const index = Math.floor(this.phase * this.walkFrames.length);
       this.body.setFrame(`${dir}/${this.walkFrames[index]}`);
-      // Contact frames are the strides, walk0 and walk2.
-      if (index !== before && index % 2 === 0) this.onStep?.(x, y);
     } else {
       this.stillFor += dtMs;
       if (this.walking && this.stillFor >= SETTLE_MS) {

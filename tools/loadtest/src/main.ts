@@ -1,16 +1,24 @@
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { LAWN } from "@guago/content";
+import { buildAllMaps } from "@guago/content";
 import {
+  type Collidable,
+  ENTER_PATH,
   encodeInput,
   INPUT_MESSAGE,
-  MAP_ROOM,
   MapState,
   MOVE_MAX,
+  moveBody,
+  overlapsSolid,
+  PLAYER_RADIUS,
   PLAYER_SPEED,
   POS_SCALE,
   Predictor,
+  portalAt,
+  type Seating,
+  shutDoors,
   TICK_MS,
+  TILE_SIZE,
 } from "@guago/shared";
 import { signIn } from "./account.ts";
 import { startNetsim } from "./netsim.ts";
@@ -22,6 +30,13 @@ import { startNetsim } from "./netsim.ts";
  *
  *   pnpm --filter @guago/loadtest start --bots 80 --seconds 60 --url ws://localhost:2601
  *   … --latency 150 --jitter 30 --loss 0.01   runs every bot through a simulated mobile link
+ *
+ * Bots enter through `POST /api/enter` like the browser. `--map campus-yard` seats them on that
+ * map instead of where their characters were saved and `--monsters 150` fills a channel it
+ * opens; the server must run with ALLOW_MAP_OPTION=1 for either. A channel holds 60 players
+ * (PLAN §10): to put more in one room, run the server with MAP_CHANNEL_SEATS raised; the report
+ * reads the busiest room. Bots walk to places all over the map but never through a door, so
+ * interest cells and view changes are exercised, and each bot counts what it is sent and sees.
  *
  * Bots sign in through the HTTP API as bot0001, bot0002 … (`--accounts` changes the prefix),
  * make their characters on first use and keep their sessions in .local/ for the next run. The
@@ -38,6 +53,9 @@ const { values } = parseArgs({
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
     accounts: { type: "string", default: "bot" },
+    map: { type: "string", default: "campus-field" },
+    monsters: { type: "string" },
+    metrics: { type: "string" },
   },
 });
 
@@ -45,7 +63,18 @@ const BOTS = Number(values.bots);
 const SECONDS = Number(values.seconds);
 const WARMUP = Number(values.warmup);
 const target = new URL(values.url);
-const metricsUrl = `http://${target.host}/metrics`;
+const metricsUrl = values.metrics ?? `http://127.0.0.1:${Number(target.port) + 100}/metrics`;
+const built = buildAllMaps().find((r) => r.map.id === values.map)?.map;
+if (!built) throw new Error(`no map ${values.map}`);
+/** The room's walls: the map's own, with doors to unbuilt maps shut, as the server has them. */
+const walls: Collidable = { collision: shutDoors(built.collision, built.portals) };
+const doors = built.portals;
+const MAP_W = walls.collision.w * TILE_SIZE;
+const MAP_H = walls.collision.h * TILE_SIZE;
+const choice = {
+  map: values.map,
+  ...(values.monsters === undefined ? {} : { monsters: Number(values.monsters) }),
+};
 
 let url = values.url;
 if (values.latency !== undefined) {
@@ -58,33 +87,51 @@ if (values.latency !== undefined) {
   url = `ws://localhost:${port}`;
 }
 
-const DIRS = [
-  [1, 0],
-  [1, 1],
-  [0, 1],
-  [-1, 1],
-  [-1, 0],
-  [-1, -1],
-  [0, -1],
-  [1, -1],
-] as const;
-
 const between = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1));
 
 interface Stats {
   bytes: number;
+  /** Other players and monsters in this bot's state, summed over patches. */
+  seenPlayers: number;
+  seenMonsters: number;
+  maxPlayers: number;
+  patches: number;
   reconciles: number;
   corrections: number;
   errors: number[];
   ackMs: number[];
 }
 
-/** One bot: walks a few seconds, stops, turns, now and then reverses mid-stride. */
+/** Somewhere a player fits. */
+function anywhere(): { x: number; y: number } {
+  for (;;) {
+    const x = PLAYER_RADIUS + Math.random() * (MAP_W - 2 * PLAYER_RADIUS);
+    const y = PLAYER_RADIUS + Math.random() * (MAP_H - 2 * PLAYER_RADIUS);
+    if (!overlapsSolid(walls, x, y, PLAYER_RADIUS) && portalAt(doors, x, y) < 0) return { x, y };
+  }
+}
+
+/**
+ * One bot: picks a place anywhere on the map and walks there with the eight keyboard directions,
+ * stops for a moment now and then, and gives up on a place it cannot reach.
+ */
 class Bot {
-  readonly stats: Stats = { bytes: 0, reconciles: 0, corrections: 0, errors: [], ackMs: [] };
+  readonly stats: Stats = {
+    bytes: 0,
+    seenPlayers: 0,
+    seenMonsters: 0,
+    maxPlayers: 0,
+    patches: 0,
+    reconciles: 0,
+    corrections: 0,
+    errors: [],
+    ackMs: [],
+  };
   private predictor: Predictor | undefined;
-  private dir: readonly [number, number] = [0, 0];
-  private until = 0;
+  private goal: { x: number; y: number } | undefined;
+  private restUntil = 0;
+  private checkAt = 0;
+  private from = { x: 0, y: 0 };
   private seen = { x: -1, y: -1, seq: -1 };
   private readonly sentAt = new Map<number, number>();
   /** The body slot this bot sits in. */
@@ -118,9 +165,17 @@ class Bot {
       }
     }
     if (!me) return;
+    if (this.measuring) {
+      let others = 0;
+      for (const p of state.players.values()) if (p.sid && p.sid !== this.room.sessionId) others++;
+      this.stats.seenPlayers += others;
+      this.stats.seenMonsters += state.monsters.size;
+      this.stats.maxPlayers = Math.max(this.stats.maxPlayers, others);
+      this.stats.patches++;
+    }
     const body = { x: me.x / POS_SCALE, y: me.y / POS_SCALE, facing: me.facing as 0 };
     if (!this.predictor) {
-      this.predictor = new Predictor(LAWN, body, PLAYER_SPEED);
+      this.predictor = new Predictor(walls, body, PLAYER_SPEED);
       this.seen = { x: me.x, y: me.y, seq: me.seq };
       return;
     }
@@ -141,18 +196,37 @@ class Bot {
   }
 
   tick(n: number): void {
-    if (!this.predictor) return;
-    if (n >= this.until) {
-      const walking = this.dir[0] !== 0 || this.dir[1] !== 0;
-      if (walking && Math.random() < 0.45) {
-        this.dir = [0, 0];
-        this.until = n + between(6, 40);
-      } else {
-        this.dir = DIRS[Math.floor(Math.random() * DIRS.length)] as readonly [number, number];
-        this.until = n + between(12, 70);
+    const p = this.predictor;
+    if (!p) return;
+    let mx = 0;
+    let my = 0;
+    if (n >= this.restUntil) {
+      const at = p.body;
+      if (!this.goal || Math.hypot(this.goal.x - at.x, this.goal.y - at.y) < 8) {
+        if (this.goal && Math.random() < 0.75) this.restUntil = n + between(10, 80);
+        this.goal = anywhere();
+        this.from = { x: at.x, y: at.y };
+        this.checkAt = n + 40;
+      } else if (n >= this.checkAt) {
+        // Walled off from it: go somewhere else.
+        if (Math.hypot(at.x - this.from.x, at.y - this.from.y) < 6) this.goal = anywhere();
+        this.from = { x: at.x, y: at.y };
+        this.checkAt = n + 40;
+      }
+      if (n >= this.restUntil && this.goal) {
+        const a = Math.round(Math.atan2(this.goal.y - at.y, this.goal.x - at.x) / (Math.PI / 4));
+        mx = Math.round(Math.cos((a * Math.PI) / 4)) * MOVE_MAX;
+        my = Math.round(Math.sin((a * Math.PI) / 4)) * MOVE_MAX;
+        // A door would take the bot to another map: turn away instead.
+        const next = moveBody(walls, p.body, mx, my, PLAYER_SPEED);
+        if (portalAt(doors, next.x, next.y) >= 0) {
+          mx = 0;
+          my = 0;
+          this.goal = anywhere();
+        }
       }
     }
-    const input = this.predictor.tick(this.dir[0] * MOVE_MAX, this.dir[1] * MOVE_MAX);
+    const input = p.tick(mx, my);
     if (this.measuring) {
       this.ticks++;
       if (input) this.moving++;
@@ -177,8 +251,15 @@ for (let i = 0; i < BOTS; i++) {
   // A join can lose a race with a keep-alive close on a slow link; a player would retry too.
   for (let attempt = 1; ; attempt++) {
     try {
+      const res = await fetch(`http://${target.host}${ENTER_PATH}`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(choice),
+      });
+      if (!res.ok) throw new Error(`enter answered ${res.status}`);
+      const { seat } = (await res.json()) as Seating;
       const client = new Client(url, { headers: { cookie } });
-      bots.push(new Bot(await client.joinOrCreate(MAP_ROOM, {}, MapState)));
+      bots.push(new Bot(await client.consumeSeatReservation(seat, MapState)));
       break;
     } catch (err) {
       if (attempt === 3) throw err;
@@ -215,6 +296,7 @@ const poll = async () => {
   const res = await fetch(metricsUrl);
   const body = (await res.json()) as {
     rooms: {
+      map: string;
       players: number;
       monsters: number;
       tickMs: { p50: number; p95: number; max: number };
@@ -226,6 +308,11 @@ const poll = async () => {
   };
   const room = body.rooms.sort((a, b) => b.players - a.players)[0];
   if (!room) return;
+  if (room.map !== values.map) {
+    throw new Error(
+      `the server runs ${room.map}, not ${values.map}: start it with ALLOW_MAP_OPTION=1`,
+    );
+  }
   windows.push({
     tickP50: room.tickMs.p50,
     tickP95: room.tickMs.p95,
@@ -257,6 +344,10 @@ clearInterval(driver);
 for (const bot of bots) bot.measuring = false;
 
 const perBot = bots.map((b) => b.stats.bytes / elapsed);
+const worstBot = bots[perBot.indexOf(Math.max(...perBot))] as Bot;
+const seen = (b: Bot, pick: (s: Stats) => number) => pick(b.stats) / Math.max(1, b.stats.patches);
+const seenPlayers = bots.map((b) => seen(b, (s) => s.seenPlayers));
+const seenMonsters = bots.map((b) => seen(b, (s) => s.seenMonsters));
 const errors = bots.flatMap((b) => b.stats.errors);
 const reconciles = bots.reduce((a, b) => a + b.stats.reconciles, 0);
 const corrections = bots.reduce((a, b) => a + b.stats.corrections, 0);
@@ -277,7 +368,7 @@ const link =
     ? "loopback"
     : `round trip ${values.latency} ms + up to ${Number(values.jitter) * 2} ms jitter, loss ${values.loss}`;
 const lines = [
-  `${BOTS} bots, ${fixed(elapsed, 0)} s measured after ${WARMUP} s warm-up, ${link}`,
+  `${BOTS} bots on ${values.map} (${walls.collision.w}×${walls.collision.h} tiles), ${fixed(elapsed, 0)} s measured after ${WARMUP} s warm-up, ${link}`,
   `moving ${fixed(moving * 100, 0)}% of ticks, ${worst?.players ?? 0} players and ${worst?.monsters ?? 0} monsters in the room`,
   "",
   `server tick ms        p50 ${fixed(
@@ -314,6 +405,14 @@ const lines = [
     worstOf((w) => w.bytesMax),
     0,
   )} max   bots ${fixed(mean(perBot), 0)} mean, ${fixed(Math.max(0, ...perBot), 0)} max   budget < 8000`,
+  `bytes per bot        p50 ${fixed(quantile(perBot, 0.5), 0)}  p95 ${fixed(quantile(perBot, 0.95), 0)}  worst ${fixed(Math.max(0, ...perBot), 0)} (sees ${fixed(
+    seen(worstBot, (s) => s.seenPlayers),
+    0,
+  )} players, ${fixed(
+    seen(worstBot, (s) => s.seenMonsters),
+    0,
+  )} monsters on average)`,
+  `in view per client    players mean ${fixed(mean(seenPlayers), 1)}, most ${Math.max(0, ...bots.map((b) => b.stats.maxPlayers))} of ${BOTS - 1}; monsters mean ${fixed(mean(seenMonsters), 1)}`,
   `view changes/s        ${fixed(
     median((w) => w.viewChanges),
     0,

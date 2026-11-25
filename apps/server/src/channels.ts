@@ -20,6 +20,8 @@ export interface MapRoomOptions {
   readonly seats: number;
   /** Seconds an empty room stays open. */
   readonly grace: number;
+  /** Wandering monsters to fill it with: load tests only, through the development map option. */
+  readonly monsters?: number;
 }
 
 /** What a seat is reserved with: decided by the server, read by the room on join. */
@@ -47,10 +49,15 @@ class Channels {
    * channel when every one is full. Serialised per map, so two arrivals at a full map open one
    * new channel between them, not two.
    */
-  seat(map: string, auth: RoomAuth, options: SeatOptions = {}): Promise<Seating> {
+  seat(
+    map: string,
+    auth: RoomAuth,
+    options: SeatOptions = {},
+    fill: { monsters?: number } = {},
+  ): Promise<Seating> {
     return this.locked(map, async () => {
       for (let attempt = 0; attempt < 4; attempt++) {
-        const channel = this.open(map) ?? (await this.create(map));
+        const channel = this.open(map) ?? (await this.create(map, fill.monsters));
         try {
           const seat = await matchMaker.reserveSeatFor(channel.cache, options, auth);
           return { map, channel: channel.number, seat: ticket(seat) };
@@ -104,7 +111,7 @@ class Channels {
     return undefined;
   }
 
-  private async create(map: string): Promise<Channel> {
+  private async create(map: string, monsters?: number): Promise<Channel> {
     const list = this.byMap.get(map) ?? [];
     let number = 1;
     while (list.some((c) => c.number === number)) number++;
@@ -113,6 +120,7 @@ class Channels {
       channel: number,
       seats: Math.min(this.seats, MAP_SEATS),
       grace: this.graceSeconds,
+      ...(monsters ? { monsters } : {}),
     };
     const cache = await matchMaker.createRoom(MAP_ROOM, options);
     const channel: Channel = { number, roomId: cache.roomId, cache };

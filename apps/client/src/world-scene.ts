@@ -32,7 +32,6 @@ import { MARK_DEPTH } from "./depths.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
 import { Curtain } from "./fade.ts";
-import { Footsteps } from "./footsteps.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { ensureMap, enteredMap, mapReady, roomCollision } from "./map-data.ts";
@@ -70,7 +69,6 @@ interface Here {
   readonly map: BuiltMap;
   readonly channel: number;
   readonly view: MapView;
-  readonly footsteps: Footsteps;
   readonly npcs: Map<string, NpcActor>;
   readonly untier: () => void;
   /** What the prompt can point at: the server's own list, by the same rule. */
@@ -88,7 +86,6 @@ export class WorldScene extends Phaser.Scene {
   private look!: string;
   private camera: CameraRig | undefined;
   private keys!: KeyboardMove;
-  private footsteps: Footsteps | undefined;
   private readonly clock = new ServerClock();
   private readonly monsters = new Map<string, Remote<MonsterActor>>();
   private readonly players = new Map<string, Remote<PlayerActor>>();
@@ -230,8 +227,6 @@ export class WorldScene extends Phaser.Scene {
     const view = MapView.create(this, map.id);
     const untier = onQualityTier((t) => view.setTier(t));
     enteredMap(this, map.id);
-    const footsteps = new Footsteps(this, this.meta, map);
-    this.footsteps = footsteps;
     const npcs = new Map<string, NpcActor>();
     for (const [key, n] of room.state.npcs) {
       const art = npcArt(this.meta, n.speaker);
@@ -268,7 +263,7 @@ export class WorldScene extends Phaser.Scene {
         top: t.rect.y * T - 2,
       })),
     ];
-    this.here = { room, map, channel: seating.channel, view, footsteps, npcs, usable, untier };
+    this.here = { room, map, channel: seating.channel, view, npcs, usable, untier };
     this.selfId = room.sessionId;
     this.camera = new CameraRig(this.cameras.main, map.w * T, map.h * T);
     const x = me.x / POS_SCALE;
@@ -346,7 +341,6 @@ export class WorldScene extends Phaser.Scene {
     this.bubbles.clearAll();
     this.prompt.show(undefined);
     here?.untier();
-    here?.footsteps.destroy();
     here?.view.destroy();
   }
 
@@ -517,9 +511,7 @@ export class WorldScene extends Phaser.Scene {
   // Frames --------------------------------------------------------------------------------
 
   private playerActor(look = this.look): PlayerActor {
-    const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
-    actor.onStep = (x, y) => this.footsteps?.step(x, y);
-    return actor;
+    return new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
   }
 
   override update(time: number): void {

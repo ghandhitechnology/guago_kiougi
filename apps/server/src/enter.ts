@@ -10,13 +10,55 @@ import { ENTER_PATH, type Seating } from "@guago/shared";
 import { channels } from "./channels.ts";
 import { describeError } from "./db/index.ts";
 import { authenticateJoin, characterAfterMoves } from "./seats.ts";
-import { validPlace } from "./world-maps.ts";
+import { builtMap, validPlace } from "./world-maps.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 
 /** Entries per account: a burst of three, then one every three seconds. */
 const BURST = 3;
 const REFILL_MS = 3000;
+const MAX_BODY = 512;
+
+/**
+ * Whether an entry may name the map, and a monster count for the channel it opens. Development
+ * and load tests only (`ALLOW_MAP_OPTION=1`); anywhere else a client choosing its map would be a
+ * teleport, so the body is ignored.
+ */
+export const mapOptionAllowed = () => process.env.ALLOW_MAP_OPTION === "1";
+
+interface DevChoice {
+  readonly map?: string;
+  readonly monsters?: number;
+}
+
+function readChoice(req: IncomingMessage): Promise<DevChoice> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size <= MAX_BODY) chunks.push(c);
+    });
+    req.on("end", () => {
+      try {
+        const v = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as Record<
+          string,
+          unknown
+        >;
+        const monsters = v.monsters;
+        resolve({
+          ...(typeof v.map === "string" ? { map: v.map } : {}),
+          ...(Number.isInteger(monsters) && (monsters as number) >= 0 && (monsters as number) <= 300
+            ? { monsters: monsters as number }
+            : {}),
+        });
+      } catch {
+        resolve({});
+      }
+    });
+    req.on("error", () => resolve({}));
+  });
+}
 
 export function enterRoute(): Middleware {
   const buckets = new Map<string, { tokens: number; at: number }>();
@@ -50,12 +92,21 @@ export function enterRoute(): Middleware {
     for (const [k, v] of Object.entries(req.headers)) {
       if (typeof v === "string") headers.set(k, v);
     }
+    // Read or drained either way, so the socket can be reused.
+    const choice = mapOptionAllowed() ? await readChoice(req) : {};
+    if (!mapOptionAllowed()) req.resume();
     const auth = await authenticateJoin({ headers } as AuthContext);
     if (!take(auth.accountId)) return send(res, 429, { error: "rate_limited" });
     const character = await characterAfterMoves(auth.accountId, auth.characterId);
     if (!character) return send(res, 403, { error: "forbidden" });
-    const place = validPlace(character.mapId, character.x, character.y);
-    const seating: Seating = await channels.seat(place.map.id, auth);
+    const chosen = choice.map ? builtMap(choice.map) : undefined;
+    const map = chosen?.id ?? validPlace(character.mapId, character.x, character.y).map.id;
+    const seating: Seating = await channels.seat(
+      map,
+      auth,
+      {},
+      choice.monsters ? { monsters: choice.monsters } : {},
+    );
     send(res, 200, seating);
   }
 
@@ -63,8 +114,6 @@ export function enterRoute(): Middleware {
     if (req.method !== "POST" || new URL(req.url ?? "/", "http://local").pathname !== ENTER_PATH) {
       return next();
     }
-    // The body is never read; drain it so the socket can be reused.
-    req.resume();
     enter(req, res).catch((e: unknown) => {
       if (res.headersSent) return;
       if (e instanceof ServerError) {
