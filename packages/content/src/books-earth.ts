@@ -139,7 +139,7 @@ export const WEATHER_MAP = book<ZoneAttack>({
     { at: 30, add: { radius: 8 } },
     { at: 65, add: { duration: 2 } },
   ],
-  cues: { body: "atk-cloud", hit: "fx-bolt-node", area: "fx-rain" },
+  cues: { body: "atk-cloud", hit: "fx-thunder", area: "fx-rain" },
   evolution: {
     id: "typhoon-eye",
     attack: {
@@ -185,7 +185,7 @@ export const STAR_LOG = book<TelegraphAttack>({
     { at: 35, add: { count: 1 } },
     { at: 75, add: { radius: 6 } },
   ],
-  cues: { body: "atk-meteor", hit: "fx-crater", area: "fx-forecast" },
+  cues: { body: "atk-meteor", hit: "fx-crater", area: "fx-forecast-ring" },
   evolution: {
     id: "meteor-shower",
     attack: {
@@ -227,7 +227,7 @@ export const TIDE_TABLE = book<WaveAttack>({
     { at: 30, add: { radius: 16 } },
     { at: 70, add: { damage: 0.4 } },
   ],
-  cues: { body: "atk-tide", hit: "fx-flask-shatter" },
+  cues: { body: "atk-tide", hit: "fx-surf" },
   evolution: {
     id: "spring-tide",
     attack: {
@@ -271,7 +271,7 @@ export const VOLCANO = book<TelegraphAttack>({
     { at: 30, add: { radius: 6 } },
     { at: 70, add: { repeat: 1 } },
   ],
-  cues: { body: "atk-vent", hit: "fx-lava", area: "fx-forecast" },
+  cues: { body: "atk-vent", hit: "fx-lava", area: "fx-forecast-ring" },
   evolution: {
     id: "stratovolcano",
     attack: {
