@@ -49,6 +49,19 @@ export type ApiErrorCode = (typeof API_ERRORS)[number];
 
 export interface ApiError {
   error: ApiErrorCode;
+  /** With `account_banned` on a login whose password was right: what the player is owed. */
+  ban?: BanNotice;
+}
+
+/**
+ * Why and until when an account is banned, as its owner is told: the narrative's
+ * `moderation.banned` ({time}, {reason}) or `moderation.banned-permanent` ({reason}).
+ */
+export interface BanNotice {
+  key: "moderation.banned" | "moderation.banned-permanent";
+  /** Ms since the epoch; absent for a ban until lifted. */
+  until?: number;
+  reason: string;
 }
 
 export const MAJORS = ["math", "physics", "chemistry", "biology", "earth"] as const;

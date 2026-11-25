@@ -6,8 +6,16 @@ import * as schema from "./schema.ts";
 
 export { schema };
 
-export function createDb(url: string) {
-  const pool = new pg.Pool({ connectionString: url, max: 10 });
+/**
+ * `max` connections (the game's pool: 10); `statementTimeoutMs` caps every statement, for a
+ * pool whose queries must never hold the database (the admin page's reads).
+ */
+export function createDb(url: string, o: { max?: number; statementTimeoutMs?: number } = {}) {
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: o.max ?? 10,
+    ...(o.statementTimeoutMs ? { statement_timeout: o.statementTimeoutMs } : {}),
+  });
   // An idle connection dropped by the server (restart, forced disconnect) must not crash the
   // process; the pool reconnects on the next query.
   pool.on("error", (error) => console.error("database connection lost:", error.message));

@@ -96,7 +96,7 @@ export function enterRoute(): Middleware {
     // Read or drained either way, so the socket can be reused.
     const choice = mapOptionAllowed() ? await readChoice(req) : {};
     if (!mapOptionAllowed()) req.resume();
-    const auth = await authenticateJoin({ headers } as AuthContext);
+    const auth = await authenticateJoin({ headers, req } as AuthContext);
     // Development and load tests enter as fast as their scripts walk; players are limited.
     if (!mapOptionAllowed() && !take(auth.accountId)) {
       return send(res, 429, { error: "rate_limited" });

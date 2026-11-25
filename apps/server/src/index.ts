@@ -55,8 +55,10 @@ const live = createLive(db, {
 });
 provideLive(live);
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
+const adminReads = createDb(config.databaseUrl, { max: 2, statementTimeoutMs: 30_000 });
 const admin = await createModerationStack({
   db,
+  readDb: adminReads,
   executor: economy.executor,
   secret: config.serverSecret,
   // Social is made below; a ban only reaches these after start.
@@ -101,6 +103,7 @@ onShutdown("grants", () => economy.grants.flush());
 onShutdown("quest progress", () => live.stop());
 onShutdown("chat log", () => chatLog.flush());
 onShutdown("database", () => db.pool.end());
+onShutdown("admin reads", () => adminReads.pool.end());
 
 await server.listen(config.port);
 // The one WorldRoom exists from the start, so two first joins can never make two.
@@ -125,7 +128,12 @@ setInterval(
 setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
 await serveMetrics(config.metricsPort, "127.0.0.1", live.adminRoute);
 // Its own port on a loopback or Tailscale address (config.ts), never through the game port.
-await admin.listen({ host: config.adminHost, port: config.adminPort, origin: config.adminOrigin });
+await admin.listen({
+  host: config.adminHost,
+  port: config.adminPort,
+  origin: config.adminOrigin,
+  trustProxy: config.adminTrustProxy,
+});
 console.log(
   `game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}, admin on ${config.adminHost}:${config.adminPort}`,
 );
