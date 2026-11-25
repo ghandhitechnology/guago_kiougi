@@ -43,6 +43,13 @@
       "when": 1795587329394,
       "tag": "0005_trading",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795588282365,
+      "tag": "0006_social_review",
+      "breakpoints": true
     }
   ]
 }
