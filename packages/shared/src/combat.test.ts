@@ -134,7 +134,10 @@ describe("kill credit", () => {
   });
 
   it("falls back to the top contributor in a crowd", () => {
-    const crowd = Array.from({ length: 25 }, (_, i) => ({ playerId: `p${i}`, damage: 30 + i * 0.5 }));
+    const crowd = Array.from({ length: 25 }, (_, i) => ({
+      playerId: `p${i}`,
+      damage: 30 + i * 0.5,
+    }));
     expect(killCredits(hp, crowd)).toEqual([{ playerId: "p24", expMult: 1 }]);
   });
 
