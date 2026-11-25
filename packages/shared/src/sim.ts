@@ -1,4 +1,4 @@
-import { type Collidable, isSolidTile, pushOut } from "./collision.ts";
+import { type Collidable, overlapsSolid, pushOut } from "./collision.ts";
 import { TICK_MS, TILE_SIZE } from "./constants.ts";
 import {
   type Body,
@@ -71,20 +71,6 @@ function roller(seed: number): { roll: () => number; state: () => number } {
   };
 }
 
-function solidAt(map: Collidable, x: number, y: number, r: number): boolean {
-  const T = TILE_SIZE;
-  for (const [dx, dy] of [
-    [0, 0],
-    [-r, 0],
-    [r, 0],
-    [0, -r],
-    [0, r],
-  ] as const) {
-    if (isSolidTile(map, Math.floor((x + dx) / T), Math.floor((y + dy) / T))) return true;
-  }
-  return false;
-}
-
 export function createWorld(
   map: Collidable,
   spawns: readonly SpawnGroup[],
@@ -101,7 +87,7 @@ export function createWorld(
       for (let tries = 0; tries < 32; tries++) {
         x = EDGE + roll() * (width - 2 * EDGE);
         y = EDGE + roll() * (height - 2 * EDGE);
-        if (!solidAt(map, x, y, MONSTER_RADIUS)) break;
+        if (!overlapsSolid(map, x, y, MONSTER_RADIUS)) break;
       }
       monsters.push({
         id: monsters.length + 1,
@@ -195,8 +181,9 @@ function stepMonsters(map: Collidable, world: SimWorld, roll: () => number): Sim
         dy /= d;
       }
       const push = (min - d) / 2;
-      moved[i] = { ...a, x: a.x - dx * push, y: a.y - dy * push };
-      moved[j] = { ...b, x: b.x + dx * push, y: b.y + dy * push };
+      // Through the walls' rules, so a crowd can never shove one of its own through a thin wall.
+      moved[i] = { ...a, ...slide(map, a.x, a.y, -dx * push, -dy * push, MONSTER_RADIUS) };
+      moved[j] = { ...b, ...slide(map, b.x, b.y, dx * push, dy * push, MONSTER_RADIUS) };
     }
   }
 

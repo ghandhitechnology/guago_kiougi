@@ -144,7 +144,7 @@ describe("world replay", () => {
     expect(seqs).toEqual(seqs.map((_, i) => i + 1));
   });
 
-  it("keeps every player and monster out of the walls", () => {
+  it("keeps every player out of the walls along the recorded session", () => {
     let world = createWorld(map, [{ kind: "odap", count: 12 }], 7);
     ticks.forEach((tick, i) => {
       for (const j of tick.join) world = addPlayer(world, j.id, j.x, j.y);
@@ -185,7 +185,7 @@ describe("monsters", () => {
     expect(world).toEqual(copy);
   });
 
-  it("wander inside the map and out of the walls", () => {
+  it("wander inside the map bounds", () => {
     const map = testMap();
     let world = createWorld(map, [{ kind: "odap", count: 12 }], 3);
     for (let i = 0; i < 2400; i++) world = step(world, map);

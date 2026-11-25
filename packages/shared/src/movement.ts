@@ -103,8 +103,8 @@ function cornerSlip(
 
 /**
  * One fixed tick of player movement: instant start and stop, the same speed in every direction,
- * sliding along walls and around corners. Deterministic, so the server and the client's
- * prediction land on the same 1/POS_SCALE grid point from the same input.
+ * sliding along walls at full speed and around corners. Deterministic, so the server and the
+ * client's prediction land on the same 1/POS_SCALE grid point from the same input.
  */
 export function moveBody(
   map: Collidable,
@@ -114,28 +114,76 @@ export function moveBody(
   speed: number,
   r: number = PLAYER_RADIUS,
 ): Body {
+  return moveBy(map, body, mx, my, (speed * TICK_MS) / 1000, r);
+}
+
+/**
+ * Moves a body up to `dist` pixels the way an input points. The tick step is `moveBody`; the
+ * client also calls this with a frame's share of a tick to draw the player ahead of the tick.
+ * The path never runs longer than `dist`, whatever the walls do.
+ */
+export function moveBy(
+  map: Collidable,
+  body: Body,
+  mx: number,
+  my: number,
+  dist: number,
+  r: number = PLAYER_RADIUS,
+): Body {
   const facing = faceToward(body.facing, mx, my);
   const [vx, vy] = moveDirection(mx, my);
   if (vx === 0 && vy === 0) return facing === body.facing ? body : { ...body, facing };
 
-  const dist = (speed * TICK_MS) / 1000;
+  const want = dist * Math.sqrt(vx * vx + vy * vy);
   let { x, y } = slide(map, body.x, body.y, vx * dist, vy * dist, r);
+  const used = Math.hypot(x - body.x, y - body.y);
 
-  // A straight move stopped by a corner that only clips the collider slides past it instead,
-  // spending what is left of the step sideways.
   if ((vx === 0) !== (vy === 0)) {
+    // A straight move stopped by a corner that only clips the collider slides past it instead,
+    // spending what is left of the step sideways.
     const fx = Math.sign(vx);
     const fy = Math.sign(vy);
     const progress = (x - body.x) * fx + (y - body.y) * fy;
-    if (progress < dist * 0.5) {
+    if (progress < want * 0.5) {
       const shift = cornerSlip(map, x, y, fx, fy, r);
       if (shift !== 0) {
-        const s = Math.sign(shift) * Math.min(Math.abs(shift), dist - Math.max(progress, 0));
+        const s = Math.sign(shift) * Math.min(Math.abs(shift), want - used);
         const p = slide(map, x, y, fy === 0 ? 0 : s, fx === 0 ? 0 : s, r);
-        x = p.x;
-        y = p.y;
+        return { ...within(map, body, p.x, p.y, want, r), facing };
       }
     }
   }
-  return { x: snap(x), y: snap(y), facing };
+
+  // Full speed along walls: what a wall took from the step carries on the way the body did
+  // move, as long as that is still the way the player is pushing.
+  const extra = want - used;
+  if (extra > 1 / 64 && used > 1 / 64) {
+    const ux = (x - body.x) / used;
+    const uy = (y - body.y) / used;
+    if (ux * vx + uy * vy > 0.25 * Math.sqrt(vx * vx + vy * vy)) {
+      const p = slide(map, x, y, ux * extra, uy * extra, r);
+      x = p.x;
+      y = p.y;
+    }
+  }
+  return { ...within(map, body, x, y, want, r), facing };
+}
+
+/**
+ * Rolling off a corner, the push that keeps a body out of it can carry the body a little further
+ * than it asked to go. Pull such an end back onto the step's length when that spot is clear, so
+ * no tick ever outruns the speed.
+ */
+function within(map: Collidable, from: Body, x: number, y: number, want: number, r: number) {
+  const dx = x - from.x;
+  const dy = y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= want + 1 / 32) return { x: snap(x), y: snap(y) };
+  // Back along the way it came until the spot is clear; the start always is.
+  for (let k = want / len; k > 0; k -= 0.125) {
+    const qx = snap(from.x + dx * k);
+    const qy = snap(from.y + dy * k);
+    if (!overlapsSolid(map, qx, qy, r)) return { x: qx, y: qy };
+  }
+  return { x: from.x, y: from.y };
 }
