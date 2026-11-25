@@ -10,6 +10,7 @@ import type { ChatSink } from "./chat/log.ts";
 import { MapRoom } from "./map-room.ts";
 import { allRooms } from "./metrics.ts";
 import { provideSeatServices } from "./seats.ts";
+import type { Social } from "./social/index.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
@@ -35,10 +36,10 @@ export function createGameServer(
   auth: AuthService,
   settings: HttpSettings,
   looks: () => LookOptions,
-  chat: { filter?: ChatFilter; log?: ChatSink } = {},
+  world: { filter?: ChatFilter; log?: ChatSink; social?: Social } = {},
 ) {
   provideSeatServices({ auth, ...settings });
-  provideWorldServices(chat);
+  provideWorldServices(world);
   const api = createApiHandler(auth, settings, looks);
 
   // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays

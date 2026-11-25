@@ -25,7 +25,9 @@ import {
   step,
   TICK_MS,
   TILE_SIZE,
+  wearClub,
 } from "@guago/shared";
+import { clubTags } from "./club-tags.ts";
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
@@ -48,6 +50,7 @@ const POLL_MS = 5;
 /** A player's body in this room: what is synced, what its client sees, what it asked to do. */
 interface Pawn {
   readonly slot: string;
+  readonly characterId: string;
   readonly state: InstanceType<typeof PlayerState>;
   readonly viewer: Viewer;
   readonly queue: InputQueue;
@@ -77,6 +80,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   private readonly monsters = new Map<number, InstanceType<typeof MonsterState>>();
   private acc = 0;
   private lastLoop = 0;
+  private unlistenClubs: (() => void) | undefined;
 
   /** Only a browser with a live session and a character gets a seat. */
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
@@ -122,6 +126,12 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    // A club joined, left or restyled shows under the name at once.
+    this.unlistenClubs = clubTags.listen((characterId, tag) => {
+      for (const pawn of this.pawns.values()) {
+        if (pawn.characterId === characterId) wearClub(pawn.state, tag);
+      }
+    });
   }
 
   /** Players seated in this room. */
@@ -164,12 +174,19 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.facing = player.facing;
     state.seq = 0;
     dressPlayer(state, character);
+    wearClub(state, clubTags.get(character.id));
 
     const view = new StateView();
     client.view = view;
     view.add(state, OWNER_TAG);
     const viewer: Viewer = { view, cell: undefined };
-    this.pawns.set(id, { slot, state, viewer, queue: new InputQueue() });
+    this.pawns.set(id, {
+      slot,
+      characterId: character.id,
+      state,
+      viewer,
+      queue: new InputQueue(),
+    });
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
@@ -212,6 +229,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override onDispose(): void {
+    this.unlistenClubs?.();
     this.metrics.dispose();
   }
 
