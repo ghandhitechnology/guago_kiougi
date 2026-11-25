@@ -1,5 +1,5 @@
 import { type Legend, sprite } from "../../format.ts";
-import { type Lobe, lobes, type Mark, Pic, seal, shade, texture, tidy } from "../../paint.ts";
+import { lobes, Pic, seal, shade, smooth, tidy } from "../../paint.ts";
 
 /**
  * Page 1 props: what grows out of the 운동장 when the agora comes through. Marble is lit from
@@ -8,7 +8,8 @@ import { type Lobe, lobes, type Mark, Pic, seal, shade, texture, tidy } from "..
  */
 const palette: Legend = {
   ".": null,
-  // marble
+  // marble, with its warm shadow
+  v: "stone.vein",
   d: "stone.deep",
   S: "stone.dark",
   M: "stone.mid",
@@ -28,6 +29,11 @@ const palette: Legend = {
   O: "olive.dark",
   l: "olive.mid",
   L: "olive.light",
+  // olive leaves: grey-green, silver where the light catches them
+  f: "board.deep",
+  z: "board.dark",
+  N: "board.mid",
+  n: "board.light",
   B: "wood.deep",
   b: "wood.dark",
   U: "wood.mid",
@@ -42,7 +48,6 @@ const palette: Legend = {
   x: null,
 };
 
-const P = (src: string): Pic => Pic.of(src);
 const one = (
   name: string,
   size: [number, number],
@@ -79,7 +84,7 @@ function oval(w: number, h: number, cx: number, cy: number, rx: number, ry: numb
 const COL_W = 20;
 const COL_H = 66;
 /** Fluted shaft row, 14 wide: lit west edge, flutes as soft grooves, shade to the east. */
-const FLUTED = "dwwkKkkKkkKMMd";
+const FLUTED = "dwwkKkkKkkKvvd";
 const SHAFT_X = 3;
 
 /** Shaft rows from `top` to `bottom` inclusive, tapering one pixel near the top. */
@@ -192,51 +197,83 @@ function oliveTrunk(): string {
   return tidy(tidy(seal(pic, "d"), "M", "d"), "M", "d").toString();
 }
 
-/** Puffs of silver-green, each a main lobe with smaller bumps on its crown. */
-const puff = (x: number, y: number, r: number): Lobe[] => [
-  { x, y, rx: r, ry: r * 0.78 },
-  { x: x - r * 0.55, y: y - r * 0.45, rx: r * 0.5, ry: r * 0.45 },
-  { x: x + r * 0.35, y: y - r * 0.6, rx: r * 0.55, ry: r * 0.45 },
-  { x: x + r * 0.8, y: y - r * 0.05, rx: r * 0.4, ry: r * 0.4 },
+/** A clump of leaves: a main lobe with smaller bumps on its crown. */
+const clump = (x: number, y: number, r: number) => [
+  { x, y, rx: r, ry: r * 0.72 },
+  { x: x - r * 0.5, y: y - r * 0.4, rx: r * 0.55, ry: r * 0.45 },
+  { x: x + r * 0.35, y: y - r * 0.55, rx: r * 0.55, ry: r * 0.42 },
+  { x: x + r * 0.75, y: y + r * 0.05, rx: r * 0.42, ry: r * 0.38 },
 ];
 
-const OLIVE_CLUMPS: readonly (readonly Lobe[])[] = [
-  puff(14, 24, 8),
-  puff(38, 25, 7.5),
-  puff(26, 15, 10),
-  puff(24, 30, 7),
+/** Leaf clumps of the crown, back to front. */
+const OLIVE_CLUMPS: readonly (readonly [x: number, y: number, r: number])[] = [
+  [27, 8, 8],
+  [15, 13, 7],
+  [38, 14, 7.5],
+  [24, 18, 8.5],
+  [9, 23, 6],
+  [44, 24, 5.5],
+  [33, 25, 7.5],
+  [17, 28, 7],
+  [27, 32, 5.5],
 ];
 
-const leaves: readonly (readonly Mark[])[] = [
-  [
-    [2, 2, P("K.\n.K")],
-    [9, 5, P("OO")],
-    [5, 9, P(".L\nL.")],
-    [12, 11, P("KK")],
-  ],
-  [
-    [6, 1, P("LL")],
-    [1, 6, P("O.\n.O")],
-    [11, 8, P("K.\n.K")],
-    [4, 12, P("OO")],
-  ],
-];
-
-function oliveCrown(shift: number): string {
+/**
+ * The crown as olive leaves: clumps lit on their upper left, where the leaves turn their silver
+ * undersides to the light, grey-green through the middle and blue-green in the shade below
+ * where each clump sits over the next. Single leaves show as slivers of silver on the middle
+ * and of grey-green in the shade, and leaf tips break the silhouette.
+ */
+function oliveCrown(stir: number): string {
+  const mid = "n";
+  const leafMid = "v";
+  const leafDark = "n";
   const pic = Pic.blank(OL_W, OL_H);
-  OLIVE_CLUMPS.forEach((clump, i) => {
-    const moved = clump.map((l) => ({ ...l, x: l.x + (i % 2 ? shift : 0) }));
-    const p = shade(
-      OL_W,
-      OL_H,
-      lobes(moved),
-      { outline: "o", dark: "O", mid: "l", light: "L", glint: "K" },
-      { light: 2, dark: 2 },
-    );
-    texture(p, leaves, "l", (cx, cy) => cx + cy + i);
-    pic.put(tidy(p, "l", "o"), 0, 0);
+  const ink = { outline: "f", dark: "N", mid, light: "v", glint: "K" };
+  OLIVE_CLUMPS.forEach(([cx, cy, r], i) => {
+    const x0 = cx + (i % 2 ? stir : 0);
+    const isIn = lobes(clump(x0, cy, r));
+    const c = shade(OL_W, OL_H, isIn, ink, { light: 2, dark: 3 });
+    // Leaves: small slivers of another tone, scattered by a hash, thicker toward the light.
+    for (let y = 1; y < OL_H - 1; y++) {
+      for (let x = 1; x < OL_W - 2; x++) {
+        const h = (x * 73 + y * 151 + i * 29) % 17;
+        const at = c.at(x, y);
+        if (at === mid && h < 4)
+          c.put(Pic.of(h < 2 ? "xx" : "x.\n.x").swap("x", leafMid), x, y, {
+            onto: mid,
+            whole: true,
+          });
+        else if (at === "N" && h < 3)
+          c.put(Pic.of(h < 1 ? "xx" : ".x\nx.").swap("x", leafDark), x, y, {
+            onto: "N",
+            whole: true,
+          });
+        else if (at === "v" && h < 3)
+          c.put(Pic.of("xx").swap("x", "K"), x, y, { onto: "v", whole: true });
+      }
+    }
+    for (let y = 0; y < OL_H; y++) {
+      for (let x = 0; x < OL_W; x++) {
+        let ch = c.at(x, y) as string;
+        if (ch === ".") continue;
+        // Over a clump behind, the lit upper left edge stays leafy instead of outlined.
+        if (ch === "f" && pic.at(x, y) !== "." && (!isIn(x - 1, y) || !isIn(x, y - 1))) ch = mid;
+        pic.set(x, y, ch);
+      }
+    }
   });
-  return tidy(tidy(pic, "l", "o"), "l", "o").toString();
+  // Leaf tips breaking the top and sides of the silhouette.
+  const tips = pic.clone();
+  for (let y = 1; y < OL_H - 1; y++) {
+    for (let x = 1; x < OL_W - 1; x++) {
+      if (pic.at(x, y) !== "f" || pic.at(x, y - 1) !== "." || (x * 5 + y) % 4 !== 0) continue;
+      tips.set(x, y - 1, "f").set(x, y, "N");
+    }
+  }
+  let out = tips;
+  for (let pass = 0; pass < 3; pass++) out = seal(smooth(out), "f");
+  return out.toString();
 }
 
 // Amphorae -----------------------------------------------------------------------------------
@@ -421,6 +458,8 @@ export default [
     frames: {
       column: Pic.blank(52, 26).put(longShadow(42, 6), 0, 0).toString(),
       tree: Pic.blank(52, 26).put(longShadow(46, 12), 0, 0).toString(),
+      figure: Pic.blank(52, 26).put(longShadow(22, 3), 0, 2).toString(),
+      imp: Pic.blank(52, 26).put(longShadow(12, 5), 0, 1).toString(),
     },
     anim: { idle: { frames: ["column"], fps: 1 } },
   }),

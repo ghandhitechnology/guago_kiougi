@@ -21,6 +21,7 @@ import {
   spriteSheet,
   terrainSheet,
 } from "./static.ts";
+import { uiSheets } from "./ui-static.ts";
 
 const { values } = parseArgs({
   options: { png: { type: "string" }, port: { type: "string", default: "4310" } },
@@ -35,13 +36,13 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-const atlases = writeOutput(DIST, art);
+const { atlases, fonts: built } = writeOutput(DIST, art);
 
 if (values.png) {
   const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.png);
   mkdirSync(dir, { recursive: true });
   const fonts = loadFonts();
-  const meta = metadata(art, atlases) as SceneMeta;
+  const meta = metadata(art, atlases, built) as SceneMeta;
   const sheets = {
     scenes: sceneSheet(fonts, meta, atlases),
     ...Object.fromEntries(
@@ -51,6 +52,7 @@ if (values.png) {
     sprites: spriteSheet(fonts, art),
     rigs: rigSheet(fonts, art),
     terrain: terrainSheet(fonts, art),
+    ...uiSheets(art, built, meta, atlases),
   };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);
@@ -94,7 +96,7 @@ figure { margin: 0; display: flex; flex-direction: column; align-items: flex-sta
 figcaption { color: var(--dim); }
 .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-bottom: 8px; }
 .pair { display: flex; gap: 4px; }
-.ramps { display: grid; grid-template-columns: 72px repeat(6, 32px); gap: 4px; align-items: center; margin-bottom: 16px; }
+.ramp { display: block; width: 64px; align-self: center; }
 .swatch { display: block; width: 32px; height: 32px; border: 1px solid var(--edge); }
 .swatch.none { background: transparent; border-color: transparent; }
 .strip { display: flex; border: 1px solid var(--edge); }
