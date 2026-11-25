@@ -631,7 +631,22 @@ const water = sprite({
 
 const AIR = { outline: "o", dark: "L", mid: "P", light: "w" } as const;
 type L = { x: number; y: number; rx: number; ry: number };
-const gust = (list: readonly L[]) => form(blob(30, 16, list), AIR, { light: 1, dark: 1 });
+/** Grown by a fifth about its face, so the charger is as big a target as the rest of the pack. */
+const gust = (list: readonly L[], cx = 22.5, cy = 10) =>
+  form(
+    blob(
+      30,
+      16,
+      list.map((l) => ({
+        x: cx + (l.x - cx) * 1.2,
+        y: cy + (l.y - cy) * 1.2,
+        rx: l.rx * 1.2,
+        ry: l.ry * 1.2,
+      })),
+    ),
+    AIR,
+    { light: 1, dark: 1 },
+  );
 
 /** A puff of cloud, three bumps high, a little curl of a tail at the back. */
 const PUFF: readonly L[] = [
@@ -647,26 +662,38 @@ const shift = (list: readonly L[], dx: number, dy: number, sx = 1, sy = 1): L[] 
 const curl = gust(PUFF);
 const curl2 = gust([...shift(PUFF.slice(0, 4), 0, 0), { x: 14.6, y: 9.6, rx: 2.4, ry: 2.2 }]);
 /** Coiled back before a charge: squeezed narrow and tall, reared away from the target. */
-const coil = gust([
-  { x: 15.4, y: 11, rx: 6, ry: 2.8 },
-  { x: 11.6, y: 8, rx: 2.8, ry: 2.6 },
-  { x: 15, y: 7.6, rx: 3, ry: 2.6 },
-  { x: 19.4, y: 9.4, rx: 2.4, ry: 2 },
-]);
+const coil = gust(
+  [
+    { x: 15.4, y: 11, rx: 6, ry: 2.8 },
+    { x: 11.6, y: 8, rx: 2.8, ry: 2.6 },
+    { x: 15, y: 7.6, rx: 3, ry: 2.6 },
+    { x: 19.4, y: 9.4, rx: 2.4, ry: 2 },
+  ],
+  17,
+  10,
+);
 /** The charge: stretched long and low along the line. */
-const streak = gust([
-  { x: 22, y: 9.6, rx: 7.4, ry: 3.2 },
-  { x: 18, y: 7.6, rx: 3.6, ry: 2 },
-  { x: 23, y: 6.8, rx: 3.6, ry: 2.2 },
-  { x: 26.6, y: 8.4, rx: 2.4, ry: 2 },
-  { x: 13.6, y: 10, rx: 3, ry: 1.8 },
-]);
+const streak = gust(
+  [
+    { x: 22, y: 9.6, rx: 7.4, ry: 3.2 },
+    { x: 18, y: 7.6, rx: 3.6, ry: 2 },
+    { x: 23, y: 6.8, rx: 3.6, ry: 2.2 },
+    { x: 26.6, y: 8.4, rx: 2.4, ry: 2 },
+    { x: 13.6, y: 10, rx: 3, ry: 1.8 },
+  ],
+  24,
+  9,
+);
 /** Spent after a charge: blown out round and dizzy. */
-const spent = gust([
-  { x: 17, y: 10, rx: 6.4, ry: 4.2 },
-  { x: 14, y: 6.6, rx: 3, ry: 2.2 },
-  { x: 19.4, y: 6.4, rx: 3, ry: 2.2 },
-]);
+const spent = gust(
+  [
+    { x: 17, y: 10, rx: 6.4, ry: 4.2 },
+    { x: 14, y: 6.6, rx: 3, ry: 2.2 },
+    { x: 19.4, y: 6.4, rx: 3, ry: 2.2 },
+  ],
+  16,
+  10,
+);
 
 /** The swirl inside the puff, and the streaks of air it leaves behind. */
 const SWIRL = `
@@ -696,11 +723,13 @@ const air = sprite({
     curl,
     curl2,
     coil,
+    // Flashing white while it coils: the body's own telegraph, matching the line on the ground.
+    coilHot: swap(coil, "LP", "Pw"),
     streak,
     spent,
-    swirl: { at: [15, 7], grid: SWIRL },
+    swirl: { at: [14, 7], grid: SWIRL },
     swirl2: {
-      at: [15, 7],
+      at: [14, 7],
       grid: `
         .mm..
         m..m.
@@ -878,7 +907,7 @@ const air = sprite({
       ["face", 0, 1],
     ],
     windup0: ["coil", ["swirl", -4, 1], "squint"],
-    windup1: [["coil", -1, 0], ["swirl2", -5, 0], ["squint", -1, 0], "suck"],
+    windup1: [["coilHot", -1, 0], ["swirl2", -5, 0], ["squint", -1, 0], "suck"],
     charge0: ["speed", "streak", "streakFace"],
     charge1: [
       ["speed", -2, 0],
@@ -891,9 +920,9 @@ const air = sprite({
       ["dizzy", 0, 1],
     ],
     hit: [
-      ["curl2", 2, 0],
-      ["swirl2", 2, 0],
-      ["blink", 2, 0],
+      ["curl2", -2, 0],
+      ["swirl2", -2, 0],
+      ["blink", -2, 0],
     ],
     die0: ["puff"],
     die1: [["puff", 0, -1], "motes"],
