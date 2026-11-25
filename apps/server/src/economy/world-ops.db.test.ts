@@ -10,7 +10,9 @@ import { Client, type Room } from "@colyseus/sdk";
 import {
   API,
   bindCost,
+  type ChangeNotice,
   expToNext,
+  INVENTORY_RATE,
   OP_RATE,
   type OpResult,
   type PresenceMessage,
@@ -104,7 +106,10 @@ const results = (inbox: { type: string; body: unknown }[]) =>
 beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
   await db.pool.query("truncate accounts, login_failures cascade");
-  economy = createEconomy(db, { onLevel: (id, level) => worldRoom()?.setLevel(id, level) });
+  economy = createEconomy(db, {
+    onLevel: (id, level) => worldRoom()?.setLevel(id, level),
+    onChange: (id, change) => worldRoom()?.notify(id, change),
+  });
   const auth = createAuthService({
     db,
     onSessionsRevoked: evictAccount,
@@ -115,7 +120,7 @@ beforeAll(async () => {
     SETTINGS,
     studentLooks,
     {},
-    { ops: economy.ops, routes: economy.routes(auth) },
+    { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants },
   );
   const port = await freePort();
   await server.listen(port);
@@ -206,5 +211,44 @@ describe("operations on the WorldRoom", () => {
     room.send(WORLD_MESSAGES.chat, { ch: "world", text: "안녕", n: 2 });
     await waitFor(() => inbox.some((m) => m.type === WORLD_MESSAGES.chat));
     await room.leave();
+  });
+
+  it("pushes a landed grant's change to the player, and lands a leaving player's grants", async () => {
+    const { jar, id } = await player("hunter");
+    const { room, inbox } = await join(jar);
+    economy.grants.add(id, {
+      exp: 30,
+      drops: [{ item: { kind: "coin", amount: 11 }, source: SOURCE }],
+    });
+    await economy.grants.flush();
+    await waitFor(() => inbox.some((m) => m.type === WORLD_MESSAGES.change));
+    const change = inbox.find((m) => m.type === WORLD_MESSAGES.change)?.body as ChangeNotice;
+    expect(change.wallet?.pinecone).toBe("11");
+    expect(change.exp && Object.keys(change.exp)).toHaveLength(2);
+
+    // Credit still in the buffer when the player leaves lands before their seat is freed.
+    economy.grants.add(id, {
+      exp: 0,
+      drops: [{ item: { kind: "coin", amount: 4 }, source: SOURCE }],
+    });
+    await room.leave();
+    const wallet = async () =>
+      (
+        await db.pool.query("select pinecones::text as p from wallets where character_id = $1", [
+          id,
+        ])
+      ).rows[0]?.p;
+    await waitFor(async () => (await wallet()) === "15");
+    expect(economy.grants.waiting).toBe(0);
+  });
+
+  it("limits full inventory reads per character", async () => {
+    const { jar } = await player("reloader");
+    for (let i = 0; i < INVENTORY_RATE.burst; i++) {
+      expect((await call(base, API.inventory, { jar })).status).toBe(200);
+    }
+    const limited = await call(base, API.inventory, { jar });
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: "rate_limited" });
   });
 });

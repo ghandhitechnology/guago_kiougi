@@ -19,9 +19,14 @@ import {
   catchUp,
   claimPool,
   expToNext,
+  feedSheets,
   forgeFee,
   MAJORS,
   type Major,
+  mergeTools,
+  OP_REFUSAL_RATE,
+  OP_TOTAL_RATE,
+  type OpMessage,
   type OpRequests,
   pilgiChance,
   pilgiCost,
@@ -31,15 +36,18 @@ import {
   STAT_IDS,
   sheet,
   statResetCost,
+  textbook,
 } from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAuthService } from "../auth/service.ts";
 import { createDb, type Db } from "../db/index.ts";
+import { onShutdown, runShutdown } from "../shutdown.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { checkInvariants } from "./audit.ts";
-import type { ExecResult, ExecutorOptions } from "./executor.ts";
+import { ContractError, type ExecResult, type ExecutorOptions } from "./executor.ts";
 import { GrantBuffer } from "./grants.ts";
-import { createEconomy, type Economy } from "./index.ts";
+import { createOpHandler } from "./handler.ts";
+import { createEconomy, type Economy, pruneOperations } from "./index.ts";
 import type { AnyOp, Requests } from "./ops.ts";
 
 const PAGE = 1;
@@ -112,6 +120,22 @@ function drops(f: Funds): Drop[] {
   return out;
 }
 
+/** A character with no kit yet, as one made before items existed. */
+async function bareCharacter(major: Major = "math"): Promise<string> {
+  const n = ++seq;
+  const a = await db.pool.query(
+    `insert into accounts (login_id, password_hash, age_confirmed, signup_ip_hash)
+     values ($1, 'x', true, 'ip') returning id`,
+    [`econ${n}`],
+  );
+  const c = await db.pool.query(
+    `insert into characters (account_id, name, major, look, map_id, x, y, cohort)
+     values ($1, $2, $3, '{}', 'lawn', 0, 0, 1) returning id`,
+    [a.rows[0].id, `학생${n}`, major],
+  );
+  return c.rows[0].id as string;
+}
+
 /** Credit through a combat grant, the way income enters the game. */
 async function fund(eco: Economy, id: string, f: Funds): Promise<ExecResult> {
   const r = await eco.executor.execute(id, `fund-${randomUUID()}`, "grant", {
@@ -171,12 +195,13 @@ async function everything(eco: Economy, id: string) {
   return { snapshot: await eco.ops.snapshot(id), ...counts.rows[0] };
 }
 
+/** The equipped copy of `def`, as the starter kit put it in a slot. */
 const kitBook = async (id: string, def: string) =>
   (
-    await db.pool.query("select id from items where owner_id = $1 and def_id = $2 and slot = 0", [
-      id,
-      def,
-    ])
+    await db.pool.query(
+      "select id from items where owner_id = $1 and def_id = $2 and slot is not null",
+      [id, def],
+    )
   ).rows[0].id as string;
 
 /**
@@ -353,33 +378,51 @@ describe("idempotency", () => {
     });
   }
 
-  it("a retry sent while the first is still in flight waits and gets the same result", async () => {
+  it("a retry from another process while the first is in flight waits on the lock, reads the record and never runs again", async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
     const opId = randomUUID();
-    const eco = economy({
-      hooks: {
-        afterLoad: async (o) => {
-          if (o.opId === opId) await held;
-        },
+    let runs = 0;
+    const hooks = {
+      afterLoad: async (o: { opId: string }) => {
+        if (o.opId !== opId) return;
+        runs++;
+        await held;
       },
-    });
-    const id = await character(eco);
-    await fund(eco, id, bindFunds("wangdo"));
-    const first = op(eco, id, "craft", { def: "wangdo" }, opId);
+    };
+    // Two executors share no in-process queue, like two server processes.
+    const first = economy({ hooks });
+    const second = economy({ hooks });
+    const id = await character(first);
+    await fund(first, id, bindFunds("wangdo"));
+    const a = op(first, id, "craft", { def: "wangdo" }, opId);
     await sleep(50);
     let retried: ExecResult | undefined;
-    const retry = op(eco, id, "craft", { def: "wangdo" }, opId).then((r) => {
+    const b = op(second, id, "craft", { def: "wangdo" }, opId).then((r) => {
       retried = r;
       return r;
     });
-    // The retry waits on the character lock the first one holds.
     await sleep(200);
     expect(retried).toBeUndefined();
     release();
-    const [a, b] = await Promise.all([first, retry]);
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra.ok).toBe(true);
+    expect(rb).toEqual(ra);
+    expect(runs).toBe(1);
+    expect(await itemIds(id)).toHaveLength(3);
+  });
+
+  it("a retry in the same process waits in the character's queue and gets the same result", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    await fund(eco, id, bindFunds("wangdo"));
+    const opId = randomUUID();
+    const [a, b] = await Promise.all([
+      op(eco, id, "craft", { def: "wangdo" }, opId),
+      op(eco, id, "craft", { def: "wangdo" }, opId),
+    ]);
     expect(a.ok).toBe(true);
     expect(b).toEqual(a);
     expect(await itemIds(id)).toHaveLength(3);
@@ -412,57 +455,64 @@ describe("idempotency", () => {
 
 describe("racing requests", () => {
   /**
-   * An economy whose transactions meet at the barrier once their rows are locked. Only the two
-   * racing requests go through it; setup uses a plain economy, so the barrier waits for them.
+   * Two executors, as if two server processes, so the racing pair shares no in-process queue
+   * and meets in the database. Their transactions meet at one barrier once their rows are
+   * locked. Setup goes through a plain economy. The name of each test says what keeps the pair
+   * apart: [row locks] tests are also covered by the character lock, [character lock] tests by
+   * nothing else.
    */
-  const racing = () => economy({ random: () => 0, hooks: { afterLoad: barrier() } });
+  const racers = (): [Economy, Economy] => {
+    const meet = barrier();
+    const options = { random: () => 0, hooks: { afterLoad: meet } };
+    return [economy(options), economy(options)];
+  };
 
-  it("two 필기 attempts on one book with money for one: one lands", async () => {
+  it("[row locks] two 필기 attempts on one book with money for one: one lands", async () => {
     const eco = economy();
     const id = await character(eco);
     await fund(eco, id, pilgiCost(0, 0, 1));
     const book = await kitBook(id, "wangdo");
-    const race = racing();
+    const [a, b] = racers();
     const results = await Promise.all([
-      op(race, id, "pilgi", { item: book }),
-      op(race, id, "pilgi", { item: book }),
+      op(a, id, "pilgi", { item: book }),
+      op(b, id, "pilgi", { item: book }),
     ]);
     expect(oks(results)).toBe(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ error: "pilgi_cost" });
     expect(await pinecones(id)).toBe("0");
   });
 
-  it("two 제련 that share a copy: one lands", async () => {
+  it("[row locks] two 제련 that share a copy: one lands", async () => {
     const eco = economy();
     const id = await character(eco);
     await fund(eco, id, bindFunds("graph-note", 5));
     await fund(eco, id, { pinecone: forgeFee(0, PAGE) * 2 });
-    const [a, b, c, d, e] = [
+    const [c1, c2, c3, c4, c5] = [
       await craft(eco, id, "graph-note"),
       await craft(eco, id, "graph-note"),
       await craft(eco, id, "graph-note"),
       await craft(eco, id, "graph-note"),
       await craft(eco, id, "graph-note"),
     ] as string[];
-    const race = racing();
+    const [a, b] = racers();
     const results = await Promise.all([
-      op(race, id, "forge", { items: [a, b, c] as [string, string, string] }),
-      op(race, id, "forge", { items: [c, d, e] as [string, string, string] }),
+      op(a, id, "forge", { items: [c1, c2, c3] as [string, string, string] }),
+      op(b, id, "forge", { items: [c3, c4, c5] as [string, string, string] }),
     ]);
     expect(oks(results)).toBe(1);
     // Two kit books and three of the five copies: one forge ate two.
     expect(await itemIds(id)).toHaveLength(5);
   });
 
-  it("two purchases with money for one: one lands", async () => {
+  it("[row locks] two purchases with money for one: one lands", async () => {
     const eco = economy();
     const id = await character(eco);
     const water = VENDING.fixed[0];
     await fund(eco, id, { pinecone: shopPrice(water, PAGE) });
-    const race = racing();
+    const [a, b] = racers();
     const results = await Promise.all([
-      op(race, id, "shop.buy", { item: water.id, qty: 1 }),
-      op(race, id, "shop.buy", { item: water.id, qty: 1 }),
+      op(a, id, "shop.buy", { item: water.id, qty: 1 }),
+      op(b, id, "shop.buy", { item: water.id, qty: 1 }),
     ]);
     expect(oks(results)).toBe(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ error: "buy_cost" });
@@ -473,21 +523,21 @@ describe("racing requests", () => {
     expect(Number(held.rows[0].qty)).toBe(1);
   });
 
-  it("equipping a copy while 제련 eats it: one lands", async () => {
+  it("[row locks] equipping a copy while 제련 eats it: one lands", async () => {
     const eco = economy();
     const id = await character(eco);
     await fund(eco, id, bindFunds("wangdo", 3));
     await fund(eco, id, { pinecone: forgeFee(0, PAGE) });
-    const [a, b, c] = [
+    const [c1, c2, c3] = [
       await craft(eco, id, "wangdo"),
       await craft(eco, id, "wangdo"),
       await craft(eco, id, "wangdo"),
     ] as string[];
-    const race = racing();
-    // 제련 keeps the first of equal copies and eats the other two, `b` among them.
+    const [a, b] = racers();
+    // 제련 keeps the first of equal copies and eats the other two, `c2` among them.
     const results = await Promise.all([
-      op(race, id, "equip", { item: b as string, slot: 0 }),
-      op(race, id, "forge", { items: [a, b, c] as [string, string, string] }),
+      op(a, id, "equip", { item: c2 as string, slot: 0 }),
+      op(b, id, "forge", { items: [c1, c2, c3] as [string, string, string] }),
     ]);
     expect(oks(results)).toBe(1);
     expect(["item_equipped", "item_missing"]).toContain(
@@ -495,7 +545,7 @@ describe("racing requests", () => {
     );
   });
 
-  it("a pool claim racing itself pays once", async () => {
+  it("[character lock] a pool claim racing itself pays once", async () => {
     const id = await character(economy());
     const rates = { exp: 40, pinecone: 9, sheets: 0.002, ink: 0.01 };
     const started = new Date(NOW.getTime() - 2 * 3600_000);
@@ -504,11 +554,8 @@ describe("racing requests", () => {
          pool_sheet_book = 'wangdo' where id = $1`,
       [id, started, JSON.stringify(rates)],
     );
-    const race = racing();
-    const results = await Promise.all([
-      op(race, id, "claimPool", {}),
-      op(race, id, "claimPool", {}),
-    ]);
+    const [a, b] = racers();
+    const results = await Promise.all([op(a, id, "claimPool", {}), op(b, id, "claimPool", {})]);
     expect(oks(results)).toBe(1);
     expect(results.find((r) => !r.ok)).toMatchObject({ error: "pool_empty" });
     const fill = poolFill(rates, 2 * 3600, "field", false, catchUp(1, PAGE));
@@ -516,16 +563,47 @@ describe("racing requests", () => {
     expect(paid.ok && (await pinecones(id))).toBe(String(paid.ok && paid.state.purse.pinecone));
   });
 
-  it("a drop grant racing a spend: both land and neither is lost", async () => {
+  it("[character lock] two allocations of the last stat points: one lands and neither is lost", async () => {
+    const id = await character(economy());
+    const [a, b] = racers();
+    const results = await Promise.all([
+      op(a, id, "stats.allocate", { add: { understanding: 3 } }),
+      op(b, id, "stats.allocate", { add: { luck: 3 } }),
+    ]);
+    expect(oks(results)).toBe(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ error: "stat_points" });
+    const stats = (await economy().ops.snapshot(id))?.progression.stats;
+    expect((stats?.understanding ?? 0) + (stats?.luck ?? 0)).toBe(3);
+  });
+
+  it("[character lock] two copies of one book into two empty slots at once: one lands", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    for (const def of STARTER_BOOKS.math) {
+      expect((await op(eco, id, "unequip", { item: await kitBook(id, def) })).ok).toBe(true);
+    }
+    await fund(eco, id, bindFunds("wangdo", 2));
+    const c1 = await craft(eco, id, "wangdo");
+    const c2 = await craft(eco, id, "wangdo");
+    const [a, b] = racers();
+    const results = await Promise.all([
+      op(a, id, "equip", { item: c1, slot: 0 }),
+      op(b, id, "equip", { item: c2, slot: 1 }),
+    ]);
+    expect(oks(results)).toBe(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ error: "equip_duplicate" });
+  });
+
+  it("[delta writes] a drop grant racing a spend: both land and neither is lost", async () => {
     const eco = economy();
     const id = await character(eco);
     const cost = pilgiCost(0, 0, 1);
     await fund(eco, id, { pinecone: 1000, ink: cost.ink });
     const book = await kitBook(id, "wangdo");
-    const race = racing();
+    const [a, b] = racers();
     const results = await Promise.all([
-      op(race, id, "pilgi", { item: book }),
-      op(race, id, "grant", { exp: 0, drops: drops({ pinecone: 5000 }) }),
+      op(a, id, "pilgi", { item: book }),
+      op(b, id, "grant", { exp: 0, drops: drops({ pinecone: 5000 }) }),
     ]);
     expect(oks(results)).toBe(2);
     expect(await pinecones(id)).toBe(String(1000 + 5000 - cost.pinecone));
@@ -660,7 +738,7 @@ describe("combat grants", () => {
         const result = await eco.executor.execute(...args);
         if (lose) {
           lose = false;
-          throw new Error("connection dropped after commit");
+          throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
         }
         return result;
       },
@@ -681,6 +759,8 @@ describe("combat grants", () => {
     }
     await grants.flush();
     expect(grants.waiting).toBe(1);
+    // In flight under its id, so pruning keeps its record.
+    expect(grants.inflightIds()).toHaveLength(1);
     await grants.flush();
     expect(grants.waiting).toBe(0);
     expect(await pinecones(id)).toBe("7000");
@@ -821,4 +901,300 @@ describe("under load", () => {
     }
     expect(report.violations).toEqual([]);
   }, 60_000);
+});
+
+describe("rules that keep what was paid", () => {
+  it("feeding more 낱장 than the book can take charges only the sheets it used", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    const cost = bindFunds("wangdo");
+    await fund(eco, id, {
+      ...cost,
+      exp: expToNext(1) * 1.5,
+      sheets: { wangdo: (cost.sheets?.wangdo ?? 0) + 500 },
+    });
+    const book = await craft(eco, id, "wangdo");
+    const level = (await eco.ops.snapshot(id))?.progression.level as number;
+    const expected = feedSheets(
+      { item: textbook(book, "wangdo"), purse: { "sheet:wangdo": 500 } },
+      100_000,
+      level,
+    );
+    if (!expected.ok) throw new Error(expected.error);
+    expect(expected.state.used).toBeLessThan(500);
+    const r = await op(eco, id, "feed", { item: book, count: 100_000 });
+    expect(r).toMatchObject({ ok: true, outcome: { used: expected.state.used } });
+    const left = (await eco.ops.snapshot(id))?.materials["sheet:wangdo"];
+    expect(left).toBe(500 - expected.state.used);
+  });
+
+  it("a merge past level 5 keeps the levels that do not fit on the source copy", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    await fund(eco, id, { tools: ["compass", "compass"] });
+    const [into, from] = (
+      await db.pool.query(
+        "select id from items where owner_id = $1 and kind = 'tool' order by id",
+        [id],
+      )
+    ).rows.map((r) => r.id as string) as [string, string];
+    await db.pool.query("update items set level = 4 where id = $1", [into]);
+    await db.pool.query("update items set level = 3 where id = $1", [from]);
+    const expected = mergeTools(
+      { id: into, def: "compass", level: 4 },
+      { id: from, def: "compass", level: 3 },
+    );
+    const r = await op(eco, id, "merge", { into, from });
+    expect(r).toMatchObject({ ok: true, outcome: { level: 5, left: 2 } });
+    const levels = await db.pool.query(
+      "select id, level from items where owner_id = $1 and kind = 'tool'",
+      [id],
+    );
+    expect(Object.fromEntries(levels.rows.map((t) => [t.id, t.level]))).toEqual({
+      [into]: expected.ok && expected.state.into.level,
+      [from]: expected.ok && expected.state.from?.level,
+    });
+  });
+
+  it("past 2^53, a spend a rounded balance allowed but the exact one cannot cover is refused as insufficient", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    // A level whose stat reset costs a multiple of four in [2^53, 2^54): there, the balance one
+    // below the cost rounds up to the cost itself as a double.
+    let level = 1400;
+    while (statResetCost(level) < 2 ** 53 || statResetCost(level) % 4 !== 0) level++;
+    const cost = statResetCost(level);
+    expect(cost).toBeLessThan(2 ** 54);
+    const exact = BigInt(cost) - 1n;
+    expect(Number(exact.toString())).toBe(cost);
+    await db.pool.query("update characters set level = $2 where id = $1", [id, level]);
+    await fund(eco, id, { pinecone: Number.MAX_SAFE_INTEGER });
+    await fund(eco, id, { pinecone: cost - 2 ** 53 });
+    expect(await pinecones(id)).toBe(exact.toString());
+    const before = await everything(eco, id);
+    const opId = randomUUID();
+    expect(await op(eco, id, "stats.reset", {}, opId)).toMatchObject({
+      ok: false,
+      error: "insufficient",
+    });
+    expect(await everything(eco, id)).toEqual(before);
+  });
+});
+
+describe("the starter kit on first read", () => {
+  it("a character made before items existed gets its kit on the first read, once", async () => {
+    const eco = economy();
+    const id = await bareCharacter("earth");
+    const first = await eco.ops.snapshot(id);
+    const second = await eco.ops.snapshot(id);
+    expect(first?.items.map((i) => i.def).sort()).toEqual([...STARTER_BOOKS.earth].sort());
+    expect(second?.items).toEqual(first?.items);
+    expect(await itemIds(id)).toHaveLength(2);
+  });
+
+  it("two first reads at once, from two processes, both see the one kit", async () => {
+    const id = await bareCharacter("biology");
+    const [a, b] = await Promise.all([economy().ops.snapshot(id), economy().ops.snapshot(id)]);
+    expect(a?.items).toHaveLength(2);
+    expect(b?.items).toHaveLength(2);
+    expect(await itemIds(id)).toHaveLength(2);
+  });
+});
+
+describe("change notices", () => {
+  it("a grant sends its equipped books' new EXP alone, not whole items", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    const worn = [
+      await kitBook(id, STARTER_BOOKS.math[0]),
+      await kitBook(id, STARTER_BOOKS.math[1]),
+    ];
+    const r = await fund(eco, id, { exp: 50, pinecone: 3 });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.change.items).toBeUndefined();
+    expect(Object.keys(r.change.exp ?? {}).sort()).toEqual([...worn].sort());
+    expect(r.change.wallet?.pinecone).toBe("3");
+  });
+});
+
+describe("combat grants that fail", () => {
+  const source = { kind: "monster", fieldId: "f", monsterId: "m", rank: "normal" } as const;
+  const coin = (amount: number): Drop => ({ item: { kind: "coin", amount }, source });
+
+  it("refuses malformed credit at add, so it never joins a batch", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    const lines: string[] = [];
+    const grants = new GrantBuffer(eco.executor, { log: (line) => lines.push(line) });
+    expect(grants.add(id, { exp: Number.NaN, drops: [] })).toBe(false);
+    expect(grants.add(id, { exp: 0, drops: [coin(1.5)] })).toBe(false);
+    expect(
+      grants.add(id, { exp: 0, drops: [{ item: { kind: "ink", qty: 2 ** 53 }, source }] }),
+    ).toBe(false);
+    expect(grants.add(id, { exp: 5, drops: [coin(40)] })).toBe(true);
+    await grants.flush();
+    expect(grants.waiting).toBe(0);
+    expect(await pinecones(id)).toBe("40");
+    expect(lines).toHaveLength(3);
+  });
+
+  it("logs a batch the database refuses whole, drops it, and later credit still lands", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    await fund(eco, id, { ink: Number.MAX_SAFE_INTEGER });
+    const lines: string[] = [];
+    const grants = new GrantBuffer(eco.executor, { log: (line) => lines.push(line) });
+    grants.add(id, { exp: 0, drops: [coin(50), { item: { kind: "ink", qty: 1 }, source }] });
+    await grants.flush();
+    expect(grants.waiting).toBe(0);
+    expect(
+      lines.some((l) => l.includes("grant dropped (insufficient)") && l.includes('"amount":50')),
+    ).toBe(true);
+    grants.add(id, { exp: 0, drops: [coin(70)] });
+    await grants.flush();
+    expect(await pinecones(id)).toBe("70");
+  });
+
+  it("drops a batch that breaks the executor's contract instead of retrying it forever", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    const lines: string[] = [];
+    const grants = new GrantBuffer(
+      {
+        execute: (characterId, opId, name, request, on) => {
+          if ((request as { exp: number }).exp === 13) throw new ContractError("broken rule");
+          return eco.executor.execute(characterId, opId, name, request, on);
+        },
+      },
+      { log: (line) => lines.push(line) },
+    );
+    grants.add(id, { exp: 13, drops: [coin(1)] });
+    await grants.flush();
+    grants.add(id, { exp: 0, drops: [coin(9)] });
+    await grants.flush();
+    expect(await pinecones(id)).toBe("9");
+    expect(lines.filter((l) => l.startsWith("grant dropped"))).toHaveLength(1);
+  });
+
+  it("shutdown flushes every pending grant, and a failing step does not stop the ones after it", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    eco.grants.add(id, { exp: 0, drops: [coin(25)] });
+    const ran: string[] = [];
+    onShutdown("broken", () => {
+      throw new Error("broken step");
+    });
+    onShutdown("grants", async () => {
+      await eco.grants.flush();
+      ran.push("grants");
+    });
+    await runShutdown();
+    expect(ran).toEqual(["grants"]);
+    expect(await pinecones(id)).toBe("25");
+  });
+});
+
+describe("one character cannot tie up the database", () => {
+  it("a flood of one character's operations takes one connection at a time and does not hold up another", async () => {
+    const eco = economy();
+    const flooder = await character(eco);
+    const other = await character(eco);
+    let busy = 0;
+    let peak = 0;
+    const acquire = () => {
+      busy++;
+      peak = Math.max(peak, busy);
+    };
+    const release = () => {
+      busy--;
+    };
+    db.pool.on("acquire", acquire);
+    db.pool.on("release", release);
+    try {
+      let floodDone = 0;
+      const flood = Promise.all(
+        Array.from({ length: 30 }, () => op(eco, flooder, "pilgi", { item: randomUUID() })),
+      ).then(() => {
+        floodDone = performance.now();
+      });
+      const theirs = await op(eco, other, "stats.allocate", { add: { focus: 1 } });
+      const otherDone = performance.now();
+      await flood;
+      expect(theirs.ok).toBe(true);
+      expect(otherDone).toBeLessThan(floodDone);
+      // One for the flooder's current operation, one for the other character's.
+      expect(peak).toBeLessThanOrEqual(2);
+    } finally {
+      db.pool.off("acquire", acquire);
+      db.pool.off("release", release);
+    }
+  });
+
+  it("shares one budget across operation types and another across recorded refusals, and both refill", async () => {
+    let clock = 1_000_000;
+    const eco = economy();
+    const handler = createOpHandler({
+      db,
+      executor: eco.executor,
+      now: () => clock,
+      page: () => PAGE,
+    });
+    const send = (id: string, op: OpMessage["op"], req: unknown) =>
+      handler.run(id, { id: randomUUID(), op, req } as OpMessage);
+
+    // Every type has budget left, but all of them together are spent.
+    const busy = await character(eco);
+    const book = await kitBook(busy, "wangdo");
+    for (let i = 0; i < OP_TOTAL_RATE.burst; i++) {
+      const r =
+        i % 2 === 0
+          ? await send(busy, "stats.allocate", { add: {} })
+          : await send(busy, "equip", { item: book, slot: 0 });
+      expect(r.ok).toBe(true);
+    }
+    const capped = await send(busy, "shop.buy", { item: "water", qty: 1 });
+    expect(capped).toMatchObject({ ok: false, error: "rate_limited" });
+    clock += (capped as { retryMs: number }).retryMs;
+    expect(await send(busy, "shop.buy", { item: "water", qty: 1 })).toMatchObject({
+      error: "buy_cost",
+    });
+
+    // Recorded refusals have their own, smaller budget, across types.
+    const prober = await character(eco);
+    for (let i = 0; i < OP_REFUSAL_RATE.burst; i++) {
+      const r = await send(prober, i % 2 ? "pilgi" : "feed", {
+        item: randomUUID(),
+        ...(i % 2 ? {} : { count: 1 }),
+      });
+      expect(r).toMatchObject({ error: "item_missing" });
+    }
+    const quiet = await send(prober, "stats.allocate", { add: {} });
+    expect(quiet).toMatchObject({ ok: false, error: "rate_limited" });
+    clock += (quiet as { retryMs: number }).retryMs;
+    expect(await send(prober, "stats.allocate", { add: {} })).toMatchObject({ ok: true });
+  });
+});
+
+describe("operation records", () => {
+  it("are forgotten after their retention, except the kit's and grants still in flight", async () => {
+    const eco = economy();
+    const id = await character(eco);
+    await op(eco, id, "stats.allocate", { add: { focus: 1 } });
+    await op(eco, id, "pilgi", { item: randomUUID() });
+    const inflight = await fund(eco, id, { pinecone: 5 });
+    await db.pool.query(
+      "update operations set at = now() - interval '2 hours' where character_id = $1",
+      [id],
+    );
+    await db.pool.query(
+      "update economy_ledger set at = now() - interval '2 hours' where character_id = $1",
+      [id],
+    );
+    expect(await pruneOperations(db, [inflight.id])).toBe(2);
+    const left = await db.pool.query(
+      "select op_id from operations where character_id = $1 order by op_id",
+      [id],
+    );
+    expect(left.rows.map((r) => r.op_id)).toEqual([inflight.id, "kit"].sort());
+  });
 });
