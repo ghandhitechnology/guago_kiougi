@@ -387,28 +387,57 @@ function rugPictures(): { outer: string; inner: string; fill: string[] } {
 
 /** A diamond lattice on the rug's field, eight pixels across. */
 function lattice(pic: Pic): void {
+  // A wide diamond lattice, sixteen pixels across, a small lozenge where the lines cross.
   for (let y = 0; y < pic.h; y++) {
     for (let x = 0; x < pic.w; x++) {
       if (pic.at(x, y) !== "X") continue;
-      const u = (x + y) % 8;
-      const v = (x - y + 64) % 8;
+      const u = (x + y) % 16;
+      const v = (x - y + 64) % 16;
       if (u === 0 || v === 0) pic.set(x, y, "a");
     }
   }
-  // A dot in the middle of every diamond.
   for (let y = 0; y < pic.h; y++) {
     for (let x = 0; x < pic.w; x++) {
-      const centre = (x % 8 === 4 && y % 8 === 0) || (x % 8 === 0 && y % 8 === 4);
-      if (!centre) continue;
+      const cross = x % 16 === 8 && y % 16 === 0;
+      if (!cross) continue;
       for (const [dx, dy] of [
-        [0, 0],
+        [0, -1],
+        [-1, 0],
         [1, 0],
         [0, 1],
-        [1, 1],
       ] as const)
-        if (pic.at(x + dx, y + dy) === "X") pic.set(x + dx, y + dy, "%");
+        if (pic.at(x + dx, y + dy) === "X") pic.set(x + dx, y + dy, "x");
     }
   }
+}
+
+/**
+ * The lounge stage: a platform a step high, darker boards running front to back, a lit nosing
+ * on its edges and a front face below, its shadow on the floor in front.
+ */
+function stagePictures(): { outer: string; inner: string } {
+  const make = (kind: "outer" | "inner", size: number): string => {
+    const isIn = inside(kind, { radius: 1, holeRadius: 1 });
+    const pic = paint(size, size, isIn, {
+      fill: "u",
+      top: "W",
+      left: "W",
+      right: "U",
+      bottom: ["W"],
+      lip: ["U", "b", "b"],
+      under: "U",
+      beside: "u",
+    });
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (pic.at(x, y) !== "u" || !isIn(x, y)) continue;
+        if (x % 4 === 3) pic.set(x, y, "U");
+        else if ((x * 7 + Math.floor(y / 9) * 3) % 13 === 0 && y % 9 < 4) pic.set(x, y, "W");
+      }
+    }
+    return pic.toString();
+  };
+  return { outer: make("outer", 48), inner: make("inner", 32) };
 }
 
 const SCUFF_DECALS: Readonly<Record<string, Decal>> = {
@@ -557,6 +586,17 @@ const wallTops = overlay({
   inner: wallTop("inner", 32),
 });
 
+const stage = terrain({
+  bake: INDOOR,
+  name: "stage-wood",
+  upper: "stage",
+  lower: "wood",
+  themes: ["campus", "campus-dusk"],
+  palette,
+  ...stagePictures(),
+  base: WOOD_BASES.slice(0, 3),
+});
+
 /** The mat on boards: the 메이커실's anti-fatigue mats in front of its stations. */
 const matWood = terrain({
   bake: INDOOR,
@@ -565,4 +605,4 @@ const matWood = terrain({
   base: WOOD_BASES.slice(0, 3),
 });
 
-export default [wood, matWood, lino, terrazzoFloor, tileFloor, vinyl, wallTops];
+export default [wood, matWood, stage, lino, terrazzoFloor, tileFloor, vinyl, wallTops];
