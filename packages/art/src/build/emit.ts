@@ -16,6 +16,7 @@ import {
   colorIndex,
   INDEX_RGB,
   RAMP_LIST,
+  rampEntries,
   resolveRemap,
   SHADE,
   SLOT_STEPS,
@@ -231,7 +232,7 @@ export function metadata(
       ramps: Object.fromEntries(
         RAMP_LIST.map((r) => [
           r.name,
-          Object.fromEntries(r.steps.map((s, i) => [s, COLORS[r.indices[i] as number] as string])),
+          Object.fromEntries(rampEntries(r).map(([s, i]) => [s, COLORS[i] as string])),
         ]),
       ),
     },

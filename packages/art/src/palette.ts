@@ -14,27 +14,55 @@ export type Step = (typeof STEPS)[number];
 const NIGHT = "#1a1427"; // darkest colour in the game
 const SLATE = "#2a2741"; // ink.dark, navy.deep
 const DUSK = "#484662"; // ink.mid, stone.deep
+const ASH = "#6a6276"; // stone.dark, ink.light
 const WINE = "#3d1426"; // red.deep, clay.deep
-const UMBER = "#4f2d26"; // wood.dark, gold.deep
+const BRICK = "#7a3329"; // clay.dark, flesh.dark
+const UMBER = "#4f2d26"; // wood.dark, gold.deep, flesh.deep
 const FOREST = "#173230"; // grass.deep, board.deep
+const PINE = "#336555"; // board.mid, grass.dark
 const PLUMSHADE = "#4a2758"; // plum.dark, rose.deep
 
+/**
+ * Core ramps. `flesh` is the fixed skin ramp: the `skin` swap slot keeps the name `skin`, so a
+ * legend asks for a fixed skin colour as `flesh.pale` and for the slot as `skin.mid`.
+ *
+ * Revision 2 merged four near-identical pairs to free room for the steps in `EXTRAS`; the old
+ * names are aliases of the survivor: `ink.light` #706f8a → `stone.dark` #6a6276,
+ * `skin.deep` #4b2629 → `wood.dark` #4f2d26, `skin.dark` #773f35 → `clay.dark` #7a3329,
+ * `grass.dark` #23533a → `board.mid` #336555.
+ */
 const RAMPS = {
-  ink: [NIGHT, SLATE, DUSK, "#706f8a"],
-  stone: [DUSK, "#6a6276", "#958b93", "#bdb2ab", "#e0d5c2", "#faf2e1"],
+  ink: [NIGHT, SLATE, DUSK, ASH],
+  stone: [DUSK, ASH, "#958b93", "#bdb2ab", "#e0d5c2", "#faf2e1"],
   red: [WINE, "#751a30", "#b8293a", "#e3513f", "#ff9268"],
-  clay: [WINE, "#7a3329", "#b5582f", "#dc8a4a", "#f4c185"],
+  clay: [WINE, BRICK, "#b5582f", "#dc8a4a", "#f4c185"],
   gold: [UMBER, "#8c5524", "#c98b25", "#efc244", "#fbe8a0"],
   wood: ["#2f1b24", UMBER, "#7d5039", "#a8784e", "#d0a56f"],
-  skin: ["#4b2629", "#773f35", "#a25e46", "#ca8a64", "#e9b58d", "#f9dcbc"],
-  grass: [FOREST, "#23533a", "#3c7d3b", "#6aa845", "#acd26a", "#e0ee9c"],
+  flesh: [UMBER, BRICK, "#a25e46", "#ca8a64", "#e9b58d", "#f9dcbc"],
+  grass: [FOREST, PINE, "#3c7d3b", "#6aa845", "#acd26a", "#e0ee9c"],
   olive: ["#34331f", "#5a5a30", "#858645", "#b3b16b"],
-  board: [FOREST, "#22463f", "#336555", "#518d76"],
+  board: [FOREST, "#22463f", PINE, "#518d76"],
   navy: [SLATE, "#2b3a6d", "#3c5ca2", "#5e8bd0", "#99c0ea"],
   sea: ["#143e5b", "#196e91", "#22a5c3", "#58d8d6", "#b6f6e5"],
   plum: ["#2a1636", PLUMSHADE, "#763f86", "#a868ad", "#d9a3cc"],
   rose: [PLUMSHADE, "#953a68", "#cf5f80", "#f297a0", "#ffcdbf"],
 } as const satisfies Record<string, readonly string[]>;
+
+/**
+ * Extra named steps that sit between two core steps of a ramp, each with the core step it
+ * shades down to. They are full palette colours but stay out of the step order that shadows,
+ * outlines and `ramp.*` remaps follow, so adding one never shifts another colour.
+ */
+const EXTRAS = {
+  /** A lawn green between `grass.mid` and `grass.light`, for soft tonal patches. */
+  "grass.soft": ["#53923f", "grass.mid"],
+  /** Stone under a warm lamp: a lit grey, not a brown. */
+  "stone.lamp": ["#d5c3a0", "stone.light"],
+  /** Marble's warm shadow, between `stone.mid` and `stone.light`. */
+  "stone.vein": ["#a89a8c", "stone.mid"],
+  /** Sunlit dust between `clay.light` and `clay.pale`. */
+  "clay.dust": ["#e8a768", "clay.light"],
+} as const;
 
 export type RampName = keyof typeof RAMPS;
 
@@ -47,25 +75,38 @@ type StepNames<
     : never
   : never;
 
-/** Every addressable palette name, like `red.deep` or `stone.bright`. */
-export type ColorName = {
-  [R in RampName]: `${R}.${StepNames<(typeof RAMPS)[R]>}`;
-}[RampName];
+export type ExtraName = keyof typeof EXTRAS;
+
+/** Every addressable palette name, like `red.deep`, `stone.bright` or `grass.soft`. */
+export type ColorName =
+  | {
+      [R in RampName]: `${R}.${StepNames<(typeof RAMPS)[R]>}`;
+    }[RampName]
+  | ExtraName;
 
 export interface Ramp {
   readonly name: RampName;
   readonly steps: readonly Step[];
   /** Palette indices of the steps, dark to light. */
   readonly indices: readonly number[];
+  /** Extra named steps of this ramp, name to palette index. */
+  readonly extras: ReadonlyMap<string, number>;
 }
 
 /** The 64 unique colours, in first-seen order. Index into this is a palette index. */
-export const COLORS: readonly string[] = [...new Set(Object.values(RAMPS).flat())];
+export const COLORS: readonly string[] = [
+  ...new Set([...Object.values(RAMPS).flat(), ...Object.values(EXTRAS).map(([hex]) => hex)]),
+];
 
 export const RAMP_LIST: readonly Ramp[] = Object.entries(RAMPS).map(([name, hexes]) => ({
   name: name as RampName,
   steps: STEPS.slice(0, hexes.length),
   indices: hexes.map((h) => COLORS.indexOf(h)),
+  extras: new Map(
+    Object.entries(EXTRAS)
+      .filter(([extra]) => extra.startsWith(`${name}.`))
+      .map(([extra, [hex]]) => [extra.slice(name.length + 1), COLORS.indexOf(hex)]),
+  ),
 }));
 
 const NAME_TO_INDEX = new Map<string, number>();
@@ -73,6 +114,25 @@ for (const ramp of RAMP_LIST) {
   ramp.steps.forEach((step, i) => {
     NAME_TO_INDEX.set(`${ramp.name}.${step}`, ramp.indices[i] as number);
   });
+  for (const [extra, index] of ramp.extras) NAME_TO_INDEX.set(`${ramp.name}.${extra}`, index);
+}
+// In code, `skin.<step>` still names the fixed skin colours; in a legend it is the swap slot.
+for (const step of STEPS) {
+  const index = NAME_TO_INDEX.get(`flesh.${step}`);
+  if (index !== undefined) NAME_TO_INDEX.set(`skin.${step}`, index);
+}
+
+/** Every ramp name and step in display order (extras slot in above the step they shade to). */
+export function rampEntries(ramp: Ramp): [name: string, index: number][] {
+  const out: [string, number][] = [];
+  ramp.steps.forEach((step, i) => {
+    out.push([step, ramp.indices[i] as number]);
+    for (const [extra, [, below]] of Object.entries(EXTRAS)) {
+      if (below === `${ramp.name}.${step}`)
+        out.push([extra.split(".")[1] as string, NAME_TO_INDEX.get(extra) as number]);
+    }
+  });
+  return out;
 }
 
 export function isColorName(name: string): name is ColorName {
@@ -98,14 +158,18 @@ export const DEEP_INDICES: ReadonlySet<number> = new Set(
  */
 export const SHADE: ReadonlyMap<number, number> = new Map(
   COLORS.map((_, i) => {
+    const extra = Object.values(EXTRAS).find(([hex]) => COLORS.indexOf(hex) === i);
+    if (extra) return [i, NAME_TO_INDEX.get(extra[1]) as number];
     const ramp = RAMP_LIST.find((r) => r.indices.indexOf(i) > 0);
     return [i, ramp ? (ramp.indices[ramp.indices.indexOf(i) - 1] as number) : i];
   }),
 );
 
-/** Ramps that contain a palette index. A shared end colour belongs to several. */
+/** Ramps that contain a palette index, as a step or an extra. A shared end colour belongs to several. */
 export function rampsOf(index: number): readonly Ramp[] {
-  return RAMP_LIST.filter((r) => r.indices.includes(index));
+  return RAMP_LIST.filter(
+    (r) => r.indices.includes(index) || [...r.extras.values()].includes(index),
+  );
 }
 
 export function rampByName(name: string): Ramp | undefined {
@@ -132,9 +196,9 @@ type Four = readonly [ColorName, ColorName, ColorName, ColorName];
  */
 const SLOT_OPTIONS = {
   skin: {
-    fair: ["skin.dark", "skin.light", "skin.pale", "skin.bright"],
-    warm: ["skin.deep", "skin.mid", "skin.light", "skin.pale"],
-    deep: ["skin.deep", "skin.dark", "skin.mid", "skin.light"],
+    fair: ["flesh.dark", "flesh.light", "flesh.pale", "flesh.bright"],
+    warm: ["flesh.deep", "flesh.mid", "flesh.light", "flesh.pale"],
+    deep: ["flesh.deep", "flesh.dark", "flesh.mid", "flesh.light"],
   },
   hair: {
     black: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
@@ -191,7 +255,10 @@ export function paintIndex(name: string): number {
   const slot = SLOTS.find((s) => s.name === head);
   if (slot) {
     const i = SLOT_STEPS.indexOf(step as (typeof SLOT_STEPS)[number]);
-    if (i < 0) throw new Error(`unknown slot step "${name}"`);
+    if (i < 0) {
+      const fixed = head === "skin" ? ` (fixed skin colours are "flesh.${step}")` : "";
+      throw new Error(`unknown slot step "${name}"${fixed}`);
+    }
     return slot.base + i;
   }
   return colorIndex(name);
@@ -228,7 +295,9 @@ export function previewLut(
 
 /**
  * A remap of palette names. `'grass.*': 'olive.*'` maps every step of a ramp to the same step
- * of another; `'grass.pale': 'stone.pale'` maps one colour. Later entries win.
+ * of another; `'grass.pale': 'stone.pale'` maps one colour. Later entries win. Names merged in
+ * revision 2 share one index, so a theme maps the survivor once (`stone.dark`, `board.mid`) and
+ * the alias (`ink.light`, `grass.dark`) follows it.
  */
 export type Remap = Readonly<Record<string, string>>;
 
@@ -252,6 +321,14 @@ export function resolveRemap(remap: Remap): Map<number, number> {
       if (j < 0) throw new Error(`remap "${from}" → "${to}": ${b.name} has no step "${step}"`);
       out.set(a.indices[i] as number, b.indices[j] as number);
     });
+    // Extras go to the same extra in the target, or to the target's step they shade to.
+    for (const [extra, index] of a.extras) {
+      const same = b.extras.get(extra);
+      const below = EXTRAS[`${a.name}.${extra}` as ExtraName][1].split(".")[1] as Step;
+      const j = b.steps.indexOf(below);
+      if (same !== undefined) out.set(index, same);
+      else if (j >= 0) out.set(index, b.indices[j] as number);
+    }
   }
   return out;
 }
@@ -273,7 +350,6 @@ export function theme(name: string, remap: Remap): Theme {
  * them and keep glowing.
  */
 const CAMPUS_NIGHT = theme("campus-night", {
-  "ink.light": "ink.mid",
   "ink.mid": "ink.dark",
   "ink.dark": "ink.deep",
   "stone.bright": "stone.dark",
@@ -285,7 +361,6 @@ const CAMPUS_NIGHT = theme("campus-night", {
   "grass.pale": "board.mid",
   "grass.light": "board.dark",
   "grass.mid": "board.deep",
-  "grass.dark": "board.deep",
   "board.light": "board.mid",
   "board.mid": "board.dark",
   "board.dark": "board.deep",
@@ -321,130 +396,143 @@ const CAMPUS_NIGHT = theme("campus-night", {
   "rose.light": "rose.dark",
   "rose.mid": "rose.dark",
   "rose.dark": "plum.dark",
+  "grass.soft": "board.dark",
+  "stone.lamp": "ink.mid",
+  "stone.vein": "ink.dark",
+  "clay.dust": "stone.dark",
 });
 
 /**
- * Lamp light at night, in three bands from the lamp out. Stone takes the warm ramps (gold,
- * clay, wood) so pavement glows like it is under a sodium lamp; grass steps down its own ramp
- * and stays green; the last band meets `campus-night`.
+ * Lamp light at night, in three bands from the lamp out. Pavers under the lamp turn the lamp-lit
+ * grey with warm joints, so the pool reads as light on stone; grass softens to the lawn green.
  */
 const CAMPUS_LAMP = theme("campus-lamp", {
   "stone.bright": "gold.pale",
-  "stone.pale": "gold.pale",
-  "stone.light": "clay.pale",
-  "stone.mid": "wood.pale",
-  "stone.dark": "wood.light",
-  "grass.bright": "gold.pale",
-});
-
-const CAMPUS_LAMP_MID = theme("campus-lamp-mid", {
-  "stone.bright": "clay.pale",
-  "stone.pale": "clay.pale",
-  "stone.light": "wood.pale",
-  "stone.mid": "wood.light",
-  "stone.dark": "wood.mid",
+  "stone.pale": "stone.pale",
+  "stone.light": "stone.lamp",
+  "stone.mid": "stone.vein",
+  "stone.dark": "stone.mid",
   "grass.bright": "grass.pale",
   "grass.pale": "grass.light",
+  "grass.light": "grass.soft",
+  "grass.soft": "grass.mid",
+});
+
+/** The lamp's middle band, and the bright foot of a window's spill: warm greys on stone. */
+const CAMPUS_DUSK = theme("campus-dusk", {
+  "ink.mid": "ink.dark",
+  "stone.bright": "stone.lamp",
+  "stone.pale": "stone.lamp",
+  "stone.light": "stone.vein",
+  "stone.lamp": "stone.vein",
+  "stone.mid": "stone.dark",
+  "stone.vein": "stone.dark",
+  "stone.dark": "ink.mid",
+  "grass.bright": "grass.soft",
+  "grass.pale": "grass.soft",
   "grass.light": "grass.mid",
-  "grass.mid": "grass.dark",
-  "grass.dark": "grass.deep",
+  "grass.soft": "grass.mid",
+  "grass.mid": "board.mid",
+  "board.light": "board.mid",
+  "board.mid": "board.dark",
+  "board.dark": "board.deep",
   "wood.pale": "wood.light",
   "wood.light": "wood.mid",
   "wood.mid": "wood.dark",
-  "clay.pale": "clay.light",
+  "clay.pale": "clay.dust",
+  "clay.dust": "clay.light",
   "clay.light": "clay.mid",
+  "clay.mid": "clay.dark",
   "red.light": "red.mid",
   "red.mid": "red.dark",
   "navy.light": "navy.mid",
   "navy.mid": "navy.dark",
-  "board.light": "board.mid",
-  "board.mid": "board.dark",
-});
-
-const CAMPUS_DUSK = theme("campus-dusk", {
-  "ink.light": "ink.mid",
-  "ink.mid": "ink.dark",
-  "stone.bright": "wood.pale",
-  "stone.pale": "wood.light",
-  "stone.light": "wood.mid",
-  "stone.mid": "wood.dark",
-  "stone.dark": "wood.deep",
-  "grass.bright": "grass.light",
-  "grass.pale": "grass.mid",
-  "grass.light": "grass.dark",
-  "grass.mid": "grass.deep",
-  "grass.dark": "grass.deep",
-  "board.light": "board.mid",
-  "board.mid": "board.dark",
-  "board.dark": "board.deep",
-  "wood.pale": "wood.mid",
-  "wood.light": "wood.dark",
-  "wood.mid": "wood.dark",
-  "clay.pale": "clay.mid",
-  "clay.light": "clay.dark",
-  "clay.mid": "clay.dark",
-  "red.light": "red.dark",
-  "red.mid": "red.dark",
-  "navy.light": "navy.dark",
-  "navy.mid": "navy.dark",
 });
 
 /**
- * The field at night: the campus night, with the open field's sand keeping its grain in the
- * dark: blue grit and deep dents on a dusk-coloured ground.
+ * The last of any light before the night: the night itself with stone and grass one step up,
+ * so a pool or a spill fades out instead of ending on an edge.
+ */
+const CAMPUS_GLOW = theme("campus-glow", {
+  ...CAMPUS_NIGHT.remap,
+  "stone.bright": "stone.mid",
+  "stone.pale": "stone.dark",
+  "stone.lamp": "stone.dark",
+  "stone.light": "stone.dark",
+  "stone.vein": "ink.mid",
+  "stone.mid": "ink.mid",
+  "stone.dark": "ink.dark",
+  "grass.bright": "board.light",
+  "grass.pale": "board.light",
+  "grass.light": "board.mid",
+  "grass.soft": "board.mid",
+  "grass.mid": "board.dark",
+});
+
+/**
+ * The field at night: the campus night, with the open field's sand carried by its grain. Every
+ * grain is lit a step above the ground and shaded a step below it, and the warm grains turn
+ * umber, so the field reads as earth.
  */
 const FIELD_NIGHT = theme("field-night", {
   ...CAMPUS_NIGHT.remap,
   "stone.bright": "stone.dark",
   "stone.pale": "ink.mid",
-  "stone.light": "navy.dark",
+  "stone.light": "stone.dark",
   "stone.mid": "ink.dark",
+  "stone.vein": "ink.dark",
   "stone.dark": "ink.deep",
+  "clay.pale": "wood.dark",
 });
 
 /**
  * Daylight pouring out of a rift across a campus at night, in three bands from the tear out:
- * the field's pale sand falls through the warm browns of the wood ramp until it meets the night.
- * White stays white in the first band, so the torn paper edge of the rift always reads.
+ * the field's pale sand takes the sunlit dust tone, then falls through the wood ramp to the
+ * night. White stays white in the first band, so the torn paper edge always reads.
  */
 const RIFT_SUN = theme("rift-sun", {
-  "stone.pale": "wood.pale",
-  "stone.light": "wood.light",
-  "stone.mid": "wood.mid",
-  "stone.dark": "wood.dark",
+  "stone.pale": "clay.dust",
+  "stone.lamp": "clay.dust",
+  "stone.light": "wood.pale",
+  "stone.mid": "wood.light",
+  "stone.vein": "wood.light",
+  "stone.dark": "wood.mid",
 });
 
 const RIFT_WARM = theme("rift-warm", {
-  "stone.bright": "gold.pale",
-  "stone.pale": "wood.light",
-  "stone.light": "wood.mid",
-  "stone.mid": "wood.dark",
-  "stone.dark": "wood.deep",
+  "stone.bright": "clay.dust",
+  "stone.pale": "wood.pale",
+  "stone.lamp": "wood.pale",
+  "stone.light": "wood.light",
+  "stone.mid": "wood.mid",
+  "stone.vein": "wood.mid",
+  "stone.dark": "wood.dark",
   "grass.bright": "grass.pale",
   "grass.pale": "grass.light",
-  "grass.light": "grass.mid",
-  "grass.mid": "grass.dark",
-  "grass.dark": "grass.deep",
+  "grass.light": "grass.soft",
+  "grass.soft": "grass.mid",
+  "grass.mid": "board.mid",
   "wood.pale": "wood.light",
   "wood.light": "wood.mid",
   "wood.mid": "wood.dark",
 });
 
 const RIFT_EMBER = theme("rift-ember", {
-  "stone.bright": "clay.pale",
-  "stone.pale": "wood.mid",
-  "stone.light": "wood.dark",
-  "stone.mid": "wood.deep",
-  "stone.dark": "ink.deep",
-  "grass.bright": "grass.light",
-  "grass.pale": "grass.mid",
-  "grass.light": "grass.dark",
+  "stone.bright": "wood.pale",
+  "stone.pale": "wood.light",
+  "stone.lamp": "wood.light",
+  "stone.light": "wood.mid",
+  "stone.mid": "wood.dark",
+  "stone.vein": "wood.dark",
+  "stone.dark": "wood.deep",
+  "grass.bright": "grass.soft",
+  "grass.pale": "grass.soft",
+  "grass.light": "grass.mid",
+  "grass.soft": "board.mid",
   "grass.mid": "grass.deep",
-  "grass.dark": "grass.deep",
   "wood.pale": "wood.mid",
   "wood.light": "wood.dark",
   "wood.mid": "wood.deep",
-  "ink.light": "ink.mid",
   "ink.mid": "ink.dark",
 });
 
@@ -456,10 +544,11 @@ const GREECE = theme("greece", {
   "grass.mid": "olive.mid",
   "grass.dark": "olive.dark",
   "grass.deep": "olive.deep",
+  "grass.soft": "olive.mid",
   "wood.pale": "clay.pale",
-  "wood.light": "clay.light",
-  "wood.mid": "clay.mid",
-  "wood.dark": "clay.dark",
+  "wood.light": "clay.dust",
+  "wood.mid": "clay.light",
+  "wood.dark": "clay.mid",
   "clay.pale": "gold.pale",
 });
 
@@ -468,8 +557,8 @@ export const THEMES: readonly Theme[] = [
   theme("campus", {}),
   CAMPUS_NIGHT,
   CAMPUS_LAMP,
-  CAMPUS_LAMP_MID,
   CAMPUS_DUSK,
+  CAMPUS_GLOW,
   FIELD_NIGHT,
   RIFT_SUN,
   RIFT_WARM,
@@ -481,8 +570,10 @@ export const THEMES: readonly Theme[] = [
 export function nameOf(index: number): string {
   const slot = slotOf(index);
   if (slot) return `${slot.name}.${SLOT_STEPS[index - slot.base]}`;
-  const names = RAMP_LIST.filter((r) => r.indices.includes(index)).map(
-    (r) => `${r.name}.${r.steps[r.indices.indexOf(index)]}`,
+  const names = RAMP_LIST.flatMap((r) =>
+    rampEntries(r)
+      .filter(([, i]) => i === index)
+      .map(([step]) => `${r.name}.${step}`),
   );
   return names.length > 0 ? names.join(" / ") : `#${index}`;
 }

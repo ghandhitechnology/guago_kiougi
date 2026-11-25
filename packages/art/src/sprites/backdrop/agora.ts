@@ -38,8 +38,11 @@ const palette: Legend = {
   P: "stone.bright",
   p: "stone.pale",
   e: "stone.light",
+  v: "stone.vein",
   n: "navy.light",
+  N: "navy.mid",
   r: "red.light",
+  R: "red.mid",
   // working cells
   x: null,
   // lit windows and specks are dots on purpose
@@ -192,32 +195,137 @@ const TERRACE = `
 
 // Things being pulled in ------------------------------------------------------------------------
 
-/**
- * A page torn out of the 0조 notebook: ruled in blue, a red margin, the ragged edge where it
- * left the spiral. Frames turn it over as it flies: face, foreshortened, edge on, back.
- */
-function page(width: number, face: boolean): string {
-  const W = 26;
-  const H = 16;
-  const pic = Pic.blank(W, H);
-  const x0 = Math.round((W - width) / 2);
-  for (let y = 1; y < H - 1; y++) {
-    for (let x = x0; x < x0 + width; x++) {
-      const left = x === x0;
-      // The torn spiral edge: notches every third row.
-      if (left && y % 3 === 0) continue;
-      let ch = "P";
-      if (y === H - 2) ch = "e";
-      else if (x >= x0 + width - 1) ch = "p";
-      else if (face && width > 6 && x === x0 + 2) ch = "r";
-      else if (face && width > 6 && y % 2 === 0 && x > x0 + 2 && x < x0 + width - 2) ch = "n";
-      pic.set(x, y, ch);
-    }
-  }
-  return pic.toString();
+type V3 = readonly [number, number, number];
+
+const rotX = ([x, y, z]: V3, a: number): V3 => [
+  x,
+  y * Math.cos(a) - z * Math.sin(a),
+  y * Math.sin(a) + z * Math.cos(a),
+];
+const rotY = ([x, y, z]: V3, a: number): V3 => [
+  x * Math.cos(a) + z * Math.sin(a),
+  y,
+  -x * Math.sin(a) + z * Math.cos(a),
+];
+const rotZ = ([x, y, z]: V3, a: number): V3 => [
+  x * Math.cos(a) - y * Math.sin(a),
+  x * Math.sin(a) + y * Math.cos(a),
+  z,
+];
+
+/** Light from the top left and a little toward the viewer. */
+const SUN: V3 = (() => {
+  const v: V3 = [-0.55, -0.7, 0.85];
+  const n = Math.hypot(...v);
+  return [v[0] / n, v[1] / n, v[2] / n];
+})();
+
+/** How a flying sheet sits in one frame: turned, tipped, spun, bowed and curled. */
+interface Pose {
+  readonly turn: number;
+  readonly tip: number;
+  readonly spin: number;
+  readonly bow: number;
+  readonly curl: number;
 }
 
-const PAGES = [page(24, true), page(15, true), page(3, false), page(18, false)];
+/**
+ * A page torn out of the 0조 notebook, as a real sheet in the air: bowed across its width by
+ * the wind, its top corner curling, turned and tipped in space and drawn from that, so its
+ * outline, its foreshortening and its shading all come from the bend. Lit from the top left;
+ * the side turned away goes a step grey, and a sheet seen from behind shows its blank back.
+ * The front is ruled in blue with a red margin, its left edge torn where it left the spiral.
+ */
+function page(w: number, h: number, size: number, pose: Pose): string {
+  const pic = Pic.blank(size, size);
+  const best = new Map<number, { z: number; d: number; ch: string }>();
+  const at = (u: number, v: number): V3 => {
+    const x = (u - 0.5) * w;
+    const y = (v - 0.5) * h;
+    const z =
+      pose.bow * w * ((u - 0.5) ** 2 * 4 - 0.33) +
+      pose.curl * h * Math.max(0, u - v - 0.4) ** 2 * 3;
+    return rotZ(rotX(rotY([x, y, z], pose.turn), pose.tip), pose.spin);
+  };
+  const c = (size - 1) / 2;
+  const step = 0.2;
+  for (let pv = 0; pv <= h - step / 2; pv += step) {
+    for (let pu = 0; pu <= w - step / 2; pu += step) {
+      const col = Math.floor(pu);
+      const row = Math.floor(pv);
+      // The spiral's torn edge: a notch every third row.
+      if (col === 0 && row % 3 === 1 && h >= 9) continue;
+      const u = (pu + step / 2) / w;
+      const v = (pv + step / 2) / h;
+      const p = at(u, v);
+      const du = at(u + 0.01, v);
+      const dv = at(u, v + 0.01);
+      const a: V3 = [du[0] - p[0], du[1] - p[1], du[2] - p[2]];
+      const b: V3 = [dv[0] - p[0], dv[1] - p[1], dv[2] - p[2]];
+      const n: V3 = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+      ];
+      const len = Math.hypot(...n) || 1;
+      const front = n[2] >= 0;
+      const s = front ? 1 : -1;
+      const lit = (s * (n[0] * SUN[0] + n[1] * SUN[1] + n[2] * SUN[2])) / len;
+      const tone = front
+        ? lit > 0.82
+          ? 3
+          : lit > 0.55
+            ? 2
+            : lit > 0.25
+              ? 1
+              : 0
+        : lit > 0.7
+          ? 2
+          : lit > 0.3
+            ? 1
+            : 0;
+      let ch = "vepP"[tone] as string;
+      if (front && col === 2 && w >= 8) ch = tone >= 2 ? "r" : "R";
+      else if (front && row % 3 === 2 && col >= 3 && col < w - 1) ch = tone >= 2 ? "n" : "N";
+      const sx = Math.round(c + p[0]);
+      const sy = Math.round(c + p[1]);
+      if (sx < 0 || sy < 0 || sx >= size || sy >= size) continue;
+      const key = sy * size + sx;
+      const d = Math.hypot(c + p[0] - sx, c + p[1] - sy);
+      const cur = best.get(key);
+      if (!cur || p[2] > cur.z + 0.4 || (Math.abs(p[2] - cur.z) <= 0.4 && d < cur.d))
+        best.set(key, { z: Math.max(p[2], cur?.z ?? -1e9), d, ch });
+    }
+  }
+  for (const [key, { ch }] of best) pic.set(key % size, Math.floor(key / size), ch);
+  // The edge turned from the light, below and to the right, one step darker.
+  const darker: Record<string, string> = { P: "p", p: "e", e: "v", v: "M", n: "N", r: "R" };
+  const edged = pic.clone();
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const ch = pic.at(x, y) as string;
+      if (ch === "." || !(ch in darker)) continue;
+      if (pic.at(x + 1, y) === "." || pic.at(x, y + 1) === ".")
+        edged.set(x, y, darker[ch] as string);
+    }
+  }
+  return smooth(edged).toString();
+}
+
+/** A tumble: one full turn of the sheet about its long axis, flexing as it goes. */
+function pageFrames(w: number, h: number, n: number): string[] {
+  const size = Math.ceil(Math.hypot(w, h)) + 3;
+  return Array.from({ length: n }, (_, i) => {
+    const t = (i / n) * Math.PI * 2;
+    return page(w, h, size, {
+      turn: t + 0.4,
+      tip: 0.45 + 0.2 * Math.sin(t),
+      spin: -0.35 + 0.25 * Math.sin(t + 1.2),
+      bow: 0.08 + 0.06 * Math.cos(t * 2),
+      curl: 0.3 + 0.15 * Math.sin(t),
+    });
+  });
+}
 
 /** A scrap of the field coming loose at the tear: sand on top, pale page underneath. */
 const SCRAPS = [
@@ -301,13 +409,26 @@ export default [
     frames: { run: TERRACE },
     anim: { idle: { frames: ["run"], fps: 1 } },
   }),
-  sprite({
-    name: "page-big",
-    size: [26, 16],
-    palette,
-    outline: false,
-    frames: four(PAGES, "turn"),
-    anim: { turn: { frames: ["turn0", "turn1", "turn2", "turn3"], fps: 5, jump: 1 } },
+  ...(
+    [
+      ["page-s", 6, 8],
+      ["page-m", 9, 12],
+      ["page-l", 12, 16],
+    ] as const
+  ).map(([name, w, h]) => {
+    const frames = pageFrames(w, h, 8);
+    const size = Math.ceil(Math.hypot(w, h)) + 3;
+    return sprite({
+      name,
+      size: [size, size],
+      origin: [Math.floor(size / 2), Math.floor(size / 2)],
+      palette,
+      outline: false,
+      frames: Object.fromEntries(frames.map((g, i) => [`turn${i}`, g])),
+      anim: {
+        turn: { frames: frames.map((_, i) => `turn${i}`), fps: 8, jump: 1 },
+      },
+    });
   }),
   sprite({
     name: "scrap",

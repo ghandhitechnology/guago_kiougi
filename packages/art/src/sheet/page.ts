@@ -334,23 +334,16 @@ for (const theme of meta.themes) {
 
 {
   const s = section("palette", "해솔 64");
-  const steps = ["deep", "dark", "mid", "light", "pale", "bright"];
-  const grid = el("div", "ramps");
-  grid.append(el("span"));
-  for (const step of steps) grid.append(el("span", "dim", step));
   for (const [name, ramp] of Object.entries(meta.palette.ramps)) {
-    grid.append(el("span", "", name));
-    for (const step of steps) {
+    const r = row(s);
+    r.append(el("span", "ramp", name));
+    for (const [step, hex] of Object.entries(ramp)) {
       const sw = el("i", "swatch");
-      const hex = ramp[step];
-      if (hex) {
-        sw.style.background = hex;
-        sw.title = `${name}.${step} ${hex}`;
-      } else sw.className = "swatch none";
-      grid.append(sw);
+      sw.style.background = hex;
+      sw.title = `${name}.${step} ${hex}`;
+      r.append(cell(sw, step));
     }
   }
-  s.append(grid);
   for (const [name, slot] of Object.entries(meta.slots)) {
     const r = row(s, name);
     for (const [option, colors] of Object.entries(slot.options)) {

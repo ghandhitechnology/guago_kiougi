@@ -287,11 +287,17 @@ function hud(kit: Kit): Screen {
 function dialogue(kit: Kit): Screen {
   const d = new Draw(kit);
   d.scene("campus-night");
-  // 엔트로피 sits at the student's feet, looking unimpressed.
-  const { students } = cast(sceneDef("campus-night"));
+  // 엔트로피 sits at the student's feet, looking unimpressed, unless the scene has already put
+  // the cat somewhere of its own choosing.
+  const def = sceneDef("campus-night");
+  const placed = [...(def?.objects ?? []), ...(def?.overhead ?? [])].some(
+    (o) => ("prop" in o && o.prop === "entropy") || ("actor" in o && o.actor === "entropy"),
+  );
+  const { students } = cast(def);
   const near = students.find((s) => s.dir === "up") ?? students[0];
   const cat = kit.origin("entropy");
-  if (near && cat) d.frame("entropy", "sit0", near.at[0] + 14 - cat[0], near.at[1] - cat[1]);
+  if (!placed && near && cat)
+    d.frame("entropy", "sit0", near.at[0] + 14 - cat[0], near.at[1] - cat[1]);
 
   // A notebook page: the portrait pasted in the margin, lines ruled for what the cat says.
   const x = 8;

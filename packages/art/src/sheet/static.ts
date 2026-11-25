@@ -11,9 +11,10 @@ import {
   INDEX_RGB,
   previewLut,
   RAMP_LIST,
+  rampEntries,
   resolveRemap,
   SLOTS,
-  STEPS,
+  type Step,
   THEMES,
   type Theme,
 } from "../palette.ts";
@@ -104,21 +105,22 @@ export function themeBackdrops(theme: Theme, terrains: readonly CompiledTerrain[
 export function paletteSheet(f: Fonts): Rgba {
   const sw = 32;
   const left = 96;
-  const s = new Sheet(left + STEPS.length * (sw + 4) + 24);
+  const cols = Math.max(...RAMP_LIST.map((r) => rampEntries(r).length));
+  const cell = sw + 12;
+  const s = new Sheet(left + cols * cell + 24);
   let y = 20;
   drawText(s.c, f.head, "해솔 64", 20, y, UI.head);
-  y += 28;
-  STEPS.forEach((step, i) => {
-    drawText(s.c, f.label, step, left + i * (sw + 4), y, UI.dim);
-  });
-  y += 18;
+  y += 32;
   for (const ramp of RAMP_LIST) {
     drawText(s.c, f.label, ramp.name, 20, y + 10, UI.text);
-    ramp.indices.forEach((ix, i) => {
-      s.c.rect(left + i * (sw + 4), y, sw, sw, UI.edge);
-      s.c.rect(left + i * (sw + 4) + 1, y + 1, sw - 2, sw - 2, INDEX_RGB[ix] as readonly number[]);
+    rampEntries(ramp).forEach(([step, ix], i) => {
+      const x = left + i * cell;
+      s.c.rect(x, y, sw, sw, UI.edge);
+      s.c.rect(x + 1, y + 1, sw - 2, sw - 2, INDEX_RGB[ix] as readonly number[]);
+      const extra = !ramp.steps.includes(step as Step);
+      drawText(s.c, f.label, step, x, y + sw + 2, extra ? UI.head : UI.dim);
     });
-    y += sw + 4;
+    y += sw + 18;
   }
   y += 16;
   drawText(s.c, f.head, "slots", 20, y, UI.head);
