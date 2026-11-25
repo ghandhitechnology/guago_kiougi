@@ -745,6 +745,30 @@ const DUSK_FIRE = theme("dusk-fire", {
   "stone.dark": "clay.dark",
 });
 
+/**
+ * 아고라 외곽 at 12:50, the sun straight overhead: dust bleaches to pale straw, paving goes
+ * flat and white with its shading lifted a step, dry grass stays olive. Awnings, roofs and
+ * bronze keep their colour, so the market is the brightest thing in the glare.
+ */
+const GREECE_NOON = theme("greece-noon", {
+  "wood.pale": "gold.pale",
+  "wood.light": "clay.pale",
+  "wood.mid": "clay.dust",
+  "wood.dark": "clay.light",
+  "clay.pale": "stone.bright",
+  "grass.bright": "stone.bright",
+  "grass.pale": "gold.pale",
+  "grass.light": "olive.light",
+  "grass.soft": "olive.mid",
+  "grass.mid": "olive.mid",
+  "grass.dark": "olive.dark",
+  "grass.deep": "olive.deep",
+  "stone.light": "stone.pale",
+  "stone.vein": "stone.light",
+  "stone.mid": "stone.vein",
+  "stone.dark": "stone.mid",
+});
+
 /** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
 export const THEMES: readonly Theme[] = [
   theme("campus", {}),
@@ -766,6 +790,7 @@ export const THEMES: readonly Theme[] = [
   OLIVE_MORNING,
   GREECE_DUSK,
   DUSK_FIRE,
+  GREECE_NOON,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */

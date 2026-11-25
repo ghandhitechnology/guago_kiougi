@@ -3,6 +3,7 @@ import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
+import p1AgoraEdge from "./p1-agora-edge.ts";
 import p1CaveMouth from "./p1-cave-mouth.ts";
 // Page 1 hunting fields and the 생태공원.
 import p1Colonnade from "./p1-colonnade.ts";
@@ -25,6 +26,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   p1Colonnade,
   p1OliveRoad,
   p1CaveMouth,
+  p1AgoraEdge,
 ];
 
 /**
@@ -48,7 +50,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "p1-croton-school",
   "p1-elea-track",
   "p1-lyceum",
-  "p1-agora-edge",
 ]);
 
 /** Builds every map. */
