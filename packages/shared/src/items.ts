@@ -5,7 +5,7 @@
  * ledger entries. Nothing here downgrades or destroys a book except the two copies 제련 eats.
  */
 import { growth } from "./growth.ts";
-import { type Amounts, type Outcome, type Purse, pay, sheet } from "./ledger.ts";
+import { type Amounts, balance, type Outcome, type Purse, pay, sheet } from "./ledger.ts";
 import { BookGrade, bookExpToNext, GRADE_MULTIPLIER } from "./numbers.ts";
 
 export interface BookItem {
@@ -18,6 +18,8 @@ export interface BookItem {
   readonly pilgi: number;
   /** Failures since the last success; each adds `PILGI_PITY` to the next attempt. */
   readonly pilgiFails: number;
+  /** Set once the book has evolved (PLAN §8); grade, level and 필기 carry over. */
+  readonly evolved?: boolean;
 }
 
 export interface ToolItem {
@@ -118,21 +120,18 @@ export function bindCost(book: string, page: number): Amounts {
   };
 }
 
+/** A fresh 교과서 copy at level 1, as 제본 and the starter kit make it. */
+export function textbook(id: string, def: string): BookItem {
+  return { id, def, grade: BookGrade.Textbook, level: 1, exp: 0, pilgi: 0, pilgiFails: 0 };
+}
+
 export function bind(
   purse: Purse,
   request: { readonly id: string; readonly def: string; readonly page: number },
 ): Outcome<Holding<BookItem>> {
   const paid = pay(purse, bindCost(request.def, request.page), "sink.bind");
   if (!paid) return { ok: false, error: "bind_cost" };
-  const item: BookItem = {
-    id: request.id,
-    def: request.def,
-    grade: BookGrade.Textbook,
-    level: 1,
-    exp: 0,
-    pilgi: 0,
-    pilgiFails: 0,
-  };
+  const item = textbook(request.id, request.def);
   return { ok: true, state: { item, purse: paid.purse }, ledger: paid.ledger };
 }
 
@@ -172,6 +171,8 @@ export function forge(
     grade: (a.grade + 1) as BookGrade,
     pilgi: pen.pilgi,
     pilgiFails: pen.pilgiFails,
+    // An evolution, once earned, is not forged away.
+    ...(copies.some((x) => x.evolved) ? { evolved: true } : {}),
   };
   return {
     ok: true,
@@ -213,32 +214,58 @@ export const BOOK_EXP_FROM_OWNER = 0.1;
 /** One fed 낱장 is worth a twentieth of the book's current level: twenty sheets, one level. */
 export const SHEET_FEED_SHARE = 1 / 20;
 
+/**
+ * Feeds up to `count` 낱장 of the book's own, one at a time: each is worth a twentieth of the
+ * level the book has when that sheet goes in, and feeding stops once the book reaches its
+ * owner's level. Only the sheets used are paid, and `used` says how many. Feeding the same
+ * sheets in one request or in several ends in the same book.
+ */
 export function feedSheets(
   state: Holding<BookItem>,
   count: number,
   ownerLevel: number,
-): Outcome<Holding<BookItem>> {
+): Outcome<Holding<BookItem> & { readonly used: number }> {
   if (!Number.isInteger(count) || count <= 0) return { ok: false, error: "feed_count" };
   if (state.item.level >= ownerLevel) return { ok: false, error: "feed_capped" };
-  const paid = pay(state.purse, { [sheet(state.item.def)]: count }, "sink.feed");
+  const currency = sheet(state.item.def);
+  const offered = Math.min(count, Math.floor(balance(state.purse, currency)));
+  let item = state.item;
+  let used = 0;
+  while (used < offered && item.level < ownerLevel) {
+    item = addBookExp(item, bookExpToNext(item.level) * SHEET_FEED_SHARE, ownerLevel);
+    used++;
+  }
+  const paid = used > 0 ? pay(state.purse, { [currency]: used }, "sink.feed") : null;
   if (!paid) return { ok: false, error: "feed_cost" };
-  // Sheets fed in one go are valued at the level the book had when feeding began.
-  const exp = bookExpToNext(state.item.level) * SHEET_FEED_SHARE * count;
-  const item = addBookExp(state.item, exp, ownerLevel);
-  return { ok: true, state: { item, purse: paid.purse }, ledger: paid.ledger };
+  return { ok: true, state: { item, purse: paid.purse, used }, ledger: paid.ledger };
 }
 
 // ── Tools ───────────────────────────────────────────────────────────────────
 
 export const TOOL_MAX_LEVEL = 5;
 
-/** A tool's level is the copies merged into it, up to 5; a merge past 5 is refused. */
-export function mergeTools(a: ToolItem, b: ToolItem): Outcome<ToolItem> {
-  if (a.id === b.id) return { ok: false, error: "merge_same_item" };
-  if (a.def !== b.def) return { ok: false, error: "merge_mismatch" };
-  if (a.level >= TOOL_MAX_LEVEL) return { ok: false, error: "merge_max" };
-  const level = Math.min(TOOL_MAX_LEVEL, a.level + b.level);
-  return { ok: true, state: { ...a, level }, ledger: [] };
+/**
+ * A tool's level is the copies merged into it, up to 5. Merging moves `from`'s levels onto
+ * `into` until it reaches 5; whatever does not fit stays on `from`, which is used up (null) only
+ * when nothing is left on it. No merge loses a level. A tool already at 5 takes no merge.
+ */
+export function mergeTools(
+  into: ToolItem,
+  from: ToolItem,
+): Outcome<{ readonly into: ToolItem; readonly from: ToolItem | null }> {
+  if (into.id === from.id) return { ok: false, error: "merge_same_item" };
+  if (into.def !== from.def) return { ok: false, error: "merge_mismatch" };
+  if (into.level >= TOOL_MAX_LEVEL) return { ok: false, error: "merge_max" };
+  const moved = Math.min(from.level, TOOL_MAX_LEVEL - into.level);
+  const left = from.level - moved;
+  return {
+    ok: true,
+    state: {
+      into: { ...into, level: into.level + moved },
+      from: left > 0 ? { ...from, level: left } : null,
+    },
+    ledger: [],
+  };
 }
 
 // ── Evolution ───────────────────────────────────────────────────────────────
@@ -266,4 +293,18 @@ export function canEvolve(
     tool?.def === linkedTool &&
     tool.level >= EVOLUTION.toolLevel
   );
+}
+
+/** Evolves a book in place. Its linked tool stays as it is. */
+export function evolve(
+  book: BookItem,
+  tool: ToolItem | undefined,
+  linkedTool: string,
+  evolutionUnlocked: boolean,
+): Outcome<BookItem> {
+  if (book.evolved) return { ok: false, error: "evolve_done" };
+  if (!canEvolve(book, tool, linkedTool, evolutionUnlocked)) {
+    return { ok: false, error: "evolve_requirements" };
+  }
+  return { ok: true, state: { ...book, evolved: true }, ledger: [] };
 }

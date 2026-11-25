@@ -166,15 +166,59 @@ describe("book levels", () => {
     expect(r.state.item.level).toBe(31);
     expect(r.ledger).toEqual([{ currency: "sheet:wangdo", amount: -20, key: "sink.feed" }]);
   });
+
+  it("charges only the sheets the book can take before it reaches its owner", () => {
+    const fed = (count: number) =>
+      feedSheets({ item: book({ level: 1 }), purse: { "sheet:wangdo": 100_000 } }, count, 2);
+    const some = fed(100);
+    const all = fed(100_000);
+    if (!some.ok || !all.ok) throw new Error("refused");
+    expect(some.state.item.level).toBe(2);
+    expect(some.state.used).toBe(20);
+    expect(some.state.purse["sheet:wangdo"]).toBe(100_000 - 20);
+    expect(all.state).toEqual(some.state);
+    expect(all.ledger).toEqual([{ currency: "sheet:wangdo", amount: -20, key: "sink.feed" }]);
+  });
+
+  it("ends in the same book however the same sheets are split across requests", () => {
+    const start = book({ level: 3, exp: bookExpToNext(3) * 0.37 });
+    const feedAll = (splits: readonly number[]) => {
+      let state = { item: start, purse: { "sheet:wangdo": 500 } as Record<string, number> };
+      let used = 0;
+      for (const n of splits) {
+        const r = feedSheets(state, n, 40);
+        if (!r.ok) throw new Error(r.error);
+        state = { item: r.state.item, purse: { ...r.state.purse } as Record<string, number> };
+        used += r.state.used;
+      }
+      return { item: state.item, used, left: state.purse["sheet:wangdo"] };
+    };
+    const once = feedAll([240]);
+    expect(once.item.level).toBeGreaterThan(start.level + 10);
+    expect(feedAll([120, 120])).toEqual(once);
+    expect(feedAll([7, 33, 200])).toEqual(once);
+    expect(feedAll(Array(240).fill(1))).toEqual(once);
+  });
 });
 
 describe("tools and evolution", () => {
-  it("merges duplicates up to level 5", () => {
+  it("merges duplicates up to level 5 and keeps the levels that do not fit", () => {
     const r = mergeTools(
-      { id: "t1", def: "compass", level: 3 },
-      { id: "t2", def: "compass", level: 4 },
+      { id: "t1", def: "compass", level: 4 },
+      { id: "t2", def: "compass", level: 3 },
     );
-    expect(r.ok && r.state.level).toBe(5);
+    expect(r.ok && r.state).toEqual({
+      into: { id: "t1", def: "compass", level: 5 },
+      from: { id: "t2", def: "compass", level: 2 },
+    });
+    const whole = mergeTools(
+      { id: "t1", def: "compass", level: 2 },
+      { id: "t2", def: "compass", level: 3 },
+    );
+    expect(whole.ok && whole.state).toEqual({
+      into: { id: "t1", def: "compass", level: 5 },
+      from: null,
+    });
     expect(
       mergeTools({ id: "t1", def: "compass", level: 5 }, { id: "t2", def: "compass", level: 1 }).ok,
     ).toBe(false);
