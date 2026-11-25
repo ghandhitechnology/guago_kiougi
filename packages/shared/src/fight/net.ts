@@ -18,6 +18,7 @@ import {
   WireMinion,
   WirePlayer,
   writeFx,
+  ZONE_FOLLOW_UP,
 } from "./wire.ts";
 import { type Effect, Ev, type FightWorld, FxKind, Gone, type Player } from "./world.ts";
 
@@ -776,6 +777,11 @@ export class FightNet {
         f.speed = e.growth;
         f.spin = e.spin;
         f.flags = wp?.allies && e.kind === FxKind.Zone ? 1 : 0;
+        // 일기도's lightning: when it lands, so every viewer can strike it on what stands inside.
+        if (e.fireAt > e.born) {
+          f.flags |= ZONE_FOLLOW_UP;
+          f.a = e.fireAt - e.born;
+        }
         return true;
       case FxKind.Dash:
         f.tx = e.tx;
@@ -921,6 +927,14 @@ export class FightNet {
       fo.u16(Math.max(0, Math.round(x)));
       fo.u16(Math.max(0, Math.round(y)));
       fo.u8(Math.min(255, Math.round(radius)));
+      if (kind === BurstKind.Qed) {
+        // The neighbours a Q.E.D. carried to (완전한 증명), at most three.
+        const n = (ev.d > 0 ? 1 : 0) + (ev.e > 0 ? 1 : 0) + (ev.f > 0 ? 1 : 0);
+        fo.u8(n);
+        if (ev.d > 0) fo.u16(ev.d);
+        if (ev.e > 0) fo.u16(ev.e);
+        if (ev.f > 0) fo.u16(ev.f);
+      }
       // Bursts share the players' effects budget: a 화학 crowd's reactions or a healer build's
       // heals would otherwise flood every viewer. Only monsters' tells and shots skip it.
       this.pushFx(cell, at, false, by, x, y, id, 2);

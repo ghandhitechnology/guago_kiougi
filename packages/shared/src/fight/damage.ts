@@ -371,6 +371,10 @@ function proof(w: FightWorld, p: Player, m: Monster, hit: number, cast: number):
       const rr = o.radius + m.radius + 6;
       if (dx * dx + dy * dy > rr * rr) continue;
       damageMonster(w, p, null, o, burst, m.x, m.y, 0, HitFlag.Qed, cast, -1, true);
+      // The burst record names the first three it carried to, for the chalk links.
+      if (chained === 0) ev.d = o.entity;
+      else if (chained === 1) ev.e = o.entity;
+      else if (chained === 2) ev.f = o.entity;
       chained++;
     }
   }

@@ -125,7 +125,16 @@ export interface WireSelf {
   shield: number;
 }
 
-/** Burst kinds (a reaction's index is below 16). */
+/**
+ * Flag on a zone, pool or trail record: a follow-up strike lands `a` ticks after it began, on
+ * everything inside (일기도's lightning); the byte follows the flags.
+ */
+export const ZONE_FOLLOW_UP = 2;
+
+/**
+ * Burst kinds (a reaction's index is below 16). A Q.E.D. burst carries the entity ids it carried
+ * to (완전한 증명's neighbours, at most three) in `chain`: u8 count, then u16 ids.
+ */
 export const BurstKind = { Qed: 16, Heal: 17, LevelUp: 18, Elite: 19, Revive: 20 } as const;
 
 // ── Bytes ───────────────────────────────────────────────────────────────────
@@ -541,6 +550,9 @@ export function writeFx(w: ByteWriter, f: WireFx): void {
       w.u8(clamp8(f.speed * 16));
       w.i8(clampI8(f.spin * 1000));
       w.u8(f.flags & 0xff);
+      // A trail lies along a line (판 구조론's fault); a zone may strike once later (일기도).
+      if (f.kind === K.Trail) w.u16(angle16(f.angle));
+      if (f.flags & ZONE_FOLLOW_UP) w.u8(clamp8(f.a));
       break;
     case K.Dash:
       w.u16(clamp16(f.tx));
@@ -549,6 +561,10 @@ export function writeFx(w: ByteWriter, f: WireFx): void {
       break;
     case K.Burst:
       w.u8(clamp8(f.radius));
+      if (f.def === BurstKind.Qed) {
+        w.u8(f.chain.length);
+        for (const id of f.chain) w.u16(id);
+      }
       break;
   }
 }
@@ -649,6 +665,8 @@ export function readFx(r: ByteReader, f: WireFx): WireFx {
       f.speed = r.u8() / 16;
       f.spin = r.i8() / 1000;
       f.flags = r.u8();
+      if (f.kind === K.Trail) f.angle = fromAngle16(r.u16());
+      f.a = f.flags & ZONE_FOLLOW_UP ? r.u8() : 0;
       break;
     case K.Dash:
       f.tx = r.u16();
@@ -657,6 +675,10 @@ export function readFx(r: ByteReader, f: WireFx): WireFx {
       break;
     case K.Burst:
       f.radius = r.u8();
+      if (f.def === BurstKind.Qed) {
+        const n = r.u8();
+        for (let i = 0; i < n; i++) f.chain.push(r.u16());
+      }
       break;
   }
   return f;

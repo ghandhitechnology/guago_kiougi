@@ -466,7 +466,7 @@ export const Ev = {
   Collect: 9,
   /** c healer entity, x, y, d radius. */
   Heal: 10,
-  /** a player, c target entity, x, y. */
+  /** a player, c target entity, x, y; d, e, f the entities it carried to (완전한 증명), or 0. */
   Qed: 11,
   /** d 1 surge, 0 lull. */
   Phase: 12,
