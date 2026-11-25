@@ -7,7 +7,7 @@ const elsewhere = (n: number) => new Error(`fault ${n}`);
 
 describe("an uncaught fault", () => {
   it("keeps the server serving once, and stops it when the same fault keeps coming", () => {
-    let t = 0;
+    const t = 0;
     const decide = faultPolicy(() => t);
     for (let i = 1; i < SAME_FAULT_LIMIT; i++) expect(decide(fromHere())).toBe("serve");
     expect(decide(fromHere())).toBe("stop");

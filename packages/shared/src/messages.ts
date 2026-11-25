@@ -108,3 +108,12 @@ export const reviveMessage = messageSchema<number>((value) => {
   }
   return slot as number;
 });
+
+/** Client to the map room: `[bossId]`, fight a boss the server freed again, alone (복습, PLAN §10). */
+export const REPLAY_MESSAGE = "replay";
+export const replayMessage = messageSchema<{ readonly boss: string }>((value) => {
+  if (!Array.isArray(value) || value.length !== 1) return "replay is [boss]";
+  const [boss] = value as unknown[];
+  if (typeof boss !== "string" || !/^[a-z][a-z-]{0,31}$/.test(boss)) return "replay boss is an id";
+  return { boss };
+});

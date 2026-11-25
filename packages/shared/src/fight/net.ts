@@ -18,6 +18,7 @@ import {
   WireMinion,
   WirePlayer,
   writeFx,
+  ZONE_FOLLOW_UP,
 } from "./wire.ts";
 import { type Effect, Ev, type FightWorld, FxKind, Gone, type Player } from "./world.ts";
 
@@ -29,8 +30,17 @@ const IDS = 65536;
 const MAX_HITS = 48;
 /** Kinds that last long enough to be worth sending again to someone who arrives late. */
 /** Kinds that can end before their clock runs out (a hit, a bounce, a merge). */
-const ENDS_EARLY = new Set<number>([FxKind.Shot, FxKind.Lob, FxKind.EnemyShot, FxKind.Pool]);
+const ENDS_EARLY = new Set<number>([
+  FxKind.Shot,
+  FxKind.Lob,
+  FxKind.EnemyShot,
+  FxKind.Pool,
+  // A boss's hanging arrows end when the paradox breaks.
+  FxKind.Danger,
+]);
 const NONE: readonly number[] = [];
+/** A boss bar's HP goes out at most this often, in ticks; phase, shield and flags at once. */
+const BOSS_HP_TICKS = 4;
 
 /** Half the 480×270 view. */
 const VIEW_W = 240;
@@ -112,6 +122,8 @@ export interface NetViewer {
   readonly sentFx: Uint8Array;
   /** The own body as last sent: x, y (1/POS_SCALE px), facing, seq, hp, shield, roll left. */
   readonly self: Float64Array;
+  /** The boss record as last sent: phase, flags, mode, shield byte, hp, tick. */
+  readonly boss: Float64Array;
   /** Its drops go out again in the next message (after a reconnect). */
   resendDrops: boolean;
   /** Bytes of the last message, for metrics. */
@@ -138,6 +150,7 @@ export function newViewer(): NetViewer {
     privCount: 0,
     sentFx: new Uint8Array(65536),
     self: new Float64Array(7).fill(-1),
+    boss: new Float64Array(6).fill(-1),
     resendDrops: false,
     lastBytes: 0,
     parts: new Float64Array(8),
@@ -764,6 +777,11 @@ export class FightNet {
         f.speed = e.growth;
         f.spin = e.spin;
         f.flags = wp?.allies && e.kind === FxKind.Zone ? 1 : 0;
+        // 일기도's lightning: when it lands, so every viewer can strike it on what stands inside.
+        if (e.fireAt > e.born) {
+          f.flags |= ZONE_FOLLOW_UP;
+          f.a = e.fireAt - e.born;
+        }
         return true;
       case FxKind.Dash:
         f.tx = e.tx;
@@ -909,6 +927,14 @@ export class FightNet {
       fo.u16(Math.max(0, Math.round(x)));
       fo.u16(Math.max(0, Math.round(y)));
       fo.u8(Math.min(255, Math.round(radius)));
+      if (kind === BurstKind.Qed) {
+        // The neighbours a Q.E.D. carried to (완전한 증명), at most three.
+        const n = (ev.d > 0 ? 1 : 0) + (ev.e > 0 ? 1 : 0) + (ev.f > 0 ? 1 : 0);
+        fo.u8(n);
+        if (ev.d > 0) fo.u16(ev.d);
+        if (ev.e > 0) fo.u16(ev.e);
+        if (ev.f > 0) fo.u16(ev.f);
+      }
       // Bursts share the players' effects budget: a 화학 crowd's reactions or a healer build's
       // heals would otherwise flood every viewer. Only monsters' tells and shots skip it.
       this.pushFx(cell, at, false, by, x, y, id, 2);
@@ -1033,6 +1059,7 @@ export class FightNet {
       }
       v.privCount++;
     }
+    if (w.boss) for (const v of this.viewers) this.bossRecord(v);
     for (const v of this.viewers) {
       if (!v.resendDrops) continue;
       v.resendDrops = false;
@@ -1043,6 +1070,11 @@ export class FightNet {
       if (!ev) continue;
       if (ev.type === Ev.Phase) {
         for (const v of this.viewers) this.note(v, Priv.Phase, ev.d, 0, 0);
+        continue;
+      }
+      if (ev.type === Ev.Cue) {
+        const slot = ev.a >= 0 ? (w.players[ev.a]?.slot ?? -1) : -1;
+        for (const v of this.viewers) this.note(v, Priv.Cue, ev.d, slot, 0);
         continue;
       }
       const v = this.viewerOf.get(ev.a);
@@ -1081,6 +1113,9 @@ export class FightNet {
         case Ev.Wake:
           this.note(v, Priv.Wake, 0, 0, 0);
           break;
+        case Ev.Objective:
+          this.note(v, Priv.Objective, ev.d, 0, 0);
+          break;
       }
     }
     for (const k of w.pickups) {
@@ -1088,6 +1123,41 @@ export class FightNet {
       const v = this.viewerOf.get(k.owner);
       if (v) this.dropRecord(v, k.id, k.drop.kind, k.x, k.y, k.fromX, k.fromY);
     }
+  }
+
+  /** The boss's bar for one viewer, when something it shows changed (HP at most 5 Hz). */
+  private bossRecord(v: NetViewer): void {
+    const boss = this.w.boss;
+    const p = v.player;
+    if (!boss || !p?.joined) return;
+    const b = boss.view(p);
+    const last = v.boss;
+    const shield = Math.round(Math.min(1, Math.max(0, b.shield)) * 255);
+    const changed =
+      v.fresh ||
+      last[0] !== b.phase ||
+      last[1] !== b.flags ||
+      last[2] !== b.mode ||
+      last[3] !== shield ||
+      (last[4] !== b.hp && this.w.tick - (last[5] as number) >= BOSS_HP_TICKS);
+    if (!changed) return;
+    last[0] = b.phase;
+    last[1] = b.flags;
+    last[2] = b.mode;
+    last[3] = shield;
+    last[4] = b.hp;
+    last[5] = this.w.tick;
+    const out = v.priv;
+    out.u8(Priv.Boss);
+    out.u16(b.entity);
+    out.u8(b.boss);
+    out.u8(b.phase);
+    out.u8(b.flags);
+    out.u8(b.mode);
+    out.f32(b.hp);
+    out.f32(b.max);
+    out.u8(shield);
+    v.privCount++;
   }
 
   private note(v: NetViewer, type: number, a: number, b: number, c: number): void {

@@ -10,6 +10,7 @@ import { TICK_RATE_HZ } from "../constants.ts";
 import type { Modifiers } from "../live.ts";
 import type { Random } from "../random.ts";
 import type { Stats } from "../stats.ts";
+import type { BossRule } from "./boss.ts";
 
 // ── Attacks ─────────────────────────────────────────────────────────────────
 
@@ -308,6 +309,10 @@ export const Behavior = {
   Swarm: 7,
   Zeno: 8,
   Golem: 9,
+  /** A boss body or one of its parts: no AI of its own, its damage goes to the boss's pool. */
+  Boss: 10,
+  /** A boss fight's objective (a stele, a block): stands still unless pushed, never credited. */
+  Object: 11,
 } as const;
 export type Behavior = (typeof Behavior)[keyof typeof Behavior];
 
@@ -483,6 +488,8 @@ export interface SimRules {
   kit(build: PlayerBuild): PlayerKit;
   /** 운동량's walking bonus: ×(1 + share × strength × speed ÷ base). */
   momentumDamage(speed: number, baseSpeed: number, strength: number): number;
+  /** Boss fights by id (`fight/boss.ts`); their kinds come after the golem in `monsters`. */
+  readonly bosses: readonly BossRule[];
   qedDamage(triggerHit: number, strength: number): number;
   zenoDamage(remaining: number, maxHp: number, damage: number, halvings: number): number;
   rollDrops(random: Random, ctx: DropContext): SimDrop[];

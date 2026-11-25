@@ -288,6 +288,61 @@ export const AWARDS: readonly Award[] = [
     "위 학생은 아무도 시키지 않았는데 쉼표 라운지의 피아노를 쳤으므로 이 상장을 수여합니다.",
     "First time playing the lounge piano (easter egg)",
   ),
+  // The raid boards (PLAN §10): whoever tops a freed boss's damage, support or objective board.
+  award(
+    "raid-damage-pythagoreans",
+    "셈 틀리게 했상",
+    "위 학생은 크로톤 학당의 셈판 위에서 누구보다 큰 반론을 던져 학파의 셈을 가장 많이 어긋나게 하였으므로 이 상장을 수여합니다.",
+    "Top of the 피타고라스 학파 damage board",
+  ),
+  award(
+    "raid-support-pythagoreans",
+    "다시 세웠상",
+    "위 학생은 셈판 위에 쓰러진 동료를 누구보다 많이 일으켜 세우고 유리수 병사를 막아 섰으므로 이 상장을 수여합니다.",
+    "Top of the 피타고라스 학파 support board",
+  ),
+  award(
+    "raid-objectives-pythagoreans",
+    "대각선 그었상",
+    "위 학생은 학파가 셀 수 없는 대각선을 누구보다 많이 걸어 셈판의 약점을 열었으므로 이 상장을 수여합니다.",
+    "Top of the 피타고라스 학파 objective board",
+  ),
+  award(
+    "raid-damage-zeno",
+    "끝까지 갔상",
+    "위 학생은 반씩만 갈 수 있다는 엘레아 경주로에서 누구보다 많이 제논에게 닿았으므로 이 상장을 수여합니다.",
+    "Top of the 제논 damage board",
+  ),
+  award(
+    "raid-support-zeno",
+    "같이 뛰었상",
+    "위 학생은 엘레아 경주로에서 쓰러진 동료를 누구보다 많이 일으켜 끝까지 함께 달렸으므로 이 상장을 수여합니다.",
+    "Top of the 제논 support board",
+  ),
+  award(
+    "raid-objectives-zeno",
+    "극한 취했상",
+    "위 학생은 줄어드는 원을 누구보다 많이 채워 끝나지 않는 거리에 끝을 내었으므로 이 상장을 수여합니다.",
+    "Top of the 제논 objective board",
+  ),
+  award(
+    "raid-damage-aristotle",
+    "반박했상",
+    "위 학생은 리케이온의 네 논제에 누구보다 많은 반론을 보태 아리스토텔레스의 강의를 끝내는 데 크게 이바지하였으므로 이 상장을 수여합니다.",
+    "Top of the 아리스토텔레스 damage board",
+  ),
+  award(
+    "raid-support-aristotle",
+    "부축했상",
+    "위 학생은 리케이온에서 쓰러진 동료를 누구보다 많이 일으키고 흙의 정령을 막아 섰으므로 이 상장을 수여합니다.",
+    "Top of the 아리스토텔레스 support board",
+  ),
+  award(
+    "raid-objectives-aristotle",
+    "얼음 밀었상",
+    "위 학생은 비석을 부수고 원소의 자리를 지키고 얼음 위로 돌을 밀어 누구보다 많은 논제를 무너뜨렸으므로 이 상장을 수여합니다.",
+    "Top of the 아리스토텔레스 objective board",
+  ),
 ];
 
 export const AWARD_FRAME = { heading: aw.t("상장"), signature: aw.t("해솔과학고등학교장") };
