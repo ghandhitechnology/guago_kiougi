@@ -853,17 +853,21 @@ export class FightNet {
       let y = ev.y;
       let radius = 16;
       let owner = 0;
+      // The player whose burst it is (its own bursts always reach it); -1 for a monster's.
+      let by = -1;
       switch (ev.type) {
         case Ev.Reaction: {
           kind = ev.d;
           const r = w.rules.reactions[ev.d];
           radius = r ? Math.max(16, r.radius) : 16;
           owner = (w.players[ev.a] as Player).entity;
+          by = ev.a;
           break;
         }
         case Ev.Qed:
           kind = BurstKind.Qed;
           owner = (w.players[ev.a] as Player).entity;
+          by = ev.a;
           break;
         case Ev.Heal:
           kind = BurstKind.Heal;
@@ -877,6 +881,7 @@ export class FightNet {
           x = p.x;
           y = p.y;
           owner = p.entity;
+          by = p.index;
           break;
         }
         case Ev.Elite: {
@@ -894,15 +899,18 @@ export class FightNet {
       const cell = this.cellAt(x, y);
       if (!(this.cells[cell] as Cell).watched) continue;
       const at = fo.n;
+      const id = w.allocFx();
       fo.u8(FxRec.Spawn);
-      fo.u16(w.allocFx());
+      fo.u16(id);
       fo.u8(FxKind.Burst);
       fo.u16(owner);
       fo.u8(kind);
       fo.u16(Math.max(0, Math.round(x)));
       fo.u16(Math.max(0, Math.round(y)));
       fo.u8(Math.min(255, Math.round(radius)));
-      this.pushFx(cell, at, true);
+      // Bursts share the players' effects budget: a 화학 crowd's reactions or a healer build's
+      // heals would otherwise flood every viewer. Only monsters' tells and shots skip it.
+      this.pushFx(cell, at, false, by, x, y, id, 2);
     }
   }
 
@@ -1247,7 +1255,8 @@ export class FightNet {
                 if (!cell.fxPick[k]) continue;
                 m.bytes(fo.subarray(cell.fx[k * 2] as number, cell.fx[k * 2 + 1] as number));
                 const id = cell.fxMeta[k * 5 + 3] as number;
-                v.sentFx[id] = cell.fxMeta[k * 5 + 4] === 1 ? 0 : 1;
+                // A spawn that will end is remembered; an end, or a burst (which never ends), is not.
+                v.sentFx[id] = cell.fxMeta[k * 5 + 4] === 0 ? 1 : 0;
               }
               this.add(v, 4, m.n - before);
             }

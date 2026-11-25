@@ -9,6 +9,7 @@ import {
   type FightInput,
   FightNet,
   type FightWorld,
+  FxKind,
   gridOf,
   InputFlag,
   knockbackDistance,
@@ -558,6 +559,49 @@ describe("reviving", () => {
     }
     expect(b.down).toBe(false);
     expect(a.down).toBe(true);
+  });
+});
+
+describe("the effects budget", () => {
+  it("holds other players' bursts to the budget and always sends a player its own", () => {
+    const w = arena();
+    const me = w.addPlayer("me", 0, 300, 300, kitFor("math", ["wangdo"], 10), 10);
+    const other = w.addPlayer("other", 1, 330, 300, kitFor("chemistry", ["zoomin-chem"], 10), 10);
+    me.mode = Mode.Manual;
+    other.mode = Mode.Manual;
+    const net = new FightNet(w);
+    const v = newViewer();
+    v.player = me;
+    net.viewers.add(v);
+    const r = snapshotReaderFor(w.map);
+    let theirs = 0;
+    let mine = 0;
+    const sink = {
+      ...NULL_SINK,
+      fx: (f: { kind: number; owner: number }) => {
+        if (f.kind !== FxKind.Burst) return;
+        if (f.owner === me.entity) mine++;
+        else theirs++;
+      },
+    };
+    for (let t = 0; t < 3; t++) {
+      stepFight(w, new Map());
+      if (t === 2) {
+        for (let i = 0; i < 20; i++) {
+          const ev = w.event(Ev.Reaction);
+          Object.assign(ev, { a: other.index, d: 0, x: 330 + i, y: 300 });
+        }
+        for (let i = 0; i < 3; i++) {
+          const ev = w.event(Ev.Reaction);
+          Object.assign(ev, { a: me.index, d: 0, x: 300, y: 300 + i });
+        }
+      }
+      net.update();
+      r.read(net.message(v).slice(), sink);
+    }
+    expect(mine).toBe(3);
+    expect(theirs).toBeGreaterThan(0);
+    expect(theirs * 13).toBeLessThanOrEqual(40);
   });
 });
 
