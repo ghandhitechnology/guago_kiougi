@@ -1,5 +1,6 @@
 /**
- * The game's audio: buses, music and ambient streams, effect voices, ducking and the limiter.
+ * The game's audio: buses, music and ambient streams, effect voices, the hit mixer, ducking and
+ * the limiter.
  *
  * Graph:
  *
@@ -10,18 +11,19 @@
  * ```
  *
  * Nothing here touches the browser until the first call that needs sound, so importing the
- * package is free.
+ * package is free. Effects are rendered in the worker and arrive as buffers; the main thread
+ * carries no synthesis code.
  */
 
-import { EFFECTS } from "../content/effects/index.ts";
+import { resolveCue } from "../aliases.ts";
 import type { AmbientId, Bus, EffectId, SongId } from "../ids.ts";
-import { type EffectSource, parseEffect } from "../sfx/format.ts";
-import { renderEffect } from "../sfx/render.ts";
+import type { Bank } from "../sfx/format.ts";
 import { Deck } from "./deck.ts";
-import type { FromWorker, SongInfo, ToWorker } from "./protocol.ts";
-import { type EffectMeta, type PlayOptions, type Sound, Voices } from "./voices.ts";
+import { HIT_RULES, type HitEvent, HitMixer, type Play } from "./hits.ts";
+import type { CueMeta, FromWorker, SongInfo, ToWorker } from "./protocol.ts";
+import { type PlayOptions, type Sound, type VoiceOptions, Voices } from "./voices.ts";
 
-export type { PlayOptions, Sound };
+export type { HitEvent, PlayOptions, Sound };
 
 export interface AudioOptions {
   /** Starting volumes 0..1, usually what the player saved last time. */
@@ -35,10 +37,40 @@ export interface MusicOptions {
   readonly fade?: number;
   /** Starting stem levels by name, 0..1. */
   readonly stems?: Readonly<Record<string, number>>;
+  /** Start in a named part, such as a boss phase. */
+  readonly part?: string;
+}
+
+export interface CueOptions extends PlayOptions {
+  /** The local player's own sound. Default true; false fades it with distance. */
+  readonly own?: boolean;
+  /** Source position relative to the listener, px. Sets the pan when given. */
+  readonly dx?: number;
+  readonly dy?: number;
+}
+
+export interface ForecastOptions {
+  /** Seconds from the cast to the strike. */
+  readonly delay: number;
+  /** The rising rumble; defaults to 지구는 둥글다's. */
+  readonly cast?: string;
+  /** The strike; defaults to 지구는 둥글다's crack. */
+  readonly land?: string;
+  readonly own?: boolean;
+  readonly dx?: number;
+  readonly dy?: number;
 }
 
 const GESTURES = ["pointerdown", "pointerup", "touchend", "keydown", "mousedown"] as const;
 const DEFAULT_VOLUMES: Record<Bus, number> = { master: 1, music: 0.8, effects: 1, ambient: 0.8 };
+/** Seconds a sound asked for before its samples exist may still start late. */
+const WAIT_EFFECT = 0.3;
+const WAIT_JINGLE = 2.5;
+/** Shortest gap between two plays of one cue: own, others'. */
+const CUE_GAP_OWN = 0.03;
+const CUE_GAP_OTHER = 0.12;
+/** The rumble of 예보 is drawn for a delay of this many seconds. */
+const FORECAST_DRAWN = 1.2;
 
 interface Graph {
   readonly ctx: AudioContext;
@@ -69,8 +101,14 @@ export class GameAudio {
   private g: Graph | null = null;
   private readonly volumes: Record<Bus, number>;
   private readonly pauseHidden: boolean;
+  private catalog = new Map<string, CueMeta>();
   private readonly buffers = new Map<string, AudioBuffer[]>();
-  private readonly meta = new Map<string, EffectMeta & { duck?: EffectSource["duck"] }>();
+  private readonly waiting = new Map<string, { o: VoiceOptions; until: number }[]>();
+  private readonly lastCue = new Map<string, number>();
+  private readonly streaks = new Map<string, { at: number; step: number }>();
+  private readonly mixer = new HitMixer((id) => this.catalog.has(id));
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastProof = { at: -1, stack: 0 };
   private armed = false;
   private resuming = false;
   private hiddenPaused = false;
@@ -111,7 +149,7 @@ export class GameAudio {
     this.onGesture();
   }
 
-  /** Crossfades to a song, or to silence with `null`. Asking for the playing song only changes its stems. */
+  /** Crossfades to a song, or to silence with `null`. Asking for the playing song changes its stems and part. */
   music(id: SongId | null, o: MusicOptions = {}): void {
     this.wanted.music = id;
     const g = this.graph();
@@ -119,17 +157,23 @@ export class GameAudio {
     const current = g.music[this.musicDeck];
     if (id !== null && current.id === id) {
       for (const [name, level] of Object.entries(o.stems ?? {})) current.stem(name, level, fade);
+      if (o.part) current.setPart(o.part);
       return;
     }
     current.stop(fade);
     if (id === null) return;
     this.musicDeck = this.musicDeck === 0 ? 1 : 0;
-    g.music[this.musicDeck].start("song", id, current.active ? fade : 0.05, o.stems ?? {});
+    g.music[this.musicDeck].start("song", id, current.active ? fade : 0.05, o.stems ?? {}, o.part);
   }
 
   /** Fades one stem of the playing song: `audio.stem("melody", 0)` leaves the bed under a menu. */
   stem(name: string, level: number, fade = 1): void {
     this.graph().music[this.musicDeck].stem(name, level, fade);
+  }
+
+  /** Moves the playing song to a named part at its next bar line: a boss's next phase. */
+  part(name: string): void {
+    this.graph().music[this.musicDeck].setPart(name);
   }
 
   /** Crossfades to an ambient bed, or to silence with `null`. */
@@ -145,23 +189,95 @@ export class GameAudio {
     g.ambient[this.ambientDeck].start("bed", id, fade, {});
   }
 
-  /**
-   * Plays an effect. Returns a handle to stop or move it (looping effects keep going until
-   * stopped), or null when the sound was dropped: audio still locked, tab hidden, or eight more
-   * important sounds already playing.
-   */
+  /** Plays an interface or world effect by its id. See `cue` for the return value. */
   play(id: EffectId, o: PlayOptions = {}): Sound | null {
+    return this.cue(id, o);
+  }
+
+  /**
+   * Plays any sound the content or the story names: an effect id (`sfx.reaction.combustion`), a
+   * jingle (`jingle.level-up`) or a story cue (`whistle`, `page-flutter`). Other players' sounds
+   * (`own: false`) fade with distance and are spaced out. Returns a handle to stop or move it, or
+   * null when the sound was dropped or is still being rendered.
+   */
+  cue(name: string, o: CueOptions = {}): Sound | null {
     const g = this.graph();
     if (g.ctx.state !== "running" && !this.resuming) return null;
-    const meta = this.effectMeta(id);
+    const id = resolveCue(name);
+    const meta = this.catalog.get(id);
     if (!meta) return null;
-    const variants = this.effectBuffers(id);
-    const sound = g.voices.play(id, variants, meta, o);
-    if (sound && meta.duck) {
-      const length = (variants[0]?.duration ?? 0.3) * 0.9;
-      this.duck(meta.duck.depth, length, meta.duck.release);
+    const own = o.own ?? true;
+    const now = g.ctx.currentTime;
+    const last = this.lastCue.get(id) ?? -1;
+    if (!meta.loop && now - last < (own ? CUE_GAP_OWN : CUE_GAP_OTHER)) return null;
+    const placed = this.place(own, o);
+    if (!placed) return null;
+    this.lastCue.set(id, now);
+    let pitch = o.pitch ?? 0;
+    if (meta.streak) {
+      const s = this.streaks.get(id);
+      const step =
+        s && now - s.at < meta.streak.window
+          ? Math.min(s.step + 1, meta.streak.steps.length - 1)
+          : 0;
+      this.streaks.set(id, { at: now, step });
+      pitch += meta.streak.steps[step] ?? 0;
     }
-    return sound;
+    return this.start(id, meta, {
+      ...placed,
+      pitch,
+      ...(own ? {} : { priority: Math.max(0, meta.priority - 1) }),
+      ...(meta.jingle ? { group: "jingle" } : {}),
+    });
+  }
+
+  /**
+   * One hit event from the server. The library decides what is heard: own hits over others',
+   * kills and crits over ordinary hits, repeats merged into one stronger hit, distant hits faded
+   * and dropped. See `HitMixer` for the rules.
+   */
+  hit(e: HitEvent): void {
+    const g = this.graph();
+    if (g.ctx.state !== "running") return;
+    this.voice(this.mixer.hit(e, g.ctx.currentTime));
+    this.scheduleFlush();
+  }
+
+  /** 수학's 증명 stack reached `stack` (1 to 10); ten proves it with Q.E.D. Own hits only. */
+  proof(stack: number): void {
+    const now = this.graph().ctx.currentTime;
+    const s = Math.max(1, Math.min(10, Math.round(stack)));
+    if (now - this.lastProof.at < 0.05 && s <= this.lastProof.stack) return;
+    this.lastProof = { at: now, stack: s };
+    this.cue(`class.math.proof.${s}`);
+    if (s === 10) this.cue("class.math.qed");
+  }
+
+  /** 물리's 운동량: link 1 to 3 of a knockback collision chain. */
+  collide(link: number, o: CueOptions = {}): void {
+    this.cue(`class.physics.collide.${Math.max(1, Math.min(3, Math.round(link)))}`, o);
+  }
+
+  /** 지구과학's 예보: a rumble that grows for `delay` seconds and lands exactly on the strike. */
+  forecast(o: ForecastOptions): void {
+    const g = this.graph();
+    if (g.ctx.state !== "running") return;
+    const own = o.own ?? true;
+    const placed = this.place(own, o);
+    if (!placed) return;
+    const cast = resolveCue(o.cast ?? "sfx.book.round-earth.rumble");
+    const land = resolveCue(o.land ?? "sfx.book.round-earth.crack");
+    const rate = Math.max(0.6, Math.min(1.6, FORECAST_DRAWN / Math.max(0.1, o.delay)));
+    const priority = own ? 2 : 0;
+    const castMeta = this.catalog.get(cast);
+    const landMeta = this.catalog.get(land);
+    if (castMeta) this.start(cast, castMeta, { ...placed, rate, priority, group: "hit" });
+    if (landMeta) this.start(land, landMeta, { ...placed, at: o.delay, priority, group: "hit" });
+  }
+
+  /** Renders a bank ahead of need: `audio.preload("page1")` on entering a Page 1 rift. */
+  preload(bank: Bank): void {
+    this.graph().worker.postMessage({ type: "bank", bank } satisfies ToWorker);
   }
 
   /** Sets a bus volume 0..1. The caller persists it. */
@@ -184,23 +300,95 @@ export class GameAudio {
       return { id: deck.id, info: deck.info, frame: at.frame, row: at.row };
     },
     analyser: (): AnalyserNode => this.graph().analyser,
+    catalog: (): ReadonlyMap<string, CueMeta> => this.catalog,
     stats: () => {
       const g = this.g;
       const decks = g ? [...g.music, ...g.ambient] : [];
+      let bytes = 0;
+      for (const list of this.buffers.values())
+        for (const b of list) bytes += b.length * b.numberOfChannels * 4;
       return {
         state: g?.ctx.state ?? "none",
         sampleRate: g?.ctx.sampleRate ?? 0,
         voices: g?.voices.count ?? 0,
+        started: g?.voices.started ?? 0,
         stolen: g?.voices.stolen ?? 0,
         dropped: g?.voices.dropped ?? 0,
         blocks: decks.reduce((n, d) => n + d.blocks, 0),
         late: decks.reduce((n, d) => n + d.late, 0),
         workerMs: decks.reduce((n, d) => n + d.workerMs, 0),
-        effectsReady: this.buffers.size,
+        sounds: this.catalog.size,
+        ready: this.buffers.size,
+        bufferBytes: bytes,
+        hits: { ...this.mixer.stats },
         duck: g?.duck.gain.value ?? 1,
       };
     },
   };
+
+  /** Gain and pan for a sound at a position, or null when it is too far to hear. */
+  private place(own: boolean, o: CueOptions): VoiceOptions | null {
+    const has = o.dx !== undefined || o.dy !== undefined;
+    const dx = o.dx ?? 0;
+    const distance = Math.hypot(dx, o.dy ?? 0);
+    if (!own && distance > HIT_RULES.hearing) return null;
+    const fade = own ? 1 : 1 / (1 + (distance / HIT_RULES.falloff) ** 2);
+    const pan = has
+      ? Math.max(-1, Math.min(1, dx / HIT_RULES.panWidth)) * (own ? 0.5 : 0.9)
+      : (o.pan ?? 0);
+    return {
+      pan,
+      volume: (o.volume ?? 1) * fade,
+      ...(o.pitch !== undefined ? { pitch: o.pitch } : {}),
+    };
+  }
+
+  private voice(plays: readonly Play[]): void {
+    for (const p of plays) {
+      const meta = this.catalog.get(p.id);
+      const buffers = this.buffers.get(p.id);
+      if (!meta || !buffers) continue;
+      this.graph().voices.play(p.id, buffers, meta, {
+        pan: p.pan,
+        volume: Math.min(2, p.gain),
+        priority: p.priority,
+        group: "hit",
+      });
+    }
+  }
+
+  private scheduleFlush(): void {
+    const g = this.g;
+    if (!g || this.flushTimer) return;
+    const due = this.mixer.nextFlush();
+    if (!Number.isFinite(due)) return;
+    const ms = Math.max(0, (due - g.ctx.currentTime) * 1000) + 2;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      if (!this.g) return;
+      this.voice(this.mixer.flush(this.g.ctx.currentTime));
+      this.scheduleFlush();
+    }, ms);
+  }
+
+  /** Starts a sound, or asks the worker for it and starts it when it arrives, if still in time. */
+  private start(id: string, meta: CueMeta, o: VoiceOptions): Sound | null {
+    const g = this.graph();
+    const buffers = this.buffers.get(id);
+    if (!buffers) {
+      const list = this.waiting.get(id) ?? [];
+      if (list.length === 0) g.worker.postMessage({ type: "render", id } satisfies ToWorker);
+      list.push({ o, until: g.ctx.currentTime + (meta.jingle ? WAIT_JINGLE : WAIT_EFFECT) });
+      this.waiting.set(id, list);
+      return null;
+    }
+    const sound = g.voices.play(id, buffers, meta, o);
+    if (sound && meta.duck) {
+      const length = ((buffers[0]?.duration ?? 0.3) * 0.9) / (o.rate ?? 1);
+      this.duck(meta.duck.depth, length + (o.at ?? 0), meta.duck.release);
+    }
+    return sound;
+  }
 
   private readonly onGesture = (): void => {
     const g = this.g;
@@ -287,16 +475,28 @@ export class GameAudio {
     worker.onmessage = (e: MessageEvent<FromWorker>) => {
       const m = e.data;
       switch (m.type) {
-        case "effect": {
+        case "catalog":
+          this.catalog = new Map(Object.entries(m.cues));
+          break;
+        case "sound": {
           if (this.buffers.has(m.id)) break;
-          this.buffers.set(
-            m.id,
-            m.variants.map((v) => {
-              const b = ctx.createBuffer(1, v.length, ctx.sampleRate);
-              b.copyToChannel(v as Float32Array<ArrayBuffer>, 0);
-              return b;
-            }),
-          );
+          const meta = this.catalog.get(m.id);
+          const toBuffer = (chans: Float32Array[]) => {
+            const b = ctx.createBuffer(chans.length, chans[0]?.length ?? 1, ctx.sampleRate);
+            chans.forEach((c, i) => {
+              b.copyToChannel(c as Float32Array<ArrayBuffer>, i);
+            });
+            return b;
+          };
+          const buffers = meta?.jingle
+            ? [toBuffer(m.variants)]
+            : m.variants.map((v) => toBuffer([v]));
+          this.buffers.set(m.id, buffers);
+          const waiting = this.waiting.get(m.id);
+          this.waiting.delete(m.id);
+          if (meta)
+            for (const w of waiting ?? [])
+              if (ctx.currentTime <= w.until) this.start(m.id, meta, w.o);
           break;
         }
         case "started":
@@ -311,7 +511,6 @@ export class GameAudio {
       }
     };
     worker.postMessage({ type: "init", sampleRate: ctx.sampleRate } satisfies ToWorker);
-    worker.postMessage({ type: "effects" } satisfies ToWorker);
     const timer = setInterval(() => {
       for (const d of decks) d.pump();
     }, 100);
@@ -329,44 +528,12 @@ export class GameAudio {
     old.voices.clear();
     this.g = null;
     this.buffers.clear();
+    this.waiting.clear();
     const { music, ambient } = this.wanted;
     this.graph();
     this.onGesture();
     if (music) this.music(music, { fade: 0.5 });
     if (ambient) this.ambient(ambient, { fade: 0.5 });
-  }
-
-  private effectMeta(id: EffectId) {
-    let m = this.meta.get(id);
-    if (m) return m;
-    const source = EFFECTS[id as keyof typeof EFFECTS] as EffectSource | undefined;
-    if (!source) return undefined;
-    const fx = parseEffect(id, source);
-    m = {
-      vary: fx.vary,
-      priority: fx.priority,
-      max: fx.max,
-      loop: fx.loop !== undefined,
-      ...(fx.duck ? { duck: fx.duck } : {}),
-    };
-    this.meta.set(id, m);
-    return m;
-  }
-
-  /** The effect's buffers; rendered here at once if the worker has not delivered them yet. */
-  private effectBuffers(id: EffectId): AudioBuffer[] {
-    const ready = this.buffers.get(id);
-    if (ready) return ready;
-    const ctx = this.graph().ctx;
-    const source = EFFECTS[id as keyof typeof EFFECTS] as EffectSource;
-    const r = renderEffect(id, source, ctx.sampleRate);
-    const buffers = r.variants.map((v) => {
-      const b = ctx.createBuffer(1, v.length, ctx.sampleRate);
-      b.copyToChannel(v as Float32Array<ArrayBuffer>, 0);
-      return b;
-    });
-    this.buffers.set(id, buffers);
-    return buffers;
   }
 
   /** Lowers the music, holds, then lets it back up. Overlapping ducks keep the deepest. */

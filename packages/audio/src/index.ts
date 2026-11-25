@@ -17,8 +17,17 @@
 
 import { GameAudio } from "./engine/audio.ts";
 
-export type { AudioOptions, MusicOptions, PlayOptions, Sound } from "./engine/audio.ts";
+export type {
+  AudioOptions,
+  CueOptions,
+  ForecastOptions,
+  HitEvent,
+  MusicOptions,
+  PlayOptions,
+  Sound,
+} from "./engine/audio.ts";
 export { GameAudio } from "./engine/audio.ts";
+export { HIT_RULES, type HitClass } from "./engine/hits.ts";
 export * from "./ids.ts";
 
 /** The game's one audio instance. Nothing is created until the first call. */

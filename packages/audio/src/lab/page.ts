@@ -290,7 +290,7 @@ function tickMeter(): void {
     `voices ${s.voices}/8 · stolen ${s.stolen} · dropped ${s.dropped}`,
     `duck ${(20 * Math.log10(s.duck)).toFixed(1)} dB`,
     `blocks ${s.blocks} · late ${s.late} · worker ${(load * 100).toFixed(1)}%`,
-    `effects ready ${s.effectsReady}/${EFFECT_IDS.length}`,
+    `sounds ready ${s.ready}/${s.sounds}`,
   ].join("\n");
 }
 
