@@ -978,3 +978,17 @@ export const duelRecords = pgTable(
   },
   (t) => [check("duel_records_counts_check", sql`${t.won} >= 0 and ${t.won} <= ${t.played}`)],
 );
+
+/**
+ * Where a fighter stood before its duel, for as long as the match lasts (duel/origins.ts): the
+ * server puts every row back at start, so a crash never leaves anyone on the floor.
+ */
+export const duelOrigins = pgTable("duel_origins", {
+  characterId: uuid("character_id")
+    .primaryKey()
+    .references(() => characters.id, { onDelete: "cascade" }),
+  mapId: text("map_id").notNull(),
+  x: doublePrecision("x").notNull(),
+  y: doublePrecision("y").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+});

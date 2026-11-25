@@ -69,6 +69,13 @@ export const DUEL_FLOORS_MAX = 8;
  * was fought out first: conceding at once never hands a friend a win for the player card.
  */
 export const DUEL_FORFEIT_WIN_SECONDS = 15;
+/**
+ * Wins counted toward the record per lineup (the same winners over the same losers) a Korean day:
+ * past it a match is still played and recorded as played, the win is not counted.
+ */
+export const DUEL_PAIR_WINS_DAILY = 3;
+/** A character that landed or took a hit this recently is in a fight and may not start a duel. */
+export const DUEL_COMBAT_SECONDS = 10;
 /** Challenges waiting on one player at once. */
 export const DUEL_CHALLENGES_IN_CAP = 5;
 
