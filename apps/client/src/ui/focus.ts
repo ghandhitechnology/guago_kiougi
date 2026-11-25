@@ -196,9 +196,25 @@ function navKey(e: KeyboardEvent, typing: boolean): NavKey | undefined {
  * ahead of Phaser's own listener. A key the UI takes is stopped there, so the world scene
  * never moves while someone types a name.
  */
+/**
+ * Keys the game takes while no menu or field holds the keyboard: Enter opens chat, Escape the
+ * notebook. True when taken.
+ */
+let idle: ((e: KeyboardEvent) => boolean) | undefined;
+
+export function setIdleKeys(fn: ((e: KeyboardEvent) => boolean) | undefined): void {
+  idle = fn;
+}
+
 function route(e: KeyboardEvent): void {
   const scope = scopes.at(-1);
-  if (!scope) return;
+  if (!scope) {
+    if (!e.repeat && !e.isComposing && idle?.(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    return;
+  }
   const field = scope.current?.field;
   const typing = field !== undefined && document.activeElement === field;
   // Mid-composition keys belong to the IME (Enter commits a syllable, it does not submit).

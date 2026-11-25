@@ -10,6 +10,8 @@ import type { Register, Slot } from "./schema.ts";
  * starts at x 86 (margin 70 + 8) and must stop before the caret at x 454. Three ruled rows.
  */
 export const DIALOGUE_BOX = { lines: 3, px: 364 } as const;
+/** A toast: one row of an 11 px font across the 480 px screen, about 28 Hangul. */
+export const TOAST_PX = 336;
 /** Chat and system lines (PLAN §12: 120 characters per message). */
 export const CHAT_CHARS = 120;
 /** A 도감 field: about three rows of the codex page. */
@@ -25,6 +27,13 @@ export const SLOT_WIDTH: Readonly<Record<Slot, string>> = {
   quest: "균열탐사기본실습",
   thesis: "넷째논제",
   award: "다먹었상",
+  club: "동아리이름열자",
+  time: "12월 31일 23시",
+  total: "100",
+  price: "1,234,567",
+  reason: "채팅 규정 위반",
+  level: "30",
+  names: "가나다, 라마바, 사아자",
 };
 
 /** `{slot}` or `{slot|josa}`. */

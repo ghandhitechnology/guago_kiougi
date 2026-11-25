@@ -15,22 +15,42 @@ export type Target = Phaser.GameObjects.GameObject & {
   setPosition(x: number, y?: number): unknown;
 };
 
+/**
+ * Running tweens per object and channel: a move and a fade can run together, and a new move
+ * replaces only the move. `all` replaces everything, for whole-sheet motions.
+ */
+type Channel = "move" | "fade" | "all";
+const running = new WeakMap<object, Map<Channel, Phaser.Tweens.Tween>>();
+
 function run(
   target: Target,
   props: Record<string, number>,
   ms: number,
   ease: string,
   done?: () => void,
+  channel: Channel = "all",
 ): void {
   const scene = target.scene;
-  scene.tweens.killTweensOf(target);
-  scene.tweens.add({
+  let mine = running.get(target);
+  if (!mine) {
+    mine = new Map();
+    running.set(target, mine);
+  }
+  if (channel === "all") {
+    scene.tweens.killTweensOf(target);
+    mine.clear();
+  } else {
+    mine.get(channel)?.stop();
+    mine.get("all")?.stop();
+  }
+  const tween = scene.tweens.add({
     targets: target,
     ...props,
     duration: ms,
     ease,
     ...(done ? { onComplete: done } : {}),
   });
+  mine.set(channel, tween);
 }
 
 /** Where an object rests when fully shown. */
@@ -116,14 +136,21 @@ export function nudge(target: Target, rest: Rest, dx: number, dy: number, done?:
 
 /** Slides an object to a resting place. */
 export function slide(target: Target, to: Rest, ms = 160, done?: () => void): void {
-  run(target, { x: to.x, y: to.y }, ms, "Cubic.Out", done);
+  run(target, { x: to.x, y: to.y }, ms, "Cubic.Out", done, "move");
 }
 
 /** Fades an object in or out. */
 export function fade(target: Target, alpha: number, ms = 140, done?: () => void): void {
   if (alpha > 0) target.setVisible(true);
-  run(target, { alpha }, ms, "Quad.Out", () => {
-    if (alpha === 0) target.setVisible(false);
-    done?.();
-  });
+  run(
+    target,
+    { alpha },
+    ms,
+    "Quad.Out",
+    () => {
+      if (alpha === 0) target.setVisible(false);
+      done?.();
+    },
+    "fade",
+  );
 }

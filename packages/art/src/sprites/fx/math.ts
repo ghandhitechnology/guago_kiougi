@@ -327,9 +327,12 @@ const STROKES: readonly (readonly (readonly [number, number])[])[] = [
   ],
 ];
 
-/** The tally at `n` (1 to 10): chalk strokes with a navy shadow under them. */
+/**
+ * The tally at `n` (1 to 15): chalk strokes with a navy shadow under them, white when the stack
+ * is full (10, or 15 with 증명 노트 equipped).
+ */
 function tally(n: number): Pic {
-  const pic = Pic.blank(13, 7);
+  const pic = Pic.blank(19, 7);
   const marks: [number, number][] = [];
   for (let i = 0; i < n; i++) {
     const glyph = Math.floor(i / 5);
@@ -346,22 +349,23 @@ function tally(n: number): Pic {
       if (pic.at(x + dx, y + dy) === ".") pic.set(x + dx, y + dy, "o");
     }
   }
-  for (const [x, y] of marks) pic.set(x, y, n === 10 ? "W" : "c");
+  for (const [x, y] of marks) pic.set(x, y, n === 10 || n === 15 ? "W" : "c");
   return clean(pic);
 }
 
 const proof = sprite({
   ...fx,
   name: "fx-proof",
-  size: [13, 7],
-  origin: [6, 6],
+  size: [19, 7],
+  origin: [9, 6],
   frames: Object.fromEntries(
-    Array.from({ length: 10 }, (_, i) => [`n${i + 1}`, tally(i + 1).toString()]),
+    Array.from({ length: 15 }, (_, i) => [`n${i + 1}`, tally(i + 1).toString()]),
   ),
   anim: {
-    // The client shows one frame per stack count; `full` blinks at ten before Q.E.D. fires.
-    count: { frames: names("n", 10).map((_, i) => `n${i + 1}`), fps: 4, loop: false, jump: 1 },
+    // The client shows one frame per stack count; `full` blinks at the cap before Q.E.D. fires.
+    count: { frames: names("n", 15).map((_, i) => `n${i + 1}`), fps: 4, loop: false, jump: 1 },
     full: { frames: ["n10", "n9", "n10"], fps: 12, jump: 1 },
+    full15: { frames: ["n15", "n14", "n15"], fps: 12, jump: 1 },
   },
 });
 

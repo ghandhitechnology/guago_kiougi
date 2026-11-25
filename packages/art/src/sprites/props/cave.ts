@@ -486,7 +486,126 @@ const CUTOUTS = {
   `,
 };
 
+/**
+ * Steps cut down a terrace's edge: four treads, each lit along its nose with its riser in shade,
+ * worn hollow in the middle where everyone treads. Flat, for the details layer.
+ */
+function steps(): string {
+  const W = 48;
+  const H = 22;
+  const pic = Pic.blank(W, H);
+  for (let k = 0; k < 4; k++) {
+    const y0 = k * 5;
+    for (let x = 1 + k; x < W - 1 - k; x++) {
+      const worn = Math.abs(x - W / 2) < 8 - k;
+      pic
+        .set(x, y0, "w")
+        .set(x, y0 + 1, worn ? "K" : "k")
+        .set(x, y0 + 2, worn ? "v" : "K");
+      pic.set(x, y0 + 3, "M").set(x, y0 + 4, "S");
+    }
+    pic.set(k, y0, "d").set(W - 1 - k, y0, "d");
+  }
+  for (let x = 4; x < W - 4; x++) pic.set(x, 20, "M").set(x, 21, "S");
+  return smooth(pic).toString();
+}
+
+// The whole wall ------------------------------------------------------------------------------------
+
+const WALL_W = 256;
+const WALL_H = 132;
+/** Where the cave opens, in wall pixels from the wall's west end. */
+const MOUTH_X = 640;
+
+/**
+ * The cliff as one wall at its own scale, drawn in five 256-pixel sections from a function of
+ * the whole wall's x so they join anywhere: buttresses that catch the light on their west faces
+ * and shade on their east, bands where an overhang throws the rock under it into shadow, long
+ * fissures running down through several beds, ledges with scrub, the rock darkening into a
+ * recess around the cave's mouth, and the fallen rock heaped at the foot.
+ */
+function wallSection(section: number): string {
+  const pic = Pic.blank(WALL_W, WALL_H);
+  const wave = (wx: number, p: number, a: number) => Math.sin((wx / p) * Math.PI * 2) * a;
+  const top = (wx: number) =>
+    Math.round(
+      16 +
+        wave(wx, 410, 8) +
+        wave(wx + 37, 133, 5) +
+        wave(wx + 11, 47, 2.4) +
+        Math.max(0, 14 - Math.abs(wx - MOUTH_X) / 9),
+    );
+  // Buttress shape: a slow bulge whose slope says which way the face turns.
+  const bulge = (wx: number) => wave(wx, 96, 1) + wave(wx + 40, 230, 0.7);
+  for (let x = 0; x < WALL_W; x++) {
+    const wx = section * WALL_W + x;
+    const t = top(wx);
+    const slope = bulge(wx + 2) - bulge(wx - 2);
+    const recess = Math.max(0, 1 - Math.abs(wx - MOUTH_X) / 110);
+    for (let y = t; y < WALL_H; y++) {
+      const depth = y - t;
+      const bed = y + wave(wx, 180, 4) + wave(wx + 90, 61, 1.5);
+      const band = ((bed % 19) + 19) % 19;
+      // The face's light: west-turning faces lit, east-turning in shade, overhang bands dark.
+      let light = slope < -0.06 ? 2 : slope > 0.06 ? 0 : 1;
+      if (band > 15) light -= 1;
+      if (band < 1.2 && wave(wx + y * 3, 70, 1) > -0.3) light = Math.min(3, light + 1);
+      if (recess > 0.35 && depth > 18) light -= recess > 0.7 ? 2 : 1;
+      let ch = ["S", "M", "v", "k"][Math.max(0, Math.min(3, light))] as string;
+      if (light < 0) ch = "i";
+      // Long fissures through several beds.
+      const fissure = (wx * 7 + Math.floor(bed / 38) * 13) % 53;
+      if (fissure === 0 && depth > 6) ch = recess > 0.5 ? "J" : "S";
+      if (depth === 0) ch = "w";
+      else if (depth === 1) ch = "k";
+      pic.set(x, y, ch);
+    }
+    // Scrub on the ledges' lit tops.
+    for (let y = t + 4; y < WALL_H - 14; y++) {
+      const bed = y + wave(wx, 180, 4) + wave(wx + 90, 61, 1.5);
+      if (((bed % 19) + 19) % 19 < 1.2 && hash(wx, y, 5) < 0.09)
+        pic.put(".oo.\noOOo", x - 1, y - 2, { onto: "kvMS" });
+    }
+  }
+  // Fallen rock heaped along the foot.
+  for (let k = 0; k < 9; k++) {
+    const cx = ((k * 31 + section * 17) % (WALL_W - 12)) + 6;
+    const r = 4 + ((k * 5 + section) % 4);
+    const isIn = lobes([{ x: cx, y: WALL_H - 4, rx: r * 1.3, ry: r * 0.8 }]);
+    for (let y = WALL_H - 14; y < WALL_H; y++)
+      for (let x = 0; x < WALL_W; x++)
+        if (isIn(x, y)) pic.set(x, y, isIn(x - 1, y - 1) ? (isIn(x + 1, y + 1) ? "v" : "M") : "k");
+  }
+  const sealed = seal(smooth(pic, "oO"), "d");
+  // Leave the section's sides open: the next section carries on.
+  for (let y = 0; y < WALL_H; y++)
+    for (const x of [0, WALL_W - 1]) {
+      const was = pic.at(x, y) as string;
+      if (was !== "." && pic.at(x, y - 1) !== "." && y < WALL_H - 1) sealed.set(x, y, was);
+    }
+  return tidy(tidy(sealed, "v", "doOiJ"), "v", "doOiJ").toString();
+}
+
 export default [
+  sprite({
+    name: "rock-steps",
+    size: [48, 22],
+    origin: [24, 0],
+    palette,
+    outline: false,
+    frames: { still: steps() },
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
+  sprite({
+    name: "cliff-wall",
+    size: [WALL_W, WALL_H],
+    origin: [0, WALL_H - 1],
+    palette,
+    outline: false,
+    lone: "oO",
+    frames: Object.fromEntries([0, 1, 2, 3, 4].map((k) => [`s${k}`, wallSection(k)])),
+    anim: { idle: { frames: ["s0"], fps: 1 } },
+  }),
   sprite({
     name: "cliff-face",
     size: [CL_W, CL_H],

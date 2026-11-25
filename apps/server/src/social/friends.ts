@@ -4,8 +4,10 @@
  * turns and never deadlock; the caps themselves are the counters' CHECK constraints.
  *
  * Blocking hides without telling: a request from someone the receiver blocked is stored like any
- * other (the sender sees it waiting) but never listed for the receiver, and the rows a block
- * removes disappear for the other side exactly as a decline or an unfriend would.
+ * other (the sender sees it waiting) but never listed for the receiver and never counted toward
+ * its inbox cap (migration 0004). A block's arrival drops every request between the two and its
+ * removal drops the requests it hid, both in a trigger on `blocks`; for the other side those rows
+ * disappear exactly as a decline or an unfriend would.
  */
 import {
   FRIEND_REQUEST_DAYS,
@@ -100,9 +102,11 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
           await befriend(tx, me, other);
           return "friends";
         }
+        // Asking again restarts only a request that already lapsed; a waiting one keeps its age.
         await tx.execute(sql`
           insert into friend_requests (from_id, to_id) values (${me}, ${other})
-          on conflict (from_id, to_id) do update set created_at = now()`);
+          on conflict (from_id, to_id) do update set created_at = now()
+          where friend_requests.created_at <= ${cutoff()}`);
         return "requested";
       });
     },
@@ -127,6 +131,8 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
 
     async decline(me: string, other: string): Promise<true | Refuse> {
       return transact(db, async (tx) => {
+        // Deleting a request moves both counters; the pair lock takes them in id order first.
+        await lockPair(tx, me, other);
         if (await hasBlocked(tx, me, other)) throw new Refuse("no_request");
         const gone = await tx.execute(sql`
           delete from friend_requests where from_id = ${other} and to_id = ${me} returning 1`);
@@ -136,9 +142,13 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
     },
 
     async cancel(me: string, other: string): Promise<true | Refuse> {
-      const gone = await db.execute(sql`
-        delete from friend_requests where from_id = ${me} and to_id = ${other} returning 1`);
-      return gone.rows.length > 0 ? true : new Refuse("no_request");
+      return transact(db, async (tx) => {
+        await lockPair(tx, me, other);
+        const gone = await tx.execute(sql`
+          delete from friend_requests where from_id = ${me} and to_id = ${other} returning 1`);
+        if (gone.rows.length === 0) throw new Refuse("no_request");
+        return true as const;
+      });
     },
 
     async remove(me: string, other: string): Promise<true | Refuse> {
@@ -165,22 +175,24 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
         await tx.execute(sql`
           insert into blocks (character_id, other_id) values (${me}, ${other})
           on conflict do nothing`);
+        // The block row's trigger has dropped the requests both ways.
         const ended = await tx.execute(sql`
           delete from friends
           where (character_id = ${me} and other_id = ${other})
              or (character_id = ${other} and other_id = ${me})
           returning 1`);
-        await tx.execute(sql`
-          delete from friend_requests
-          where (from_id = ${me} and to_id = ${other}) or (from_id = ${other} and to_id = ${me})`);
         return { wereFriends: ended.rows.length > 0 };
       });
     },
 
-    async unblock(me: string, other: string): Promise<true> {
-      await db.execute(sql`
-        delete from blocks where character_id = ${me} and other_id = ${other}`);
-      return true;
+    /** The block row's trigger drops the requests the block hid, so none surfaces late. */
+    async unblock(me: string, other: string): Promise<true | Refuse> {
+      return transact(db, async (tx) => {
+        await lockPair(tx, me, other);
+        await tx.execute(sql`
+          delete from blocks where character_id = ${me} and other_id = ${other}`);
+        return true as const;
+      });
     },
 
     async friendsOf(me: string): Promise<Omit<FriendEntry, "room">[]> {
@@ -221,8 +233,20 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
     },
 
     /** Drops requests past `FRIEND_REQUEST_DAYS`. */
+    /** Drops lapsed requests a pair at a time, each under its pair lock like any other change. */
     async sweep(): Promise<void> {
-      await db.execute(sql`delete from friend_requests where created_at <= ${cutoff()}`);
+      const { rows } = await db.execute(sql`
+        select from_id, to_id from friend_requests where created_at <= ${cutoff()}
+        order by created_at limit 1000`);
+      for (const r of rows) {
+        const [from, to] = [r.from_id as string, r.to_id as string];
+        await transact(db, async (tx) => {
+          await lockPair(tx, from, to);
+          await tx.execute(sql`
+            delete from friend_requests
+            where from_id = ${from} and to_id = ${to} and created_at <= ${cutoff()}`);
+        });
+      }
     },
   };
 }

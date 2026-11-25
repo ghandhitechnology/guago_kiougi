@@ -1,12 +1,24 @@
 import { type Legend, sprite } from "../../format.ts";
-import { clean, ell, framesOf, line, names, Pic, paintAt, path, put, rng } from "../../fx.ts";
+import {
+  aimedFrames,
+  clean,
+  ell,
+  framesOf,
+  line,
+  names,
+  Pic,
+  paintAt,
+  path,
+  put,
+  rng,
+} from "../../fx.ts";
 
 /**
  * Enemy danger: red, and only here. Every enemy warning is filled with diagonal hazard stripes
  * that no player effect ever uses, its edge is a red dashed line, and its last frame (`fire`) is
  * a solid flash that means "now". The player's own 예보 is amber and traced, never striped.
  */
-const DANGER: Legend = {
+export const DANGER: Legend = {
   ".": null,
   o: "red.deep",
   d: "red.dark",
@@ -20,11 +32,12 @@ const DANGER: Legend = {
   "'": "red.pale",
   ",": "red.light",
 };
-const LONE = "*',";
-const fx = { group: "combat", outline: false, palette: DANGER, lone: LONE } as const;
+export const DANGER_LONE = "*',";
+const fx = { group: "combat", outline: false, palette: DANGER, lone: DANGER_LONE } as const;
 
 /** Hazard stripes: dark and darker red bands running down to the right. */
-const stripe = (x: number, y: number): string => (Math.floor((x + y) / 3) % 2 === 0 ? "d" : "o");
+export const stripe = (x: number, y: number): string =>
+  Math.floor((x + y) / 3) % 2 === 0 ? "d" : "o";
 
 /**
  * A circular area that fills from the centre: the dashed rim, then stripes growing outward in
@@ -127,12 +140,16 @@ const teleLine = sprite({
   },
 });
 
-/** A cone from the apex at the left, ±32°, filling outward like the circle. */
-function cone(k: number): Pic {
-  const w = 44;
-  const h = 44;
-  const ax = 2;
-  const ay = 22;
+/**
+ * A cone from the apex at the canvas centre, ±32°, filling outward like the circle. Drawn in
+ * sixteen aims so the client never turns it: the stripes stay screen-aligned and the edges stay
+ * clean at every angle.
+ */
+function cone(aim: number, k: number): Pic {
+  const w = 88;
+  const h = 88;
+  const ax = 44;
+  const ay = 44;
   const len = 40;
   const half = 0.56;
   const fill = [0, 0.3, 0.55, 0.8, 1, 1][k] as number;
@@ -141,8 +158,9 @@ function cone(k: number): Pic {
       const dx = x - ax;
       const dy = y - ay;
       const d = Math.hypot(dx, dy);
-      const a = Math.atan2(dy, dx);
-      if (d > len || Math.abs(a) > half || dx < 0) return null;
+      let a = Math.atan2(dy, dx) - aim;
+      a = Math.atan2(Math.sin(a), Math.cos(a));
+      if (d > len || Math.abs(a) > half || d < 1) return null;
       const side = (half - Math.abs(a)) * d < 1.3;
       const arc = d > len - 1.4;
       if (k === 5) return side || arc ? "W" : d / len > 0.8 ? "p" : "l";
@@ -157,15 +175,26 @@ function cone(k: number): Pic {
   );
 }
 
+const CONE_SETS = Array.from({ length: 16 }, (_, d) =>
+  [0, 1, 2, 3, 4, 5].map((k) => cone((d / 16) * Math.PI * 2, k)),
+);
+
 const teleCone = sprite({
   ...fx,
   name: "tele-cone",
-  size: [44, 44],
-  origin: [2, 22],
-  frames: framesOf("t", [0, 1, 2, 3, 4, 5].map(cone)),
+  size: [88, 88],
+  origin: [44, 44],
+  frames: aimedFrames("d", CONE_SETS),
   anim: {
-    fill: { frames: names("t", 5), fps: 4, loop: false, jump: 1 },
-    fire: { frames: ["t5", "t4", "t5"], fps: 15, loop: false, jump: 1 },
+    // `fill` and `fire` aim right; `fill0`..`fill15` and `fire0`..`fire15` aim clockwise.
+    fill: { frames: names("d0-", 5), fps: 4, loop: false, jump: 1 },
+    fire: { frames: ["d0-5", "d0-4", "d0-5"], fps: 15, loop: false, jump: 1 },
+    ...Object.fromEntries(
+      CONE_SETS.flatMap((_, d) => [
+        [`fill${d}`, { frames: names(`d${d}-`, 5), fps: 4, loop: false, jump: 1 }],
+        [`fire${d}`, { frames: [`d${d}-5`, `d${d}-4`, `d${d}-5`], fps: 15, loop: false, jump: 1 }],
+      ]),
+    ),
   },
 });
 
@@ -194,7 +223,7 @@ function aura(k: number): Pic {
     const y = cy - 2 - rise;
     put(pic, rise < 8 ? "l\nm" : rise < 13 ? "p" : "'", x, y);
   }
-  return clean(pic, LONE);
+  return clean(pic, DANGER_LONE);
 }
 
 const eliteAura = sprite({
