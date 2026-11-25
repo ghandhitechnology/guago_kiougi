@@ -107,6 +107,11 @@ export default scene({
     { prop: "long-shadow", frame: "column", at: [222, 158], flip: true },
     { prop: "long-shadow", frame: "column", at: [184, 250], flip: true },
     { prop: "long-shadow", frame: "tree", at: [190, 122], flip: true },
+    // The students stand in the tear's light, so their shadows run out across the dark field.
+    { prop: "long-shadow", frame: "figure", at: [242, 222], flip: true },
+    { prop: "long-shadow", frame: "figure", at: [204, 198], flip: true },
+    { prop: "long-shadow", frame: "imp", at: [268, 222], flip: true },
+    { prop: "long-shadow", frame: "imp", at: [292, 230], flip: true },
   ],
   objects: [
     // The field's far edge: lawn, the sea wall and its fence, cut by the tear.
@@ -124,6 +129,10 @@ export default scene({
     ...sorted(columns),
     { prop: "drum", at: [160, 260], flip: true },
     { prop: "rocket", at: [20, 152] },
+    // Left out after PE and lunch: two training cones and the ball.
+    { prop: "marker-cone", at: [66, 176] },
+    { prop: "marker-cone", at: [94, 183] },
+    { prop: "ball", at: [140, 232] },
     { prop: "tortoise-statue", at: [336, 124], raw: true },
     { prop: "olive", at: [398, 128], raw: true },
     { prop: "amphora", at: [282, 140], raw: true },

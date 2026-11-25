@@ -458,6 +458,8 @@ export default [
     frames: {
       column: Pic.blank(52, 26).put(longShadow(42, 6), 0, 0).toString(),
       tree: Pic.blank(52, 26).put(longShadow(46, 12), 0, 0).toString(),
+      figure: Pic.blank(52, 26).put(longShadow(22, 3), 0, 2).toString(),
+      imp: Pic.blank(52, 26).put(longShadow(12, 5), 0, 1).toString(),
     },
     anim: { idle: { frames: ["column"], fps: 1 } },
   }),

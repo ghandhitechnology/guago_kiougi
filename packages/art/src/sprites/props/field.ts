@@ -1,5 +1,5 @@
 import { type Legend, sprite } from "../../format.ts";
-import { lobes, Pic, texture, tidy } from "../../paint.ts";
+import { lobes, Pic, seal, texture, tidy } from "../../paint.ts";
 
 /**
  * The 운동장 as a school field: chalk lines laid by hand and half rubbed out, a goal mouth worn
@@ -8,6 +8,7 @@ import { lobes, Pic, texture, tidy } from "../../paint.ts";
  */
 const palette: Legend = {
   ".": null,
+  d: "stone.deep",
   w: "stone.bright",
   k: "stone.pale",
   K: "stone.light",
@@ -16,6 +17,14 @@ const palette: Legend = {
   G: "grass.mid",
   D: "grass.dark",
   h: "grass.pale",
+  // training cones
+  Q: "clay.deep",
+  R: "clay.mid",
+  r: "clay.light",
+  // the ball's patches
+  j: "ink.dark",
+  // shadow shapes
+  x: "ink.deep",
 };
 
 /**
@@ -103,6 +112,35 @@ const WEEDS = `
   .GDDGG..
 `;
 
+/** A training cone left out after PE: orange, a white band, lit on its left. */
+function cone(): string {
+  const W = 9;
+  const H = 10;
+  const c = 4;
+  const pic = Pic.blank(W, H);
+  for (let y = 0; y < H - 1; y++) {
+    const half = Math.min(3, Math.floor((y + 2) / 2.6));
+    for (let x = c - half; x <= c + half; x++) {
+      const band = y === 4 || y === 5;
+      pic.set(x, y, band ? (x <= c ? "w" : "k") : x <= c ? "r" : "R");
+    }
+  }
+  for (let x = 0; x < W; x++) pic.set(x, H - 1, x < c ? "r" : "R");
+  pic.set(0, H - 2, "r").set(W - 1, H - 2, "R");
+  return seal(tidy(pic, "r"), "Q").toString();
+}
+
+/** The lunchtime ball, kicked into a corner when the field went quiet. */
+const BALL = `
+  ..ddd..
+  .dwwkd.
+  dwwjkkd
+  dwjjjkd
+  dkkjKKd
+  .dkKKd.
+  ..ddd..
+`;
+
 const one = (name: string, size: [number, number], grid: string) =>
   sprite({
     name,
@@ -138,4 +176,42 @@ export default [
   one("worn", [44, 18], worn()),
   one("drag", [17, 5], DRAG),
   one("weeds", [8, 4], WEEDS),
+  sprite({
+    name: "marker-cone",
+    size: [11, 12],
+    palette,
+    frames: { still: Pic.blank(11, 12).put(cone(), 1, 1).toString() },
+    shadow: `
+      ...........
+      ...........
+      ...........
+      ...........
+      ...........
+      ...........
+      ...........
+      ...........
+      ...........
+      ...........
+      ..xxxxxxxxx
+      ...xxxxxxx.
+    `,
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
+  sprite({
+    name: "ball",
+    size: [8, 8],
+    palette,
+    frames: { still: Pic.blank(8, 8).put(BALL, 0, 1).toString() },
+    shadow: `
+      ........
+      ........
+      ........
+      ........
+      ........
+      ........
+      ..xxxxx.
+      ...xxx..
+    `,
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
 ];
