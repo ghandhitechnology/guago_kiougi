@@ -196,6 +196,8 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     for (const o of typeof e.overlay === "string" ? [e.overlay] : e.overlay)
       unbaked(o, art.overlays[o]?.bake);
   if (!colour(map.ambient.color)) say(`ambient ${map.ambient.color} is not a palette colour`);
+  if (map.ambient.unlit && !themes.has(map.ambient.unlit))
+    say(`ambient: unlit theme ${map.ambient.unlit} is not built`);
   map.lights.forEach((l, i) => {
     if (!colour(l.color)) say(`light ${i + 1}: ${l.color} is not a palette colour`);
     for (const b of l.paint?.bands ?? [])
