@@ -83,6 +83,11 @@ export class Bubbles {
     });
   }
 
+  /** Whether `key` is saying something now. */
+  has(key: string): boolean {
+    return this.shown.has(key);
+  }
+
   /** Closes `key`'s bubble: at once, or with a short fade. */
   clear(key: string, now = false): void {
     const b = this.shown.get(key);

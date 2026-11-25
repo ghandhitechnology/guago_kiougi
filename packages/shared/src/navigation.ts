@@ -155,8 +155,8 @@ export function zonesAt(
 
 /** How far from the feet a thing can be used: a little over a tile from its edge. */
 export const INTERACT_REACH_PX = 20;
-/** A standing person is this far across, for reach. */
-const PERSON_PX = 6;
+/** People are reached from a little further off than things: about two tiles from their feet. */
+const PERSON_PX = 10;
 
 /** Something that can be used: an interactable's tile area, or a person standing at a point. */
 export type Usable =

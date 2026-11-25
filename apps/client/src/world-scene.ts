@@ -41,7 +41,7 @@ import { PlaceCard } from "./place-card.ts";
 import { Prompt } from "./prompt.ts";
 import { MapView, onQualityTier } from "./render/index.ts";
 import { SelfMover } from "./self.ts";
-import { emitWorld } from "./world-events.ts";
+import { emitWorld, onWorld } from "./world-events.ts";
 import { playWorld } from "./world-sound.ts";
 
 const PLAYER_RIG = "student";
@@ -57,6 +57,19 @@ const HEAR_PX = 220;
 /** A door this close starts loading the map behind it. */
 const NEAR_DOOR_PX = 56;
 const KO = narrative.NARRATIVE.ko;
+
+/** One map change as the player saw it: from the step into the door to the fade lifting. */
+interface Transition {
+  readonly from: string;
+  readonly to: string;
+  readonly ms: number;
+  /** Timed from the predicted step into the door, or from the server's word when it came first. */
+  readonly how: "step" | "server";
+  /** Whether the map behind the door was already loaded. */
+  readonly warm: boolean;
+  /** Milliseconds to each stage: transfer, seat, map, dark, body. */
+  readonly marks: Record<string, number>;
+}
 
 interface Remote<A> {
   readonly track: Track;
@@ -116,13 +129,17 @@ export class WorldScene extends Phaser.Scene {
   private lastMove: [number, number] = [0, 0];
   private lastRattle = 0;
   private interactN = 0;
+  /** A thing just shaken keeps its prompt down until then, so the lock over it reads. */
+  private quiet = { key: "", until: 0 };
   private roomZone: string | undefined;
   /** The zones the server last said the player stands in. */
   private zones: readonly string[] = [];
   private stop: (() => void) | undefined;
   /** Transition timings for development checks: door to fade lifting, in ms. */
-  readonly transitions: { from: string; to: string; ms: number; warm: boolean }[] = [];
-  private transitionStart: { at: number; warm: boolean } | undefined;
+  readonly transitions: Transition[] = [];
+  private transitionStart:
+    | { at: number; how: "step" | "server"; warm: boolean; marks: Record<string, number> }
+    | undefined;
 
   constructor() {
     super("world");
@@ -218,9 +235,17 @@ export class WorldScene extends Phaser.Scene {
   private async enterMap(seat: MapSeat): Promise<void> {
     const { room, seating } = seat;
     this.holding = true;
-    const [map] = await Promise.all([ensureMap(this, seating.map), this.curtain.close()]);
+    this.mark("seat");
+    const [map] = await Promise.all([
+      ensureMap(this, seating.map).then((m) => {
+        this.mark("map");
+        return m;
+      }),
+      this.curtain.close().then(() => this.mark("dark")),
+    ]);
     const me = await this.ownBody(room);
     if (this.room !== room || !me) return;
+    this.mark("body");
 
     const before = this.here?.map.id;
     this.clearMap();
@@ -292,7 +317,9 @@ export class WorldScene extends Phaser.Scene {
         from: before,
         to: map.id,
         ms: Math.round(performance.now() - started.at),
+        how: started.how,
         warm: started.warm,
+        marks: started.marks,
       });
     }
     this.transitionStart = undefined;
@@ -348,9 +375,15 @@ export class WorldScene extends Phaser.Scene {
   private depart(transfer: Transfer): void {
     this.holding = true;
     if (this.doorAt === undefined) {
-      this.transitionStart = { at: performance.now(), warm: false };
+      this.transitionStart = {
+        at: performance.now(),
+        how: "server",
+        warm: mapReady(this, transfer.map),
+        marks: {},
+      };
       playWorld("door.open", { volume: 0.6 });
     }
+    this.mark("transfer");
     this.doorAt = undefined;
     void this.curtain.close();
     void ensureMap(this, transfer.map).catch(() => {});
@@ -363,7 +396,12 @@ export class WorldScene extends Phaser.Scene {
     this.holding = true;
     this.doorAt = performance.now();
     const target = map.portals[this.selfInside];
-    this.transitionStart = { at: this.doorAt, warm: target ? mapReady(this, target.to) : false };
+    this.transitionStart = {
+      at: this.doorAt,
+      how: "step",
+      warm: target ? mapReady(this, target.to) : false,
+      marks: {},
+    };
     if (target) void ensureMap(this, target.to).catch(() => {});
     playWorld("door.open", { volume: 0.6 });
     void this.curtain.close();
@@ -491,6 +529,7 @@ export class WorldScene extends Phaser.Scene {
     const me = this.selfActor?.body;
     const near = !me || Math.hypot(me.x - cx, me.y - top) < HEAR_PX;
     if (!mine && !near) return;
+    this.quiet = { key: `thing:${id}`, until: performance.now() + 700 };
     const lock = this.add
       .image(cx, top - 4, "ui", "lock/idle")
       .setOrigin(0.5, 1)
@@ -523,7 +562,9 @@ export class WorldScene extends Phaser.Scene {
       this.lastMove = this.holding ? [0, 0] : this.keys.sample();
       return this.lastMove;
     };
-    const drawn = this.self?.frame(dt, move, this.live && !this.holding);
+    // Held keys go quiet at a door, but the inputs that bring the server's body up to the drawn
+    // one still go out: the server has to see the step into the door too.
+    const drawn = this.self?.frame(dt, move, this.live);
     if (drawn && here && this.camera) {
       if (!this.selfActor) {
         this.selfActor = this.playerActor(this.selfLook);
@@ -595,11 +636,20 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     const target = nearestUsable(here.usable, x, y);
-    if (!target) {
+    // A bubble over the thing says enough while it is up.
+    const key = target && `${target.kind}:${target.id}`;
+    const hushed = key === this.quiet.key && performance.now() < this.quiet.until;
+    if (!target || !key || hushed || this.bubbles.has(key)) {
       this.prompt.show(undefined);
       return;
     }
-    this.prompt.show(`${target.kind}:${target.id}`, target.cx, target.top);
+    this.prompt.show(key, target.cx, target.top);
+  }
+
+  /** Notes how long into a map change a stage was reached, for the development numbers. */
+  private mark(stage: string): void {
+    const t = this.transitionStart;
+    if (t && t.marks[stage] === undefined) t.marks[stage] = Math.round(performance.now() - t.at);
   }
 
   /** Numbers for development checks; never drawn. */
@@ -622,6 +672,11 @@ export class WorldScene extends Phaser.Scene {
 }
 
 function exposeDevStats(scene: WorldScene): void {
-  (window as unknown as { __guago?: () => unknown }).__guago = () => scene.devStats();
+  const events: unknown[] = [];
+  onWorld((e) => events.push(e));
+  (window as unknown as { __guago?: () => unknown }).__guago = () => ({
+    ...scene.devStats(),
+    events: events.slice(-8),
+  });
   (window as unknown as { __guagoScene?: unknown }).__guagoScene = scene;
 }

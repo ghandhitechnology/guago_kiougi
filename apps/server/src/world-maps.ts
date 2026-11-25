@@ -3,7 +3,7 @@
  * who of the cast stands where. Built once at start from the map sources, the same data the art
  * build writes for the client.
  */
-import { type BuiltMap, buildAllMaps, narrative } from "@guago/content";
+import { type BuiltMap, buildAllMaps, CAST_ART, narrative } from "@guago/content";
 import {
   type Collidable,
   type Facing,
@@ -136,8 +136,9 @@ function placesAt(map: BuiltMap, x: number, y: number): string[] {
 /**
  * Who stands where, decided once for the whole hub. A cast member is around when their barks
  * have begun at the current milestone (or they have none, like the cat). Each stands at one spot
- * only: the spot inside the place their barks name, else the first spot the maps list for them.
- * There they say the lines of that place, plus lines for places not built yet.
+ * only: the spot in their home (`CAST_ART`), else in the place their barks name, else the first
+ * spot the maps list for them. There they say the lines of that place, plus lines for places
+ * not built yet.
  */
 function cast(): Map<string, Npc[]> {
   const barks = narrative.NARRATIVE.barks;
@@ -151,7 +152,11 @@ function cast(): Map<string, Npc[]> {
     if (own.length > 0 && now.length === 0) continue;
     const mine = spots.filter((s) => s.spot.speaker === speaker);
     const named = new Set(now.flatMap((b) => (b.where ? [b.where] : [])));
-    const home = mine.find((s) => s.places.some((p) => named.has(p))) ?? mine[0];
+    const lives = CAST_ART[speaker]?.home;
+    const home =
+      (lives ? mine.find((s) => s.places.includes(lives)) : undefined) ??
+      mine.find((s) => s.places.some((p) => named.has(p))) ??
+      mine[0];
     if (!home) continue;
     const lines = now
       .filter((b) => !b.where || home.places.includes(b.where) || !builtPlaces.has(b.where))
