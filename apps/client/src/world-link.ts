@@ -9,18 +9,45 @@
  * server delivered it (masked by the filter, with its id and time) or with a refusal code. The
  * server may mask, refuse or mute, so an optimistic copy could show words nobody else saw; the
  * round trip is one hop on an open socket, and the input can show the pending text meanwhile.
+ *
+ * Social (friends, blocks, parties, 동아리, 대자보, reports, emotes): `social` holds the player's
+ * state from the login snapshot, kept current by the server's events; each change is also
+ * emitted as a `social` event. `request` sends one social request and resolves with its one
+ * answer. Names and text are checked here first, so a request the server would treat as
+ * malformed is answered locally and never sent.
  */
 import { Client, type Room } from "@colyseus/sdk";
 import {
+  type Applicant,
+  BOARD_POST_LENGTH,
   type ChatLine,
   type ChatSend,
   CLOSE_SESSION_REPLACED,
+  CLUB_NOTICE_LENGTH,
+  type ClubApplication,
+  type ClubInvite,
+  type ClubView,
   cleanChatText,
+  cleanText,
+  type Done,
+  type FriendEntry,
+  type FriendRequest,
+  isPlayerName,
+  type PartyInvite,
+  type PartyView,
+  type Person,
   type PresenceEntry,
   type PresenceMessage,
+  REPORT_NOTE_LENGTH,
   type Refusal,
   type RefusalCode,
   ROOMS_PATH,
+  SOCIAL_OP_ID,
+  type SocialDone,
+  type SocialEvent,
+  type SocialRequests,
+  type SocialSnapshot,
+  type SocialType,
   type SpeakChannel,
   type SystemLine,
   WORLD_MESSAGES,
@@ -56,12 +83,41 @@ export type PresenceChange =
   /** Map or level changed; `entry` holds the new values. */
   | { kind: "update"; entry: PresenceEntry };
 
+/** A social request's answer: its data, or why it was not carried out. */
+export type RequestResult<K extends SocialType> =
+  | { ok: true; data: SocialDone<K> }
+  | { ok: false; code: SendCode; retryMs?: number; need?: number };
+
+/** The player's social state, as the server last told it. */
+export interface SocialState {
+  /** By character id. */
+  friends: Map<string, FriendEntry>;
+  requests: { in: FriendRequest[]; out: FriendRequest[] };
+  /** By character id. */
+  blocks: Map<string, Person>;
+  party: PartyView | null;
+  partyInvites: PartyInvite[];
+  club: ClubView | null;
+  clubInvites: ClubInvite[];
+  applications: ClubApplication[];
+  /** Empty unless 짱 or 부짱. */
+  applicants: Applicant[];
+}
+
+/** A friend with what presence knows: online, the map and the live level. */
+export interface FriendStatus extends FriendEntry {
+  online: boolean;
+  map: string;
+}
+
 export type WorldEvent =
   | { type: "status"; status: WorldStatus }
   | { type: "presence"; change: PresenceChange }
   /** `mine` is true for the player's own lines, which also resolve their `send`. */
   | { type: "chat"; line: ChatLine; mine: boolean }
-  | { type: "system"; line: SystemLine };
+  | { type: "system"; line: SystemLine }
+  /** After `social` has been updated with it. */
+  | { type: "social"; event: SocialEvent };
 
 export interface WorldLink {
   readonly status: WorldStatus;
@@ -73,7 +129,66 @@ export interface WorldLink {
   on(listener: (event: WorldEvent) => void): () => void;
   /** `target` is the character name for `whisper`. */
   send(channel: SpeakChannel, text: string, target?: string): Promise<SendResult>;
+  readonly social: SocialState;
+  /** Friends in name order with online state, map and level from presence. */
+  friends(): FriendStatus[];
+  /** Whether the player blocked this character: hide their bubbles and emotes. */
+  isBlocked(characterId: string): boolean;
+  /**
+   * One social request (`SocialRequests` in shared social.ts lists each with its answer).
+   * `club.create` takes an operation id: `newOpId()`, and the same id again to retry after
+   * `offline` or `timeout`, which never founds or charges twice.
+   */
+  request<K extends SocialType>(type: K, req: SocialRequests[K]["req"]): Promise<RequestResult<K>>;
   close(): Promise<void>;
+}
+
+/** A fresh operation id for `club.create`. */
+export function newOpId(): string {
+  return crypto.randomUUID();
+}
+
+const emptySocial = (): SocialState => ({
+  friends: new Map(),
+  requests: { in: [], out: [] },
+  blocks: new Map(),
+  party: null,
+  partyInvites: [],
+  club: null,
+  clubInvites: [],
+  applications: [],
+  applicants: [],
+});
+
+/**
+ * What the server would drop the connection for, or refuse for sure, answered here instead:
+ * names that break the name rule, and text that cannot pass the length rules.
+ */
+function precheck(type: SocialType, req: Record<string, unknown>): SendCode | null {
+  const name = req.name;
+  if (type === "party.invite" && !isPlayerName(name)) return "target_offline";
+  if (
+    (type === "friend.request" || type === "club.invite" || (type === "block.add" && !req.id)) &&
+    !isPlayerName(name)
+  ) {
+    return "no_player";
+  }
+  const text = (raw: unknown, max: number) => {
+    const cleaned = cleanText(String(raw ?? ""), max);
+    return cleaned.ok ? null : cleaned.code;
+  };
+  if (type === "board.post" || type === "board.pin") return text(req.text, BOARD_POST_LENGTH);
+  if (type === "club.notice") return text(req.text, CLUB_NOTICE_LENGTH);
+  if (type === "report" && req.note !== undefined) {
+    const code = text(req.note, REPORT_NOTE_LENGTH);
+    if (code === "too_long") return code;
+  }
+  if (type === "club.create") {
+    if (typeof req.op !== "string" || !SOCIAL_OP_ID.test(req.op)) return "op_id_reused";
+    if (String(req.name ?? "").length > 64) return "name_invalid";
+  }
+  if (type === "club.disband" && String(req.name ?? "").length > 64) return "name_mismatch";
+  return null;
 }
 
 /** How long `send` waits for the server before answering `timeout`. */
@@ -106,6 +221,14 @@ export function connectWorld(
     { resolve: (r: SendResult) => void; timer: ReturnType<typeof setTimeout> | undefined }
   >();
   const seen = new Set<number>();
+  const requests = new Map<
+    number,
+    {
+      resolve: (r: RequestResult<SocialType>) => void;
+      timer: ReturnType<typeof setTimeout> | undefined;
+    }
+  >();
+  const social = emptySocial();
   let status: WorldStatus = "connecting";
   let me: string | undefined;
   let room: Room | undefined;
@@ -136,6 +259,74 @@ export function connectWorld(
     clearTimeout(p.timer);
     p.resolve(result);
   };
+  const armRequest = (n: number) =>
+    setTimeout(() => settleRequest(n, { ok: false, code: "timeout" }), SEND_TIMEOUT_MS);
+  const settleRequest = (n: number, result: RequestResult<SocialType>) => {
+    const p = requests.get(n);
+    if (!p) return;
+    requests.delete(n);
+    clearTimeout(p.timer);
+    p.resolve(result);
+  };
+
+  function onSocial(e: SocialEvent): void {
+    switch (e.t) {
+      case "all": {
+        const s: SocialSnapshot = e.s;
+        social.friends = new Map(s.friends.map((f) => [f.id, f]));
+        social.requests = s.requests;
+        social.blocks = new Map(s.blocks.map((b) => [b.id, b]));
+        social.party = s.party;
+        social.partyInvites = s.partyInvites;
+        social.club = s.club;
+        social.clubInvites = s.clubInvites;
+        social.applications = s.applications;
+        social.applicants = s.applicants;
+        break;
+      }
+      case "friend":
+        social.friends.set(e.f.id, e.f);
+        break;
+      case "unfriend":
+        social.friends.delete(e.id);
+        break;
+      case "requests":
+        social.requests = { in: e.in, out: e.out };
+        break;
+      case "blocks":
+        social.blocks = new Map(e.list.map((b) => [b.id, b]));
+        break;
+      case "party":
+        social.party = e.party;
+        break;
+      case "partyInvites":
+        social.partyInvites = e.list;
+        break;
+      case "vitals": {
+        const member = social.party?.members.find((m) => m.id === e.id);
+        if (member) Object.assign(member, { hp: e.hp, mode: e.mode });
+        break;
+      }
+      case "club":
+        social.club = e.club;
+        break;
+      case "clubExp":
+        if (social.club) Object.assign(social.club, { level: e.level, exp: e.exp });
+        break;
+      case "clubInvites":
+        social.clubInvites = e.list;
+        break;
+      case "applications":
+        social.applications = e.list;
+        break;
+      case "applicants":
+        social.applicants = e.list;
+        break;
+      case "emote":
+        break;
+    }
+    emit({ type: "social", event: e });
+  }
 
   function onPresence(m: PresenceMessage): void {
     if (m.t === "all") {
@@ -170,9 +361,22 @@ export function connectWorld(
     joined.onMessage(WORLD_MESSAGES.system, (line: SystemLine) => {
       if (fresh(line.id)) emit({ type: "system", line });
     });
+    joined.onMessage(WORLD_MESSAGES.social, onSocial);
+    joined.onMessage(WORLD_MESSAGES.done, (d: Done) => {
+      settleRequest(d.n, { ok: true, data: d.data as SocialDone<SocialType> });
+    });
     joined.onMessage(WORLD_MESSAGES.refused, (r: Refusal) => {
-      if (r.type !== WORLD_MESSAGES.chat || r.n === undefined) return;
+      if (r.n === undefined) return;
       const { code, until, retryMs, need } = r;
+      if (r.type !== WORLD_MESSAGES.chat) {
+        settleRequest(r.n, {
+          ok: false,
+          code,
+          ...(retryMs === undefined ? {} : { retryMs }),
+          ...(need === undefined ? {} : { need }),
+        });
+        return;
+      }
       settle(r.n, {
         ok: false,
         code,
@@ -185,10 +389,12 @@ export function connectWorld(
     // the server then replays the answers the drop swallowed.
     joined.onDrop(() => {
       for (const p of pending.values()) clearTimeout(p.timer);
+      for (const p of requests.values()) clearTimeout(p.timer);
       setStatus("reconnecting");
     });
     joined.onReconnect(() => {
       for (const [n, p] of pending) p.timer = arm(n);
+      for (const [n, p] of requests) p.timer = armRequest(n);
       setStatus("online");
     });
   }
@@ -224,6 +430,7 @@ export function connectWorld(
       const code = await new Promise<number>((resolve) => joined.onLeave((c) => resolve(c)));
       room = undefined;
       for (const n of [...pending.keys()]) settle(n, { ok: false, code: "offline" });
+      for (const n of [...requests.keys()]) settleRequest(n, { ok: false, code: "offline" });
       if (code === CLOSE_SESSION_REPLACED) {
         setStatus("replaced");
         return;
@@ -266,6 +473,34 @@ export function connectWorld(
       return new Promise<SendResult>((resolve) => {
         pending.set(n, { resolve, timer: arm(n) });
         open.send(WORLD_MESSAGES.chat, message);
+      });
+    },
+    social,
+    friends() {
+      return [...social.friends.values()]
+        .map((f) => {
+          const p = presence.get(f.id);
+          return { ...f, online: p !== undefined, map: p?.map ?? "", level: p?.level ?? f.level };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    },
+    isBlocked(characterId) {
+      return social.blocks.has(characterId);
+    },
+    request(type, req) {
+      type R = RequestResult<typeof type>;
+      const local = precheck(type, req as Record<string, unknown>);
+      if (local) return Promise.resolve({ ok: false, code: local } as R);
+      const open = room;
+      if (!open || status !== "online") return Promise.resolve({ ok: false, code: "offline" } as R);
+      const n = ++counter;
+      return new Promise<R>((resolve) => {
+        requests.set(n, {
+          resolve: resolve as (r: RequestResult<SocialType>) => void,
+          timer: armRequest(n),
+        });
+        const body = Object.fromEntries(Object.entries(req).filter(([, v]) => v !== undefined));
+        open.send(type, { ...body, n });
       });
     },
     async close() {
