@@ -25,12 +25,14 @@ import {
 } from "@guago/shared";
 import * as Phaser from "phaser";
 import { CameraRig } from "../camera.ts";
-import { UI_SCENE } from "../entry.ts";
+import { UI_SCENE, type WorldEntry } from "../entry.ts";
+import { bindFight } from "../hud/fight.ts";
 import { KeyboardMove } from "../input.ts";
 import { artMetadata } from "../render/assets.ts";
 import { loadMap, MapView, setQualityTier, TIERS, type Tier } from "../render/index.ts";
 import { SelfMover } from "../self.ts";
 import { setUiArt } from "../ui/theme.ts";
+import { session } from "../world/session.ts";
 import { FightView } from "./fight-view.ts";
 
 const NAMES: Readonly<Record<string, string>> = {
@@ -51,22 +53,16 @@ const EVOLVED_NAMES: Readonly<Record<string, string>> = {
 /** The camera frames the body, not the feet. */
 const CHEST_PX = 10;
 
-/** The HUD and the world session, when this build has them (`hud/fight.ts`). */
-const HUD_MODULES = import.meta.glob(["../hud/fight.ts", "../world/session.ts"]);
-
 /** Binds the HUD to the fight the way the game will: the session starts, the UI scene draws. */
-async function bindHud(scene: Phaser.Scene, fight: FightView, entry: unknown): Promise<boolean> {
-  const loadFight = HUD_MODULES["../hud/fight.ts"];
-  const loadSession = HUD_MODULES["../world/session.ts"];
-  if (!loadFight || !loadSession || !entry) return false;
-  const { bindFight } = (await loadFight()) as { bindFight(source: unknown): () => void };
-  const { session } = (await loadSession()) as { session: { start(entry: unknown): void } };
+function bindHud(scene: Phaser.Scene, fight: FightView, entry: WorldEntry): void {
   setUiArt(artMetadata(scene));
   scene.scene.launch(UI_SCENE);
   session.start(entry);
   const unbind = bindFight(fight.hud);
-  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, unbind);
-  return true;
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    unbind();
+    session.stop();
+  });
 }
 
 async function call(method: "GET" | "POST", route: string, body?: unknown) {
@@ -93,7 +89,7 @@ async function signIn(
   cls: string,
   meta: ReturnType<typeof artMetadata>,
   evolved: boolean,
-): Promise<unknown> {
+): Promise<WorldEntry> {
   const loginId = evolved ? `evo_${cls}` : `stage_${cls}`;
   const password = `stage-${cls}-fights-well`;
   let me = await call("GET", API.me);
@@ -124,7 +120,7 @@ async function signIn(
     if (made.status !== 200) throw new Error(`stage character: ${JSON.stringify(made.body)}`);
   }
   me = await call("GET", API.me);
-  return { account: me.body.account, character: me.body.character };
+  return { account: me.body.account, character: me.body.character } as unknown as WorldEntry;
 }
 
 interface Sample {
@@ -228,7 +224,7 @@ export class FightStage extends Phaser.Scene {
     this.fight.setEvolved(
       items.filter((i) => i.kind === "book" && i.slot !== null && i.evolved).map((i) => i.def),
     );
-    if (this.params.get("hud") !== "0") await bindHud(this, this.fight, entry);
+    if (this.params.get("hud") !== "0") bindHud(this, this.fight, entry);
     if (this.params.get("readout") === "1") this.makeReadout();
     this.expose();
   }

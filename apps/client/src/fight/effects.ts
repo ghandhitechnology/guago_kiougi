@@ -1243,6 +1243,19 @@ export class Effects {
     const n = Math.min(6, Math.max(2, Math.round(Math.hypot(a.tx - a.x, a.ty - a.y) / 16)));
     const fade = Math.min(1, (life - t) / 3);
     const ang = Math.atan2(a.ty - a.y, a.tx - a.x);
+    const body = a.art?.body && cat.has(a.art.body) ? a.art.body : null;
+    if (body && cat.meta.sprites[body]?.anims.d0) {
+      // The dash's own drawing, one of sixteen headings, along the path behind the player.
+      const key = `${body}/d${dir16(ang)}`;
+      for (let i = 0; i < n; i++) {
+        const f = (i + 1) / (n + 1);
+        const p = this.piece(a, i, Layer.Glow, cat.meta.sprites[body]?.blend === "add");
+        show(p, cat.atlas(body), cat.frame(body), key, false);
+        p.s.setVisible(true).setAlpha(a.alpha * fade * (0.35 + 0.65 * f));
+        p.s.setPosition(Math.round(a.x + (a.tx - a.x) * f), Math.round(a.y - 8 + (a.ty - a.y) * f));
+      }
+      return false;
+    }
     for (let i = 0; i < n; i++) {
       const f = (i + 1) / (n + 1);
       const p = this.piece(a, i, Layer.Glow, true);

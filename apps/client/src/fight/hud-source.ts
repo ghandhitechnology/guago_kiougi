@@ -1,37 +1,7 @@
 import { CONTROL_MODES, type ControlMode, MAX_AIM } from "@guago/shared";
+import type { FightSource, FightState as HudFightState } from "../hud/fight.ts";
+import type { BookSlot } from "../hud/store.ts";
 import type { FightActions, FightState } from "./state.ts";
-
-/**
- * The fight as the HUD binds it: the exact shape of `FightSource` in `hud/fight.ts`, so the
- * HUD's bars, book row and fan, mode chip, dodge and 멘토 찬스 buttons and the phone's aim drag
- * follow the fight with `bindFight(fight.hud)` and nothing else.
- */
-export interface HudBook {
-  /** A `book` frame in the UI atlas, without the `book/` prefix. */
-  readonly book: string;
-  /** 0 when ready, up to 1 right after casting. */
-  readonly cooldown: number;
-}
-
-export interface HudFightState {
-  readonly hp: { readonly now: number; readonly max: number };
-  readonly exp: { readonly now: number; readonly max: number };
-  readonly level: number;
-  readonly books: readonly (HudBook | null)[];
-  readonly mode: ControlMode;
-  readonly dodge: number;
-  readonly mentor?: number;
-}
-
-export interface HudFightSource {
-  readonly state: HudFightState | undefined;
-  on(fn: (state: HudFightState | undefined) => void): () => void;
-  cast(slot: number): void;
-  dodge(): void;
-  cycleMode(): void;
-  mentor(): void;
-  aim(dir: { x: number; y: number } | undefined): void;
-}
 
 /** Slots the HUD shows; the ones the 전직 tier has not opened are null. */
 const SLOTS = 6;
@@ -41,10 +11,11 @@ const EVERY_MS = 66;
 const THUMB_REACH = 140;
 
 /**
- * Feeds the HUD from the fight's state: a fresh, frozen state object whenever what it shows has
- * changed, a few times a second at most, and the HUD's buttons straight to the fight's actions.
+ * Feeds the HUD from the fight's state (`FightSource` in `hud/fight.ts`): a fresh, frozen state
+ * object whenever what it shows has changed, a few times a second at most, and the HUD's buttons
+ * straight to the fight's actions. `bindFight(fight.hud)` is the whole wiring.
  */
-export class HudFeed implements HudFightSource {
+export class HudFeed implements FightSource {
   private readonly fight: FightState;
   private readonly actions: FightActions;
   private readonly selfAt: () => { x: number; y: number };
@@ -111,7 +82,7 @@ export class HudFeed implements HudFightSource {
     let key = `${Math.round(f.hp)}|${Math.round(f.maxHp)}|${Math.floor(f.exp)}|${f.level}|${f.mode}|${q(f.dodge.cooldown)}`;
     for (const b of f.books) key += `|${b.icon}:${q(b.cooldown)}`;
     if (key === this.key) return;
-    const books: (HudBook | null)[] = [];
+    const books: (BookSlot | null)[] = [];
     for (let i = 0; i < SLOTS; i++) {
       const b = f.books[i];
       books.push(b ? { book: b.icon.replace(/^book\//, ""), cooldown: q(b.cooldown) / 32 } : null);
