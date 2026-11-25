@@ -39,15 +39,15 @@ const perm = part({
       up: `
         ....XX.XX.XX....
         ..XXHHXHHXhhXX..
-        .XHHHhhhhhhhhhX.
-        XHHhhhhhhhhhhxxX
-        XHhhhhhhhhhhxxxX
-        XhhhhhhhhhhhxxxX
-        XhhxxhhxxhhxxxxX
-        XhhhhhhhhhhhxxxX
-        XxxhhxxhhxxhhxxX
-        .XhhhhhhhhhxxxX.
-        ..XXXXXXXXXXXX..
+        .XHHHHhHHhhhhhX.
+        XHHhhhHHhhhhhxxX
+        XhhxxhhhhxxhhxxX
+        XHHhhxxhhhhhxxxX
+        XhhhhhhhxxhhhxxX
+        .XxxhhhhhhhxxxX.
+        .XhhhxxhhhhhxxX.
+        ..XhhhhhxxhhxX..
+        ...XXXXXXXXXX...
         .....X....X.....
       `,
       side: `
@@ -298,18 +298,18 @@ const mop = part({
         .XX..........XX.
       `,
       up: `
-        .....XXXXXX.....
-        ...XXHHhhhhXX...
-        ..XHHhhhhhhhhX..
-        .XHHhhhhhhhhhxX.
-        .XHhhhhhhhhhhxX.
-        XhhhhhhhhhhhhxxX
-        XhhhhhhhhhhhxxxX
-        XhhhxhhhxhhhxxxX
-        XhhhxhhhxhhxxxxX
-        .XhhhhhhhhhxxxX.
-        ..XXXXXXXXXXXX..
-        .....X....X.....
+        .....X..XX.X....
+        ...XXHXXhhXhX...
+        ..XHHHHhhhhhhX..
+        .XHHHhhhxxhhhxX.
+        .XHhhhhxhhxhhxX.
+        XHhhhhhxhhhhhxxX
+        XhhhhhhhxxhhxxxX
+        .XhxhhhhhhhhxhX.
+        .XhxhhhxhhhxhxX.
+        .XhhxhhxhhxhhxX.
+        ..XhXhhXhXhhxX..
+        ...X.XXXhXXXX...
       `,
       side: `
         .........XX.........
