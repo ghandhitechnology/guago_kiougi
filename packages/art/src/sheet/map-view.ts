@@ -65,6 +65,8 @@ const MARKS = {
   room: "navy.pale",
   mark: "gold.pale",
   npc: "rose.pale",
+  arena: "clay.pale",
+  elite: "red.pale",
 } as const;
 
 function rgb(ramps: Ramps, name: string): Rgb {
@@ -213,6 +215,17 @@ export function overlay(
       }
     }
     labels.push({ text: name, x: cx + 8 * scale, y: cy - 6 * scale, color: sc });
+  }
+  // Arenas: a dashed floor outline with the fights it hosts.
+  for (const a of map.arenas ?? []) {
+    const c = rgb(ramps, MARKS.arena);
+    box(a.rect, c, true, 2 * scale);
+    labels.push({
+      text: `${a.id} · arena ${a.modes.join(" ")}`,
+      x: a.rect.x * T + 4 * scale,
+      y: a.rect.y * T + 4 * scale,
+      color: c,
+    });
   }
   return { w, h, data, labels };
 }

@@ -15,7 +15,7 @@ import {
 } from "@guago/shared";
 import { describeError } from "../db/index.ts";
 import { deviceSource, ipHash, newDeviceToken } from "./crypto.ts";
-import type { AuthService, Origin, Session } from "./service.ts";
+import type { AuthedAccount, AuthService, Origin, Session } from "./service.ts";
 
 export interface HttpSettings {
   clientOrigin: string;
@@ -63,6 +63,23 @@ export function readCookie(header: string | null | undefined, name: string): str
 
 class BodyError extends Error {}
 
+/** What a route outside this file gets: the request, its session and ways to answer. */
+export interface RouteContext {
+  method: string;
+  path: string;
+  /** HMAC of the client IP, for per-address limits. */
+  ip: string;
+  query: URLSearchParams;
+  /** The account behind the session cookie, or null. */
+  account(): Promise<AuthedAccount | null>;
+  readJson(): Promise<unknown>;
+  send(status: number, body: unknown): void;
+  error(code: ApiErrorCode): void;
+}
+
+/** Answers and returns true when the request is its own; false passes it on. */
+export type ApiRoute = (ctx: RouteContext) => Promise<boolean>;
+
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -91,6 +108,7 @@ export function createApiHandler(
   auth: AuthService,
   settings: HttpSettings,
   looks: () => LookOptions,
+  routes: readonly ApiRoute[] = [],
 ) {
   const cookieName = sessionCookieName(settings.secureCookies);
   const deviceName = deviceCookieName(settings.secureCookies);
@@ -235,6 +253,17 @@ export function createApiHandler(
       const { recoveryCode } = result.value;
       return send(res, 200, { ok: true, recoveryCode }, deviceCookie(parsed.value.loginId));
     }
+    const ctx: RouteContext = {
+      method,
+      path,
+      ip,
+      query,
+      account: () => auth.authenticate(token),
+      readJson: () => readJson(req),
+      send: (status, body) => send(res, status, body),
+      error: (code) => error(res, code),
+    };
+    for (const extra of routes) if (await extra(ctx)) return;
     res.statusCode = 404;
     res.end();
   }

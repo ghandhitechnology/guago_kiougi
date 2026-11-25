@@ -33,6 +33,7 @@ export class Deck {
   private stopAt = Number.POSITIVE_INFINITY;
   private ended = false;
   id: string | null = null;
+  part: string | null = null;
   info: SongInfo | null = null;
   readonly rows: RowAt[] = [];
   late = 0;
@@ -58,12 +59,14 @@ export class Deck {
   }
 
   start(
-    kind: "song" | "bed",
+    kind: "song" | "bed" | "jingle",
     id: string,
     fade: number,
     stems: Readonly<Record<string, number>>,
+    part?: string,
   ): void {
     this.reset();
+    this.part = part ?? null;
     this.gen++;
     this.id = id;
     this.stemLevels = new Map(Object.entries(stems));
@@ -82,9 +85,17 @@ export class Deck {
       kind,
       id,
       seed: (Math.random() * 2 ** 31) | 0,
+      ...(part ? { part } : {}),
     });
     this.pump();
     this.pump();
+  }
+
+  /** Switches a song to a named part at its next bar line. */
+  setPart(part: string): void {
+    if (!this.id || this.part === part) return;
+    this.part = part;
+    this.post({ type: "part", deck: this.index, gen: this.gen, part });
   }
 
   /** Fades out and stops. */

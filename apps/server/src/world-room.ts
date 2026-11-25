@@ -7,6 +7,7 @@ import { type AuthContext, type Client, CloseCode, Room, ServerError } from "@co
 import {
   CHAT_BURST,
   CHAT_PER_SECOND,
+  type ChangeNotice,
   type Character,
   type ChatLine,
   type ChatSend,
@@ -15,6 +16,9 @@ import {
   FILTER_MUTE_MS,
   FILTER_REPEAT_MS,
   NEAR_CHAT_TILES,
+  OPS,
+  type OpMessage,
+  opSchema,
   type PresenceEntry,
   type PresenceMessage,
   RECONNECT_SECONDS,
@@ -30,6 +34,7 @@ import {
 } from "@guago/shared";
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
+import type { OpHandler } from "./economy/handler.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
@@ -73,6 +78,8 @@ interface Standing {
 interface Services {
   filter: ChatFilter;
   log: ChatSink | undefined;
+  /** Item and currency operations; without it the room does not take them (tests). */
+  ops: OpHandler | undefined;
   /** Friends, blocks, parties, clubs, the 대자보, reports and emotes; off without it (tests). */
   social: Social | undefined;
 }
@@ -84,13 +91,24 @@ let current: WorldRoom | undefined;
 export function provideWorldServices(s: {
   filter?: ChatFilter;
   log?: ChatSink;
+  ops?: OpHandler;
   social?: Social;
 }): void {
-  services = { filter: s.filter ?? ChatFilter.fromFile(), log: s.log, social: s.social };
+  services = {
+    filter: s.filter ?? ChatFilter.fromFile(),
+    log: s.log,
+    ops: s.ops,
+    social: s.social,
+  };
 }
 
 function use(): Services {
-  services ??= { filter: ChatFilter.fromFile(), log: undefined, social: undefined };
+  services ??= {
+    filter: ChatFilter.fromFile(),
+    log: undefined,
+    ops: undefined,
+    social: undefined,
+  };
   return services;
 }
 
@@ -126,6 +144,14 @@ export class WorldRoom extends Room {
     this.handle(WORLD_MESSAGES.chat, chatSendSchema, (client, message) =>
       this.chat(client, message),
     );
+    // Item and currency operations (PLAN §21): one message type per operation, `{ id, req }`,
+    // each answered by exactly one `result` with its id. The handler limits each type.
+    const ops = use().ops;
+    if (ops) {
+      for (const op of OPS) {
+        this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
+      }
+    }
     const social = use().social;
     if (social) {
       const hub = new SocialHub<Member>(social, {
@@ -258,6 +284,11 @@ export class WorldRoom extends Room {
     });
   }
 
+  /** A change the player did not ask for (a combat grant), sent to them if they are online. */
+  notify(characterId: string, change: ChangeNotice): void {
+    this.byCharacter.get(characterId)?.client.send(WORLD_MESSAGES.change, change);
+  }
+
   /** Called when a character's level changes, for presence and the 전체 level gate. */
   setLevel(characterId: string, level: number): void {
     const member = this.byCharacter.get(characterId);
@@ -318,11 +349,22 @@ export class WorldRoom extends Room {
   }
 
   /**
-   * The level the 전체 gate reads. Levels do not change in play yet (they arrive with the
-   * progression milestone); progression backs this one hook and calls `setLevel` for presence.
+   * The level the 전체 gate reads: the joined level, kept current by `setLevel`, which the item
+   * executor calls after every commit that changes a character's level.
    */
   private levelOf(member: Member): number {
     return member.entry.level;
+  }
+
+  // Item and currency operations -------------------------------------------------------------
+
+  private async operate(ops: OpHandler, client: Client, message: OpMessage): Promise<void> {
+    const me = this.members.get(client.sessionId);
+    if (!me) return;
+    const result = await ops.run(me.characterId, message);
+    // The member may have reconnected meanwhile; `answer` sends to its current socket and keeps
+    // the result for replay, so a result lost to a drop arrives after the reconnect.
+    if (this.members.get(client.sessionId) === me) this.answer(me, WORLD_MESSAGES.result, result);
   }
 
   // Chat -------------------------------------------------------------------------------------

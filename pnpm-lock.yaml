@@ -107,6 +107,9 @@ importers:
 
   packages/audio:
     devDependencies:
+      '@guago/content':
+        specifier: workspace:*
+        version: link:../content
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
@@ -131,6 +134,9 @@ importers:
 
   tools/balance-sim:
     dependencies:
+      '@guago/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@guago/content':
         specifier: workspace:*
         version: link:../../packages/content

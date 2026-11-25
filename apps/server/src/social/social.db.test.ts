@@ -6,8 +6,10 @@ import { CLUB_FEE, CLUB_FOUND_LEVEL, CLUB_SIZE, FRIEND_CAP } from "@guago/shared
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db, pgErrorCode } from "../db/index.ts";
+import { checkInvariants } from "../economy/audit.ts";
+import { createEconomy } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
-import { MemoryWallet } from "./fees.ts";
+import { executorFees, MemoryWallet } from "./fees.ts";
 import { createSocial, type Social } from "./index.ts";
 import { Refuse } from "./tx.ts";
 
@@ -306,5 +308,68 @@ describe("clubs", () => {
     const leader = accepted?.leader as string;
     expect(codeOf(await social.clubs.review(leader, me, true))).toBe("ok");
     expect(await social.clubs.applicationsOf(me)).toEqual([]);
+  });
+});
+
+describe("the founding fee through the item executor", () => {
+  it("is charged once under a retried request, refused when short, and keeps the books whole", async () => {
+    const economy = createEconomy(db);
+    const real = createSocial(db, {
+      fees: executorFees(db, economy.executor),
+      jackets: () => ["navy"],
+    });
+    const earn = async (id: string, amount: number) => {
+      const r = await economy.executor.execute(id, `earn-${id}`, "grant", {
+        exp: 0,
+        drops: [
+          {
+            item: { kind: "coin", amount },
+            source: { kind: "monster", fieldId: "p1-colonnade", monsterId: "odap", rank: "elite" },
+          },
+        ],
+      });
+      expect(r.ok).toBe(true);
+    };
+    const wallet = async (id: string) =>
+      count(
+        sql`select coalesce((select pinecones from wallets where character_id = ${id}), 0) as n`,
+      );
+
+    const me = await character(CLUB_FOUND_LEVEL);
+    await earn(me, CLUB_FEE + 7);
+    const req = {
+      op: "real-fee-01",
+      name: "장부부",
+      joinRule: "open",
+      jacket: "navy",
+      emblem: EMBLEM,
+    } as const;
+    const raced = await Promise.all([
+      real.clubs.found(me, CLUB_FOUND_LEVEL, req),
+      real.clubs.found(me, CLUB_FOUND_LEVEL, req),
+    ]);
+    const again = await real.clubs.found(me, CLUB_FOUND_LEVEL, req);
+    const ids = [...raced, again].map((r) => (r instanceof Refuse ? r.code : r.club));
+    expect(new Set(ids).size).toBe(1);
+    expect(await wallet(me)).toBe(7);
+    expect(
+      await count(sql`
+        select count(*) as n from economy_ledger
+        where character_id = ${me} and source_or_sink = 'sink.club' and amount = ${-CLUB_FEE}`),
+    ).toBe(1);
+
+    const broke = await character(CLUB_FOUND_LEVEL);
+    await earn(broke, CLUB_FEE - 1);
+    const refused = await real.clubs.found(broke, CLUB_FOUND_LEVEL, {
+      ...req,
+      op: "real-fee-02",
+      name: "빈지갑부",
+    });
+    expect(codeOf(refused)).toBe("insufficient");
+    expect(await wallet(broke)).toBe(CLUB_FEE - 1);
+    expect(await count(sql`select count(*) as n from clubs where founded_by = ${broke}`)).toBe(0);
+
+    const audit = await checkInvariants(db);
+    expect(audit.violations).toEqual([]);
   });
 });

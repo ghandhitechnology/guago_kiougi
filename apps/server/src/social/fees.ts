@@ -1,37 +1,15 @@
 /**
- * The 동아리 founding fee (PLAN §12, §13). Every 솔방울 change goes through the item executor
- * (branch `feat/item-operations`): the fee is one executor operation run inside the founding
- * transaction, so the fee and the new club commit together or not at all, and a retry under the
- * same operation id charges nothing. Nothing here touches a wallet outside that path.
+ * The 동아리 founding fee (PLAN §12, §13), through the item executor: the fee is its internal
+ * `club.found` operation (economy/ops.ts) run inside the founding transaction, so the fee and the
+ * new club commit together or not at all. Nothing here touches a wallet any other way.
  *
- * Until the executor is on main, `MemoryWallet` stands in for tests and the scripted run. Wiring
- * the real one is these lines once both branches meet:
- *
- *   // economy/ops.ts: InternalRequests gains `"club.found": Record<string, never>`, and OPS:
- *   "club.found": {
- *     client: false,
- *     rows: () => ({}),
- *     currencies: () => ["pinecone"],
- *     apply(l, _req, env) {
- *       const r = payClubFee(l.purse, env.page);
- *       return r.ok ? ok({ purse: r.purse, ledger: r.ledger }) : no(r.error);
- *     },
- *   },
- *
- *   // index.ts: createSocial({ ..., fees: executorFees(db, economy.executor) })
- *   export function executorFees(db: Db, executor: Executor): FeePath {
- *     return {
- *       withFee: (characterId, opId, work) =>
- *         db.transaction(async (tx) => {
- *           const paid = await executor.execute(characterId, opId, "club.found", {}, { tx });
- *           if (!paid.ok) return { ok: false, error: paid.error === "op_id_reused" ? "op_id_reused" : "insufficient" };
- *           return { ok: true, value: await work(tx) };
- *         }),
- *     };
- *   }
+ * A retry under the same operation id finds its club before anything is charged (`replay`), so
+ * it pays nothing even after the executor has forgotten the id; two copies racing meet at the
+ * executor's character lock, and the second finds the first's record and club.
  */
 import { type LedgerEntry, type Purse, payClubFee } from "@guago/shared";
 import type { Db } from "../db/index.ts";
+import type { Executor } from "../economy/executor.ts";
 import type { Tx } from "./tx.ts";
 
 export type FeeResult<T> =
@@ -40,21 +18,41 @@ export type FeeResult<T> =
 
 export interface FeePath {
   /**
-   * Opens one transaction, takes the founding fee in it under `opId` and runs `work` in it. A
-   * throw from `work` rolls the fee back. An `opId` already paid takes nothing and runs `work`
-   * again, which finds what the first run made.
+   * Opens one transaction. `replay` runs first: a value from it means the operation already
+   * happened, and nothing is charged. Otherwise the fee is taken under `opId` and `work` runs;
+   * a throw from `work` rolls the fee back.
    */
   withFee<T>(
     characterId: string,
     opId: string,
     work: (tx: Tx) => Promise<T>,
+    replay: (tx: Tx) => Promise<T | undefined>,
   ): Promise<FeeResult<T>>;
 }
 
+/** The fee as one executor operation in the founding transaction. */
+export function executorFees(db: Db, executor: Executor): FeePath {
+  return {
+    withFee: (characterId, opId, work, replay) =>
+      db.transaction(async (tx) => {
+        const prior = await replay(tx);
+        if (prior !== undefined) return { ok: true, value: prior };
+        const paid = await executor.execute(characterId, opId, "club.found", {}, { tx });
+        if (!paid.ok) {
+          if (paid.error === "insufficient" || paid.error === "op_id_reused") {
+            return { ok: false, error: paid.error };
+          }
+          throw new Error(`club fee refused: ${paid.error}`);
+        }
+        return { ok: true, value: await work(tx) };
+      }),
+  };
+}
+
 /**
- * The executor's contract in memory: one operation at a time per character (the executor's
- * character row lock), a known id answered from its record, and the purse moved only when the
- * transaction commits.
+ * The executor's contract in memory, for tests and the scripted run: one operation at a time per
+ * character (the executor's character lock), a known id answered from its record, and the purse
+ * moved only when the transaction commits.
  */
 export class MemoryWallet implements FeePath {
   readonly ledger: (LedgerEntry & { characterId: string; opId: string })[] = [];
@@ -63,44 +61,49 @@ export class MemoryWallet implements FeePath {
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly db: Db;
   private readonly page: () => number;
-  private readonly seed: number;
 
-  /** `seed`: 솔방울 each character's purse starts with (local play only). */
-  constructor(db: Db, options: { page?: () => number; seed?: number } = {}) {
+  constructor(db: Db, options: { page?: () => number } = {}) {
     this.db = db;
     this.page = options.page ?? (() => 1);
-    this.seed = options.seed ?? 0;
   }
 
   credit(characterId: string, pinecones: number): void {
-    const purse = this.purseOf(characterId);
+    const purse = this.purses.get(characterId) ?? {};
     this.purses.set(characterId, { ...purse, pinecone: (purse.pinecone ?? 0) + pinecones });
   }
 
   balance(characterId: string): number {
-    return this.purseOf(characterId).pinecone ?? 0;
+    return this.purses.get(characterId)?.pinecone ?? 0;
   }
 
-  private purseOf(characterId: string): Purse {
-    return this.purses.get(characterId) ?? { pinecone: this.seed };
-  }
-
-  withFee<T>(characterId: string, opId: string, work: (tx: Tx) => Promise<T>) {
+  withFee<T>(
+    characterId: string,
+    opId: string,
+    work: (tx: Tx) => Promise<T>,
+    replay: (tx: Tx) => Promise<T | undefined>,
+  ): Promise<FeeResult<T>> {
     const run = async (): Promise<FeeResult<T>> => {
       const key = `${characterId}\u0000${opId}`;
       const known = this.done.get(key);
-      if (known === false) return { ok: false, error: "insufficient" };
-      if (known === true) return { ok: true, value: await this.db.transaction(work) };
-      const paid = payClubFee(this.purseOf(characterId), this.page());
-      if (!paid.ok) {
+      const out = await this.db.transaction(async (tx) => {
+        const prior = await replay(tx);
+        if (prior !== undefined) return { value: prior };
+        if (known === false) return { refused: true as const };
+        if (known === true) return { value: await work(tx) };
+        const paid = payClubFee(this.purses.get(characterId) ?? {}, this.page());
+        if (!paid.ok) return { refused: true as const };
+        return { value: await work(tx), paid };
+      });
+      if ("refused" in out) {
         this.done.set(key, false);
-        return paid;
+        return { ok: false, error: "insufficient" };
       }
-      const value = await this.db.transaction(work);
-      this.purses.set(characterId, paid.purse);
-      this.ledger.push(...paid.ledger.map((e) => ({ ...e, characterId, opId })));
-      this.done.set(key, true);
-      return { ok: true, value };
+      if (out.paid) {
+        this.purses.set(characterId, out.paid.purse);
+        this.ledger.push(...out.paid.ledger.map((e) => ({ ...e, characterId, opId })));
+        this.done.set(key, true);
+      }
+      return { ok: true, value: out.value };
     };
     const before = this.queues.get(characterId) ?? Promise.resolve();
     const mine = before.then(run, run);
@@ -112,8 +115,3 @@ export class MemoryWallet implements FeePath {
     return mine;
   }
 }
-
-/** No wallet yet: every founding is refused as unaffordable, so no club is ever free. */
-export const closedFees: FeePath = {
-  withFee: async () => ({ ok: false, error: "insufficient" }),
-};

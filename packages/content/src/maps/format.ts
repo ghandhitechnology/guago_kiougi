@@ -39,6 +39,11 @@ export interface Ambient {
   readonly color: string;
   /** 0 is black, 1 is the art as drawn. */
   readonly intensity: number;
+  /**
+   * The theme the game draws the art in before this light falls on it, when the map's `theme`
+   * already paints the light in for the contact sheet (a night theme). Defaults to `theme`.
+   */
+  readonly unlit?: string;
 }
 
 /**
@@ -125,7 +130,9 @@ export type Zone =
    * A named room or place inside the map, shown on entering it. Its id is the name the story
    * stages scenes in (`study-hall`, `gym`), so a scene's place resolves to a map and an area.
    */
-  | { readonly kind: "room"; readonly id: string; readonly rect: TileRect; readonly name: string };
+  | { readonly kind: "room"; readonly id: string; readonly rect: TileRect; readonly name: string }
+  /** Where a field's elite appears when its kill count comes round (PLAN §6, every 200 kills). */
+  | { readonly kind: "elite"; readonly id: string; readonly rect: TileRect };
 
 // Source ---------------------------------------------------------------------------------------
 
@@ -248,6 +255,7 @@ export interface MapSource extends Layers {
     | (Omit<Extract<Zone, { kind: "monsters" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "gather" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "room" }>, "rect"> & { readonly rect: TileRect | string })
+    | (Omit<Extract<Zone, { kind: "elite" }>, "rect"> & { readonly rect: TileRect | string })
   )[];
   /** Named spots scenes refer to (`cooler`, `landing-3f`), at a tile; solid tiles allowed. */
   readonly marks?: Readonly<Record<string, Vec>>;
@@ -256,6 +264,12 @@ export interface MapSource extends Layers {
     readonly speaker: string;
     readonly tile: Vec;
     readonly facing?: Spawn["facing"];
+  }[];
+  /** Dueling grounds (PLAN §14): a floor of open tiles, or a stamp region name. */
+  readonly arenas?: readonly {
+    readonly id: string;
+    readonly rect: TileRect | string;
+    readonly modes: Arena["modes"];
   }[];
 }
 
@@ -283,6 +297,8 @@ export interface BuiltMap {
   readonly marks: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
   /** Cast stand points: speaker id, feet in world pixels, facing. */
   readonly npcs: readonly NpcSpot[];
+  /** Dueling grounds, in tiles. */
+  readonly arenas: readonly Arena[];
 }
 
 export interface NpcSpot {
@@ -290,4 +306,11 @@ export interface NpcSpot {
   readonly x: number;
   readonly y: number;
   readonly facing: Spawn["facing"];
+}
+
+/** A dueling ground: open floor, and which fights it hosts. */
+export interface Arena {
+  readonly id: string;
+  readonly rect: TileRect;
+  readonly modes: readonly ("1v1" | "3v3")[];
 }

@@ -139,19 +139,23 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
     if (bad) throw new Refuse(bad);
   }
 
-  /** Applications elsewhere are moot once `who` is in a club; each club is its own lock. */
-  async function dropApplications(who: string, except?: number): Promise<number[]> {
+  /**
+   * Applications and invites elsewhere are moot once `who` is in a club. Each club's rows go in
+   * a transaction of their own under that club's lock, so no transaction holds two clubs.
+   */
+  async function dropApplications(who: string, except?: number): Promise<void> {
     const { rows } = await db.execute(sql`
-      select club_id from club_applications where character_id = ${who}`);
-    const clubs = rows.map((r) => Number(r.club_id)).filter((id) => id !== except);
-    for (const club of clubs) {
+      select club_id from club_applications where character_id = ${who}
+      union select club_id from club_invites where character_id = ${who}`);
+    for (const club of rows.map((r) => Number(r.club_id)).filter((id) => id !== except)) {
       await transact(db, async (tx) => {
         await tx.execute(sql`select 1 from clubs where id = ${club} for update`);
         await tx.execute(sql`
           delete from club_applications where club_id = ${club} and character_id = ${who}`);
+        await tx.execute(sql`
+          delete from club_invites where club_id = ${club} and character_id = ${who}`);
       });
     }
-    return clubs;
   }
 
   async function run<T>(work: (tx: Tx) => Promise<T>): Promise<T | Refuse> {
@@ -171,24 +175,32 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
       if (options.nameBanned(name)) return new Refuse("name_banned");
       try {
         checkLook(req.jacket, req.emblem, 1);
-        const paid = await fees.withFee(me, req.op, async (tx) => {
+        const replay = async (tx: Tx) => {
           const before = await tx.execute(sql`
             select id from clubs where founded_by = ${me} and founded_op = ${req.op}`);
-          if (before.rows[0]) return Number(before.rows[0].id);
-          const inClub = await tx.execute(sql`
-            select 1 from club_members where character_id = ${me}`);
-          if (inClub.rows[0]) throw new Refuse("in_club");
-          const made = await tx.execute(sql`
-            insert into clubs (name, leader_id, join_rule, jacket_color, emblem, founded_by, founded_op)
-            values (${name}, ${me}, ${req.joinRule}, ${req.jacket}, ${JSON.stringify(req.emblem)}::jsonb,
-                    ${me}, ${req.op})
-            returning id`);
-          const id = Number(made.rows[0]?.id);
-          await addMember(tx, id, me);
-          // Invites are moot for a member; invites only lock this new club's counter.
-          await tx.execute(sql`delete from club_invites where character_id = ${me}`);
-          return id;
-        });
+          return before.rows[0] ? Number(before.rows[0].id) : undefined;
+        };
+        const paid = await fees.withFee(
+          me,
+          req.op,
+          async (tx) => {
+            // A copy of this request that waited on the fee's lock finds the first one's club.
+            const raced = await replay(tx);
+            if (raced !== undefined) return raced;
+            const inClub = await tx.execute(sql`
+              select 1 from club_members where character_id = ${me}`);
+            if (inClub.rows[0]) throw new Refuse("in_club");
+            const made = await tx.execute(sql`
+              insert into clubs (name, leader_id, join_rule, jacket_color, emblem, founded_by, founded_op)
+              values (${name}, ${me}, ${req.joinRule}, ${req.jacket}, ${JSON.stringify(req.emblem)}::jsonb,
+                      ${me}, ${req.op})
+              returning id`);
+            const id = Number(made.rows[0]?.id);
+            await addMember(tx, id, me);
+            return id;
+          },
+          replay,
+        );
         if (!paid.ok) return new Refuse(paid.error);
         await dropApplications(me);
         return { club: paid.value, moved: [me] };

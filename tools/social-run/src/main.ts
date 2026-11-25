@@ -12,7 +12,6 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { getMessageBytes, matchMaker, Protocol } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
-import { LAWN, type MapDef } from "@guago/content";
 import {
   API,
   type ChatLine,
@@ -37,11 +36,12 @@ import { createGameServer } from "../../../apps/server/src/app.ts";
 import { createAuthService } from "../../../apps/server/src/auth/service.ts";
 import { ChatLog } from "../../../apps/server/src/chat/log.ts";
 import { createDb, type Db, migrateDb } from "../../../apps/server/src/db/index.ts";
+import { checkInvariants } from "../../../apps/server/src/economy/audit.ts";
+import { createEconomy } from "../../../apps/server/src/economy/index.ts";
 import { clubJackets, studentLooks } from "../../../apps/server/src/looks.ts";
-import { MapRoom } from "../../../apps/server/src/map-room.ts";
 import { parties } from "../../../apps/server/src/parties.ts";
 import { evictAccount } from "../../../apps/server/src/seats.ts";
-import { MemoryWallet } from "../../../apps/server/src/social/fees.ts";
+import { executorFees } from "../../../apps/server/src/social/fees.ts";
 import { createSocial } from "../../../apps/server/src/social/index.ts";
 import { call, cookieHeader, type Jar, remember } from "../../../apps/server/src/test/http.ts";
 import { worldRoom } from "../../../apps/server/src/world-room.ts";
@@ -106,27 +106,31 @@ async function freshDatabase(): Promise<Db> {
   return db;
 }
 
-/** A second map, so a party can stand on two at once. */
-const EAST: MapDef = { ...LAWN, id: "lawn-east" };
-class EastRoom extends MapRoom {
-  protected override mapDef(): MapDef {
-    return EAST;
-  }
-}
+// Map rooms open the map a client names (the development option), so a party can stand on two.
+process.env.ALLOW_MAP_OPTION = "1";
+const LAWN_MAP = "lawn";
+const YARD = "campus-yard";
 
 /** The run's clock: real time plus whatever the run skips ahead. */
 let skipped = 0;
 const now = () => Date.now() + skipped;
 
 const db = await freshDatabase();
+const economy = createEconomy(db);
 const auth = createAuthService({
   db,
   onSessionsRevoked: evictAccount,
+  onCharacterCreated: economy.giveKit,
   limits: { signupsPerIpPerDay: 1000 },
 });
 const log = new ChatLog(db);
-const wallet = new MemoryWallet(db);
-const social = createSocial(db, { fees: wallet, jackets: clubJackets, log, now });
+// The founding fee goes through the real item executor, as in the game server.
+const social = createSocial(db, {
+  fees: executorFees(db, economy.executor),
+  jackets: clubJackets,
+  log,
+  now,
+});
 const server = createGameServer(
   auth,
   {
@@ -137,9 +141,9 @@ const server = createGameServer(
   },
   studentLooks,
   { log, social },
+  { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants },
 );
 await server.listen(PORT);
-matchMaker.defineRoomType("map-east", EastRoom);
 await matchMaker.createRoom(WORLD_ROOM, {});
 
 // Players ------------------------------------------------------------------------------------
@@ -190,14 +194,36 @@ async function online(name: string, jar: Jar): Promise<Player> {
   return { name, jar, link, events };
 }
 
-async function enterMap(p: Player, room: string): Promise<void> {
+async function enterMap(p: Player, map: string): Promise<void> {
   await p.map?.leave();
-  p.map = await new Client(BASE, { headers: { cookie: cookieHeader(p.jar) } }).joinOrCreate(room);
-  p.map.onMessage("*", () => {});
-  await until(
-    () => p.link.presence.get(p.link.me ?? "")?.map === (room === MAP_ROOM ? "lawn" : "lawn-east"),
-    `${p.name} on ${room}`,
+  p.map = await new Client(BASE, { headers: { cookie: cookieHeader(p.jar) } }).joinOrCreate(
+    MAP_ROOM,
+    { map },
   );
+  p.map.onMessage("*", () => {});
+  await until(() => p.link.presence.get(p.link.me ?? "")?.map === map, `${p.name} on ${map}`);
+}
+
+/** 솔방울 in through a combat grant, the way income enters the game. */
+async function earn(characterId: string, pinecones: number): Promise<void> {
+  const r = await economy.executor.execute(characterId, `run-earn-${newOpId()}`, "grant", {
+    exp: 0,
+    drops: [
+      {
+        item: { kind: "coin", amount: pinecones },
+        source: { kind: "monster", fieldId: "p1-colonnade", monsterId: "odap", rank: "elite" },
+      },
+    ],
+  });
+  if (!r.ok) throw new Error(`grant refused: ${r.error}`);
+}
+
+async function pinecones(characterId: string): Promise<number> {
+  const { rows } = await db.pool.query(
+    "select coalesce((select pinecones from wallets where character_id = $1), 0)::float8 as p",
+    [characterId],
+  );
+  return Number(rows[0]?.p);
 }
 
 const socialEvents = (p: Player, t: SocialEvent["t"]) =>
@@ -245,9 +271,9 @@ const D = await online("네오", neo);
 say(
   `server :${PORT}, database ${DATABASE}; 하나 and 세찬 (Lv ${CLUB_FOUND_LEVEL + 2}), 두리 and 네오 (Lv 1) signed in with real session cookies`,
 );
-await enterMap(A, MAP_ROOM);
-await enterMap(B, "map-east");
-say(`하나 stands on lawn, 두리 on lawn-east`);
+await enterMap(A, LAWN_MAP);
+await enterMap(B, YARD);
+say(`하나 stands on the lawn, 두리 in the campus yard`);
 
 section("Friendship");
 say(`하나 → friend.request 두리: ${short(await ask(A, "friend.request", { name: "두리" }))}`);
@@ -260,8 +286,8 @@ say(
   `하나's friend list: ${JSON.stringify(A.link.friends().map((f) => ({ name: f.name, online: f.online, map: f.map, channel: f.room })))}`,
 );
 check(
-  seenB?.online === true && seenB.map === "lawn-east" && seenB.room === B.map?.roomId,
-  "하나 sees 두리 online on lawn-east in 두리's channel",
+  seenB?.online === true && seenB.map === YARD && seenB.room === B.map?.roomId,
+  "하나 sees 두리 online in the campus yard, in 두리's channel",
 );
 say(`하나 → friend.request 두리 again: ${short(await ask(A, "friend.request", { name: "두리" }))}`);
 say(
@@ -308,25 +334,25 @@ say(
   `party as 하나 sees it: ${JSON.stringify(A.link.social.party?.members.map((m) => ({ name: m.name, map: m.map, online: m.online })))}`,
 );
 check(
-  A.link.social.party?.members.find((m) => m.name === "두리")?.map === "lawn-east",
-  "the party spans lawn and lawn-east",
+  A.link.social.party?.members.find((m) => m.name === "두리")?.map === YARD,
+  "the party spans the lawn and the campus yard",
 );
-const partyLine = await B.link.send("party", "나 동쪽 잔디밭이야");
+const partyLine = await B.link.send("party", "나 본관 앞마당이야");
 await until(() => chatLines(A).some((l) => l.ch === "party"), "party chat");
 say(
-  `두리 → party chat "나 동쪽 잔디밭이야": ${partyLine.ok ? "ok" : partyLine.code}; 하나 received it across maps`,
+  `두리 → party chat "나 본관 앞마당이야": ${partyLine.ok ? "ok" : partyLine.code}; 하나 received it across maps`,
 );
 say(
   `kill sharing while apart: sharers(하나) = ${JSON.stringify(parties.sharers(id(A)).map((x) => (x === id(A) ? "하나" : "두리")))}`,
 );
-await enterMap(B, MAP_ROOM);
+await enterMap(B, LAWN_MAP);
 await until(
-  () => A.link.social.party?.members.find((m) => m.name === "두리")?.map === "lawn",
+  () => A.link.social.party?.members.find((m) => m.name === "두리")?.map === LAWN_MAP,
   "두리 moved",
 );
 const sharing = parties.sharers(id(A));
 say(
-  `두리 walks to lawn; party view updates; sharers(하나) = ${JSON.stringify(sharing.map((x) => (x === id(A) ? "하나" : "두리")))}, EXP ×${partyExpMultiplier(sharing.length)}`,
+  `두리 walks to the lawn; party view updates; sharers(하나) = ${JSON.stringify(sharing.map((x) => (x === id(A) ? "하나" : "두리")))}, EXP ×${partyExpMultiplier(sharing.length)}`,
 );
 check(
   sharing.length === 2 && partyExpMultiplier(2) === 1.1,
@@ -370,7 +396,7 @@ await until(
 );
 say(`두리 signs in again within the grace: back in party ${B2.link.social.party?.id}, online`);
 Object.assign(B, B2);
-await enterMap(B, MAP_ROOM);
+await enterMap(B, LAWN_MAP);
 say(
   `하나 → party.lead 두리: ${short(await ask(A, "party.lead", { id: id(B) }))}; leader is now ${A.link.social.party?.leader === id(B) ? "두리" : "하나"}`,
 );
@@ -385,8 +411,8 @@ check(
 );
 
 section("동아리 from founding to disband");
-wallet.credit(id(A), CLUB_FEE * 2);
-wallet.credit(id(C), CLUB_FEE);
+await earn(id(A), CLUB_FEE * 2);
+await earn(id(C), CLUB_FEE);
 const op = newOpId();
 const create = {
   op,
@@ -395,7 +421,7 @@ const create = {
   jacket: "navy",
   emblem: EMBLEM,
 };
-say(`하나 holds ${wallet.balance(id(A))} 솔방울; the fee is ${CLUB_FEE}`);
+say(`하나 earned ${await pinecones(id(A))} 솔방울 in a combat grant; the fee is ${CLUB_FEE}`);
 say(
   `두리 → club.create (Lv 1): ${short(await ask(B, "club.create", { ...create, op: newOpId() }))}`,
 );
@@ -404,9 +430,13 @@ say(`하나 → club.create 물리탐구부 (op ${op.slice(0, 8)}…): ${short(f
 say(
   `하나 → club.create again with the same op (a retry after a timeout): ${short(await ask(A, "club.create", create))}`,
 );
+const ledger = await db.pool.query(
+  "select source_or_sink, amount::float8 as amount from economy_ledger where character_id = $1 and currency = 'pinecone' order by id",
+  [id(A)],
+);
 check(
-  wallet.balance(id(A)) === CLUB_FEE,
-  `the fee was taken once: 하나 holds ${wallet.balance(id(A))}`,
+  (await pinecones(id(A))) === CLUB_FEE,
+  `the fee was taken once: 하나 holds ${await pinecones(id(A))}; ledger ${JSON.stringify(ledger.rows.map((r) => `${r.source_or_sink} ${r.amount}`))}`,
 );
 const clubId = founded.ok ? founded.data.club : 0;
 say(
@@ -443,7 +473,7 @@ say(
 say(
   `하나 → club.settings jacket crimson: ${short(await ask(A, "club.settings", { jacket: "crimson" }))}`,
 );
-await enterMap(D, MAP_ROOM);
+await enterMap(D, LAWN_MAP);
 await sleep(300);
 const bodies = [
   ...((D.map?.state as { players?: Map<string, Record<string, unknown>> })?.players?.values() ??
@@ -483,7 +513,7 @@ check(
 );
 
 section("Emote");
-await enterMap(C, MAP_ROOM);
+await enterMap(C, LAWN_MAP);
 const marks = { b: B.events.length, c: C.events.length };
 say(`하나 → emote wave: ${short(await ask(A, "emote", { e: "wave" }))}`);
 say(`하나 → emote moonwalk: ${short(await ask(A, "emote", { e: "moonwalk" }))}`);
@@ -601,7 +631,7 @@ for (const [leader, from] of [
   [0, 1],
   [30, 31],
 ] as const) {
-  wallet.credit(ids[leader] as string, CLUB_FEE);
+  await earn(ids[leader] as string, CLUB_FEE);
   const made = await social.clubs.found(ids[leader] as string, CLUB_FOUND_LEVEL, {
     op: `bots-${leader}-club`,
     name: `봇동아리${leader}`,
@@ -707,6 +737,11 @@ say(`login snapshot per client: ${JSON.stringify(summary.loginSnapshotBytes)} by
 say(`event sizes in bytes: ${JSON.stringify(events)}`);
 
 for (const p of crowd) await p.link.close();
+const audit = await checkInvariants(db);
+say(
+  `economy audit after the run: ${audit.ok ? "every invariant holds (wallets equal their ledger)" : JSON.stringify(audit.violations)}`,
+);
+if (!audit.ok) process.exitCode = 1;
 await server.gracefullyShutdown(false).catch(() => {});
 await log.close();
 await db.pool.end();

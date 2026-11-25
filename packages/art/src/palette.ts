@@ -630,6 +630,163 @@ const GREECE = theme("greece", {
   "clay.pale": "gold.pale",
 });
 
+// Page 1 hunting fields ---------------------------------------------------------------------------
+
+/**
+ * Shade on Greek ground under a high sun: dust cools to a lilac grey instead of browning, dry
+ * grass drops into olive shadow, marble to its vein, the sea one step deeper. Painted from the
+ * raw colours, so it serves every Greek field whatever its own theme.
+ */
+const GREECE_SHADE = theme("greece-shade", {
+  "wood.pale": "stone.light",
+  "wood.light": "stone.vein",
+  "wood.mid": "stone.mid",
+  "wood.dark": "stone.dark",
+  "clay.pale": "stone.pale",
+  "clay.dust": "stone.vein",
+  "clay.light": "clay.mid",
+  "clay.mid": "clay.dark",
+  "grass.bright": "olive.light",
+  "grass.pale": "olive.light",
+  "grass.light": "olive.mid",
+  "grass.soft": "olive.dark",
+  "grass.mid": "olive.dark",
+  "grass.dark": "olive.deep",
+  "olive.light": "olive.mid",
+  "olive.mid": "olive.dark",
+  "olive.dark": "olive.deep",
+  "stone.bright": "stone.light",
+  "stone.pale": "stone.vein",
+  "stone.lamp": "stone.vein",
+  "stone.light": "stone.mid",
+  "stone.vein": "stone.mid",
+  "stone.mid": "stone.dark",
+  "stone.dark": "ink.mid",
+  "sea.pale": "sea.light",
+  "sea.light": "sea.mid",
+  "sea.mid": "sea.dark",
+  "sea.dark": "sea.deep",
+});
+
+/**
+ * 올리브 숲길 at 09:40, before the heat: the road is white limestone dust instead of the
+ * afternoon's peach, grass grey-olive with dew-silver tips, its shadows cool. Wood and terracotta
+ * stay warm, so the harvest gear reads against the pale ground.
+ */
+const OLIVE_MORNING = theme("olive-morning", {
+  "grass.bright": "stone.bright",
+  "grass.pale": "stone.pale",
+  "grass.light": "olive.light",
+  "grass.soft": "olive.mid",
+  "grass.mid": "olive.mid",
+  "grass.dark": "olive.dark",
+  "grass.deep": "olive.deep",
+  "wood.pale": "stone.pale",
+  "wood.light": "stone.lamp",
+  "wood.mid": "stone.vein",
+  "wood.dark": "stone.mid",
+  "clay.pale": "stone.bright",
+});
+
+/**
+ * 동굴 입구 at 19:20, the sun just gone behind the hill: dust turns mauve grey, grass teal, the
+ * limestone keeps a pale top over darker faces and its rims catch the last rose light. Wood and
+ * clay drop a step. Mid-toned on purpose, so the dark 그림자 still read against it.
+ */
+const GREECE_DUSK = theme("greece-dusk", {
+  "wood.pale": "stone.vein",
+  "wood.light": "stone.light",
+  "wood.mid": "stone.mid",
+  "wood.dark": "stone.dark",
+  "clay.pale": "stone.light",
+  "grass.bright": "rose.pale",
+  "grass.pale": "clay.dust",
+  "grass.light": "board.light",
+  "grass.soft": "board.mid",
+  "grass.mid": "board.mid",
+  "grass.dark": "board.dark",
+  "grass.deep": "board.deep",
+  "stone.bright": "rose.pale",
+  "stone.lamp": "stone.light",
+  "stone.vein": "stone.mid",
+  "stone.mid": "stone.dark",
+  "stone.dark": "ink.mid",
+  "olive.light": "olive.mid",
+  "olive.mid": "olive.dark",
+  "olive.dark": "olive.deep",
+  "sea.pale": "sea.light",
+  "sea.light": "sea.mid",
+  "sea.mid": "sea.dark",
+  "sea.dark": "sea.deep",
+});
+
+/**
+ * Firelight at dusk, the band just outside a fire's core (whose core is the `greece` afternoon):
+ * dust and stone warm to ochre and orange, grass to dark olive.
+ */
+const DUSK_FIRE = theme("dusk-fire", {
+  "wood.pale": "clay.dust",
+  "wood.light": "clay.light",
+  "wood.mid": "clay.mid",
+  "wood.dark": "clay.dark",
+  "clay.pale": "gold.pale",
+  "grass.bright": "gold.pale",
+  "grass.pale": "gold.light",
+  "grass.light": "olive.mid",
+  "grass.soft": "olive.dark",
+  "grass.mid": "olive.dark",
+  "grass.dark": "olive.deep",
+  "stone.bright": "gold.pale",
+  "stone.pale": "clay.pale",
+  "stone.lamp": "clay.dust",
+  "stone.light": "clay.dust",
+  "stone.vein": "clay.light",
+  "stone.mid": "clay.mid",
+  "stone.dark": "clay.dark",
+});
+
+/**
+ * 아고라 외곽 at 12:50, the sun straight overhead: dust bleaches to pale straw, paving goes
+ * flat and white with its shading lifted a step, dry grass stays olive. Awnings, roofs and
+ * bronze keep their colour, so the market is the brightest thing in the glare.
+ */
+const GREECE_NOON = theme("greece-noon", {
+  "wood.pale": "gold.pale",
+  "wood.light": "clay.pale",
+  "wood.mid": "clay.dust",
+  "wood.dark": "clay.light",
+  "clay.pale": "stone.bright",
+  "grass.bright": "stone.bright",
+  "grass.pale": "gold.pale",
+  "grass.light": "olive.light",
+  "grass.soft": "olive.mid",
+  "grass.mid": "olive.mid",
+  "grass.dark": "olive.dark",
+  "grass.deep": "olive.deep",
+  "stone.light": "stone.pale",
+  "stone.vein": "stone.light",
+  "stone.mid": "stone.vein",
+  "stone.dark": "stone.mid",
+});
+
+// 생태공원 ----------------------------------------------------------------------------------------
+
+/**
+ * The 생태공원 at 07:10 after a night of rain: mist lifts the lawn's shadows a step, the dirt is
+ * dark and wet, and the water is algae green right through.
+ */
+const ECO_MORNING = theme("eco-morning", {
+  "grass.dark": "grass.mid",
+  "grass.mid": "grass.soft",
+  "wood.pale": "wood.light",
+  "wood.light": "wood.mid",
+  "sea.pale": "grass.pale",
+  "sea.light": "grass.light",
+  "sea.mid": "board.light",
+  "sea.dark": "board.mid",
+  "sea.deep": "board.dark",
+});
+
 /** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
 export const THEMES: readonly Theme[] = [
   theme("campus", {}),
@@ -646,6 +803,14 @@ export const THEMES: readonly Theme[] = [
   GOLDEN_SUN,
   GOLDEN_WARM,
   GOLDEN_SHADE,
+  // Page 1 hunting fields
+  GREECE_SHADE,
+  OLIVE_MORNING,
+  GREECE_DUSK,
+  DUSK_FIRE,
+  GREECE_NOON,
+  // 생태공원
+  ECO_MORNING,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */

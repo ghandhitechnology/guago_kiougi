@@ -17,6 +17,13 @@
       "breakpoints": true
     },
     {
+      "idx": 2,
+      "version": "7",
+      "when": 1795579496699,
+      "tag": "0002_items_economy",
+      "breakpoints": true
+    },
+    {
       "idx": 3,
       "version": "7",
       "when": 1795582672684,

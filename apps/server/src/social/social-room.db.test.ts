@@ -8,6 +8,7 @@ import { ClientState, matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
 import {
   API,
+  CLUB_FEE,
   CLUB_FOUND_LEVEL,
   type Done,
   type Refusal,
@@ -20,13 +21,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGameServer } from "../app.ts";
 import { createAuthService } from "../auth/service.ts";
 import { createDb, type Db } from "../db/index.ts";
+import { createEconomy } from "../economy/index.ts";
 import { studentLooks } from "../looks.ts";
 import { parties } from "../parties.ts";
 import { evictAccount } from "../seats.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { call, cookieHeader, type Jar, remember, waitFor } from "../test/http.ts";
 import { worldRoom } from "../world-room.ts";
-import { MemoryWallet } from "./fees.ts";
+import { executorFees } from "./fees.ts";
 import { createSocial } from "./index.ts";
 
 const SETTINGS = {
@@ -37,6 +39,7 @@ const SETTINGS = {
 };
 
 let db: Db;
+let economy: ReturnType<typeof createEconomy>;
 let server: ReturnType<typeof createGameServer>;
 let base: string;
 let nextIp = 1;
@@ -119,10 +122,23 @@ beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
   await db.pool.query("truncate accounts, login_failures, clubs, reports cascade");
   parties.reset();
-  const auth = createAuthService({ db, onSessionsRevoked: evictAccount });
-  const wallet = new MemoryWallet(db, { seed: 10_000_000 });
-  const social = createSocial(db, { fees: wallet, jackets: () => ["navy"] });
-  server = createGameServer(auth, SETTINGS, studentLooks, { social });
+  economy = createEconomy(db);
+  const auth = createAuthService({
+    db,
+    onSessionsRevoked: evictAccount,
+    onCharacterCreated: economy.giveKit,
+  });
+  const social = createSocial(db, {
+    fees: executorFees(db, economy.executor),
+    jackets: () => ["navy"],
+  });
+  server = createGameServer(
+    auth,
+    SETTINGS,
+    studentLooks,
+    { social },
+    { ops: economy.ops, grants: economy.grants },
+  );
   const port = await freePort();
   await server.listen(port);
   base = `http://127.0.0.1:${port}`;
@@ -139,6 +155,17 @@ describe("a block", () => {
     const blockerJar = await player("막는이");
     const pestJar = await player("막힌이");
     await db.execute(sql`update characters set level = ${CLUB_FOUND_LEVEL} where name = '막힌이'`);
+    const { rows } = await db.execute(sql`select id from characters where name = '막힌이'`);
+    const funded = await economy.executor.execute(rows[0]?.id as string, "room-fund", "grant", {
+      exp: 0,
+      drops: [
+        {
+          item: { kind: "coin", amount: CLUB_FEE },
+          source: { kind: "monster", fieldId: "p1-colonnade", monsterId: "odap", rank: "elite" },
+        },
+      ],
+    });
+    expect(funded.ok).toBe(true);
     const blocker = await join(blockerJar);
     const pest = await join(pestJar);
     expect(codeOf(await ask(blocker, "block.add", { name: "막힌이" }))).toBe("ok");

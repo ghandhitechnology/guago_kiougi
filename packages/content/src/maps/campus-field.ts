@@ -182,7 +182,7 @@ const map: MapSource = {
   time: { clock: "23:40", phase: "night", weather: "sea-wind" },
   theme: "field-night",
   sky: "ink.deep",
-  ambient: { color: "navy.light", intensity: 0.34 },
+  ambient: { color: "navy.light", intensity: 0.34, unlit: "campus" },
   plan: PLAN,
   legend: {
     "~": { terrain: null },
@@ -462,7 +462,7 @@ const map: MapSource = {
   landmark: { name: "균열", tile: [46, 10] },
   portals: [
     { id: "yard", rect: { x: 0, y: 20, w: 1, h: 3 }, to: "campus-yard", spawn: "field" },
-    { id: "agora", rect: { x: 44, y: 6, w: 4, h: 2 }, to: "agora", spawn: "campus" },
+    { id: "agora", rect: { x: 44, y: 6, w: 4, h: 2 }, to: "p1-agora", spawn: "campus" },
     { id: "eco-park", rect: { x: 59, y: 55, w: 3, h: 1 }, to: "eco-park", spawn: "campus" },
   ],
   interactables: [

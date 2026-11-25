@@ -1,12 +1,14 @@
 /**
  * Effect voices: at most eight one-shots at once (PLAN §6), each a pre-rendered buffer with its
  * own gain and pan. When all eight are busy, a new sound steals the oldest of the lowest priority,
- * and is dropped instead if everything playing matters more than it does. Looping emitters (the
+ * and is dropped instead if everything playing matters more than it does. Combat hits may hold at
+ * most six of the eight, so interface and world sounds always find room. Looping emitters (the
  * vending machine's hum) live outside the eight, capped at four.
  */
 
 export const MAX_VOICES = 8;
 const MAX_LOOPS = 4;
+const GROUP_CAP: Readonly<Record<string, number>> = { hit: 6 };
 const STEAL_FADE = 0.012;
 
 export interface PlayOptions {
@@ -16,6 +18,16 @@ export interface PlayOptions {
   readonly pitch?: number;
   /** 0..1, linear. */
   readonly volume?: number;
+}
+
+export interface VoiceOptions extends PlayOptions {
+  /** Seconds from now to start. */
+  readonly at?: number;
+  /** Playback rate multiplier, replacing the random variation. */
+  readonly rate?: number;
+  readonly priority?: number;
+  /** Voices of a group share a cap below the eight: `hit`. */
+  readonly group?: string;
 }
 
 export interface Sound {
@@ -37,10 +49,10 @@ interface Voice {
   readonly id: string;
   readonly priority: number;
   readonly started: number;
+  readonly group: string | undefined;
   readonly src: AudioBufferSourceNode;
   readonly gain: GainNode;
   readonly pan: StereoPannerNode;
-  readonly loop: boolean;
   ended: boolean;
 }
 
@@ -49,9 +61,10 @@ export class Voices {
   private readonly out: AudioNode;
   private readonly live: Voice[] = [];
   private readonly loops: Voice[] = [];
-  private last = new Map<string, number>();
+  private readonly last = new Map<string, number>();
   stolen = 0;
   dropped = 0;
+  started = 0;
 
   constructor(ctx: AudioContext, out: AudioNode) {
     this.ctx = ctx;
@@ -66,30 +79,23 @@ export class Voices {
     id: string,
     variants: readonly AudioBuffer[],
     meta: EffectMeta,
-    o: PlayOptions,
+    o: VoiceOptions = {},
   ): Sound | null {
     if (variants.length === 0) return null;
+    const priority = o.priority ?? meta.priority;
     const pool = meta.loop ? this.loops : this.live;
     // Per-effect cap: the oldest copy makes way.
     const same = pool.filter((v) => v.id === id);
     if (same.length >= meta.max) this.release(same[0] as Voice, pool);
     if (meta.loop) {
       if (pool.length >= MAX_LOOPS) this.release(pool[0] as Voice, pool);
-    } else if (pool.length >= MAX_VOICES) {
-      let victim: Voice | undefined;
-      for (const v of pool)
-        if (
-          !victim ||
-          v.priority < victim.priority ||
-          (v.priority === victim.priority && v.started < victim.started)
-        )
-          victim = v;
-      if (!victim || victim.priority > meta.priority) {
-        this.dropped++;
-        return null;
+    } else {
+      const cap = o.group ? GROUP_CAP[o.group] : undefined;
+      if (cap !== undefined) {
+        const members = pool.filter((v) => v.group === o.group);
+        if (members.length >= cap && !this.steal(members, priority, pool)) return null;
       }
-      this.stolen++;
-      this.release(victim, pool);
+      if (pool.length >= MAX_VOICES && !this.steal(pool, priority, pool)) return null;
     }
 
     // Pick a variant, never the same one twice in a row.
@@ -101,8 +107,8 @@ export class Voices {
     const src = ctx.createBufferSource();
     src.buffer = variants[pick] as AudioBuffer;
     src.loop = meta.loop;
-    const rate = 2 ** ((o.pitch ?? 0) / 12) * (1 + (Math.random() * 2 - 1) * meta.vary);
-    src.playbackRate.value = rate;
+    const variation = 1 + (Math.random() * 2 - 1) * meta.vary;
+    src.playbackRate.value = 2 ** ((o.pitch ?? 0) / 12) * (o.rate ?? variation);
     const gain = ctx.createGain();
     gain.gain.value = o.volume ?? 1;
     const pan = ctx.createStereoPanner();
@@ -110,12 +116,12 @@ export class Voices {
     src.connect(gain).connect(pan).connect(this.out);
     const voice: Voice = {
       id,
-      priority: meta.priority,
+      priority,
       started: ctx.currentTime,
+      group: o.group,
       src,
       gain,
       pan,
-      loop: meta.loop,
       ended: false,
     };
     src.onended = () => {
@@ -124,8 +130,9 @@ export class Voices {
       if (i >= 0) pool.splice(i, 1);
       pan.disconnect();
     };
-    src.start();
+    src.start(ctx.currentTime + Math.max(0, o.at ?? 0));
     pool.push(voice);
+    this.started++;
     return {
       stop: (fade = 0.05) => this.release(voice, pool, fade),
       set: (s) => {
@@ -138,6 +145,25 @@ export class Voices {
         return !voice.ended;
       },
     };
+  }
+
+  /** Frees one of `among` for a sound of `priority`: the oldest of the lowest priority. */
+  private steal(among: readonly Voice[], priority: number, pool: Voice[]): boolean {
+    let victim: Voice | undefined;
+    for (const v of among)
+      if (
+        !victim ||
+        v.priority < victim.priority ||
+        (v.priority === victim.priority && v.started < victim.started)
+      )
+        victim = v;
+    if (!victim || victim.priority > priority) {
+      this.dropped++;
+      return false;
+    }
+    this.stolen++;
+    this.release(victim, pool);
+    return true;
   }
 
   /** Fades a voice out and frees its slot at once. */

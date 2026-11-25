@@ -84,5 +84,8 @@ export function compileSong(id: string, source: SongSource): CompiledSong {
   if (frames.length === 0) throw new ParseError(`${id}: empty order`);
   if (source.loop !== false && (source.loop < 0 || source.loop >= frames.length))
     throw new ParseError(`${id}: loop frame ${source.loop} out of range`);
+  for (const [name, [from, to]] of Object.entries(source.parts ?? {}))
+    if (!(from >= 0 && to >= from && to < frames.length))
+      throw new ParseError(`${id}: part ${name} frames ${from}..${to} out of range`);
   return { id, source, rowsPerBar, stems, channels, frames };
 }

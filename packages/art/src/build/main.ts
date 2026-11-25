@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { bakeMaps } from "./bake.ts";
 import { ART_ROOT, compileAll } from "./compile.ts";
 import { metadata, writeOutput } from "./emit.ts";
 import { buildMaps } from "./maps.ts";
@@ -28,4 +29,11 @@ if (built.problems.length > 0) {
   for (const p of built.problems) console.error(`  ${p}`);
   process.exit(1);
 }
-for (const m of built.maps) console.log(`map ${m.id.padEnd(12)} ${m.w}×${m.h}  ${m.name}`);
+const t0 = performance.now();
+const baked = bakeMaps(DIST, metadata(art, atlases, fonts), atlases, built.maps);
+const ms = Math.round(performance.now() - t0);
+for (const m of built.maps) {
+  const kb = Math.round((baked.get(m.id) ?? 0) / 1024);
+  console.log(`map ${m.id.padEnd(12)} ${m.w}×${m.h}  ${m.name}  baked ${kb} kB`);
+}
+console.log(`maps baked in ${ms} ms`);
