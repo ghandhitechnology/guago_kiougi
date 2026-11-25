@@ -126,13 +126,13 @@ export type Zone =
     }
   /** A place a group naturally stands around: the client may seat idle players here. */
   | { readonly kind: "gather"; readonly id: string; readonly rect: TileRect }
-  /** Where a field's elite appears when its kill count comes round (PLAN §6, every 200 kills). */
-  | { readonly kind: "elite"; readonly id: string; readonly rect: TileRect }
   /**
    * A named room or place inside the map, shown on entering it. Its id is the name the story
    * stages scenes in (`study-hall`, `gym`), so a scene's place resolves to a map and an area.
    */
-  | { readonly kind: "room"; readonly id: string; readonly rect: TileRect; readonly name: string };
+  | { readonly kind: "room"; readonly id: string; readonly rect: TileRect; readonly name: string }
+  /** Where a field's elite appears when its kill count comes round (PLAN §6, every 200 kills). */
+  | { readonly kind: "elite"; readonly id: string; readonly rect: TileRect };
 
 // Source ---------------------------------------------------------------------------------------
 
@@ -254,8 +254,8 @@ export interface MapSource extends Layers {
     | (Omit<Extract<Zone, { kind: "logout" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "monsters" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "gather" }>, "rect"> & { readonly rect: TileRect | string })
-    | (Omit<Extract<Zone, { kind: "elite" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "room" }>, "rect"> & { readonly rect: TileRect | string })
+    | (Omit<Extract<Zone, { kind: "elite" }>, "rect"> & { readonly rect: TileRect | string })
   )[];
   /** Named spots scenes refer to (`cooler`, `landing-3f`), at a tile; solid tiles allowed. */
   readonly marks?: Readonly<Record<string, Vec>>;

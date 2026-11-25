@@ -62,11 +62,11 @@ const MARKS = {
   logout: "plum.light",
   monsters: "red.light",
   gather: "rose.light",
-  elite: "gold.pale",
   room: "navy.pale",
   mark: "gold.pale",
   npc: "rose.pale",
   arena: "clay.pale",
+  elite: "red.pale",
 } as const;
 
 function rgb(ramps: Ramps, name: string): Rgb {
