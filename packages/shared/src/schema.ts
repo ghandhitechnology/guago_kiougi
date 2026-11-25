@@ -1,7 +1,13 @@
 import { type SchemaType, schema, t } from "@colyseus/schema";
 import type { Character } from "./api.ts";
 
-/** Synced map state. Positions are whole world pixels; the client interpolates between patches. */
+/** View tag a client holds only on its own player, for fields nobody else needs. */
+export const OWNER_TAG = 1;
+
+/**
+ * Synced map state. Positions are in 1/POS_SCALE pixels. Entities sit in view-gated collections:
+ * a client receives only what its interest cells hold.
+ */
 export const MonsterState = schema(
   {
     kind: t.string(),
@@ -27,10 +33,21 @@ export const LookState = schema(
 );
 export type LookState = SchemaType<typeof LookState>;
 
+/**
+ * A player body. Bodies are a fixed pool made with the room and handed from seat to seat, keyed
+ * by slot, never by session: a schema instance keeps its ref id for the room's lifetime, ids are
+ * never reused, and every patch spends 1 byte on an id under 128 but 3 on one past 255. Pooled
+ * bodies keep the moving players on 1-byte ids however many have come and gone.
+ */
 export const PlayerState = schema(
   {
+    /** Session id of the seat using this body; empty while the body is free. */
+    sid: t.string(),
     x: t.uint16(),
     y: t.uint16(),
+    facing: t.uint8(),
+    /** Sequence number of the last input the server applied; sent to the owner only. */
+    seq: t.uint32().view(OWNER_TAG),
     name: t.string(),
     major: t.string(),
     look: LookState,
@@ -54,12 +71,15 @@ export function dressPlayer(player: PlayerState, character: Character): void {
   player.look = synced;
 }
 
-/** Keys of `monsters` are monster ids, keys of `players` are session ids. */
+/** Player bodies a map room holds, which is also its seat count. */
+export const MAP_SEATS = 100;
+
+/** Keys of `monsters` are monster ids, keys of `players` are body slots ("0" to MAP_SEATS - 1). */
 export const MapState = schema(
   {
     tick: t.uint32(),
-    monsters: t.map(MonsterState),
-    players: t.map(PlayerState),
+    monsters: t.map(MonsterState).view(),
+    players: t.map(PlayerState).view(),
   },
   "MapState",
 );

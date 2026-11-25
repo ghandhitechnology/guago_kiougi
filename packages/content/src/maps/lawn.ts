@@ -1,5 +1,6 @@
 import type { SpawnGroup, TileCollision } from "@guago/shared";
 import { TILE_SIZE } from "@guago/shared";
+import { footprintRows, LAWN_PROPS, type PlacedProp } from "./lawn-props.ts";
 
 /**
  * The first walking map, written before the map format: one terrain pair, one spawn. Kept as is
@@ -17,8 +18,10 @@ export interface MapDef {
   /** Player spawn in world pixels. */
   readonly spawn: { readonly x: number; readonly y: number };
   readonly monsters: readonly SpawnGroup[];
-  /** Every tile walkable; the map edge is the wall. */
+  /** Walkable but for the props' footprints; the map edge is the wall. */
   readonly collision: TileCollision;
+  /** What stands on the map, drawn by the client and blocking its footprint. */
+  readonly props: readonly PlacedProp[];
 }
 
 const LAWN_ROWS = [
@@ -61,8 +64,9 @@ export const LAWN: MapDef = {
   collision: {
     w: LAWN_ROWS[0]?.length ?? 0,
     h: LAWN_ROWS.length,
-    rows: LAWN_ROWS.map((r) => ".".repeat(r.length)),
+    rows: footprintRows(LAWN_ROWS[0]?.length ?? 0, LAWN_ROWS.length, LAWN_PROPS),
   },
+  props: LAWN_PROPS,
 };
 
 export function mapSize(map: MapDef): { w: number; h: number } {
