@@ -82,8 +82,11 @@ export class Body {
   stopUntil = 0;
   stopHeavy = false;
   lag = 0;
+  /** Frames of flash still to draw. */
   flash = 0;
   flashMode = 0;
+  /** The flash tint is on the sprite and comes off on the first frame after it. */
+  flashing = false;
   squash = 0;
   squashV = 0;
   /** Kick in pixels on top of the track, from the last hit, decaying. */
@@ -216,6 +219,7 @@ export class Bodies {
     b.stopUntil = 0;
     b.lag = 0;
     b.flash = 0;
+    b.flashing = false;
     b.squash = 0;
     b.squashV = 0;
     b.kickX = 0;
@@ -655,16 +659,21 @@ export class Bodies {
     s.setPosition(Math.round(b.x), Math.round(b.y));
   }
 
-  /** Two frames of flash: the player's own hit is solid white, anyone else's a softer lift. */
+  /**
+   * The flash, drawn for exactly `flash` frames (PLAN §6: two for a hit): the player's own hit is
+   * solid white, a hurt solid red, anyone else's hit a softer lift.
+   */
   private drawFlash(b: Body): void {
-    if (b.flash <= 0) return;
     const s = b.sprite;
-    b.flash--;
-    if (b.flash < 0) return;
-    if (b.flash === 0 && !b.blink) {
-      s.clearTint();
+    if (b.flash <= 0) {
+      if (b.flashing) {
+        b.flashing = false;
+        if (!b.blink) s.clearTint();
+      }
       return;
     }
+    b.flash--;
+    b.flashing = true;
     if (b.flashMode === 0) s.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     else if (b.flashMode === 2)
       s.setTint(this.ctx.cat.color("red.light")).setTintMode(Phaser.TintModes.FILL);

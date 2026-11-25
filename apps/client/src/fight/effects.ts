@@ -112,12 +112,16 @@ export class Effects {
   private turn = 0;
   /** Books the local player wears evolved, by rules index (from its inventory). */
   private readonly evolvedOwn = new Set<number>();
+  /** The light a monster's tell throws on the ground. */
+  private readonly tellColor: number;
+  private frame = 0;
 
   constructor(ctx: FightContext, bodies: Bodies, hooks: EffectHooks) {
     this.ctx = ctx;
     this.bodies = bodies;
     this.hooks = hooks;
     this.pieces = new Pieces(ctx.scene, ctx.view);
+    this.tellColor = ctx.cat.color("red.light");
   }
 
   get count(): number {
@@ -238,9 +242,13 @@ export class Effects {
     if (fresh) {
       if (!a.own && !a.enemy) this.others++;
       this.live.push(a);
-      // The caster swings when its effect leaves its hands.
+      // The caster swings when its effect leaves its hands, and the cast lights the ground there.
       const caster = enemy ? undefined : this.hooks.body(f.owner);
-      if (caster) this.bodies.attack(caster);
+      if (caster) {
+        this.bodies.attack(caster);
+        if (a.art && (own || this.ctx.restraint.otherSparks > 0))
+          this.castLight(caster.x, caster.y, a.art.color, own);
+      }
     }
     if (enemy && f.kind === FxKind.Danger) {
       this.ctx.sound.cue("combat.telegraph.tick", f.x, f.y, true);
@@ -317,11 +325,36 @@ export class Effects {
     a.predicted = true;
     a.predictedAt = this.ctx.now;
     this.live.push(a);
+    this.castLight(x, y, a.art.color, true);
     return true;
+  }
+
+  /** A cast's light on the ground at the caster's hands. */
+  private castLight(x: number, y: number, color: number, own: boolean): void {
+    this.ctx.lights.flash(x, y - 10, color, own ? 48 : 30, own ? 0.9 : 0.35, own ? 260 : 160);
+  }
+
+  /**
+   * An effect carries its light while it flies or lies: a short flash at its first drawn piece
+   * every few frames, the local player's often and bright, anyone else's seldom and dim.
+   */
+  private carry(a: Active): void {
+    const art = a.art;
+    if (!art) return;
+    const every = a.mine ? 3 : 8;
+    if ((this.frame + a.fx) % every !== 0) return;
+    if (!a.mine && (this.ctx.restraint.otherSparks <= 0 || !this.ctx.lights.spare)) return;
+    for (const p of a.pieces) {
+      if (!p.inUse || !p.s.visible) continue;
+      const r = a.mine ? 30 : 20;
+      this.ctx.lights.flash(p.s.x, p.s.y, art.color, r, a.mine ? 0.6 : 0.25, 150);
+      return;
+    }
   }
 
   update(dtMs: number): void {
     const now = this.ctx.now;
+    this.frame++;
     for (let i = 0; i < this.live.length; ) {
       const a = this.live[i] as Active;
       if (a.predicted && now - a.predictedAt > PREDICT_MS) {
@@ -349,6 +382,7 @@ export class Effects {
         this.free(a);
         continue;
       }
+      if (!a.enemy && t >= 0) this.carry(a);
       i++;
     }
   }
@@ -924,7 +958,7 @@ export class Effects {
       const fade = strikes > 0 ? Math.max(0, Math.min(1, (FLASH - sinceStrike) / 3)) : 1;
       const blink = Math.floor(this.ctx.now / 90) % 2 === 0;
       for (let i = 0; i < n; i++) {
-        const p = this.piece(a, i, Layer.Ground);
+        const p = this.piece(a, i, Layer.Tell);
         const frame =
           strikes > 0
             ? blink
@@ -939,6 +973,8 @@ export class Effects {
         const d = (i + 1) * gap;
         p.s.setPosition(Math.round(a.x + cos * d), Math.round(a.y + sin * d - 2));
         p.s.setVisible(true);
+        // Every other dot throws light, so the run lights up as a band, not beads.
+        if (i % 2 === 0) this.pieces.tell(p, { color: this.tellColor, radius: 9, intensity: 0.45 });
       }
       this.hideFrom(a, n);
       return false;
@@ -950,7 +986,7 @@ export class Effects {
       const cos = Math.cos(a.angle);
       const sin = Math.sin(a.angle);
       for (let i = 0; i < n; i++) {
-        const p = this.piece(a, i, Layer.Ground);
+        const p = this.piece(a, i, enemy ? Layer.Tell : Layer.Ground);
         let frame: string;
         if (enemy) {
           const frames = cat.meta.sprites[art]?.anims.charge?.frames ?? [];
@@ -975,6 +1011,7 @@ export class Effects {
         );
         p.s.setPosition(Math.round(a.x + cos * i * segLen), Math.round(a.y + sin * i * segLen));
         p.s.setVisible(true);
+        if (enemy) this.pieces.tell(p, { color: this.tellColor, radius: segLen / 2 + 6 });
       }
       this.hideFrom(a, n);
       // The fault itself opens along the line when the 예보 lands.
@@ -1000,7 +1037,7 @@ export class Effects {
       return this.forecastCircle(a, t, strikes, sinceStrike, charging, progress, delay);
     // A circle.
     const art = "tele-circle";
-    const p = this.piece(a, 0, Layer.Ground);
+    const p = this.piece(a, 0, enemy ? Layer.Tell : Layer.Ground);
     const fill = cat.meta.sprites[art]?.anims.fill?.frames ?? [];
     const fire = cat.meta.sprites[art]?.anims.fire?.frames ?? [];
     const frame =
@@ -1017,6 +1054,7 @@ export class Effects {
       .setAlpha(a.alpha * (strikes > 0 && !charging ? Math.min(1, (FLASH - sinceStrike) / 3) : 1));
     // The player's own telegraph is amber, never hazard red.
     if (!enemy) p.s.setTint(this.ctx.cat.color("gold.light"));
+    else this.pieces.tell(p, { color: this.tellColor, radius: r + 8 });
     return false;
   }
 

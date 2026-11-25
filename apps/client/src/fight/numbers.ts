@@ -14,6 +14,8 @@ const BIG_AFTER = 3;
 const MERGE_MS = 420;
 const LIFE_MS = 720;
 const FADE_MS = 180;
+/** A new number standing on another moves up by this, px: a line of the small font and a gap. */
+const STACK_PX = 9;
 /** Above the world, under the reticle. */
 const DEPTH = 20;
 
@@ -143,8 +145,6 @@ export class DamageNumbers {
     n.amount = amount;
     n.age = 0;
     n.total = 0;
-    n.x = x + (Math.random() - 0.5) * 8;
-    n.y = y - Math.random() * 4;
     this.side = -this.side;
     n.drift = this.side * (2 + Math.random() * 4);
     n.pop = style === NumberStyle.Crit ? 1.2 : 0.8;
@@ -154,6 +154,30 @@ export class DamageNumbers {
     n.text.setText(formatKorean(amount)).setVisible(true).setAlpha(1);
     n.text.clearTint();
     if (style === NumberStyle.Heal) n.text.setTint(0xacd26a);
+    n.x = x + (Math.random() - 0.5) * 8;
+    n.y = this.clear(n, n.x, y - Math.random() * 4);
+  }
+
+  /**
+   * The height a new number at (x, y) can stand at without covering one already rising there:
+   * it stacks above, so a crowd's numbers read as a column instead of a smudge.
+   */
+  private clear(n: Num, x: number, y: number): number {
+    const w = n.text.width;
+    for (let tries = 0; tries < 4; tries++) {
+      let moved = false;
+      for (const p of this.pool) {
+        if (!p.alive || p === n) continue;
+        const f = Math.min(1, p.total / LIFE_MS);
+        const px = p.x + p.drift * f;
+        const py = p.y - 16 * (1 - (1 - f) * (1 - f));
+        if (Math.abs(px - x) * 2 >= w + p.text.width || Math.abs(py - y) >= STACK_PX) continue;
+        y = py - STACK_PX;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    return y;
   }
 
   private free(): Num {
