@@ -6,7 +6,7 @@
 
 import { growth } from "./growth.ts";
 import { type Amounts, earn, type Outcome, type Purse, pay } from "./ledger.ts";
-import { expToNext, monsterCoin, monsterEXP } from "./numbers.ts";
+import { expFalloff, expToNext, monsterCoin, monsterEXP } from "./numbers.ts";
 import { STAT_IDS, STAT_POINTS_PER_LEVEL, type Stats } from "./stats.ts";
 
 // ── 전직 ───────────────────────────────────────────────────────────────────
@@ -95,9 +95,9 @@ export interface Rate {
 export type LogoutPlace = "field" | "hub" | "study-hall" | "dorm";
 
 export const POOL = {
-  share: 0.25,
+  share: 0.03,
   capSeconds: 8 * 3600,
-  studyHallShare: 0.35,
+  studyHallShare: 0.042,
   studyHallCapSeconds: 10 * 3600,
   /** 층장 of the week: one more hour on the cap (PLAN §11). */
   floorLeaderSeconds: 3600,
@@ -234,8 +234,8 @@ export const BOARD = {
 export const QUEST_REWARD: Readonly<
   Record<Cadence, { kills: number; ink: number; binding: number; sheets: number }>
 > = {
-  daily: { kills: 150, ink: 10, binding: 0, sheets: 2 },
-  weekly: { kills: 1200, ink: 60, binding: 2, sheets: 10 },
+  daily: { kills: 150, ink: 10, binding: 0, sheets: 0 },
+  weekly: { kills: 1200, ink: 60, binding: 2, sheets: 3 },
   repeat: { kills: 50, ink: 0, binding: 0, sheets: 0 },
 };
 
@@ -252,12 +252,23 @@ export interface QuestReward {
   readonly sheets: number;
 }
 
-/** What a notice pays a player of `level`; `completedToday` steps repeatables down. */
-export function questReward(cadence: Cadence, level: number, completedToday = 0): QuestReward {
+/**
+ * What a notice pays. `level` is the level of the field's monsters the notice sends the player
+ * after, so its EXP falls off like those kills would for a `playerLevel` far above them; a
+ * notice never pays more than hunting there. `completedToday` steps repeatables down; in a sealed
+ * Page `catchUpMult` multiplies the EXP like every other EXP there (PLAN §9).
+ */
+export function questReward(
+  cadence: Cadence,
+  level: number,
+  completedToday = 0,
+  playerLevel = level,
+  catchUpMult = 1,
+): QuestReward {
   const r = QUEST_REWARD[cadence];
   const share = cadence === "repeat" ? repeatShare(completedToday) : 1;
   return {
-    exp: monsterEXP(level, 1) * r.kills * share,
+    exp: monsterEXP(level, 1) * r.kills * share * expFalloff(playerLevel, level) * catchUpMult,
     pinecone: Math.round(monsterCoin(level, 1) * r.kills * share),
     ink: r.ink,
     binding: r.binding,

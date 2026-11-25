@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { earn, pay } from "./ledger.ts";
-import { expToNext, monsterCoin, monsterEXP } from "./numbers.ts";
+import { expToNext, killsPerLevel, monsterCoin, monsterEXP } from "./numbers.ts";
 import {
   addExp,
   allocateStats,
@@ -10,6 +10,7 @@ import {
   completeQuest,
   drowsyMult,
   hasUnlock,
+  POOL,
   poolFill,
   questReward,
   repeatShare,
@@ -50,21 +51,21 @@ describe("stats", () => {
 describe("자습 pool", () => {
   const rate = { exp: 100, pinecone: 10, sheets: 0.01 };
 
-  it("fills at 25% for up to 8 hours", () => {
+  it("fills at its share for up to 8 hours", () => {
     const fill = poolFill(rate, 20 * 3600, "field");
     expect(fill.seconds).toBe(8 * 3600);
-    expect(fill.exp).toBeCloseTo(100 * 0.25 * 8 * 3600, 6);
-    expect(poolFill(rate, 3600, "dorm").exp).toBeCloseTo(100 * 0.25 * 3600, 6);
+    expect(fill.exp).toBeCloseTo(100 * POOL.share * 8 * 3600, 6);
+    expect(poolFill(rate, 3600, "dorm").exp).toBeCloseTo(100 * POOL.share * 3600, 6);
   });
 
-  it("fills at 35% for up to 10 hours in the 자습실, plus the 층장 hour", () => {
+  it("fills at its larger share for up to 10 hours in the 자습실, plus the 층장 hour", () => {
     const fill = poolFill(rate, 20 * 3600, "study-hall", true);
     expect(fill.seconds).toBe(11 * 3600);
-    expect(fill.pinecone).toBeCloseTo(10 * 0.35 * 11 * 3600, 6);
+    expect(fill.pinecone).toBeCloseTo(10 * POOL.studyHallShare * 11 * 3600, 6);
   });
 
   it("applies catch-up to the pool", () => {
-    expect(poolFill(rate, 3600, "hub", false, 3).exp).toBeCloseTo(100 * 0.25 * 3600 * 3, 6);
+    expect(poolFill(rate, 3600, "hub", false, 3).exp).toBeCloseTo(100 * POOL.share * 3600 * 3, 6);
   });
 
   it("takes the best ten-minute window by EXP", () => {
@@ -113,7 +114,7 @@ describe("수행평가", () => {
   it("pays in same-level kills, so a notice keeps its worth through a Page", () => {
     for (const level of [5, 50, 95]) {
       const daily = questReward("daily", level);
-      expect(daily.exp / expToNext(level)).toBeCloseTo(150 / Math.min(3000, 100 + 60 * level), 9);
+      expect(daily.exp / expToNext(level)).toBeCloseTo(150 / killsPerLevel(level), 9);
       expect(daily.pinecone).toBe(Math.round(monsterCoin(level, 1) * 150));
     }
     expect(questReward("repeat", 40, 2).exp).toBeCloseTo(monsterEXP(40, 1) * 50 * 0.6, 6);

@@ -45,6 +45,8 @@ export interface BoardDraw {
   readonly milestone: Milestone;
   /** Repeatables already finished today, for the step-down. */
   readonly completedToday?: number;
+  /** Catch-up of the field's Page (`catchUp`), 1 on the live Page. */
+  readonly catchUpMult?: number;
 }
 
 function eligible(t: QuestTemplate, cadence: Cadence, milestone: Milestone): boolean {
@@ -63,6 +65,8 @@ export function drawNotices(random: Random, draw: BoardDraw): QuestOffer[] {
   const hunted = draw.field.roster.filter(
     (r) => !NOT_HUNTED.has(r.monster) && (r.from ?? 0) <= draw.level,
   );
+  const { min, max } = draw.field.levels;
+  const fieldLevel = Math.min(max, Math.max(min, draw.level));
   return picked.map((t, i) => {
     const count = QUEST_TARGETS[t.kind][draw.cadence];
     const slots: Partial<Record<Slot, string | number>> = {};
@@ -79,7 +83,13 @@ export function drawNotices(random: Random, draw: BoardDraw): QuestOffer[] {
       cadence: draw.cadence,
       slots,
       count,
-      reward: questReward(draw.cadence, draw.level, (draw.completedToday ?? 0) + i),
+      reward: questReward(
+        draw.cadence,
+        fieldLevel,
+        (draw.completedToday ?? 0) + i,
+        draw.level,
+        draw.catchUpMult ?? 1,
+      ),
     };
   });
 }
