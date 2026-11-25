@@ -11,6 +11,8 @@ import {
   type Applicant,
   CLUB_FOUND_LEVEL,
   CLUB_INVITE_DAYS,
+  CLUB_INVITES_IN_CAP,
+  CLUB_INVITES_OUT_CAP,
   CLUB_NOTICES_CAP,
   CLUB_PAGE,
   type ClubAction,
@@ -46,6 +48,7 @@ interface ClubRow {
   jacket: string;
   emblem: Emblem;
   memberCount: number;
+  inviteCount: number;
 }
 
 const clubRow = (r: Record<string, unknown>): ClubRow => ({
@@ -58,6 +61,7 @@ const clubRow = (r: Record<string, unknown>): ClubRow => ({
   jacket: r.jacket_color as string,
   emblem: r.emblem as Emblem,
   memberCount: Number(r.member_count),
+  inviteCount: Number(r.invite_count),
 });
 
 const time = (v: unknown) => new Date(v as string).getTime();
@@ -263,7 +267,19 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
             Number(member.rows[0].club_id) === club.id ? "in_club" : "target_in_club",
           );
         }
-        if (silent) return { club: club.id };
+        if (silent) {
+          // Nothing is stored, but the caps a stored invite would meet answer the same way,
+          // so a full club or a full inbox never tells the inviter they are blocked.
+          const held = await tx.execute(sql`
+            select club_invites as n from social_counts where character_id = ${target}`);
+          if (
+            club.inviteCount >= CLUB_INVITES_OUT_CAP ||
+            Number(held.rows[0]?.n ?? 0) >= CLUB_INVITES_IN_CAP
+          ) {
+            throw new Refuse("invites_full");
+          }
+          return { club: club.id };
+        }
         const expires = new Date(now() + CLUB_INVITE_DAYS * 24 * 3600 * 1000);
         await tx.execute(sql`
           insert into club_invites (club_id, character_id, invited_by, expires_at)

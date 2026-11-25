@@ -449,3 +449,27 @@ describe("lock order", () => {
     }
   });
 });
+
+describe("a club invite to a player who blocked the inviter", () => {
+  it("is refused by the same caps as one that is delivered", async () => {
+    const leader = await character(CLUB_FOUND_LEVEL);
+    await club(leader, "invite");
+    for (let i = 0; i < 20; i++) {
+      expect(codeOf(await social.clubs.invite(leader, await character(), false))).toBe("ok");
+    }
+    const [open, blocker] = [await character(), await character()];
+    expect(codeOf(await social.clubs.invite(leader, open, false))).toBe("invites_full");
+    expect(codeOf(await social.clubs.invite(leader, blocker, true))).toBe("invites_full");
+
+    // The target's side: ten invites held already.
+    const full = await character();
+    for (let i = 0; i < 10; i++) {
+      const other = await character(CLUB_FOUND_LEVEL);
+      await club(other, "invite");
+      expect(codeOf(await social.clubs.invite(other, full, false))).toBe("ok");
+    }
+    const late = await character(CLUB_FOUND_LEVEL);
+    await club(late, "invite");
+    expect(codeOf(await social.clubs.invite(late, full, true))).toBe("invites_full");
+  });
+});
