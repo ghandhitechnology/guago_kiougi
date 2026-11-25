@@ -5,10 +5,14 @@
  * without a line fails the typecheck. Rule things are 권 사감's, money is the 자판기's or the
  * 매점부's, club things are the 짱's, the rest is the narrator. Each fits one toast row.
  *
+ * Trade codes (`TRADE_ERRORS`) are both WorldRoom refusals (direct trade) and operation errors
+ * (the 매점 게시판), so their lines are filed under both. A listing a blocked seller put up reads
+ * `listing_missing`, the same as one that is gone, and nothing here hints at a block.
+ *
  * Ids: `refusal.live.<code>`, `refusal.world.<code>`, `refusal.op.<code>`. A refusal's own
  * fields fill the slots: `until` as {time} for `muted`, `need` as {level} for `level`.
  */
-import type { LiveRefusalCode, OpError, RefusalCode } from "@guago/shared";
+import type { LiveRefusalCode, OpError, RefusalCode, TradeErrorCode } from "@guago/shared";
 import { Writer } from "./author.ts";
 import type { CopyPart, Slot, SystemMessage } from "./schema.ts";
 
@@ -31,7 +35,34 @@ const LIVE: Readonly<Record<LiveRefusalCode, Line>> = {
   sent_home: ["sagam", "귀가 중입니다. 복귀한 뒤에 오십시오."],
 };
 
+const TRADE: Readonly<Record<TradeErrorCode, Line>> = {
+  trade_level: ["narrator", "둘 다 1학년 전직을 마쳐야 거래할 수 있다."],
+  trade_offline: ["narrator", "그 학생은 지금 접속해 있지 않다."],
+  trade_self: ["narrator", "자기 자신과는 거래할 수 없다."],
+  trade_far: ["narrator", "너무 멀다. 가까이 가야 거래할 수 있다."],
+  trade_busy: ["narrator", "다른 거래가 아직 끝나지 않았다."],
+  trade_no_session: ["narrator", "그 거래 창은 이미 닫혔다."],
+  trade_changed: ["narrator", "그사이 올려놓은 것이 바뀌었다. 다시 볼 것."],
+  trade_empty: ["narrator", "양쪽 다 아무것도 올려놓지 않았다."],
+  trade_too_many: ["narrator", "한 번에 올릴 수 있는 수를 넘었다."],
+  trade_item_gone: ["narrator", "올려놓은 물건이 이제 가방에 없다."],
+  trade_item_bound: ["narrator", "귀속된 물건은 건넬 수 없다."],
+  trade_item_equipped: ["narrator", "장착 중인 물건은 건넬 수 없다."],
+  trade_item_cooldown: ["narrator", "받은 지 하루가 안 된 물건이다."],
+  trade_stack: ["narrator", "그 묶음은 거래할 수 없다."],
+  trade_funds: ["narrator", "가진 것보다 많이 올렸다."],
+  listing_limit: ["store", "한 사람당 열 개까지만 붙일 수 있어요."],
+  listing_missing: ["store", "그 물건은 매점에 없어요."],
+  listing_closed: ["store", "이미 팔렸거나 내려간 물건이에요."],
+  listing_expired: ["store", "기한이 지나서 내려간 물건이에요."],
+  listing_own: ["store", "자기 물건은 못 사요."],
+  listing_qty: ["store", "남은 수량보다 많이 골랐어요."],
+  listing_price: ["store", "값이 맞지 않아요. 다시 확인해 주세요."],
+  listing_funds: ["store", "솔방울이 모자라요."],
+};
+
 const WORLD: Readonly<Record<RefusalCode, Line>> = {
+  ...TRADE,
   // Chat.
   empty: ["narrator", "아무 말도 쓰지 않았다."],
   too_long: ["narrator", "너무 길다. 조금 줄여야 한다."],
@@ -89,6 +120,7 @@ const WORLD: Readonly<Record<RefusalCode, Line>> = {
 };
 
 const OP: Readonly<Record<OpError, Line>> = {
+  ...TRADE,
   bad_request: ["narrator", "서류 양식이 맞지 않는다."],
   rate_limited: ["narrator", "손이 너무 빠르다. 잠시 뒤에 다시."],
   op_id_reused: ["narrator", "같은 서류가 두 번 들어왔다. 처음 것만 받는다."],

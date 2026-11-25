@@ -1,10 +1,11 @@
 /**
  * Trading (PLAN §13), written ahead of the server: direct trade between two players and the
- * 매점 게시판. Direct trade is the narrator's; the 매점 게시판 is the 학생회 매점부's, who takes
- * the fee up front and the tax on sale. Amounts arrive formatted in {price}.
+ * 매점 게시판 (`packages/shared/src/trade.ts`). Direct trade is the narrator's; the 매점 게시판 is
+ * the 학생회 매점부's, who takes the fee up front and the tax on sale. Amounts arrive formatted
+ * in {price}. Refusals live in `refusals.ts` with every other code.
  */
 import { Writer } from "./author.ts";
-import type { CopyPart, Slot, SystemMessage } from "./schema.ts";
+import type { CopyPart, Slot, SystemMessage, Term } from "./schema.ts";
 
 const w = new Writer("trade");
 
@@ -31,7 +32,6 @@ const lines = (
 const DIRECT = lines("trade", [
   ["request-in", "narrator", "toast", "{player|이} 거래를 청했다.", ["player"]],
   ["request-sent", "narrator", "toast", "{player}에게 거래를 청했다.", ["player"]],
-  ["declined", "narrator", "toast", "{player|이} 거래를 거절했다.", ["player"]],
   ["confirm-offer", "narrator", "toast", "올려놓은 것을 확정했다. 상대를 기다린다."],
   ["confirm-final", "narrator", "toast", "둘 다 확정했다. 이제 맞바꿀 차례다."],
   [
@@ -41,13 +41,35 @@ const DIRECT = lines("trade", [
     "{player|이} 확정한 뒤에 올려놓은 것을 바꿨다. 다시 확인해야 한다.",
     ["player"],
   ],
-  ["tax", "store", "toast", "옮기는 솔방울에서 거래세로 {price} 솔방울을 떼요.", ["price"]],
+  ["tax", "store", "toast", "받는 솔방울에서 거래세로 {price} 솔방울을 떼요.", ["price"]],
+  ["opened", "narrator", "toast", "{player|와} 거래 창을 열었다.", ["player"]],
   ["done", "narrator", "toast", "거래를 마쳤다. 거래세로 {price} 솔방울이 빠졌다.", ["price"]],
-  ["cancelled", "narrator", "toast", "거래가 취소되었다. 아무것도 넘어가지 않았다."],
-  ["too-far", "narrator", "toast", "너무 멀다. 가까이 가야 거래할 수 있다."],
-  ["level", "narrator", "toast", "거래는 1학년 전직 뒤부터 할 수 있다."],
-  ["bound", "narrator", "toast", "귀속된 물건은 건넬 수 없다."],
-  ["cooldown", "narrator", "toast", "{time}부터 건넬 수 있는 물건이다.", ["time"]],
+  ["done-untaxed", "narrator", "toast", "거래를 마쳤다."],
+  ["failed", "narrator", "toast", "거래를 마치지 못했다. 두 사람 확인이 모두 풀렸다."],
+  [
+    "failed-server",
+    "narrator",
+    "dialogue",
+    "서버가 거래를 끝내지 못했다. 가방에 보이는 것이 지금 그대로다. 한쪽만 가져간 것은 없다.",
+  ],
+]);
+
+/**
+ * A window closing (`TradeCloseReason`), as `trade.closed.<reason>`. Both sides get the push; a
+ * `-self` line is for the player whose own answer or silence closed it. A request a block
+ * dropped lapses as `expired`: the asker reads the same line as for one nobody answered.
+ */
+const CLOSED = lines("trade.closed", [
+  ["cancelled", "narrator", "toast", "거래가 취소되었다."],
+  ["declined", "narrator", "toast", "{player|이} 거래를 거절했다.", ["player"]],
+  ["declined-self", "narrator", "toast", "거래 신청을 거절했다."],
+  ["expired", "narrator", "toast", "{player|이} 거래 신청에 답하지 않았다.", ["player"]],
+  ["expired-self", "narrator", "toast", "거래 신청이 시간이 지나 사라졌다."],
+  ["far", "narrator", "toast", "서로 멀어져 거래 창이 닫혔다."],
+  ["map", "narrator", "toast", "한쪽이 자리를 옮겨 거래 창이 닫혔다."],
+  ["left", "narrator", "toast", "상대가 접속을 끊어 거래 창이 닫혔다."],
+  ["replaced", "narrator", "toast", "다른 곳에서 다시 접속해 거래 창이 닫혔다."],
+  ["timeout", "narrator", "toast", "시간이 다 되어 거래 창이 닫혔다."],
 ]);
 
 const MARKET = lines("market", [
@@ -58,11 +80,19 @@ const MARKET = lines("market", [
   ["expired", "store", "toast", "{item}, 이틀 동안 아무도 안 사 갔어요.", ["item"]],
   ["returned", "store", "toast", "안 팔린 {item}, 가방에 돌려 드렸어요.", ["item"]],
   ["withdrawn", "store", "toast", "{item} 내렸어요. 수수료는 돌려드리지 않아요.", ["item"]],
-  ["full", "store", "toast", "한 사람당 열 개까지만 붙일 수 있어요."],
-  ["level", "store", "toast", "매점은 1학년 전직 뒤부터 쓸 수 있어요."],
-  ["bound", "store", "toast", "이건 못 받아요. 귀속된 물건이에요."],
-  ["cooldown", "store", "toast", "{time}부터 팔 수 있는 물건이에요.", ["time"]],
-  ["fee-short", "store", "toast", "수수료가 모자라요."],
 ]);
 
-export const TRADE_COPY: CopyPart = { system: [...DIRECT, ...MARKET], ko: w.ko };
+const names = w.scope("term");
+const TERMS: readonly Term[] = [
+  ["book", "책"],
+  ["tool", "도구"],
+  ["sheet", "낱장"],
+  ["material", "재료"],
+  ["snack", "간식"],
+].map(([id, name]) => ({ id: id as string, kind: "listing", name: names.t(name as string) }));
+
+export const TRADE_COPY: CopyPart = {
+  system: [...DIRECT, ...CLOSED, ...MARKET],
+  terms: TERMS,
+  ko: w.ko,
+};

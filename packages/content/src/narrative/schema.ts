@@ -331,7 +331,9 @@ export interface Term {
     | "rank"
     | "join"
     /** 상벌점 ledger reasons, as the ledger stores them (`knockout`, `merit.cancel`, `expel`). */
-    | "conduct";
+    | "conduct"
+    /** 매점 게시판 browse categories, by `LISTING_CATEGORIES` id. */
+    | "listing";
   readonly name: TextKey;
 }
 
