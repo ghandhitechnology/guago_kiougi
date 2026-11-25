@@ -97,6 +97,10 @@ export class Body {
   /** Kick in pixels on top of the track, from the last hit, decaying. */
   kickX = 0;
   kickY = 0;
+  /** A killed monster thrown by the blow while it pops: px/s along the ground, and its hop. */
+  flyX = 0;
+  flyY = 0;
+  hop = 0;
   lastFrame = -1;
   /** 0 alive, 1 died and waiting for its hitstop, 2 popping, 3 fading out. */
   dying = 0;
@@ -230,6 +234,9 @@ export class Bodies {
     b.squashV = 0;
     b.kickX = 0;
     b.kickY = 0;
+    b.flyX = 0;
+    b.flyY = 0;
+    b.hop = 0;
     b.lastFrame = -1;
     b.dying = 0;
     b.mineUntil = 0;
@@ -430,12 +437,41 @@ export class Bodies {
     }
     const k = Math.hypot(kx, ky);
     if (k > 0.01) {
-      const push = Math.min(3, 0.6 + k * 0.5);
+      // The blow moves what it hits: a light hit a pixel or two, a heavy one up to five.
+      const push = Math.min(5, 1.2 + k * 0.7 + (heavy ? 1 : 0));
       b.kickX = (kx / k) * push;
       b.kickY = (ky / k) * push * 0.6;
     }
-    this.kick(b, heavy ? 0.9 : 0.5);
+    this.kick(b, heavy ? 1.1 : 0.6);
     b.mineUntil = this.ctx.now + 4000;
+  }
+
+  /**
+   * A kill of the local player's: the body is thrown along (dx, dy) while it pops, with a hop,
+   * so a kill scatters instead of vanishing on the spot.
+   */
+  fling(b: Body, dx: number, dy: number, speed: number): void {
+    const d = Math.hypot(dx, dy) || 1;
+    b.flyX = (dx / d) * speed;
+    b.flyY = (dy / d) * speed * 0.6;
+    b.hop = 1;
+  }
+
+  /** Pushes the monsters within `r` of (x, y) outward by up to `px`: the blast of an impact. */
+  shove(x: number, y: number, r: number, px: number): void {
+    const r2 = r * r;
+    for (const b of this.byId.values()) {
+      if (b.cat !== Cat.Monster || b.dying) continue;
+      const dx = b.x - x;
+      const dy = b.y - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 1;
+      const k = px * (1 - (d / r) * 0.5);
+      b.kickX += (dx / d) * k;
+      b.kickY += (dy / d) * k * 0.6;
+      if (b.squash > -0.2) b.squashV += 4;
+    }
   }
 
   /** The local player was hurt. */
@@ -493,8 +529,16 @@ export class Bodies {
         b.squash = 0;
         b.squashV = 0;
       }
-      b.kickX *= 0.82;
-      b.kickY *= 0.82;
+      b.kickX *= 0.86;
+      b.kickY *= 0.86;
+      if (b.dying === 2 && b.hop > 0) {
+        // Thrown by the killing blow: it slides on, slowing, and its hop falls back.
+        b.x += b.flyX * dt;
+        b.y += b.flyY * dt;
+        b.flyX *= 0.9;
+        b.flyY *= 0.9;
+        b.hop = Math.max(0, b.hop - dt * 4);
+      }
       if (b.cat === Cat.Monster) this.drawMonster(b, frozen);
       else if (b.cat === Cat.Player) this.drawStudent(b, dtMs);
       else this.drawMinion(b);
@@ -548,7 +592,8 @@ export class Bodies {
     const shake = frozen && b.stopHeavy ? ((now / 16) & 1 ? 1 : -1) : 0;
     s.setScale(sx, sy);
     s.setFlipX((b.state & 16) === 0);
-    s.setPosition(Math.round(b.x + b.kickX + shake), Math.round(b.y + b.kickY));
+    const hop = b.hop > 0 ? Math.round(Math.sin(b.hop * Math.PI) * 7) : 0;
+    s.setPosition(Math.round(b.x + b.kickX + shake), Math.round(b.y + b.kickY) - hop);
     if (b.aura) {
       b.aura.setPosition(s.x, s.y - 0.01);
       b.aura.setVisible(b.dying === 0);
@@ -697,6 +742,11 @@ export class Bodies {
     const s = b.sprite;
     s.clearTint();
     s.anims.resume();
+    // The local player's kill pops white for a frame as it goes.
+    if (b.hop > 0) {
+      b.flash = 1;
+      b.flashMode = 0;
+    }
     const die = b.elite ? (art?.eliteDie ?? art?.die) : art?.die;
     let ms = 220;
     if (die) {

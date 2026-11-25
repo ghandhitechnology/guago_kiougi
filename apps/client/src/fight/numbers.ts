@@ -93,9 +93,8 @@ export class DamageNumbers {
   visible = 0;
   private added = 0;
   private average = 0;
-  /** Where the player stands this frame. */
+  /** Where the player stands this frame, across: numbers are thrown away from it. */
   private selfX = 0;
-  private selfY = 0;
 
   constructor(scene: Phaser.Scene) {
     for (let i = 0; i < MAX_NUMBERS; i++) {
@@ -153,11 +152,10 @@ export class DamageNumbers {
         n.style = next;
         n.text.setFont(FONT[next]);
       }
+      // It grows where it hangs, kicked up a pixel or two: its arc is not thrown again.
       n.age = 0;
       n.pop = 1;
       n.life = big(n.style) ? BIG_LIFE_MS : LIFE_MS;
-      // It grows where its target is: the arc starts again from over the head.
-      this.throwFrom(n, x, y);
       n.text.setText(formatKorean(n.amount));
       return;
     }
@@ -238,7 +236,6 @@ export class DamageNumbers {
   update(dtMs: number, selfX: number, selfY: number): void {
     this.added = 0;
     this.selfX = selfX;
-    this.selfY = selfY;
     let visible = 0;
     for (const n of this.pool) {
       if (!n.alive) continue;
@@ -250,7 +247,9 @@ export class DamageNumbers {
         continue;
       }
       visible++;
-      const s = n.total / 1000;
+      // Up to the top of its arc and a little past, then it hangs there until it fades.
+      const apex = -n.vy / GRAVITY;
+      const s = Math.min(n.total / 1000, apex + 0.08);
       // Each new hit kicks it up a pixel or two for a beat; pops are whole pixels, never a scale.
       n.pop = Math.max(0, n.pop - dtMs / 110);
       const kick = Math.round(n.pop * (big(n.style) ? 3 : 2));

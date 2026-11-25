@@ -1,5 +1,6 @@
 import * as Phaser from "phaser";
 import type { MapView } from "../render/index.ts";
+import { TEX } from "../render/textures.ts";
 import { COMBAT } from "./catalog.ts";
 
 /** How a particle moves and looks. */
@@ -12,6 +13,8 @@ export const Bit = {
   Spark: 2,
   /** An ember or a mote: drifts up and fades. */
   Mote: 3,
+  /** A wind-up: starts on a ring and draws in to the point, arriving as it ends. */
+  Gather: 4,
 } as const;
 export type Bit = (typeof Bit)[keyof typeof Bit];
 
@@ -24,6 +27,8 @@ const PAPER = [
 ];
 /** Gravity on the fake height axis, px per s². */
 const GRAVITY = 520;
+/** Seconds a wind-up's points take to draw in. */
+const GATHER_LIFE = 0.14;
 
 /**
  * Pooled particles with a hard cap (PLAN §6: 150 on mobile, 600 on desktop). Sprites are made
@@ -132,6 +137,14 @@ export class Particles {
       this.z[i] = height;
       this.vx[i] = Math.cos(a) * v;
       this.vy[i] = Math.sin(a) * v * 0.6;
+      if (kind === Bit.Gather) {
+        // `speed` is the ring's radius: it starts there and flies in over its life.
+        const r = speed * (0.7 + Math.random() * 0.5);
+        this.x[i] = x + Math.cos(a) * r;
+        this.y[i] = y + Math.sin(a) * r * 0.6;
+        this.vx[i] = (-Math.cos(a) * r) / GATHER_LIFE;
+        this.vy[i] = (-Math.sin(a) * r * 0.6) / GATHER_LIFE;
+      }
       this.vz[i] = kind === Bit.Debris ? 70 + Math.random() * 70 : kind === Bit.Paper ? 40 : 0;
       this.age[i] = 0;
       this.kind[i] = kind;
@@ -143,21 +156,25 @@ export class Particles {
             ? 0.9 + Math.random() * 0.4
             : kind === Bit.Spark
               ? 0.16 + Math.random() * 0.1
-              : 0.5 + Math.random() * 0.3;
+              : kind === Bit.Gather
+                ? GATHER_LIFE
+                : 0.5 + Math.random() * 0.3;
       const s = this.sprite(i);
-      const frame =
-        kind === Bit.Paper
-          ? (PAPER[0] as string)
-          : kind === Bit.Debris
-            ? (DEBRIS[(Math.random() * 3) | 0] as string)
-            : (DEBRIS[0] as string);
-      s.setFrame(frame, false, false);
+      if (kind === Bit.Paper || kind === Bit.Debris) {
+        if (s.texture.key !== COMBAT) s.setTexture(COMBAT);
+        s.setFrame(
+          kind === Bit.Paper ? (PAPER[0] as string) : (DEBRIS[(Math.random() * 3) | 0] as string),
+          false,
+          false,
+        );
+      } else if (s.texture.key !== TEX.px) {
+        // Sparks, motes and wind-ups are single 2 px points, drawn at ×1.
+        s.setTexture(TEX.px);
+      }
       s.setVisible(true)
         .setAlpha(1)
         .setTint(tint)
         .setFlipX(Math.random() < 0.5);
-      if (kind === Bit.Spark || kind === Bit.Mote) s.setScale(0.5);
-      else s.setScale(1);
     }
   }
 
@@ -202,6 +219,8 @@ export class Particles {
       } else if (kind === Bit.Spark) {
         vx *= 0.88;
         vy *= 0.88;
+      } else if (kind === Bit.Gather) {
+        // Straight in, no drag: it arrives on the point as it ends.
       } else {
         z += 14 * dt;
         vx *= 0.9;
@@ -218,7 +237,7 @@ export class Particles {
       const s = this.sprites[i] as Phaser.GameObjects.Sprite;
       s.setPosition(Math.round(x), Math.round(y - z));
       const left = life - age;
-      if (left < 0.2) s.setAlpha(left / 0.2);
+      if (left < 0.2 && kind !== Bit.Gather) s.setAlpha(left / 0.2);
       if (kind === Bit.Paper) {
         const f = PAPER[Math.floor(age * 10) % PAPER.length] as string;
         if (s.frame.name !== f) s.setFrame(f, false, false);

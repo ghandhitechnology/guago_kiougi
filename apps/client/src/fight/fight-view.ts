@@ -283,6 +283,7 @@ export class FightView {
       moment: (kind) => this.moment(kind),
       elite: (b, x, y) => this.eliteArrived(b, x, y),
       wears: (bookId) => this.ownBooks.includes(this.cat.rules.books.indexOf(bookId)),
+      streak: (mark) => this.streakMark(mark),
     });
     this.own = undefined;
 
@@ -451,6 +452,7 @@ export class FightView {
     this.counters.bytes += bytes.byteLength;
     this.feedback.mineThisMessage.clear();
     this.reader.read(bytes, this.sink);
+    this.feedback.flush();
     const tick = this.reader.tick;
     this.clock.observe(tick, performance.now());
     this.bodies.sync(tick, this.reader.members);
@@ -751,6 +753,76 @@ export class FightView {
     }
   }
 
+  /**
+   * The kill streak passed 10, 25, 50, 100 (then every hundred): a burst on the player that
+   * grows with the mark, a note that climbs, and the field shaken.
+   */
+  private streakMark(mark: number): void {
+    const cat = this.cat;
+    const x = this.ctx.selfX;
+    const y = this.ctx.selfY;
+    const step = mark >= 100 ? 3 : mark >= 50 ? 2 : mark >= 25 ? 1 : 0;
+    const gold = cat.color(step >= 2 ? "gold.pale" : "gold.light");
+    this.effects.oneShot(
+      "fx-hit-crit",
+      "fx-hit-crit/hit",
+      x,
+      y - 12,
+      1,
+      Layer.Glow,
+      step >= 1 ? 2 : 1,
+    );
+    this.effects.oneShot("fx-pop", "fx-pop/die", x, y - 12, 1, Layer.Glow, step >= 2 ? 2 : 1);
+    this.ctx.particles.burst(Bit.Spark, x, y - 10, 16 + step * 8, gold, 180 + step * 30, 0);
+    this.ctx.particles.burst(Bit.Mote, x, y - 6, 10 + step * 4, gold, 60, 0);
+    this.bodies.shove(x, y, 48 + step * 16, 3 + step);
+    this.ctx.lights.strike(x, y - 10, gold, 32, 0.9, 400);
+    this.ctx.sound.streakMark(this.ctx.selfClass, step);
+    this.ctx.trauma.add(0.2 + step * 0.06);
+    const self = this.bodies.self;
+    if (self) {
+      self.flash = 2;
+      self.flashMode = 0;
+      this.bodies.kick(self, -1.4);
+    }
+  }
+
+  /** Book slots whose ready tick has had its wind-up. */
+  private readonly wound: number[] = [];
+
+  /**
+   * Where books cast themselves, each book's next cast winds up at the player's hands a beat
+   * before it is ready, when there is something near to cast at.
+   */
+  private windups(): void {
+    const own = this.own;
+    if (!own || own.down > 0 || !this.bodies.self) return;
+    if (!MODE_AUTO[this.state.mode as 0]?.books) return;
+    let near = false;
+    for (let i = 0; i < this.ownBooks.length; i++) {
+      const ready = own.ready[i] ?? 0;
+      if (this.wound[i] === ready) continue;
+      const left = ready - this.ctx.ownTick;
+      if (left > 2.6 || left < -1) continue;
+      this.wound[i] = ready;
+      if (!near) near = this.monsterWithin(170);
+      if (!near) return;
+      this.effects.windup(this.ownBooks[i] as number, this.ctx.selfX, this.ctx.selfY);
+      this.bodies.kick(this.bodies.self, 0.35);
+    }
+  }
+
+  private monsterWithin(r: number): boolean {
+    const r2 = r * r;
+    for (const b of this.bodies.byId.values()) {
+      if (b.cat !== Cat.Monster || b.dying) continue;
+      const dx = b.x - this.ctx.selfX;
+      const dy = b.y - this.ctx.selfY;
+      if (dx * dx + dy * dy < r2) return true;
+    }
+    return false;
+  }
+
   // Frame --------------------------------------------------------------------------------------
 
   /** Draws the fight for this frame. Call at the end of the scene's update, after the camera is placed. */
@@ -782,6 +854,7 @@ export class FightView {
     this.composeQueued();
     this.feedback.frame();
     this.controlsFrame(now);
+    this.windups();
     this.bodies.update(dt, rt);
     this.selfFrame(now);
     this.effects.update(dt);

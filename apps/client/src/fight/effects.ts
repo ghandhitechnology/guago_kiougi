@@ -243,6 +243,16 @@ class Loose {
   stopAt = "";
 }
 
+/** A copy of a piece left where it was, fading out. */
+class Fade {
+  p: Piece | null = null;
+  from = 0;
+  start = 0;
+}
+
+/** How long an after-image takes to fade, ms. */
+const AFTER_MS = 150;
+
 /** One of sixteen directions for art drawn turned in steps of 22.5°, 0 pointing right. */
 export function dir16(angle: number): number {
   return ((Math.round(angle / (Math.PI / 8)) % 16) + 16) % 16;
@@ -271,6 +281,8 @@ export class Effects {
   private readonly pool: Active[] = [];
   private readonly loose: Loose[] = [];
   private readonly loosePool: Loose[] = [];
+  private readonly fades: Fade[] = [];
+  private readonly fadePool: Fade[] = [];
   private others = 0;
   private rockTurn = 0;
   private turn = 0;
@@ -493,6 +505,7 @@ export class Effects {
         if (a.art && (own || this.ctx.restraint.otherSparks > 0))
           this.castLight(caster.x, caster.y, a.art.color, own);
       }
+      if (own) this.flourish(a, this.ctx.selfX, this.ctx.selfY);
     }
     if (enemy && f.kind === FxKind.Danger) {
       this.ctx.sound.cue("combat.telegraph.tick", f.x, f.y, true);
@@ -570,7 +583,63 @@ export class Effects {
     a.predictedAt = this.ctx.now;
     this.live.push(a);
     this.castLight(x, y, a.art.color, true);
+    this.flourish(a, x, y);
     return true;
+  }
+
+  /**
+   * The local player's cast leaving their hands: sparks thrown along the aim for anything aimed,
+   * a ring of motes at the feet for anything that rises round them, and the body's lunge.
+   */
+  private flourish(a: Active, x: number, y: number): void {
+    const art = a.art;
+    if (!art) return;
+    const color = this.trailColor(a);
+    const hx = x + Math.cos(a.angle) * 7;
+    const hy = y - 10 + Math.sin(a.angle) * 7;
+    switch (a.kind) {
+      case FxKind.Shot:
+      case FxKind.Lob:
+      case FxKind.Beam:
+      case FxKind.Cone:
+      case FxKind.Chain:
+      case FxKind.Dash:
+        this.ctx.particles.burst(Bit.Spark, hx, hy, 6, color, 140, 0, a.angle, 0.7);
+        this.ctx.particles.burst(Bit.Spark, hx, hy, 3, this.ctx.cat.color("stone.bright"), 90, 0);
+        this.oneShot("fx-spark", "fx-spark/hit", hx, hy, 1);
+        break;
+      default:
+        this.ctx.particles.burst(Bit.Mote, x, y - 4, 8, color, 50, 0);
+        break;
+    }
+    const self = this.bodies.self;
+    if (self) {
+      // The lunge: a stretch into the cast and a pixel's step along the aim.
+      this.bodies.kick(self, -0.7);
+      self.kickX += Math.cos(a.angle) * 1.5;
+      self.kickY += Math.sin(a.angle) * 0.9;
+    }
+  }
+
+  /**
+   * The colour an own effect's trail and sparks take: the book's own, turning gold once the
+   * kill streak is running.
+   */
+  private trailColor(a: Active): number {
+    const streak = this.ctx.sound.killStreak;
+    if (streak >= 10) return this.ctx.cat.color(streak >= 25 ? "gold.pale" : "gold.light");
+    return a.art?.color ?? this.ctx.cat.color("stone.bright");
+  }
+
+  /**
+   * A wind-up of the local player's next cast at their hands: points of the book's colour
+   * drawing in for a beat before the book is ready again.
+   */
+  windup(book: number, x: number, y: number): void {
+    const art = this.ctx.cat.book(book, this.evolvedOwn.has(book));
+    const streak = this.ctx.sound.killStreak;
+    const color = streak >= 10 ? this.ctx.cat.color("gold.light") : art.color;
+    this.ctx.particles.burst(Bit.Gather, x, y - 10, 7, color, 14, 0);
   }
 
   /** A cast's light on the ground at the caster's hands; `FightLights` keeps it to dark maps. */
@@ -629,6 +698,47 @@ export class Effects {
       i++;
     }
     this.updateLoose(now);
+    this.updateFades(now);
+  }
+
+  /**
+   * Leaves a copy of a piece where it stands, fading over a beat: the after-image of a shot that
+   * landed. The copy is a glow piece of its own; the original goes back with its effect.
+   */
+  afterImage(src: Piece, alpha = 0.6): void {
+    const p = this.pieces.take(Layer.Glow);
+    const s = p.s;
+    const o = src.s;
+    show(p, o.texture.key, o.frame.name, null);
+    s.setOrigin(o.originX, o.originY)
+      .setPosition(o.x, o.y)
+      .setRotation(o.rotation)
+      .setFlip(o.flipX, o.flipY)
+      .setScale(o.scaleX, o.scaleY)
+      .setAlpha(alpha * o.alpha);
+    if (o.isTinted) s.setTint(o.tintTopLeft).setTintMode(o.tintMode);
+    const f = this.fadePool.pop() ?? new Fade();
+    f.p = p;
+    f.from = s.alpha;
+    f.start = this.ctx.now;
+    this.fades.push(f);
+  }
+
+  private updateFades(now: number): void {
+    for (let i = 0; i < this.fades.length; ) {
+      const f = this.fades[i] as Fade;
+      const k = 1 - (now - f.start) / AFTER_MS;
+      if (k <= 0) {
+        this.pieces.give(f.p as Piece);
+        f.p = null;
+        this.fadePool.push(f);
+        this.fades[i] = this.fades[this.fades.length - 1] as Fade;
+        this.fades.pop();
+        continue;
+      }
+      (f.p as Piece).s.setAlpha(f.from * k);
+      i++;
+    }
   }
 
   /** Draws an effect at age `t` ticks; true when it is over. */
@@ -760,22 +870,21 @@ export class Effects {
     if (art?.turns) s.setRotation(a.angle);
     place(p, x, y - (enemy ? 2 : 4));
     if (fallback && art && !enemy) s.setTint(art.color);
-    // Smear: two ghosts behind anything fast, untinted: the art already carries its colour.
-    if (!enemy && a.speed >= 6) {
-      for (let g = 1; g <= 2; g++) {
-        const gp = this.piece(a, g);
-        const gs = show(gp, cat.atlas(name), s.frame.name, null);
-        gs.setVisible(true)
-          .setAlpha(a.alpha * (g === 1 ? 0.45 : 0.2))
-          .setRotation(s.rotation);
-        place(
-          gp,
-          x - Math.cos(a.angle) * a.speed * 0.25 * g,
-          y - 4 - Math.sin(a.angle) * a.speed * 0.25 * g,
-        );
-        if (fallback && art) gs.setTint(art.color);
-      }
+    // Smear: ghosts behind anything fast, untinted: the art already carries its colour. The
+    // player's own shots always trail three, a body's length apart, and drop motes behind them.
+    const ghosts = a.mine && a.speed >= 3 ? 3 : !enemy && a.speed >= 6 ? 2 : 0;
+    const gap = Math.max(4, Math.min(9, a.speed * 0.6));
+    for (let g = 1; g <= ghosts; g++) {
+      const gp = this.piece(a, g);
+      const gs = show(gp, cat.atlas(name), s.frame.name, null);
+      gs.setVisible(true)
+        .setAlpha(a.alpha * (g === 1 ? 0.5 : g === 2 ? 0.28 : 0.12))
+        .setRotation(s.rotation);
+      place(gp, x - Math.cos(a.angle) * gap * g, y - 4 - Math.sin(a.angle) * gap * g);
+      if (fallback && art) gs.setTint(art.color);
     }
+    if (a.mine && (this.frame + a.fx) % 2 === 0)
+      this.ctx.particles.burst(Bit.Mote, x, y - 4, 1, this.trailColor(a), 10, 0);
     return false;
   }
 
@@ -827,6 +936,19 @@ export class Effects {
     }
     sh.s.setVisible(true).setAlpha(0.8 * a.alpha);
     place(sh, x, y);
+    if (a.mine) {
+      // A ghost a step back along the arc, and motes falling off it.
+      const g = this.piece(a, 2);
+      const fb = Math.max(0, f - 0.07);
+      const gx = a.x + (a.tx - a.x) * fb + a.ox;
+      const gy = a.y + (a.ty - a.y) * fb + a.oy - 4 * a.a * fb * (1 - fb) - 3;
+      show(g, s.texture.key, s.frame.name, null);
+      g.s.setVisible(true).setAlpha(a.alpha * 0.35);
+      if (body === "fx-book" && art) g.s.setTint(art.color);
+      place(g, gx, gy);
+      if ((this.frame + a.fx) % 2 === 0)
+        this.ctx.particles.burst(Bit.Mote, x, y - z - 3, 1, this.trailColor(a), 10, 0);
+    }
     return false;
   }
 
@@ -886,11 +1008,14 @@ export class Effects {
       }
       return false;
     }
+    // The player's own bodies drag two ghosts behind them round the circle.
+    const ghosts = a.mine && a.sweep <= 0 ? 2 : 0;
+    const back = (Math.PI * 2 * 0.6) / Math.max(1, a.period);
+    const r = a.radius * (0.5 + 0.5 * grow);
     for (let i = 0; i < n; i++) {
       let ang: number;
       if (a.sweep > 0) ang = a.angle + (a.sweep / 2) * Math.sin(turn) + a.spin * t;
       else ang = a.angle + turn + (i / n) * Math.PI * 2;
-      const r = a.radius * (0.5 + 0.5 * grow);
       const x = tmp.x + Math.cos(ang) * r;
       const y = tmp.y - 8 + Math.sin(ang) * r * 0.7;
       const p = this.piece(a, i);
@@ -898,8 +1023,16 @@ export class Effects {
       s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2));
       place(p, x, y);
       if (body === "fx-book" && art) s.setTint(art.color);
+      for (let g = 1; g <= ghosts; g++) {
+        const gp = this.piece(a, n + (i * 2 + g - 1));
+        const ga = ang - back * g;
+        show(gp, s.texture.key, s.frame.name, null);
+        gp.s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2) * (g === 1 ? 0.4 : 0.16));
+        if (body === "fx-book" && art) gp.s.setTint(art.color);
+        place(gp, tmp.x + Math.cos(ga) * r, tmp.y - 8 + Math.sin(ga) * r * 0.7);
+      }
     }
-    this.hideFrom(a, n);
+    this.hideFrom(a, n * (1 + ghosts));
     // 집단 면역: a ring of links turns on the ground under each member the antibodies guard.
     if (cat.meta.sprites[body]?.anims.ring) {
       const ring = this.piece(a, MAX_PIECES - 1, Layer.Ground);
@@ -1901,6 +2034,12 @@ export class Effects {
       name = "fx-hit-heavy";
       anim = "fx-hit-heavy/hit";
     }
+    if (a.mine) {
+      // What landed lingers a beat as an after-image, and the blast moves what stands there.
+      const body = a.pieces[0];
+      if (body?.s.visible) this.afterImage(body);
+      if (hit) this.bodies.shove(x, y, Math.max(18, a.radius * 2), a.kind === FxKind.Lob ? 3 : 2);
+    }
     // Lobs land on the ground; everything else lands where it was.
     if (a.kind === FxKind.Lob) {
       if (art.area && cat.has(art.area) && art.area.endsWith("crater")) {
@@ -2048,6 +2187,12 @@ export class Effects {
       this.loosePool.push(l);
     }
     this.loose.length = 0;
+    for (const f of this.fades) {
+      if (f.p) this.pieces.give(f.p);
+      f.p = null;
+      this.fadePool.push(f);
+    }
+    this.fades.length = 0;
   }
 
   destroy(): void {

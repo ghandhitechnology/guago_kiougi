@@ -14,8 +14,11 @@
  * | Sound | one call per hit to the mixer, which layers and limits voices |
  * | Squash | wind-up, landing, every hop, every hit |
  */
+
+import type { HitClass } from "@guago/audio";
 import { HitFlag, HurtFlag, Priv } from "@guago/shared";
 import { type Bodies, type Body, Cat } from "./bodies.ts";
+import { CLASS_RAMP } from "./catalog.ts";
 import type { FightContext } from "./context.ts";
 import type { Active, Effects } from "./effects.ts";
 import { NumberStyle } from "./numbers.ts";
@@ -50,6 +53,22 @@ export const TRAUMA = {
 const HIT_TRAUMA_PER_FRAME = 0.18;
 /** Collisions within this make a chain, ms (운동량's links 1 to 3). */
 const CHAIN_MS = 320;
+/** Kills in one snapshot that make one event: a merged burst, a rising note, a nudge. */
+const MULTI_KILL = 3;
+/** Multi-kills within this of each other climb in pitch, ms. */
+const COMBO_MS = 2200;
+/** Kill streaks that mark themselves on the player. */
+const STREAKS = [10, 25, 50, 100] as const;
+
+/** One of the local player's kills this snapshot, waiting to be shown alone or merged. */
+interface Kill {
+  x: number;
+  y: number;
+  head: number;
+  id: number;
+  amount: number;
+  style: NumberStyle;
+}
 
 export interface Hit {
   target: number;
@@ -75,6 +94,8 @@ export interface FeedbackHooks {
   elite(b: Body | undefined, x: number, y: number): void;
   /** Whether the local player wears the book with this id. */
   wears(bookId: string): boolean;
+  /** The local player's kill streak passed a mark. */
+  streak(mark: number): void;
 }
 
 export class Feedback {
@@ -87,6 +108,13 @@ export class Feedback {
   private chainAt = -1e9;
   /** Own hits this frame, by target, so the flash bit of the same hit is not doubled. */
   readonly mineThisMessage = new Set<number>();
+  /** The local player's kills in the snapshot being read, pooled. */
+  private readonly kills: Kill[] = [];
+  private killCount = 0;
+  private comboAt = -1e9;
+  private combo = 0;
+  /** The last streak mark reached. */
+  private streakMark = 0;
   /** Counts for the readout. */
   readonly counts = { hits: 0, kills: 0, hurts: 0, stops: 0 };
   /** The last own hits with their hitstop, for development checks; never drawn. */
@@ -174,9 +202,18 @@ export class Feedback {
     }
     if (qed) b.proof = 0;
 
-    // The number.
+    // The number. A kill's waits for the end of the snapshot: several kills at once are one
+    // event with one merged total.
     const style = crit ? NumberStyle.Crit : dot || collision ? NumberStyle.Small : NumberStyle.Hit;
-    this.ctx.numbers.show(b.id, x, b.headY - 2, h.amount, style);
+    if (kill) {
+      this.deferKill(b, h.amount, style);
+      // The killing blow throws the body the way it was knocked, or away from the player.
+      const kx = Math.hypot(h.kx, h.ky) > 0.01 ? h.kx : x - this.ctx.selfX;
+      const ky = Math.hypot(h.kx, h.ky) > 0.01 ? h.ky : y - this.ctx.selfY;
+      this.bodies.fling(b, kx, ky, heavy || crit ? 110 : 75);
+    } else this.ctx.numbers.show(b.id, x, b.headY - 2, h.amount, style);
+    // A heavy blow shoves what stands around the target.
+    if ((heavy || crit || qed) && !dot) this.bodies.shove(x, y, qed ? 36 : 22, qed ? 3 : 1.5);
 
     // Sparks: the class's colour, the hit's weight.
     const color = art?.color ?? cat.color("stone.bright");
@@ -278,6 +315,85 @@ export class Feedback {
     this.ctx.particles.burst(Bit.Debris, b.x, b.y, 2, cat.color("stone.light"), 50, 2);
     this.ctx.sound.collide(this.chain, b.x, b.y);
     this.hitTraumaAdd(TRAUMA.collision * this.chain);
+  }
+
+  private deferKill(b: Body, amount: number, style: NumberStyle): void {
+    let k = this.kills[this.killCount];
+    if (!k) {
+      k = { x: 0, y: 0, head: 0, id: 0, amount: 0, style: NumberStyle.Hit };
+      this.kills.push(k);
+    }
+    this.killCount++;
+    k.x = b.x;
+    k.y = b.y;
+    k.head = b.headY;
+    k.id = b.id;
+    k.amount = amount;
+    k.style = style;
+  }
+
+  /**
+   * The end of a snapshot: its kills are shown. A few at once are each their own number; many
+   * are one event: a merged burst where they fell, one big total, a note that climbs with each
+   * multi-kill in a row, and the view nudged toward them. A kill streak marks itself on the
+   * player as it passes 10, 25, 50 and 100.
+   */
+  flush(): void {
+    const n = this.killCount;
+    if (n === 0) return;
+    this.killCount = 0;
+    const cat = this.ctx.cat;
+    if (n < MULTI_KILL) {
+      for (let i = 0; i < n; i++) {
+        const k = this.kills[i] as Kill;
+        this.ctx.numbers.show(k.id, k.x, k.head - 2, k.amount, k.style);
+      }
+    } else {
+      let cx = 0;
+      let cy = 0;
+      let top = Number.POSITIVE_INFINITY;
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        const k = this.kills[i] as Kill;
+        cx += k.x;
+        cy += k.y;
+        top = Math.min(top, k.head);
+        sum += k.amount;
+      }
+      cx /= n;
+      cy /= n;
+      const now = this.ctx.now;
+      this.combo = now - this.comboAt < COMBO_MS ? this.combo + 1 : 0;
+      this.comboAt = now;
+      const ramp = CLASS_RAMP[this.ctx.selfClass as HitClass] ?? CLASS_RAMP.math;
+      const color = cat.color(ramp[0]);
+      const big = n >= 6 ? 2 : 1;
+      this.effects.oneShot("fx-hit-crit", "fx-hit-crit/hit", cx, cy - 8, 1, Layer.Glow, big);
+      this.ctx.particles.burst(Bit.Spark, cx, cy - 6, 10 + n * 2, color, 170, 0);
+      this.ctx.particles.burst(Bit.Spark, cx, cy - 6, 6, cat.color("stone.bright"), 140, 0);
+      this.ctx.particles.burst(Bit.Debris, cx, cy, 4 + n, cat.color("clay.light"), 90, 3);
+      this.bodies.shove(cx, cy, 40 + n * 4, 3);
+      this.ctx.numbers.total(cx, top - 4, sum);
+      this.ctx.lights.strike(cx, cy - 8, color, 32, 0.8, 220);
+      this.ctx.sound.multiKill(this.ctx.selfClass, n, this.combo, cx, cy);
+      this.trauma(0.12 + Math.min(0.2, n * 0.025));
+      const dx = cx - this.ctx.selfX;
+      const dy = cy - this.ctx.selfY;
+      const d = Math.hypot(dx, dy) || 1;
+      this.ctx.trauma.nudge((dx / d) * 2, (dy / d) * 2);
+    }
+    const streak = this.ctx.sound.killStreak;
+    if (streak < this.streakMark) this.streakMark = 0;
+    for (const mark of STREAKS) {
+      if (streak >= mark && this.streakMark < mark) {
+        this.streakMark = mark;
+        this.hooks.streak(mark);
+      }
+    }
+    if (streak >= 200 && streak - this.streakMark >= 100) {
+      this.streakMark = streak - (streak % 100);
+      this.hooks.streak(this.streakMark);
+    }
   }
 
   /** The local player was hit. */

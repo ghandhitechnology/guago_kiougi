@@ -74,6 +74,22 @@ export class FightSound {
     audio.proof(stack);
   }
 
+  /**
+   * Several kills in one snapshot: one crit of the class, pitched up a whole tone for each kill
+   * past the third and again for each multi-kill in a row, so a run of them climbs.
+   */
+  multiKill(cls: string, kills: number, combo: number, x: number, y: number): void {
+    const pitch = Math.min(14, 2 * (kills - 3) + 2 * Math.min(4, combo));
+    this.cue(`hit.${cls}.crit`, x, y, true, pitch);
+    if (kills >= 6) this.cue(`hit.${cls}.heavy`, x, y, true, -5);
+  }
+
+  /** The kill streak passed a mark: the class's crit an octave up, climbing with each mark. */
+  streakMark(cls: string, step: number): void {
+    this.self(`hit.${cls}.crit`, Math.min(19, 7 + step * 3));
+    this.self(`hit.${cls}.heavy`, -7);
+  }
+
   collide(link: number, x: number, y: number): void {
     audio.collide(link, { dx: x - this.lx, dy: y - this.ly });
   }
