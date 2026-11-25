@@ -33,7 +33,7 @@ import { ServerClock, Track } from "./interp.ts";
 import { stayConnected } from "./net.ts";
 import { drawProps } from "./props.ts";
 import { SelfMover } from "./self.ts";
-import { enterSoundscape, soundscapeFor } from "./sound/audio.ts";
+import { enterSoundscape, preloadFor, soundscapeFor } from "./sound/audio.ts";
 import { StepSounds } from "./sound/steps.ts";
 import { builtView, lawnView } from "./world/map-view.ts";
 import { WorldOverlays } from "./world/overlays.ts";
@@ -105,6 +105,7 @@ export class WorldScene extends Phaser.Scene {
     this.overlays = new WorldOverlays(this);
     worldView.overlays = this.overlays;
     this.steps = new StepSounds(view.surfaceAt);
+    preloadFor(view.id);
     enterSoundscape(soundscapeFor(view.id, dev?.time));
     if (this.entry) session.start(this.entry);
     hud.set({ place: { map: view.id, name: view.name } });

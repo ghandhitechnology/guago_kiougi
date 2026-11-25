@@ -75,8 +75,10 @@ export const SOUNDSCAPES: Readonly<Record<string, Soundscape>> = {
   // The 자습실 floor, where the 졸방대 keep the lights on.
   "gaseol-4f": { music: "night-study", ambient: "school-interior" },
   home: { music: "home", ambient: "school-interior" },
-  agora: { music: "agora", ambient: "campus-afternoon" },
 };
+
+/** Page 1 maps (ids `p1-…`) all play the era town's song. */
+const PAGE1 = "p1-";
 
 /** Maps with a roof over them. */
 const INDOORS = new Set([
@@ -96,6 +98,8 @@ export function soundscapeFor(mapId: string, time?: { readonly phase: string }):
   const listed = SOUNDSCAPES[mapId];
   if (listed) return listed;
   const night = time?.phase === "night" || time?.phase === "dusk";
+  if (mapId.startsWith(PAGE1))
+    return { music: "agora", ambient: night ? "field-night" : "campus-afternoon" };
   if (INDOORS.has(mapId))
     return { music: night ? "night-study" : "hub", ambient: "school-interior" };
   return {
@@ -112,6 +116,15 @@ function apply(): void {
   if (!s) return;
   audio.music(s.music, { fade: 2 });
   audio.ambient(s.ambient, { fade: 2.5 });
+}
+
+let page1Ready = false;
+
+/** A rift's own effects are rendered on the way in, once: the campus never pays for them. */
+export function preloadFor(mapId: string): void {
+  if (page1Ready || !mapId.startsWith(PAGE1)) return;
+  page1Ready = true;
+  audio.preload("page1");
 }
 
 /** Crossfades to a place's music and air; asking for the playing ones changes nothing. */
