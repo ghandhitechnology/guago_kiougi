@@ -15,6 +15,13 @@
       "when": 1795576315674,
       "tag": "0001_chat_log",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795582672684,
+      "tag": "0003_social",
+      "breakpoints": true
     }
   ]
 }
