@@ -3,12 +3,14 @@ import {
   dress,
   feet,
   group,
+  IDLE,
   knot,
   type Placed,
   person,
   plain,
   rosy,
   shins,
+  WALK,
 } from "../../folk.ts";
 import { type Dir, type Legend, part, sprite } from "../../format.ts";
 import { pythagorean, pythagoreanBean, pythagoreanFirst } from "./page1-mentors.ts";
@@ -25,6 +27,8 @@ import { ink, walkArms } from "./student.ts";
  * - `agora-children`: two children running a hoop across the square, the second one chasing.
  * - `spectator-sit-a` to `-c`, `spectator-stand-a` and `-b`: one person each, to scatter on the
  *   tiers. `idle` sways a little; `cheer` is both arms up.
+ * - `crowd-a` to `-c`: the same three as walking figures, for an audience that has to face
+ *   whoever it is listening to. `idle`, `walk`, `talk`, `sit`, `cheer`, `sitCheer`.
  */
 
 // The order -------------------------------------------------------------------------------------
@@ -62,6 +66,7 @@ const pythagoreanOrder = sprite({
   origin: [29, 28],
   palette: order.palette,
   lone: order.lone,
+  shadow: order.shadow,
   frames: order.frames,
   anim: {
     idle: {
@@ -198,6 +203,7 @@ const children = sprite({
   origin: [24, 26],
   palette: kids.palette,
   lone: kids.lone,
+  shadow: kids.shadow,
   frames: kids.frames,
   anim: {
     idle: { frames: ["run0", "run1", "run2", "run3"], fps: 8 },
@@ -224,7 +230,13 @@ function spectator(
       cheer0: { armR: "raise", armL: "raise", head: "shout" },
       cheer1: { armR: ["raise", 0, -1], armL: ["raise", 0, -1], head: "shout", torso: [0, -1] },
     },
-    anim: { idle: { frames: ["sit0"], fps: 1 } },
+    anim: {
+      idle: IDLE,
+      walk: WALK,
+      sit: { frames: ["sit0", "sit0", "sit1", "sit0"], fps: 2 },
+      cheer: { frames: ["cheer0", "cheer1"], fps: 6 },
+      sitCheer: { frames: ["sitCheer0", "sitCheer1"], fps: 6 },
+    },
   });
 }
 
@@ -285,6 +297,7 @@ function single(name: string, who: (typeof crowd)[number], seated: boolean) {
     origin: [12, 26],
     palette: g.palette,
     lone: g.lone,
+    shadow: g.shadow,
     frames: g.frames,
     anim: {
       idle: { frames: ["idle0", "idle0", "idle1", "idle0"], fps: 2 },
@@ -301,4 +314,5 @@ export default [
   single("spectator-sit-c", crowd[2], true),
   single("spectator-stand-a", crowd[0], false),
   single("spectator-stand-b", crowd[1], false),
+  ...crowd,
 ];

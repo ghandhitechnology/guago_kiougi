@@ -14,9 +14,17 @@ import { frame, garment, ink, lone, shadow, skin, walkArms } from "./student.ts"
  * `guard-cone` is the cone of what he can see, drawn in front of him per direction.
  */
 const palette: Legend = { ...ink, B: "wood.mid" };
+/** Bronze: dark ochre with brass glints, apart from the terracotta of the dust and torchlight. */
+const BRONZE: Legend = {
+  T: "gold.deep",
+  t: "gold.deep",
+  u: "gold.dark",
+  U: "gold.mid",
+  y: "gold.light",
+};
 
 const helmet = part({
-  palette,
+  palette: { ...palette, ...BRONZE },
   pieces: {
     head: {
       at: { down: [4, 1], up: [4, 1], side: [0, 1] },
@@ -122,6 +130,7 @@ const kit = swapPart(
   garment(
     {
       ...palette,
+      ...BRONZE,
       "1": "skin.deep",
       "2": "skin.light",
       "3": "skin.dark",

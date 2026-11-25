@@ -171,7 +171,7 @@ const HAIR = {
   black: { X: "ink.deep", x: "ink.dark", h: "ink.mid", H: "ink.light" },
   brown: { X: "wood.deep", x: "wood.dark", h: "wood.mid", H: "wood.light" },
   auburn: { X: "clay.deep", x: "clay.dark", h: "clay.mid", H: "clay.light" },
-  grey: { X: "ink.deep", x: "ink.mid", h: "stone.dark", H: "stone.mid" },
+  grey: { X: "ink.deep", x: "stone.dark", h: "stone.mid", H: "stone.light" },
   white: { X: "stone.deep", x: "stone.mid", h: "stone.light", H: "stone.pale" },
 } as const;
 export type HairColour = keyof typeof HAIR;
@@ -653,7 +653,7 @@ export function group(
   size: readonly [number, number],
   frames: Readonly<Record<string, readonly Placed[]>>,
 ): { palette: Legend; lone: string; frames: Record<string, string>; shadow: string } {
-  const pool = [..."ABCDEFHIJKLMNPQRSTUVWXYZabcdfghijkmnopqrstuvwxyz0123456789#$=?<>[]{}()|/"];
+  const pool = [..."ABCDEFHIJKLMNPQRSTUVWXYZabcdfghijkmnopqrstuvwxy0123456789#$=?<>[]{}()|/"];
   const legend: Record<string, Paint | null> = { ".": null };
   const charOf = new Map<string, string>();
   const loneChars = new Set<string>();

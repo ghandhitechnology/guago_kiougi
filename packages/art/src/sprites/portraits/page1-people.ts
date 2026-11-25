@@ -96,11 +96,12 @@ const helmet = hair({
     ],
   ],
   shine: [
-    [13, 9, "YY"],
-    [16, 6, "YYH"],
-    [11, 13, "HH"],
+    [13, 9, "YYH"],
+    [16, 6, "YYYH"],
+    [11, 12, "HYH"],
+    [10, 16, "HH"],
   ],
-  reach: { light: 2, dark: 2 },
+  reach: { light: 3, dark: 2 },
 }).swap("XxhHY", "TguUy");
 
 /** The red horsehair crest, front to back over the dome. */
@@ -132,11 +133,11 @@ const guard = sprite({
   palette: {
     ...faceLegend("warm", ["wood.dark", "wood.mid"]),
     ...cloth(["red.deep", "red.dark", "red.mid", "red.light"]),
-    T: "clay.deep",
-    g: "clay.dark",
-    u: "clay.mid",
-    U: "clay.light",
-    y: "clay.pale",
+    T: "wood.deep",
+    g: "gold.deep",
+    u: "gold.dark",
+    U: "gold.mid",
+    y: "gold.pale",
     R: "red.deep",
     r: "red.dark",
     m: "red.mid",

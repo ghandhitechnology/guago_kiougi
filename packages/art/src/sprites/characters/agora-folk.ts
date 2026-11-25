@@ -378,7 +378,7 @@ const fishmonger = person({
     jacket: feet,
     face: rosy,
     hair: knot("black"),
-    accessory: kerchief("sea"),
+    accessory: kerchief("gold"),
     book: fish,
   },
   frames: {
