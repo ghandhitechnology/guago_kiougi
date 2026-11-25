@@ -78,6 +78,7 @@ const DUEL: Readonly<Record<DuelErrorCode, Line>> = {
   duel_busy: ["sagam", "이미 잡힌 결투 일정이 있습니다."],
   duel_target_busy: ["sagam", "결투 일정이 겹치는 학생이 있습니다."],
   duel_not_here: ["sagam", "지금 서 있는 곳에서는 결투할 수 없습니다."],
+  duel_in_combat: ["sagam", "싸우던 중에는 신청서를 받지 않습니다."],
   duel_no_challenge: ["sagam", "그 신청서는 이미 처리되었습니다."],
   duel_no_match: ["sagam", "그 점호는 이미 끝났습니다."],
   duel_not_in: ["sagam", "빠질 결투 일정이 없습니다."],
