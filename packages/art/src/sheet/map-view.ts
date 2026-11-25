@@ -66,6 +66,7 @@ const MARKS = {
   mark: "gold.pale",
   npc: "rose.pale",
   arena: "clay.pale",
+  elite: "red.pale",
 } as const;
 
 function rgb(ramps: Ramps, name: string): Rgb {
