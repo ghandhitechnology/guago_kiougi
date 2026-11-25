@@ -611,3 +611,15 @@ describe("admin limits behind a proxy", () => {
     }
   });
 });
+
+describe("the invariant check", () => {
+  it("runs once for any number of callers, and fresh at most once a minute", async () => {
+    const all = await Promise.all(
+      Array.from({ length: 30 }, () => owner.send("/economy/check?fresh=1")),
+    );
+    const runs = new Set(all.map((r) => (r.body.check as { at: string }).at));
+    expect(runs.size).toBe(1);
+    const again = await owner.send("/economy/check?fresh=1");
+    expect((again.body.check as { at: string }).at).toBe([...runs][0]);
+  });
+});

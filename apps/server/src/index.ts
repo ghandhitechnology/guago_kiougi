@@ -51,8 +51,10 @@ const live = createLive(db, {
 });
 provideLive(live);
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
+const adminReads = createDb(config.databaseUrl, { max: 2, statementTimeoutMs: 30_000 });
 const admin = await createModerationStack({
   db,
+  readDb: adminReads,
   executor: economy.executor,
   secret: config.serverSecret,
   // Social is made below; a ban only reaches these after start.
@@ -96,6 +98,7 @@ onShutdown("grants", () => economy.grants.flush());
 onShutdown("quest progress", () => live.stop());
 onShutdown("chat log", () => chatLog.flush());
 onShutdown("database", () => db.pool.end());
+onShutdown("admin reads", () => adminReads.pool.end());
 
 await server.listen(config.port);
 // The one WorldRoom exists from the start, so two first joins can never make two.

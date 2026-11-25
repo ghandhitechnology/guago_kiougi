@@ -22,6 +22,11 @@ export const ADMIN_DIST = path.resolve(import.meta.dirname, "../../../admin/dist
 
 export interface StackOptions {
   db: Db;
+  /**
+   * A small pool of its own for the admin page's reads (index.ts: 2 connections, statements
+   * capped at 30 s), so nothing an admin opens can take the game's connections. Default `db`.
+   */
+  readDb?: Db;
   executor: Executor;
   secret: string;
   /** Social's `vacate` and `announce`, for permanent bans of a club's 짱. */
@@ -51,7 +56,7 @@ export async function createModerationStack(o: StackOptions) {
     ...(o.clubs ? { clubs: o.clubs } : {}),
   });
   const auth = createAdminAuth(o.db, o.secret);
-  const reads = createReads(o.db);
+  const reads = createReads(o.readDb ?? o.db);
   const routes = adminRoutes({
     db: o.db,
     auth,

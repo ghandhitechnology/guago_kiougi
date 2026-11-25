@@ -68,11 +68,15 @@ export interface ChatQuery {
   limit?: number;
 }
 
-/** The invariant check reads whole tables; one run serves every page view for this long. */
-const CHECK_TTL_MS = 60_000;
+/**
+ * The invariant check reads whole tables. One run at a time serves every caller; a result is
+ * shown for ten minutes, and asking for a fresh one starts a new run at most once a minute.
+ */
+const CHECK_TTL_MS = 10 * 60_000;
+const FRESH_EVERY_MS = 60_000;
 
 export function createReads(db: Db) {
-  let checked: { at: number; report: Promise<AuditReport> } | undefined;
+  let checked: { at: number; report: Promise<AuditReport>; done: boolean } | undefined;
 
   async function namesOf(ids: string[]): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
@@ -432,13 +436,22 @@ export function createReads(db: Db) {
      */
     async invariants(fresh = false) {
       const now = Date.now();
-      if (fresh || !checked || now - checked.at > CHECK_TTL_MS) {
-        checked = { at: now, report: checkInvariants(db) };
-        checked.report.catch(() => (checked = undefined));
+      const last = checked;
+      const due = !last || (last.done && now - last.at > (fresh ? FRESH_EVERY_MS : CHECK_TTL_MS));
+      if (due) {
+        const run = { at: now, report: checkInvariants(db), done: false };
+        checked = run;
+        run.report.then(
+          () => (run.done = true),
+          () => {
+            if (checked === run) checked = undefined;
+          },
+        );
       }
-      const report = await checked.report;
+      const current = checked as { at: number; report: Promise<AuditReport> };
+      const report = await current.report;
       return {
-        at: new Date(checked?.at ?? now).toISOString(),
+        at: new Date(current.at).toISOString(),
         ok: report.ok,
         failed: [...new Set(report.violations.map((v) => v.check))],
         violations: report.violations.slice(0, 50),
