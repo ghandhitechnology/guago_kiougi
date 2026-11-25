@@ -204,7 +204,7 @@ export function evolutionMoment(scene: Phaser.Scene, item: ItemView): EvolutionM
           });
           name.at(-Math.round(name.width / 2), -6);
           shadow.at(-Math.round(name.width / 2) + 1, -5);
-          const plate = scene.add.container(cx, cy + 70, [shadow.obj, name.obj]);
+          const plate = scene.add.container(cx, cy + 78, [shadow.obj, name.obj]);
           front.add(plate);
           plate.setScale(5).setAlpha(0);
           scene.tweens.add({
@@ -230,7 +230,7 @@ export function evolutionMoment(scene: Phaser.Scene, item: ItemView): EvolutionM
             align: "center",
             leading: 1,
           });
-          line.at(cx - Math.round(width / 2), cy + 92);
+          line.at(cx - Math.round(width / 2), cy + 100);
           front.add(line.obj);
           line.obj.setAlpha(0);
           fade(line.obj, 1, 300);
@@ -364,7 +364,7 @@ function playArt(scene: Phaser.Scene, into: Phaser.GameObjects.Container, name: 
     const ev = step((k) => {
       copies.forEach((c, i) => {
         const th = k * 0.09 + (i / copies.length) * Math.PI * 2;
-        c.setPosition(Math.round(Math.cos(th) * 84), Math.round(Math.sin(th) * 60));
+        c.setPosition(Math.round(Math.cos(th) * 86), Math.round(Math.sin(th) * 44));
         const fly = th + Math.PI / 2;
         const d = (((Math.round((fly / (Math.PI * 2)) * n) % n) + n) % n) as number;
         const frames = groups.get(`${base}${d}-`) ?? [];
@@ -394,7 +394,7 @@ function playArt(scene: Phaser.Scene, into: Phaser.GameObjects.Container, name: 
   const ev = step((k) => {
     copies.forEach((c, i) => {
       const th = k * 0.05 + (i / copies.length) * Math.PI * 2;
-      c.setPosition(Math.round(Math.cos(th) * 92), Math.round(Math.sin(th) * 66));
+      c.setPosition(Math.round(Math.cos(th) * 92), Math.round(Math.sin(th) * 46));
       c.setFrame(frames[(k + i) % frames.length] as string);
     });
   });
