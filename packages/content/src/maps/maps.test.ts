@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyRules, buildMap, readPlan } from "./build.ts";
 import { type ArtIndex, checkMap, narrowTiles, reach } from "./check.ts";
 import type { MapSource, Stamp } from "./format.ts";
+import { interiorWalls, mountY } from "./interior.ts";
 import { place } from "./props.ts";
 import { parseStamp } from "./stamp.ts";
 
@@ -146,5 +147,54 @@ describe("reachability", () => {
     expect(checkMap(buildMap(blocked, new Set(["test"])), ART, REGISTRY).join("\n")).toMatch(
       /portal in is blocked by a prop/,
     );
+  });
+});
+
+describe("interior walls", () => {
+  const plan = `
+    ##########
+    #ll#llllll
+    #ll#llllll
+    #ll#llllll
+    #lllllllll
+    #lllllllll
+    ####DD####
+    tttttttttt
+    tttttttttt
+    tttttttttt
+    tttttttttt
+  `;
+  const walls = interiorWalls(plan, {
+    walls: "#",
+    faces: { l: "wall-cream", t: "wall-corridor" },
+    doors: { D: { prop: "door-double", frame: "open" } },
+  });
+  const solid = new Set(
+    walls.blocks.flatMap((b) =>
+      Array.from(
+        { length: b.w * b.h },
+        (_, k) => `${b.x + (k % b.w)},${b.y + Math.floor(k / b.w)}`,
+      ),
+    ),
+  );
+
+  it("hangs a solid face three tiles deep under every wall that runs across", () => {
+    for (const y of [1, 2, 3]) expect(solid.has(`1,${y}`)).toBe(true);
+    expect(solid.has("1,4")).toBe(false);
+    for (const y of [7, 8, 9]) expect(solid.has(`0,${y}`)).toBe(true);
+    expect(walls.objects.filter((o) => o.prop === "wall-corridor")).toHaveLength(10);
+  });
+
+  it("keeps the end of a side wall thin and a doorway's face walkable", () => {
+    expect(solid.has("3,4")).toBe(false);
+    for (const y of [7, 8, 9]) {
+      expect(solid.has(`4,${y}`)).toBe(false);
+      expect(solid.has(`5,${y}`)).toBe(false);
+    }
+    expect(walls.objects).toContainEqual({
+      prop: "door-double",
+      frame: "open",
+      at: [80, mountY(6)],
+    });
   });
 });

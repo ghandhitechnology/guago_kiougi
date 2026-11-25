@@ -1,4 +1,5 @@
 import { isSolidTile, type TileCollision } from "@guago/shared";
+import { SPEAKERS } from "../narrative/speakers.ts";
 import type { BuildResult } from "./build.ts";
 import type { BuiltMap, TileRect } from "./format.ts";
 import type { Actor, Decal, Doll, Prop } from "./layers.ts";
@@ -236,6 +237,18 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     if (!inBounds(z.rect)) say(`zone ${z.id} reaches past the map`);
     if (z.kind === "monsters" && !art.sprites[z.monster])
       say(`zone ${z.id}: no monster sprite ${z.monster}`);
+  }
+  // Scene marks and cast spots.
+  for (const [name, m] of Object.entries(map.marks)) {
+    const [tx, ty] = tileOf(m);
+    if (tx < 0 || ty < 0 || tx >= map.w || ty >= map.h) say(`mark ${name} is outside the map`);
+  }
+  const speakers = new Set(SPEAKERS.map((s) => s.id));
+  for (const n of map.npcs) {
+    const [tx, ty] = tileOf(n);
+    if (!speakers.has(n.speaker)) say(`npc spot for ${n.speaker}: no such speaker`);
+    if (solid(tx, ty) || !reached[ty * map.w + tx])
+      say(`npc spot for ${n.speaker} at tile ${tx},${ty} is not walkable from the main spawn`);
   }
   return out;
 }
