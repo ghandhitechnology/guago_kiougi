@@ -150,6 +150,36 @@ export function cellOf(plan: string): (tx: number, ty: number) => string {
   return (tx, ty) => rows[ty]?.[tx] ?? "";
 }
 
+/**
+ * Solid tiles of `solid` that touch walkable ground on a side: the line a player bumps into.
+ * Every `step`th one (by a seeded hash) is returned, so the edge can be marked with rocks and
+ * trees and never reads as an invisible wall.
+ */
+export function edgeLine(
+  plan: string,
+  solid: string,
+  walk: string,
+  step: number,
+  seed: number,
+): Vec[] {
+  const at = cellOf(plan);
+  const rows = plan.split("\n");
+  const out: Vec[] = [];
+  rows.forEach((row, ty) => {
+    for (let tx = 0; tx < row.length; tx++) {
+      if (!solid.includes(at(tx, ty))) continue;
+      const touches = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ].some(([dx, dy]) => walk.includes(at(tx + (dx as number), ty + (dy as number)) || "\0"));
+      if (touches && Math.floor(unit(tx, ty, seed) * step) === 0) out.push([tx, ty]);
+    }
+  });
+  return out;
+}
+
 /** Tile to the world pixel at its centre. */
 export function px(tx: number, ty: number): Vec {
   return [tx * T + T / 2, ty * T + T / 2];

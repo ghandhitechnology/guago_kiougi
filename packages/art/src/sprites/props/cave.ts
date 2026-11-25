@@ -443,6 +443,49 @@ function crawl(frame: number): string {
   return tidy(pic, "J", "j").toString();
 }
 
+/**
+ * A cut-out dropped on the slope where its carrier ran: a flat wooden horse, man or jar on its
+ * stick, lying on the ground.
+ */
+const CUTOUTS = {
+  horse: `
+    ......BB......
+    .....BUUB.....
+    BBBBBUuuB.....
+    BUUUUuuB......
+    .BuuuuuB......
+    .BuBBBuB......
+    .BB...BB......
+    ..........BBBB
+    ...BBBBBBBUUuu
+    ..........BBBB
+  `,
+  man: `
+    ...BB.........
+    ..BUUB........
+    ..BuuB........
+    .BUuuuB.......
+    .BUuuuB.......
+    ..BuuB........
+    ..BuBuB.......
+    ..BB.BB.......
+    ......BBBBBBBB
+    ......BUUUUuuu
+    ......BBBBBBBB
+  `,
+  jar: `
+    ...BBB........
+    ..BUuuB.......
+    .BUuuuuB......
+    .BUuuuuB......
+    ..BuuuB.......
+    ...BBB........
+    ....BBBBBBBBBB
+    ....BUUUUUUuuu
+    ....BBBBBBBBBB
+  `,
+};
+
 export default [
   sprite({
     name: "cliff-face",
@@ -497,6 +540,21 @@ export default [
     shadow: oval(46, 8, 18, 7, 17, 1.4),
   }),
   one("dead-tree", [44, 56], deadTree(), { shadow: oval(44, 56, 22, 55, 8, 1.6) }),
+  sprite({
+    name: "cutout",
+    size: [14, 11],
+    palette,
+    outline: false,
+    frames: Object.fromEntries(
+      Object.entries(CUTOUTS).map(([k, g]) => [
+        k,
+        Pic.blank(14, 11)
+          .put(g, 0, 11 - Pic.of(g).h)
+          .toString(),
+      ]),
+    ),
+    anim: { idle: { frames: ["horse"], fps: 1 } },
+  }),
   sprite({
     name: "shadow-crawl",
     size: [72, 26],

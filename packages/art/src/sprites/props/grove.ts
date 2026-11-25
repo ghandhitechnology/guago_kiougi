@@ -76,9 +76,13 @@ function oval(w: number, h: number, cx: number, cy: number, rx: number, ry: numb
 
 // The thousand-year olive ------------------------------------------------------------------------
 
-const GW = 104;
-const GH = 100;
-const G_ORIGIN = [52, 98] as const;
+const GW = 136;
+const GH = 128;
+const G_ORIGIN = [68, 126] as const;
+/** The great tree is drawn on the plan of an ordinary old olive, scaled up. */
+const GS = 1.3;
+const gx = (x: number) => GW / 2 + (x - 52) * GS;
+const gy = (y: number) => GH - 2 - (98 - y) * GS;
 
 /**
  * Its trunk: three boles that twisted apart centuries ago, one split open into a hollow a child
@@ -87,18 +91,23 @@ const G_ORIGIN = [52, 98] as const;
 function giantTrunk(): string {
   const pic = Pic.blank(GW, GH);
   const stems: [number, number, number][] = [];
-  for (let y = 40; y < GH - 1; y++) {
-    const up = (GH - 1 - y) / 58;
+  for (let y = 40; y < 98; y += 1 / GS) {
+    const up = (98 - y) / 58;
     if (y >= 78) {
-      stems.push([52 - Math.sin(up * 6) * 3, y, 13 - up * 6 + (y > 92 ? (y - 92) * 1.6 : 0)]);
+      stems.push([
+        gx(52 - Math.sin(up * 6) * 3),
+        gy(y),
+        (13 - up * 6 + (y > 92 ? (y - 92) * 1.6 : 0)) * GS,
+      ]);
     } else {
       const k = (78 - y) / 38;
-      stems.push([44 - k * 13 - Math.sin(k * 5) * 2, y, 6.5 - k * 2.6]);
-      stems.push([60 + k * 12 + Math.sin(k * 4) * 2, y, 6 - k * 2.4]);
-      if (y > 58) stems.push([52 + Math.sin(k * 7) * 2, y, 4.5 - k * 2]);
+      stems.push([gx(44 - k * 13 - Math.sin(k * 5) * 2), gy(y), (6.5 - k * 2.6) * GS]);
+      stems.push([gx(60 + k * 12 + Math.sin(k * 4) * 2), gy(y), (6 - k * 2.4) * GS]);
+      if (y > 58) stems.push([gx(52 + Math.sin(k * 7) * 2), gy(y), (4.5 - k * 2) * GS]);
     }
   }
-  for (const [cx, y, hw] of stems) {
+  for (const [cx, fy, hw] of stems) {
+    const y = Math.round(fy);
     const x0 = Math.round(cx - hw);
     const x1 = Math.round(cx + hw);
     for (let x = x0; x <= x1; x++) {
@@ -109,14 +118,14 @@ function giantTrunk(): string {
     }
   }
   // The hollow, dark inside, its lip lit.
-  const hollow = lobes([{ x: 50, y: 84, rx: 5, ry: 8 }]);
-  for (let y = 74; y < 94; y++)
-    for (let x = 42; x < 58; x++) {
+  const hollow = lobes([{ x: gx(50), y: gy(84), rx: 5 * GS, ry: 8 * GS }]);
+  for (let y = 0; y < GH; y++)
+    for (let x = 0; x < GW; x++) {
       if (!hollow(x, y)) continue;
       pic.set(x, y, hollow(x - 1, y) && hollow(x, y - 1) ? "t" : "K");
     }
   // Bark ridges spiralling up.
-  for (let y = 44; y < GH - 2; y++)
+  for (let y = 40; y < GH - 2; y++)
     for (let x = 0; x < GW; x++)
       if (pic.at(x, y) === "M" && (x * 2 + y) % 7 === 0 && pic.at(x + 1, y) === "M")
         pic.set(x, y, "S").set(x + 1, y, "S");
@@ -124,20 +133,22 @@ function giantTrunk(): string {
 }
 
 /** Leaf clumps of the crown, back to front: wide, low and lopsided, as old olives grow. */
-const GIANT_CLUMPS: readonly (readonly [number, number, number])[] = [
-  [50, 12, 12],
-  [28, 20, 11],
-  [74, 18, 12],
-  [14, 32, 9],
-  [90, 32, 9],
-  [40, 28, 13],
-  [62, 28, 13],
-  [24, 42, 10],
-  [80, 42, 10],
-  [50, 40, 12],
-  [36, 50, 8],
-  [66, 50, 8],
-];
+const GIANT_CLUMPS: readonly (readonly [number, number, number])[] = (
+  [
+    [50, 12, 12],
+    [28, 20, 11],
+    [74, 18, 12],
+    [14, 32, 9],
+    [90, 32, 9],
+    [40, 28, 13],
+    [62, 28, 13],
+    [24, 42, 10],
+    [80, 42, 10],
+    [50, 40, 12],
+    [36, 50, 8],
+    [66, 50, 8],
+  ] as const
+).map(([x, y, r]) => [gx(x), gy(y), r * GS] as const);
 
 const clump = (x: number, y: number, r: number) => [
   { x, y, rx: r, ry: r * 0.72 },
@@ -500,7 +511,7 @@ export default [
     size: [GW, GH],
     origin: G_ORIGIN,
     palette,
-    shadow: oval(GW, GH, 54, 97, 26, 3.4),
+    shadow: oval(GW, GH, 70, 125, 34, 4),
     frames: { base: giantTrunk() },
     anim: { idle: { frames: ["base"], fps: 1 } },
   }),

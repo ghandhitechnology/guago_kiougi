@@ -2,6 +2,7 @@ import type { MapSource, Thing } from "./format.ts";
 import {
   blob,
   cellOf,
+  edgeLine,
   GREEK_LEGEND,
   merge,
   type Placed,
@@ -167,7 +168,19 @@ function orchardSpot(tx: number, ty: number): boolean {
 const ORCHARD = scatter({ x: 8, y: 4, w: 70, h: 52 }, 5, 7, orchardSpot);
 const BEYOND = scatter({ x: 0, y: 0, w: W, h: H }, 5, 9, (tx, ty) => at(tx, ty) === "%");
 
+/** The grove's edge, where the walkable ground stops: rocks between the trunks. */
+const EDGE = edgeLine(PLAN, "%", "_,", 4, 43);
+
 const placed = merge(
+  {
+    objects: EDGE.map(
+      ([tx, ty], i): Prop => ({
+        prop: i % 3 === 0 ? "boulder-big" : "boulder",
+        at: [tx * T + 8, ty * T + 14],
+        ...(i % 2 ? { flip: true } : {}),
+      }),
+    ),
+  },
   crossroads(),
   trees("olive", ORCHARD, 0, { dapple: true }),
   trees("olive", BEYOND, 1, { dapple: true }),

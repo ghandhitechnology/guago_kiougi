@@ -1,5 +1,5 @@
 import type { LightSource, MapSource, Thing } from "./format.ts";
-import { cellOf, GREEK_LEGEND, merge, type Placed, scatter, settle } from "./greek.ts";
+import { cellOf, edgeLine, GREEK_LEGEND, merge, type Placed, scatter, settle } from "./greek.ts";
 import type { Decal, Prop, Vec } from "./layers.ts";
 import { fractal } from "./noise.ts";
 import { PlanGrid } from "./plan.ts";
@@ -120,8 +120,8 @@ function paintPlan(): PlanGrid {
     inside: { x: 0, y: 12, w: W, h: H - 12 },
   });
   g.blob(CAVE[0] + 2, 15, 12, 6, "_", { seed: 32, ragged: 0.15 });
-  g.fray(",", "_", { seed: 33, passes: 1, scale: 2.6 });
-  g.majority(",", "_", 2);
+  g.fray(",", "_", { seed: 33, passes: 1, scale: 3.2 });
+  g.majority(",", "_", 4);
   return settle(g, [2, 46]);
 }
 
@@ -231,8 +231,18 @@ const BOULDERS = scatter({ x: 6, y: 27, w: 68, h: 26 }, 9, 13, (tx, ty) => {
   return !DEAD_TREES.some(([x, y]) => Math.abs(x - tx) < 4 && Math.abs(y - ty) < 3);
 });
 
+/** Where the valley grass stops being walkable: thorn, dead wood and stones mark the line. */
+const EDGE = edgeLine(PLAN, "%:", "_,", 3, 41);
+
 const placed = merge(cliff(), fireCourt(), deadTrees(), {
   objects: [
+    ...EDGE.map(
+      ([tx, ty], i): Prop => ({
+        prop: i % 4 === 0 ? "dead-tree" : i % 2 ? "boulder" : "boulder-big",
+        at: [tx * T + 8, ty * T + 14],
+        ...(i % 3 ? { flip: true } : {}),
+      }),
+    ),
     ...BOULDERS.map(([tx, ty], i): Thing => place(i % 3 === 0 ? "boulder-big" : "boulder", tx, ty)),
     // Below the falls of the spring, a jar someone left to fill.
     { prop: "amphora", at: [1000, 250] },
@@ -248,9 +258,33 @@ const CRAWL: readonly [x: number, y: number, flip: boolean][] = [
   [470, 470, false],
   [760, 520, true],
   [600, 600, false],
+  [380, 560, true],
+  [860, 600, false],
+  [520, 720, true],
+  [300, 760, false],
+  [980, 700, true],
+  [700, 820, false],
+];
+
+/** Cut-outs dropped on the slope by whoever was carrying them, as far down as the valley. */
+const DROPPED: readonly [x: number, y: number, frame: string][] = [
+  [690, 250, "horse"],
+  [520, 384, "jar"],
+  [820, 470, "man"],
+  [400, 650, "horse"],
+  [940, 560, "jar"],
+  [610, 760, "man"],
 ];
 
 const details: (Decal | Prop)[] = [
+  ...DROPPED.map(
+    ([x, y, frame], i): Prop => ({
+      prop: "cutout",
+      frame,
+      at: [x, y],
+      ...(i % 2 ? { flip: true } : {}),
+    }),
+  ),
   ...CRAWL.map(
     ([x, y, flip], i): Prop => ({
       prop: "shadow-crawl",
