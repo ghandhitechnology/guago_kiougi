@@ -1,7 +1,14 @@
 import { checkLoginId, checkPassword } from "@guago/shared";
 import type * as Phaser from "phaser";
-import { type Backend, errorCode, errorText, type Session } from "../backend/index.ts";
+import {
+  type Backend,
+  BackendError,
+  errorCode,
+  errorText,
+  type Session,
+} from "../backend/index.ts";
 import { t } from "../i18n/index.ts";
+import { showBan } from "../social/moderation.ts";
 import { Button } from "../ui/button.ts";
 import { Checkbox } from "../ui/checkbox.ts";
 import { layDown, pickUp, shake, stamp } from "../ui/motion.ts";
@@ -207,7 +214,12 @@ export class LoginScreen extends FormScreen {
     }
     const session = await this.send(
       this.go,
-      () => this.flow.api.login(loginId, this.password.value),
+      () =>
+        this.flow.api.login(loginId, this.password.value).catch((e: unknown) => {
+          // A banned player with the right password is owed the reason and the end.
+          if (e instanceof BackendError && e.ban) showBan(this.scene, e.ban, () => this.back());
+          throw e;
+        }),
       (code) => (code === "bad_credentials" ? this.password : undefined),
     );
     if (session) this.flow.signedIn(session);

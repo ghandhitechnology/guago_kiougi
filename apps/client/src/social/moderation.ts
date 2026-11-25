@@ -1,4 +1,4 @@
-import type { SystemLine } from "@guago/shared";
+import type { BanNotice, SystemLine } from "@guago/shared";
 import type * as Phaser from "phaser";
 import { t } from "../i18n/index.ts";
 import { Button } from "../ui/button.ts";
@@ -27,7 +27,10 @@ function when(ms: number): string {
 }
 
 /** The 운영진's line, filled with what the server sent; a sentence it cannot fill is left out. */
-function moderationText(l: SystemLine | undefined, fallback: string): string | undefined {
+function moderationText(
+  l: Pick<SystemLine, "key" | "params"> | undefined,
+  fallback: string,
+): string | undefined {
   const key = l?.key ?? fallback;
   const params: Record<string, string | number> = {};
   if (typeof l?.params?.until === "number") params.time = when(l.params.until);
@@ -60,6 +63,13 @@ export function watchModeration(
     }
   });
   return off;
+}
+
+/** The ban notice for a login the server refused for a ban, with the ban's reason and end. */
+export function showBan(scene: Phaser.Scene, ban: BanNotice, toTitle: () => void): void {
+  const params: Record<string, string | number> = { reason: ban.reason };
+  if (ban.until !== undefined) params.until = ban.until;
+  notice(scene, moderationText({ key: ban.key, params }, BANNED), toTitle);
 }
 
 function notice(scene: Phaser.Scene, text: string | undefined, toTitle: () => void): void {

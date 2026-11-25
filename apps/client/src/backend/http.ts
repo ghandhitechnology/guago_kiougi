@@ -1,6 +1,7 @@
 import {
   API,
   API_ERRORS,
+  type ApiError,
   type CreateCharacterResponse,
   type LoginResponse,
   type NameAvailableResponse,
@@ -31,9 +32,9 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
     throw new BackendError(res.status >= 500 ? "offline" : "unknown");
   }
   if (!res.ok) {
-    const code = (data as { error?: string }).error;
+    const { error: code, ban } = data as Partial<ApiError>;
     const known = API_ERRORS.find((c) => c === code);
-    throw new BackendError(known ?? (res.status >= 500 ? "offline" : "unknown"));
+    throw new BackendError(known ?? (res.status >= 500 ? "offline" : "unknown"), ban);
   }
   return data as T;
 }

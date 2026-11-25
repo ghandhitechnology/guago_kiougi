@@ -1,6 +1,7 @@
 import type {
   Account,
   ApiErrorCode,
+  BanNotice,
   Character,
   LoginResponse,
   Look,
@@ -42,9 +43,12 @@ export interface Backend {
 /** A refusal from the API, or a failure on the way to it. */
 export class BackendError extends Error {
   readonly code: ErrorCode;
+  /** With `account_banned` on a login whose password was right: the ban's reason and end. */
+  readonly ban: BanNotice | undefined;
 
-  constructor(code: ErrorCode) {
+  constructor(code: ErrorCode, ban?: BanNotice) {
     super(code);
     this.code = code;
+    this.ban = ban;
   }
 }
