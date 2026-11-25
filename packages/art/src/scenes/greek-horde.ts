@@ -1,4 +1,4 @@
-import { type Actor, type Doll, type Prop, scene } from "../scene.ts";
+import { type Doll, type Prop, type ScaledActor, scene } from "../scene.ts";
 
 /**
  * greek-horde: the review screen for Page 1 at full volume. Afternoon in 아고라 외곽, the last
@@ -45,8 +45,8 @@ function mob(
   anim: string,
   at: readonly [number, number],
   shadow: string,
-  extra: Partial<Actor> = {},
-): Actor {
+  extra: Partial<ScaledActor> = {},
+): ScaledActor {
   taken.push([at[0], at[1], 10]);
   return {
     actor,
@@ -60,9 +60,9 @@ function mob(
   };
 }
 
-function crowd(): Actor[] {
+function crowd(): ScaledActor[] {
   const r = rng(1207);
-  const out: Actor[] = [];
+  const out: ScaledActor[] = [];
   // The behaviours the screen is judged on, placed by hand.
   const set = (actor: string, anim: string, at: readonly [number, number], extra = {}) =>
     out.push(mob(r, actor, anim, at, "shadow-s/blob", { index: 0, ...extra }));

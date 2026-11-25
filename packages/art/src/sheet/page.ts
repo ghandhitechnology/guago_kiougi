@@ -2,9 +2,12 @@
  * The contact sheet page. Runs in the browser and draws only from the built atlases and
  * art.json, the same files the game loads, so what shows here is what ships.
  */
+
+import type { BuiltMap } from "@guago/content";
 import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
+import { mapViews, overlay } from "./map-view.ts";
 import { sampleGrid } from "./sample-grid.ts";
 import { uiSections } from "./ui-page.ts";
 
@@ -167,7 +170,8 @@ function recolor(c: HTMLCanvasElement, choice: Record<string, string>): void {
   ctx.putImageData(data, 0, 0);
 }
 
-type Backdrop = "checker" | string;
+/** A flat colour, the checkerboard, or a ground tile repeated at the drawing's scale. */
+type Backdrop = "checker" | string | HTMLCanvasElement;
 
 function paintBackdrop(
   ctx: CanvasRenderingContext2D,
@@ -176,6 +180,13 @@ function paintBackdrop(
   bg: Backdrop,
   cell: number,
 ): void {
+  if (typeof bg !== "string") {
+    const scale = cell / 2;
+    const tw = bg.width * scale;
+    const th = bg.height * scale;
+    for (let y = 0; y < h; y += th) for (let x = 0; x < w; x += tw) ctx.drawImage(bg, x, y, tw, th);
+    return;
+  }
   if (bg !== "checker") {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
@@ -284,18 +295,90 @@ for (const theme of meta.themes) {
   }
 }
 
+// Atlas pixels for scenes and maps ------------------------------------------------------------
+
+const pixels = new Map<string, SceneAtlas>();
+for (const [name, a] of atlases) {
+  const c = canvas(a.img.width, a.img.height);
+  const ctx = ctx2d(c);
+  ctx.drawImage(a.img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+  pixels.set(name, { w: c.width, h: c.height, data, frames: a.frames as SceneAtlas["frames"] });
+}
+
+function put(target: HTMLCanvasElement, img: { w: number; h: number; data: ArrayLike<number> }) {
+  ctx2d(target).putImageData(new ImageData(new Uint8ClampedArray(img.data), img.w, img.h), 0, 0);
+}
+
+// Maps --------------------------------------------------------------------------------------
+
+/**
+ * Each built map whole at ×1, a screen at ×3 around every spawn and the landmark (playing), and
+ * the overlay of what the server sees: collision, portals, spawns, interactables and zones.
+ */
+{
+  const s = section("maps", "maps");
+  const ids: string[] = await (await fetch("dist/maps/index.json")).json();
+  const maps: BuiltMap[] = await Promise.all(
+    ids.map(async (id) => (await fetch(`dist/maps/${id}.json`)).json()),
+  );
+  const views = maps.map((map) => {
+    const box = el("article");
+    box.id = `map-${map.id}`;
+    box.append(el("h3", "name", `${map.name} · ${map.id} · ${map.time.clock}`));
+    const whole = renderScene(map.scene, meta, pixels, 0);
+    if (whole.warnings.length > 0) console.warn(map.id, whole.warnings);
+    const one = canvas(whole.w, whole.h);
+    put(one, whole);
+    box.append(cell(one, "×1"));
+    const o = overlay(map, whole, 2, meta.palette.ramps);
+    const over = canvas(o.w, o.h);
+    put(over, o);
+    const octx = ctx2d(over);
+    octx.font = "12px Galmuri9";
+    octx.textBaseline = "top";
+    for (const l of o.labels) {
+      octx.fillStyle = css.getPropertyValue("--bg").trim();
+      for (const [dx, dy] of [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+      ] as const)
+        octx.fillText(l.text, l.x + dx, l.y + dy);
+      octx.fillStyle = `rgb(${l.color.join(",")})`;
+      octx.fillText(l.text, l.x, l.y);
+    }
+    const crops = mapViews(map).map((v) => {
+      const c = canvas(v.rect.w * 3, v.rect.h * 3);
+      box.append(cell(c, `${v.name} ×3`));
+      return { v, c, small: canvas(v.rect.w, v.rect.h) };
+    });
+    box.append(cell(over, "collision, portals, spawns, places ×2"));
+    s.append(box);
+    return { map, crops };
+  });
+  let last = -1;
+  const paint = (now: number): void => {
+    const step = Math.floor(now / 100);
+    if (step !== last) {
+      last = step;
+      for (const { map, crops } of views) {
+        for (const { v, c, small } of crops) {
+          put(small, renderScene(map.scene, meta, pixels, step / 10, v.rect));
+          ctx2d(c).drawImage(small, 0, 0, c.width, c.height);
+        }
+      }
+    }
+    requestAnimationFrame(paint);
+  };
+  paint(0);
+}
+
 // Scenes ------------------------------------------------------------------------------------
 
 {
   const s = section("scenes", "scenes");
-  const pixels = new Map<string, SceneAtlas>();
-  for (const [name, a] of atlases) {
-    const c = canvas(a.img.width, a.img.height);
-    const ctx = ctx2d(c);
-    ctx.drawImage(a.img, 0, 0);
-    const data = ctx.getImageData(0, 0, c.width, c.height).data;
-    pixels.set(name, { w: c.width, h: c.height, data, frames: a.frames as SceneAtlas["frames"] });
-  }
   const views = SCENES.map((def) => {
     const box = el("article");
     box.id = def.name;
@@ -317,11 +400,7 @@ for (const theme of meta.themes) {
       for (const v of views) {
         const img = renderScene(v.def, meta, pixels, step / 10);
         if (step === 0 && img.warnings.length > 0) console.warn(v.def.name, img.warnings);
-        ctx2d(v.one).putImageData(
-          new ImageData(new Uint8ClampedArray(img.data), img.w, img.h),
-          0,
-          0,
-        );
+        put(v.one, img);
         ctx2d(v.three).drawImage(v.one, 0, 0, v.three.width, v.three.height);
       }
     }
@@ -358,12 +437,55 @@ for (const theme of meta.themes) {
   }
 }
 
+// Combat effects ----------------------------------------------------------------------------
+
+/**
+ * Every combat effect playing at ×1 and ×3 on the two grounds it must read on: the field at
+ * night and sunlit Greek dirt. Effects meant for additive blending say `add`; the sheet draws
+ * them plainly, as the palette-locked art is.
+ */
+{
+  const ground = (set: string, theme: string): HTMLCanvasElement | string => {
+    const index = meta.tilesets[set]?.masks[0]?.[0];
+    if (index === undefined || !atlases.has(`tiles-${theme}`)) return "checker";
+    // Four tiles square, so the texture does not repeat every 16 pixels.
+    const c = canvas(32, 32);
+    const ctx = ctx2d(c);
+    const list = meta.tilesets[set]?.masks[0] ?? [index];
+    for (let k = 0; k < 4; k++) {
+      ctx.drawImage(
+        tileImage(theme, list[k % list.length] as number),
+        (k % 2) * 16,
+        Math.floor(k / 2) * 16,
+      );
+    }
+    return c;
+  };
+  const grounds = [ground("lawn-field", "field-night"), ground("marble-dust", "greece")];
+  const s = section("combat-effects", "combat effects");
+  for (const [name, sp] of Object.entries(meta.sprites)) {
+    if (sp.atlas !== "combat") continue;
+    const box = el("article");
+    box.id = name;
+    box.append(el("h3", "name", (sp as { blend?: string }).blend ? `${name}  add` : name));
+    const frames = sp.frames.map((f) => frameImage(sp.atlas, f));
+    for (const [anim, a] of Object.entries(sp.anims)) {
+      const imgs = a.frames.map((f) => frames[sp.frames.indexOf(f)] as HTMLCanvasElement);
+      const r = row(box, `${anim} ${a.fps}fps`);
+      for (const scale of [1, 3]) {
+        for (const g of grounds) r.append(cell(player(imgs, a.fps, scale, g)));
+      }
+    }
+    s.append(box);
+  }
+}
+
 // Sprites -----------------------------------------------------------------------------------
 
 {
   const s = section("sprites", "sprites");
   for (const [name, sp] of Object.entries(meta.sprites)) {
-    if (sp.atlas === "ui") continue;
+    if (sp.atlas === "ui" || sp.atlas === "combat") continue;
     const box = el("article");
     box.id = name;
     box.append(el("h3", "name", name));
