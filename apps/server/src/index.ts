@@ -93,6 +93,7 @@ const server = createGameServer(
     live,
     trading,
   },
+  { channelSeats: config.channelSeats },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);

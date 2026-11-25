@@ -94,15 +94,39 @@ export function wearClub(
   player.emblem = club?.emblem ?? "";
 }
 
-/** Player bodies a map room holds, which is also its seat count. */
+/**
+ * A cast member standing on the map (PLAN §3 recurring cast): never moves, turns to face a
+ * player who comes close. Every client in the room sees every one.
+ */
+export const NpcState = schema(
+  {
+    /** Narrative speaker id. */
+    speaker: t.string(),
+    x: t.uint16(),
+    y: t.uint16(),
+    facing: t.uint8(),
+  },
+  "Npc",
+);
+export type NpcState = SchemaType<typeof NpcState>;
+
+/** Player bodies a map room holds: the most seats a channel can be given. */
 export const MAP_SEATS = 100;
 
-/** Keys of `players` are body slots ("0" to MAP_SEATS - 1). */
+/**
+ * Keys of `players` are body slots ("0" to MAP_SEATS - 1), keys of `npcs` are the map's NPC spot
+ * indices. `map` and `channel` say which room this is. Bodies and monsters move in the fight
+ * snapshot (`fight/wire.ts`), not here.
+ */
 export const MapState = schema(
   {
     /** The map this room runs, so the client draws the right one. */
     map: t.string(),
     players: t.map(PlayerState).view(),
+    channel: t.uint8(),
+    npcs: t.map(NpcState),
+    /** Ids of built portals whose map the Page clock has not opened yet: shut like unbuilt ones. */
+    closed: t.array("string"),
   },
   "MapState",
 );

@@ -6,15 +6,20 @@
 
 export interface Place {
   mapId: string;
+  /** Channel of the map, from 1. */
+  channel: number;
   /** The map room instance; 주변 reaches only players in the same one. */
   roomId: string;
   /** The character's session in that room. */
   sessionId: string;
   /** Current position in world pixels, or undefined once gone. */
   at: () => { x: number; y: number } | undefined;
+  /** Ids of the zones the character stands in (safe, logout, gather, rooms). */
+  zones: () => readonly string[];
 }
 
-type Listener = (characterId: string, mapId: string) => void;
+/** Called with the new map id and channel (empty and 0 when the character left every map). */
+type Listener = (characterId: string, mapId: string, channel: number) => void;
 
 class Places {
   private readonly byCharacter = new Map<string, Place>();
@@ -23,9 +28,13 @@ class Places {
   enter(characterId: string, place: Place): void {
     const before = this.byCharacter.get(characterId);
     this.byCharacter.set(characterId, place);
-    // A new instance of the same map is a channel change: friends see channels.
-    if (before?.mapId !== place.mapId || before?.roomId !== place.roomId) {
-      this.emit(characterId, place.mapId);
+    // A new map, channel or room instance: friends see where and in which channel.
+    if (
+      before?.mapId !== place.mapId ||
+      before.channel !== place.channel ||
+      before.roomId !== place.roomId
+    ) {
+      this.emit(characterId, place.mapId, place.channel);
     }
   }
 
@@ -34,7 +43,7 @@ class Places {
     for (const [characterId, place] of this.byCharacter) {
       if (place.sessionId !== sessionId) continue;
       this.byCharacter.delete(characterId);
-      this.emit(characterId, "");
+      this.emit(characterId, "", 0);
       return;
     }
   }
@@ -59,17 +68,13 @@ class Places {
     return found;
   }
 
-  /**
-   * Called with the new map id (empty when the character left every map), also when only the
-   * map room instance changed.
-   */
   listen(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private emit(characterId: string, mapId: string): void {
-    for (const listener of this.listeners) listener(characterId, mapId);
+  private emit(characterId: string, mapId: string, channel: number): void {
+    for (const listener of this.listeners) listener(characterId, mapId, channel);
   }
 }
 

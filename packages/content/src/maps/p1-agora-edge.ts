@@ -596,12 +596,13 @@ const details: (Decal | Prop)[] = [
   ),
 ];
 
-const lights: LightSource[] = FURNACES.map(([tx, ty]) => ({
+// Every furnace burns, the third one west of the pair too.
+const lights: LightSource[] = [...FURNACES, [60, 41] as Vec].map(([tx, ty]) => ({
   at: [tx * T + 16, ty * T + 4] as Vec,
-  radius: 70,
-  color: "gold.light",
-  intensity: 0.6,
-  flicker: { amount: 0.15, period: 0.8 },
+  radius: 80,
+  color: "clay.light",
+  intensity: 1,
+  flicker: { amount: 0.18, period: 0.8 },
 }));
 
 const map: MapSource = {
@@ -612,7 +613,7 @@ const map: MapSource = {
   theme: "greece-noon",
   shade: "greece-shade",
   sky: "gold.pale",
-  ambient: { color: "stone.bright", intensity: 1.05 },
+  ambient: { color: "stone.bright", intensity: 0.95 },
   plan: PLAN,
   legend: LEGEND,
   details,

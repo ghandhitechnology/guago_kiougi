@@ -248,6 +248,21 @@ export function withBook(row: ItemRow, book: BookItem): ItemRow {
   };
 }
 
+/**
+ * What an item made out of others carries from them (PLAN §13 "Bound items", re-trade
+ * cooldown): bound if any input was, tradable no sooner than the latest of them. Binding and the
+ * cooldown belong to the value, so 제련, a tool merge or an evolution cannot launder them.
+ */
+export function inherit(row: ItemRow, inputs: readonly ItemRow[]): ItemRow {
+  const all = [row, ...inputs];
+  const latest = Math.max(...all.map((r) => r.tradableAt?.getTime() ?? 0));
+  return {
+    ...row,
+    bound: all.some((r) => r.bound),
+    tradableAt: latest > 0 ? new Date(latest) : null,
+  };
+}
+
 export function toTool(row: ItemRow): ToolItem {
   return { id: row.id, def: row.def, level: row.level };
 }
