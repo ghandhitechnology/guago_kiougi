@@ -16,6 +16,7 @@ import type { Live } from "./live/index.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
 import type { Social } from "./social/index.ts";
+import type { Trading } from "./trade/room.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
@@ -34,6 +35,7 @@ export function createGameServer(
     routes?: readonly ApiRoute[];
     grants?: GrantBuffer;
     live?: Live;
+    trading?: Trading;
   } = {},
   world: { channelSeats?: number; emptyGraceSeconds?: number } = {},
 ) {
@@ -54,6 +56,12 @@ export function createGameServer(
     ...chat,
     ...(economy.ops ? { ops: economy.ops } : {}),
     ...(live ? { handlers: live.handlers } : {}),
+  });
+  provideWorldServices({
+    ...chat,
+    ...(economy.ops ? { ops: economy.ops } : {}),
+    ...(live ? { handlers: live.handlers } : {}),
+    ...(economy.trading ? { trading: economy.trading } : {}),
   });
   if (world.channelSeats !== undefined) channels.seats = world.channelSeats;
   if (world.emptyGraceSeconds !== undefined) channels.graceSeconds = world.emptyGraceSeconds;
@@ -80,7 +88,6 @@ export function createGameServer(
     express: (app: { disable(setting: string): void; use(handler: Middleware): void }) => {
       app.disable("x-powered-by");
       app.use(enter);
-      if (live) app.use(live.adminRoute);
       app.use(api);
     },
     greet: false,

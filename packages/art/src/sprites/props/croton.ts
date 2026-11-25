@@ -1,6 +1,8 @@
+import { type SpriteDef, variant } from "../../format.ts";
 import { finish, hline, ovalShadow, rect, vline } from "../../interior.ts";
 import { greek, hash } from "../../page1.ts";
 import { Pic } from "../../paint.ts";
+import polis from "./polis.ts";
 
 /**
  * 크로톤 학당 at 05:50: the school on its headland waiting for the sun. The sky over the sea goes
@@ -147,7 +149,80 @@ function beans(): Pic {
   return finish(p, "wJ");
 }
 
+// The scrubbed diagonal ---------------------------------------------------------------------------
+
+/**
+ * One unit square's diagonal, scratched in corner to corner by someone and scrubbed at in a hurry
+ * with a wet rag: the line broken, smears across it, the scratch still there under them. Raw, to
+ * lie on the floor's own raw squares.
+ */
+function scrubbed(): Pic {
+  const p = Pic.blank(32, 32);
+  for (let k = 3; k < 29; k++) {
+    if (hash(k, 1, 4) > 0.3) p.set(k, k, "C");
+    if (hash(k, 2, 4) > 0.6) p.set(k + 1, k, "T");
+  }
+  // The rag's strokes, across the line, paler than the slab.
+  for (let s = 0; s < 6; s++) {
+    const c = 6 + s * 4;
+    for (let t = -5; t <= 5; t++) {
+      const x = c + t;
+      const y = c - t + (s % 2);
+      if (x > 1 && x < 31 && y > 1 && y < 31 && hash(t, s, 7) > 0.25) p.set(x, y, "P");
+    }
+  }
+  return p;
+}
+
+// Dawn on the water and the walls ---------------------------------------------------------------
+
+/** Rose and gold thrown over the sea at dawn: a sparse wash laid on the water tiles. Raw. */
+function wash(): Pic {
+  const p = Pic.blank(64, 64);
+  for (let y = 0; y < 64; y++)
+    for (let x = 0; x < 64; x++) {
+      const n = hash(x >> 1, y, 21);
+      if ((x + y * 3) % 4 === 0 && n > 0.45) p.set(x, y, n > 0.85 ? "y" : n > 0.65 ? "+" : "%");
+    }
+  return p;
+}
+
+/** The sun's path glittering on the water, three frames. Raw. */
+function glitter(frame: number): Pic {
+  const p = Pic.blank(48, 12);
+  for (let k = 0; k < 14; k++) {
+    const x = Math.floor(hash(k, frame, 3) * 46);
+    const y = Math.floor(hash(frame, k, 5) * 11);
+    p.set(x, y, k % 3 ? "Y" : "w").set(x + 1, y, "y");
+  }
+  return p;
+}
+
+/** The school's stoa in the dawn: its whites taking the rose and peach of the first sun. */
+const DAWN = { "stone.bright": "flesh.bright", "stone.pale": "rose.pale" };
+const dawnOf = (name: string, as: string): SpriteDef => {
+  const base = (polis as readonly SpriteDef[]).find((d) => d.name === name) as SpriteDef;
+  return variant(base, { name: as, recolor: DAWN });
+};
+
 export default [
+  greek(
+    "scrubbed-diagonal",
+    { still: scrubbed() },
+    { origin: [0, 0], outline: false, lone: "CTP" },
+  ),
+  greek("dawn-wash", { still: wash() }, { origin: [0, 0], outline: false, lone: "y+%" }),
+  greek(
+    "dawn-glitter",
+    { glint0: glitter(0), glint1: glitter(1), glint2: glitter(2) },
+    {
+      anim: { glint: { frames: ["glint0", "glint1", "glint2"], fps: 4 } },
+      outline: false,
+      lone: "Yyw",
+    },
+  ),
+  dawnOf("stoa-bay", "stoa-bay-dawn"),
+  dawnOf("stoa-end", "stoa-end-dawn"),
   greek("dawn", { still: dawn() }, { origin: [0, 0], outline: false, lone: "Yyc=+@EvN8Xx9w" }),
   greek(
     "monochord",

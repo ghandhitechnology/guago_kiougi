@@ -1,7 +1,8 @@
 import { Client, type Room } from "@colyseus/sdk";
 import {
-  CLOSE_SESSION_REPLACED,
+  closeEnd,
   ENTER_PATH,
+  type LinkEnd,
   MAP_MESSAGES,
   MapState,
   ROOMS_PATH,
@@ -25,8 +26,11 @@ export interface MapLinkHandlers {
   arrive(seat: MapSeat): () => void;
   /** The server is sending the player through a door; the next `arrive` is the far side. */
   depart(transfer: Transfer): void;
-  /** The account joined somewhere else, or the session ended. Final. */
-  ended(why: "replaced" | "signedOut"): void;
+  /**
+   * The link gave up for good: another tab or device took the seat, an admin closed the session,
+   * the account was banned, or the session is gone. Final.
+   */
+  ended(why: LinkEnd | "signedOut"): void;
 }
 
 export type Entered = { seating: Seating } | { final: "signedOut" } | { retry: true };
@@ -148,7 +152,8 @@ export function stayConnected(
       }
       detach();
       current = undefined;
-      if (outcome.code === CLOSE_SESSION_REPLACED) return handlers.ended("replaced");
+      const end = closeEnd(outcome.code);
+      if (end) return handlers.ended(end);
       if (!stopped) await sleep(200);
     }
   }

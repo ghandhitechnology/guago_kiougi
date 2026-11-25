@@ -1,11 +1,13 @@
 import { matchMaker } from "@colyseus/core";
 import { WORLD_ROOM } from "@guago/shared";
+import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
+import { startLedgerMaintenance } from "./economy/ledger.ts";
 import { LiveClock } from "./live/clock.ts";
 import { provideLive, provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
@@ -16,6 +18,8 @@ import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
 import { createSocial } from "./social/index.ts";
+import { startListingSweeper } from "./trade/board.ts";
+import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
 
 assertServable(config);
@@ -45,8 +49,20 @@ const live = createLive(db, {
   testEvents: config.liveTestEvents,
 });
 provideLive(live);
+// Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
+const admin = await createModerationStack({
+  db,
+  executor: economy.executor,
+  secret: config.serverSecret,
+  // Social is made below; a ban only reaches these after start.
+  clubs: {
+    vacate: (id, on) => social.vacate(id, on),
+    announce: (change) => social.announce(change),
+  },
+});
 const auth = createAuthService({
   db,
+  gate: admin.moderation.gate,
   onSessionsRevoked: evictAccount,
   onCharacterCreated: economy.giveKit,
   limits: { signupsPerIpPerDay: config.signupsPerIpPerDay },
@@ -59,12 +75,19 @@ const social = createSocial(db, {
   log: chatLog,
   mayPin: (id) => live.isFloorLeader(id),
 });
+const trading = createTrading({ db, executor: economy.executor, clock: () => clock.date() });
 const server = createGameServer(
   auth,
   config,
   studentLooks,
-  { log: chatLog, social },
-  { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants, live },
+  { filter: admin.filter, log: chatLog, social },
+  {
+    ops: economy.ops,
+    routes: economy.routes(auth),
+    grants: economy.grants,
+    live,
+    trading,
+  },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
@@ -78,6 +101,13 @@ await server.listen(config.port);
 await matchMaker.createRoom(WORLD_ROOM, {});
 economy.grants.start();
 await live.start();
+startLedgerMaintenance(db, () => clock.now());
+startListingSweeper(
+  db,
+  economy.executor,
+  () => clock.date(),
+  (id, change) => worldRoom()?.notify(id, change),
+);
 setInterval(
   () => {
     auth.sweep().catch(() => {});
@@ -86,5 +116,10 @@ setInterval(
   },
   10 * 60 * 1000,
 ).unref();
-await serveMetrics(config.metricsPort);
-console.log(`game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}`);
+setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
+await serveMetrics(config.metricsPort, "127.0.0.1", live.adminRoute);
+// Its own port on a loopback or Tailscale address (config.ts), never through the game port.
+await admin.listen({ host: config.adminHost, port: config.adminPort, origin: config.adminOrigin });
+console.log(
+  `game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}, admin on ${config.adminHost}:${config.adminPort}`,
+);

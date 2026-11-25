@@ -7,6 +7,9 @@
  *
  *   LIVE_TEST_EVENTS=1 PORT=2572 pnpm --filter @guago/server start   (in one terminal)
  *   pnpm live:run --url http://127.0.0.1:2572                        (in another)
+ *
+ * The admin route is on the server's loopback metrics port (`--control`, default the game port
+ * + 100), never on the game port.
  */
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
@@ -31,9 +34,17 @@ const { values } = parseArgs({
   options: {
     url: { type: "string", default: "http://127.0.0.1:2572" },
     rate: { type: "string", default: "1456" },
+    control: { type: "string" },
   },
 });
 const BASE = values.url as string;
+const CONTROL =
+  values.control ??
+  (() => {
+    const u = new URL(BASE);
+    u.port = String(Number(u.port) + 100);
+    return u.origin;
+  })();
 
 const started = Date.now();
 let gameNow = 0;
@@ -51,7 +62,7 @@ function check(ok: boolean, what: string): void {
 }
 
 async function admin(body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const res = await fetch(`${BASE}/admin/live`, {
+  const res = await fetch(`${CONTROL}/admin/live`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

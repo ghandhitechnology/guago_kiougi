@@ -1,7 +1,9 @@
 /**
  * Renders the narrative as plain text to read top to bottom, the way the art lane has a contact
  * sheet. `node packages/content/src/narrative/print.ts <part>` prints one part:
- * voices, opening, story, cutscenes, codex, hub, quests, system.
+ * voices, opening, story, cutscenes, codex, hub, quests, system, speakers.
+ * `speakers [prefix,prefix]` prints every line grouped by its voice, as Markdown, keeping only
+ * keys that start with one of the prefixes when they are given.
  */
 import { NARRATIVE as N } from "./index.ts";
 import type { Cutscene, Line, Step } from "./schema.ts";
@@ -171,7 +173,62 @@ function system(): string[] {
   return [...msgs, "", ...awards];
 }
 
+/** Every key a speaker says, wherever it lives; written text with no voice goes last. */
+function speakers(): string[] {
+  const filter = (process.argv[3] ?? "").split(",").filter((p) => p !== "");
+  const keep = (key: string) => filter.length === 0 || filter.some((p) => key.startsWith(p));
+  const said = new Map<string, { key: string; where: string }[]>();
+  const add = (voice: string, key: string | undefined, where: string) => {
+    if (key === undefined || !keep(key)) return;
+    const list = said.get(voice) ?? [];
+    if (!list.some((x) => x.key === key)) list.push({ key, where });
+    said.set(voice, list);
+  };
+  const fromLine = (l: Line, where: string) => {
+    add(l.speaker, l.text, where);
+    for (const o of l.choice ?? []) {
+      add("player", o.text, where);
+      for (const r of o.reply) fromLine(r, where);
+    }
+  };
+  const fromSteps = (steps: readonly Step[], where: string) => {
+    for (const st of steps) {
+      if (st.do === "say" || st.do === "bubble") fromLine(st.line, where);
+      if (st.do === "offer") for (const l of st.lines) fromLine(l, where);
+    }
+  };
+  for (const sp of N.speakers) {
+    for (const k of sp.samples) add(sp.id, k, "sample");
+    add(sp.id, sp.donkatsu, "돈가스");
+  }
+  for (const b of N.opening) fromSteps(b.scene.steps, b.id);
+  for (const c of N.cutscenes) fromSteps(c.steps, c.id);
+  for (const b of N.story) fromSteps(b.lines ?? [], b.id);
+  for (const b of N.bosses)
+    for (const f of b.fight) for (const l of f.lines) fromLine(l, `${b.boss} ${f.on}`);
+  for (const b of N.barks) add(b.speaker, b.text, `bark ${b.where ?? ""} ${b.from}`);
+  for (const m of [...N.system, ...N.announcements]) add(m.voice, m.text, m.id);
+  for (const q of [...N.quests, ...(N.chores ?? [])]) {
+    add(q.voice ?? "", q.title, q.id);
+    add(q.voice ?? "", q.body, q.id);
+  }
+  for (const d of N.descriptions) {
+    add("", d.name, d.id);
+    add("", d.desc, d.id);
+  }
+  for (const t of N.terms ?? []) add("", t.name, `${t.kind}:${t.id}`);
+  const order = [...N.speakers.map((sp) => sp.id), ""];
+  return order.flatMap((id) => {
+    const list = said.get(id);
+    if (!list || list.length === 0) return [];
+    const sp = N.speakers.find((x) => x.id === id);
+    const head = sp ? `## ${nameOf(id)} (${sp.register})` : "## 목소리 없는 글";
+    return [head, "", ...list.map((x) => `- ${ko(x.key)}  \`${x.where.trim()}\``), ""];
+  });
+}
+
 const PARTS: Record<string, () => string[]> = {
+  speakers,
   voices,
   opening,
   story,

@@ -25,10 +25,13 @@
     "db:migrate": "node --env-file-if-exists=.env apps/server/src/db/migrate.ts",
     "db:generate": "pnpm --filter @guago/server exec drizzle-kit generate",
     "economy": "node --env-file-if-exists=.env apps/server/src/economy/cli.ts",
+    "admin": "node --env-file-if-exists=.env apps/server/src/admin/cli.ts",
     "balance": "pnpm --filter @guago/balance-sim balance",
     "loadtest": "pnpm --filter @guago/loadtest start",
     "netsim": "pnpm --filter @guago/loadtest netsim",
     "social:run": "pnpm --filter @guago/social-run start",
+    "trade:run": "pnpm --filter @guago/trade-run start",
+    "moderation:run": "pnpm --filter @guago/moderation-run start",
     "live": "node --env-file-if-exists=.env apps/server/src/live/cli.ts",
     "live:run": "pnpm --filter @guago/loadtest page-run"
   },

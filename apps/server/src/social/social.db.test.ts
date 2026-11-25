@@ -7,11 +7,11 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db, pgErrorCode } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
-import { createEconomy } from "../economy/index.ts";
+import { createEconomy, pruneOperations } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { executorFees, MemoryWallet } from "./fees.ts";
 import { createSocial, type Social } from "./index.ts";
-import { Refuse } from "./tx.ts";
+import { Refuse, retries } from "./tx.ts";
 
 let db: Db;
 let wallet: MemoryWallet;
@@ -34,6 +34,21 @@ async function character(level = 1): Promise<string> {
 }
 
 const codeOf = (r: unknown) => (r instanceof Refuse ? r.code : "ok");
+
+/** Backends of this database waiting on a lock. */
+async function waitingOnLocks(): Promise<number> {
+  return count(sql`
+    select count(*) as n from pg_stat_activity
+    where datname = current_database() and wait_event_type = 'Lock'`);
+}
+
+async function until(test: () => Promise<boolean>, ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await test())) {
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
 
 async function count(query: ReturnType<typeof sql>): Promise<number> {
   const { rows } = await db.execute(query);
@@ -78,7 +93,10 @@ describe("friends", () => {
 
   it("asking each other at once ends in one friendship, not a deadlock", async () => {
     const [a, b] = [await character(), await character()];
+    // A deadlock would be retried out of sight; the count shows it.
+    const before = retries.count;
     const results = await Promise.all([social.friends.request(a, b), social.friends.request(b, a)]);
+    expect(retries.count).toBe(before);
     expect(results.sort()).toEqual(["friends", "requested"]);
     expect(await count(sql`select count(*) as n from friends where character_id = ${a}`)).toBe(1);
     expect(
@@ -123,9 +141,23 @@ describe("blocks", () => {
 });
 
 describe("clubs", () => {
-  it("charge the founding fee once, however the request is retried", async () => {
+  it("find a retried founding by the club's own key, even after the executor forgot the id", async () => {
+    const economy = createEconomy(db);
+    const real = createSocial(db, {
+      fees: executorFees(db, economy.executor),
+      jackets: () => ["navy"],
+    });
     const me = await character(CLUB_FOUND_LEVEL);
-    wallet.credit(me, CLUB_FEE * 3);
+    const earned = await economy.executor.execute(me, `earn-${me}`, "grant", {
+      exp: 0,
+      drops: [
+        {
+          item: { kind: "coin", amount: CLUB_FEE * 3 },
+          source: { kind: "monster", fieldId: "p1-colonnade", monsterId: "odap", rank: "elite" },
+        },
+      ],
+    });
+    expect(earned.ok).toBe(true);
     const req = {
       op: "found-once-1",
       name: "재시도부",
@@ -133,15 +165,26 @@ describe("clubs", () => {
       jacket: "navy",
       emblem: EMBLEM,
     } as const;
-    const first = await Promise.all([
-      social.clubs.found(me, CLUB_FOUND_LEVEL, req),
-      social.clubs.found(me, CLUB_FOUND_LEVEL, req),
-    ]);
-    const again = await social.clubs.found(me, CLUB_FOUND_LEVEL, req);
-    const ids = [...first, again].map((r) => (r instanceof Refuse ? r.code : r.club));
-    expect(new Set(ids).size).toBe(1);
-    expect(wallet.balance(me)).toBe(CLUB_FEE * 2);
-    expect(wallet.ledger.filter((e) => e.characterId === me)).toHaveLength(1);
+    const first = await real.clubs.found(me, CLUB_FOUND_LEVEL, req);
+    // Operation ids are pruned after an hour; a retry that late still pays nothing.
+    await db.execute(sql`
+      update operations set at = now() - interval '2 hours'
+      where character_id = ${me} and op_id = ${req.op}`);
+    await db.execute(sql`
+      update economy_ledger set at = now() - interval '2 hours'
+      where character_id = ${me} and operation_id = ${req.op}`);
+    await pruneOperations(db, []);
+    expect(
+      await count(
+        sql`select count(*) as n from operations where character_id = ${me} and op_id = ${req.op}`,
+      ),
+    ).toBe(0);
+    const late = await real.clubs.found(me, CLUB_FOUND_LEVEL, req);
+    expect(codeOf(first)).toBe("ok");
+    expect(late).toEqual(first);
+    expect(await count(sql`select pinecones as n from wallets where character_id = ${me}`)).toBe(
+      CLUB_FEE * 2,
+    );
     expect(await count(sql`select count(*) as n from clubs where founded_by = ${me}`)).toBe(1);
   });
 
@@ -371,5 +414,128 @@ describe("the founding fee through the item executor", () => {
 
     const audit = await checkInvariants(db);
     expect(audit.violations).toEqual([]);
+  });
+});
+
+describe("a well-formed id of no character", () => {
+  it("is answered no_player, never a server error", async () => {
+    const me = await character();
+    const ghost = "00000000-0000-4000-8000-00000000dead";
+    const answers = [
+      await social.friends.accept(me, ghost).catch((e: unknown) => e),
+      await social.friends.remove(me, ghost).catch((e: unknown) => e),
+    ];
+    expect(answers.map(codeOf)).toEqual(["no_player", "no_player"]);
+  });
+});
+
+describe("requests from blocked players", () => {
+  it("never fill the blocker's inbox, and do not surface when the block is lifted", async () => {
+    const victim = await character();
+    const pests = await Promise.all(Array.from({ length: 50 }, () => character()));
+    for (const p of pests) await social.friends.request(p, victim);
+    for (const p of pests) await social.friends.block(victim, p);
+    // Each asks again; it looks sent from their side.
+    for (const p of pests) expect(await social.friends.request(p, victim)).toBe("requested");
+    const friend = await character();
+    expect(await social.friends.request(friend, victim)).toBe("requested");
+    expect((await social.friends.requestsOf(victim)).in.map((r) => r.id)).toEqual([friend]);
+    await social.friends.unblock(victim, pests[0] as string);
+    expect((await social.friends.requestsOf(victim)).in.map((r) => r.id)).toEqual([friend]);
+    expect(
+      await count(sql`select requests_in as n from social_counts where character_id = ${victim}`),
+    ).toBe(1);
+  });
+});
+
+describe("lock order", () => {
+  it("lets a cancel wait behind a pair lock instead of deadlocking against it", async () => {
+    const [x, y] = [await character(), await character()];
+    // The sender holds the smaller id, so the receiver's counter is the larger one.
+    const [sender, receiver] = x < y ? [x, y] : [y, x];
+    expect(await social.friends.request(sender, receiver)).toBe("requested");
+    const before = retries.count;
+    // An accept's pair lock on its way: the smaller row taken, the larger next.
+    const other = await db.pool.connect();
+    try {
+      await other.query("begin");
+      await other.query("select 1 from social_counts where character_id = $1 for update", [sender]);
+      const cancel = social.friends.cancel(sender, receiver).then(codeOf, (e: unknown) => e);
+      await until(async () => (await waitingOnLocks()) > 0);
+      const second = await other
+        .query("select 1 from social_counts where character_id = $1 for update", [receiver])
+        .then(
+          () => "ok",
+          (e: unknown) => pgErrorCode(e).code,
+        );
+      await other.query(second === "ok" ? "commit" : "rollback");
+      expect(second).toBe("ok");
+      expect(await cancel).toBe("ok");
+      expect(retries.count).toBe(before);
+    } finally {
+      other.release();
+    }
+  });
+});
+
+describe("a club invite to a player who blocked the inviter", () => {
+  it("is refused by the same caps as one that is delivered", async () => {
+    const leader = await character(CLUB_FOUND_LEVEL);
+    await club(leader, "invite");
+    for (let i = 0; i < 20; i++) {
+      expect(codeOf(await social.clubs.invite(leader, await character(), false))).toBe("ok");
+    }
+    const [open, blocker] = [await character(), await character()];
+    expect(codeOf(await social.clubs.invite(leader, open, false))).toBe("invites_full");
+    expect(codeOf(await social.clubs.invite(leader, blocker, true))).toBe("invites_full");
+
+    // The target's side: ten invites held already.
+    const full = await character();
+    for (let i = 0; i < 10; i++) {
+      const other = await character(CLUB_FOUND_LEVEL);
+      await club(other, "invite");
+      expect(codeOf(await social.clubs.invite(other, full, false))).toBe("ok");
+    }
+    const late = await character(CLUB_FOUND_LEVEL);
+    await club(late, "invite");
+    expect(codeOf(await social.clubs.invite(late, full, true))).toBe("invites_full");
+  });
+});
+
+describe("removing a character who leads a club", () => {
+  const accountOf = async (id: string) =>
+    (await db.execute(sql`select account_id from characters where id = ${id}`)).rows[0]
+      ?.account_id as string;
+
+  it("hands the club to the senior 부짱 first, then lets the character go", async () => {
+    const leader = await character(CLUB_FOUND_LEVEL);
+    const id = await club(leader);
+    const [early, vice] = [await character(), await character()];
+    await social.clubs.join(early, id);
+    await social.clubs.join(vice, id);
+    await social.clubs.setRank(leader, vice, "vice");
+    // Deleting the 짱 as it stands fails: the club would be left without one.
+    const blocked = await db
+      .execute(sql`delete from accounts where id = ${await accountOf(leader)}`)
+      .catch((e: unknown) => e);
+    expect(pgErrorCode(blocked).constraint).toBe("clubs_leader_member_fk");
+
+    const account = await accountOf(leader);
+    await db.transaction(async (tx) => {
+      expect(await social.vacate(leader, { tx })).toMatchObject({ club: id, moved: [leader] });
+      await tx.execute(sql`delete from accounts where id = ${account}`);
+    });
+    const view = await social.clubs.view(id);
+    expect(view?.leader).toBe(vice);
+    expect(view?.members.map((m) => m.id).sort()).toEqual([early, vice].sort());
+  });
+
+  it("disbands a club whose 짱 is alone, and ignores a character in no club", async () => {
+    const leader = await character(CLUB_FOUND_LEVEL);
+    const id = await club(leader);
+    expect(await social.vacate(leader)).toMatchObject({ club: id, gone: true });
+    await db.execute(sql`delete from accounts where id = ${await accountOf(leader)}`);
+    expect(await social.clubs.view(id)).toBeNull();
+    expect(await social.vacate(await character())).toBeNull();
   });
 });

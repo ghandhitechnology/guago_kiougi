@@ -24,3 +24,4 @@ export * from "./schema.ts";
 export * from "./sim.ts";
 export * from "./social.ts";
 export * from "./stats.ts";
+export * from "./trade.ts";
