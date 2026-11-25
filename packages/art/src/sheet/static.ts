@@ -323,7 +323,8 @@ export function sceneSheet(f: Fonts, meta: SceneMeta, atlases: readonly Atlas[])
   const pixels = new Map<string, SceneAtlas>(
     atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
   );
-  const s = new Sheet(SCREEN.w * 3 + 40);
+  // Each scene takes its ×1 and ×3 rows and a title; the canvas fits however many there are.
+  const s = new Sheet(SCREEN.w * 3 + 40, SCENES.length * (SCREEN.h * 4 + 90) + 40);
   let y = 20;
   for (const def of SCENES) {
     const img = renderScene(def, meta, pixels, 0);
@@ -387,8 +388,15 @@ export function combatGrounds(art: readonly Compiled[]): { name: string; patch: 
  * ×3 and the rest at ×1, so a sixteen-direction cone does not take a page of its own.
  */
 export function combatSheet(f: Fonts, art: readonly Compiled[], group = "combat"): Rgba {
+  // Laid out once on a one-row canvas (drawing clips) to measure, then drawn at that height.
+  const measure = layoutCombat(new Sheet(1600, 1), f, art, group);
+  const s = new Sheet(1600, measure + 40);
+  layoutCombat(s, f, art, group);
+  return s.done();
+}
+
+function layoutCombat(s: Sheet, f: Fonts, art: readonly Compiled[], group: string): number {
   const grounds = combatGrounds(art);
-  const s = new Sheet(1600, 30000);
   let y = 20;
   const gap = 6;
   let gx = 0;
@@ -442,7 +450,7 @@ export function combatSheet(f: Fonts, art: readonly Compiled[], group = "combat"
     y += 12;
     s.mark(y);
   }
-  return s.done();
+  return y;
 }
 
 /**
