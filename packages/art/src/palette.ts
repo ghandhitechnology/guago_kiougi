@@ -668,6 +668,26 @@ const GREECE_SHADE = theme("greece-shade", {
   "sea.dark": "sea.deep",
 });
 
+/**
+ * 올리브 숲길 at 09:40, before the heat: the road is white limestone dust instead of the
+ * afternoon's peach, grass grey-olive with dew-silver tips, its shadows cool. Wood and terracotta
+ * stay warm, so the harvest gear reads against the pale ground.
+ */
+const OLIVE_MORNING = theme("olive-morning", {
+  "grass.bright": "stone.bright",
+  "grass.pale": "stone.pale",
+  "grass.light": "olive.light",
+  "grass.soft": "olive.mid",
+  "grass.mid": "olive.mid",
+  "grass.dark": "olive.dark",
+  "grass.deep": "olive.deep",
+  "wood.pale": "stone.pale",
+  "wood.light": "stone.lamp",
+  "wood.mid": "stone.vein",
+  "wood.dark": "stone.mid",
+  "clay.pale": "stone.bright",
+});
+
 /** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
 export const THEMES: readonly Theme[] = [
   theme("campus", {}),
@@ -686,6 +706,7 @@ export const THEMES: readonly Theme[] = [
   GOLDEN_SHADE,
   // Page 1 hunting fields
   GREECE_SHADE,
+  OLIVE_MORNING,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */

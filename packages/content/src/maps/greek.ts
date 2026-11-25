@@ -1,5 +1,6 @@
 import type { Layers, MapSource } from "./format.ts";
 import type { Prop, ShadowShape, Vec } from "./layers.ts";
+import { unit } from "./noise.ts";
 import type { PlanGrid } from "./plan.ts";
 import { place } from "./props.ts";
 
@@ -77,7 +78,12 @@ export function merge(...parts: readonly Partial<Placed>[]): Placed {
  * Trees at tiles: the trunk blocks its tile, the crown goes overhead, and the crown's shadow
  * falls a little right of the trunk under a high sun. Crowns stir out of step.
  */
-export function trees(kind: "olive" | "cypress", at: readonly Vec[], seed = 0): Placed {
+export function trees(
+  kind: "olive" | "cypress",
+  at: readonly Vec[],
+  seed = 0,
+  opt: { dapple?: boolean } = {},
+): Placed {
   const crown = kind === "olive" ? "olive-crown" : "cypress-crown";
   const anim = kind === "olive" ? "stir" : "sway";
   const out: Placed = { objects: [], overhead: [], shadows: [] };
@@ -94,13 +100,54 @@ export function trees(kind: "olive" | "cypress", at: readonly Vec[], seed = 0): 
       at: feet,
       flip,
     });
-    out.shadows.push(
-      kind === "olive"
-        ? blob(feet[0] + 7, feet[1] - 1, 21, 7, 3)
-        : blob(feet[0] + 9, feet[1] - 1, 8, 4, 5),
-    );
+    if (kind === "olive" && opt.dapple)
+      out.shadows.push({
+        prop: "dapple",
+        frame: i % 2 ? "a" : "b",
+        at: [feet[0] + 6, feet[1] - 4],
+        flip,
+      });
+    else
+      out.shadows.push(
+        kind === "olive"
+          ? blob(feet[0] + 7, feet[1] - 1, 21, 7, 3)
+          : blob(feet[0] + 9, feet[1] - 1, 8, 4, 5),
+      );
   });
   return out;
+}
+
+/**
+ * Points on a jittered grid `step` tiles apart inside `area` where `keep` says yes: rows of an
+ * orchard that never line up perfectly, or trees scattered past an edge.
+ */
+export function scatter(
+  area: { x: number; y: number; w: number; h: number },
+  step: number,
+  seed: number,
+  keep: (tx: number, ty: number) => boolean,
+): Vec[] {
+  const out: Vec[] = [];
+  for (let gy = area.y; gy < area.y + area.h; gy += step) {
+    for (
+      let gx = area.x + ((gy / step) % 2 ? Math.floor(step / 2) : 0);
+      gx < area.x + area.w;
+      gx += step
+    ) {
+      const jx = Math.floor(unit(gx, gy, seed) * 3) - 1;
+      const jy = Math.floor(unit(gx, gy, seed + 1) * 3) - 1;
+      const tx = gx + jx;
+      const ty = gy + jy;
+      if (keep(tx, ty)) out.push([tx, ty]);
+    }
+  }
+  return out;
+}
+
+/** A plan string's character at a tile, for placing art against the settled ground. */
+export function cellOf(plan: string): (tx: number, ty: number) => string {
+  const rows = plan.split("\n");
+  return (tx, ty) => rows[ty]?.[tx] ?? "";
 }
 
 /** Tile to the world pixel at its centre. */

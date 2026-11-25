@@ -5,6 +5,7 @@ import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 // Page 1 hunting fields and the 생태공원.
 import p1Colonnade from "./p1-colonnade.ts";
+import p1OliveRoad from "./p1-olive-road.ts";
 
 export * from "./build.ts";
 export * from "./buildings.ts";
@@ -21,6 +22,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   campusField,
   // Page 1 hunting fields and the 생태공원.
   p1Colonnade,
+  p1OliveRoad,
 ];
 
 /**
@@ -44,7 +46,7 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "p1-croton-school",
   "p1-elea-track",
   "p1-lyceum",
-  "p1-olive-road",
+  "p1-cave-mouth",
 ]);
 
 /** Builds every map. */
