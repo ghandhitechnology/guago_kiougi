@@ -7,10 +7,12 @@ import { FRONT_SCENE, UI_SCENE, WORLD_SCENE } from "../entry.ts";
 import { fight, watchFight } from "../hud/fight.ts";
 import { Hud } from "../hud/hud.ts";
 import { hud } from "../hud/store.ts";
+import { registerBag } from "../menu/bag.ts";
 import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { session } from "../world/session.ts";
 import { worldView } from "../world/view.ts";
+import { onWorld } from "../world-events.ts";
 import { AnnounceBanner } from "./announce.ts";
 import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
@@ -45,6 +47,7 @@ export class UiScene extends Phaser.Scene {
   create(): void {
     setToaster(new Toaster(this));
     this.scene.bringToTop();
+    registerBag();
     registerSettings();
     onSignOut(() => void this.signOut());
     this.dialogue = new DialogueBox(this);
@@ -71,14 +74,15 @@ export class UiScene extends Phaser.Scene {
     const link = session.link;
     const touch = touchScreen();
     const chat = link ? new ChatPanel(this, link, { top: touch, rows: touch ? 5 : 7 }) : undefined;
-    const notebook = new Notebook(this, () => hudView.setVisible(true));
+    const notebook = new Notebook(
+      this,
+      () => hudView.setVisible(true),
+      () => hudView.setVisible(false),
+    );
     const hudView = new Hud(
       this,
       {
-        openMenu: () => {
-          hudView.setVisible(false);
-          notebook.open();
-        },
+        openMenu: () => notebook.open(),
         openChat: () => chat?.open(),
         cycleMode: () => fight()?.cycleMode(),
         dodge: () => fight()?.dodge(),
@@ -120,7 +124,6 @@ export class UiScene extends Phaser.Scene {
         return true;
       }
       if (e.key === "Escape") {
-        hudView.setVisible(false);
         notebook.open();
         return true;
       }
@@ -146,6 +149,13 @@ export class UiScene extends Phaser.Scene {
       if (name !== lastPlace) this.banner.show(name);
       lastPlace = name;
     });
+    // Things in the world that own a screen open it: the 메이커실's stations, the 자판기, the
+    // 수행평가 board, the 도감 shelf and the 0조 연구노트.
+    const unopen = onWorld((e) => {
+      if (e.t !== "open") return;
+      const arg = worldPanel(e.id, e.kind);
+      if (arg) notebook.open(arg.tab, arg.arg);
+    });
     let stopFeed = () => {};
     this.world = {
       hud: hudView,
@@ -154,6 +164,7 @@ export class UiScene extends Phaser.Scene {
       notebook,
       stop: () => {
         unplace();
+        unopen();
         unfight();
         unscreen();
         stopFeed();
@@ -192,4 +203,20 @@ export class UiScene extends Phaser.Scene {
     this.scene.launch(FRONT_SCENE, { session: null });
     this.scene.bringToTop();
   }
+}
+
+/** The notebook tab a thing in the world opens, by its id and kind in the map. */
+function worldPanel(id: string, kind: string): { tab: string; arg?: unknown } | undefined {
+  if (kind === "station") {
+    if (id.includes("bind")) return { tab: "bag", arg: { station: "bindery" } };
+    if (id.includes("forge")) return { tab: "bag", arg: { station: "forge" } };
+    if (id.includes("pilgi") || id.includes("desk"))
+      return { tab: "bag", arg: { station: "pilgi" } };
+    return { tab: "bag" };
+  }
+  if (kind === "shop" && id.includes("vending")) return { tab: "vending" };
+  if (kind === "board" && id === "corkboard") return { tab: "board" };
+  if (kind === "codex") return { tab: "codex" };
+  if (kind === "hall-of-fame") return { tab: "research" };
+  return undefined;
 }

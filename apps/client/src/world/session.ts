@@ -70,3 +70,8 @@ class Session {
 }
 
 export const session = new Session();
+
+// Development checks read who is in and what they hold from the console; never in production.
+if (import.meta.env.DEV) {
+  (window as unknown as { __guagoState?: unknown }).__guagoState = { session, inventory, live };
+}

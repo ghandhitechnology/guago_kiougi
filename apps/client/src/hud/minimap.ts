@@ -102,10 +102,16 @@ export class Minimap {
     }
   }
 
+  /**
+   * The place under the map. A long name (a room with its channel) widens the card to the left,
+   * keeping its right edge under the map's, so it never runs off the screen.
+   */
   setName(name: string): void {
-    const fitted = name;
-    this.nameText.set(fitted);
-    this.nameText.at(Math.floor((MINIMAP.size - this.nameText.width) / 2), MINIMAP.size + 2);
+    this.nameText.set(name);
+    const w = Math.max(MINIMAP.size, this.nameText.width + 10);
+    const x = MINIMAP.size - w;
+    this.nameCard.setX(x).setSize(w, 15);
+    this.nameText.at(x + Math.floor((w - this.nameText.width) / 2), MINIMAP.size + 2);
   }
 
   /** Follows the player; call every frame. */

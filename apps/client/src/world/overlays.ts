@@ -57,6 +57,7 @@ export class WorldOverlays {
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
+    scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.placePlates, this);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.destroy());
   }
 
@@ -254,8 +255,25 @@ export class WorldOverlays {
     }
   }
 
+  /**
+   * Plates of people standing side by side would overlap: after everyone has moved this frame,
+   * each plate that would cover one already placed drops just under it.
+   */
+  private placePlates(): void {
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const order = [...this.plates.values()].sort((a, b) => a.y - b.y || a.x - b.x);
+    for (const p of order) {
+      const w = p.back.width;
+      const rect = { x: p.x - Math.ceil(w / 2), y: p.y + 2, w, h: 13 };
+      for (let tries = 0; tries < 4 && placed.some((o) => overlaps(o, rect)); tries++) rect.y += 13;
+      placed.push(rect);
+      p.root.setPosition(p.x, rect.y);
+    }
+  }
+
   destroy(): void {
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
+    this.scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.placePlates, this);
     for (const p of this.plates.values()) p.root.destroy();
     this.plates.clear();
     for (const b of this.bubbles) b.root.destroy();

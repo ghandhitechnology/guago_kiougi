@@ -45,6 +45,10 @@ export class DialogueBox {
   private readonly tab: Phaser.GameObjects.NineSlice;
   private readonly name: Label;
   private readonly portrait: Phaser.GameObjects.Image;
+  private readonly slot: Phaser.GameObjects.Image;
+  private readonly corners: Phaser.GameObjects.Image;
+  private readonly margin: Phaser.GameObjects.NineSlice;
+  private readonly rules: Phaser.GameObjects.NineSlice[];
   private readonly text: Label;
   private readonly caret: Phaser.GameObjects.Sprite;
   private readonly scope = new FocusScope();
@@ -75,18 +79,22 @@ export class DialogueBox {
       .setOrigin(0);
     this.name = new Label(scene, 79, -12, "", { font: "galmuri11-bold", color: "stone.bright" });
     const slot = scene.add.image(10, 7, "ui", "portrait-slot/idle").setOrigin(0);
+    this.slot = slot;
     this.portrait = scene.add.image(12, 9, "portraits", "portrait-entropy/neutral").setOrigin(0);
     const corners = scene.add.image(10, 7, "ui", "portrait-corners/idle").setOrigin(0);
+    this.corners = corners;
     const [ml, mr, mt, mb] = sliceOf("margin");
     const margin = scene.add
       .nineslice(70, 5, "ui", "margin/idle", 1, BOX.h - 10, ml, mr, mt, mb)
       .setOrigin(0);
+    this.margin = margin;
     const [rl, rr, rt, rb] = sliceOf("row");
     const rules = [0, 1, 2].map((i) =>
       scene.add
         .nineslice(71, 6 + i * 17, "ui", "row/idle", BOX.w - 76, 16, rl, rr, rt, rb)
         .setOrigin(0),
     );
+    this.rules = rules;
     this.text = new Label(scene, TEXT_X, 9, "", {
       font: "galmuri11",
       color: "ink.dark",
@@ -165,12 +173,11 @@ export class DialogueBox {
     const name = speaker ? (narrative.NARRATIVE.ko[speaker.name] ?? line.speaker) : line.speaker;
     this.name.set(name);
     this.tab.setSize(this.name.width + 14, 18);
-    const face = line.face ?? speaker?.faces[0] ?? "neutral";
-    const frame = speaker?.portrait ? `${speaker.portrait}/${face}` : undefined;
-    const has = frame !== undefined && this.scene.textures.get("portraits").has(frame);
-    this.portrait.setVisible(has);
+    const frame = portraitFrame(this.scene, line.speaker, line.face ?? speaker?.faces[0]);
+    this.portrait.setVisible(frame !== undefined);
     // Portrait frames carry their own pivot; the slot wants the top-left corner.
-    if (has) this.portrait.setFrame(frame).setOrigin(0);
+    if (frame) this.portrait.setFrame(frame).setOrigin(0);
+    this.layoutFor(frame !== undefined);
     const text = line.text.replaceAll("{player}", this.playerName);
     this.full = wrap(this.scene, "galmuri11", text, TEXT_W).slice(0, 3);
     this.total = this.full.join("").length;
@@ -178,6 +185,21 @@ export class DialogueBox {
     this.clock = 0;
     this.text.set("");
     this.caret.setVisible(false);
+  }
+
+  /**
+   * With a portrait the page has its pasted photo and a margin beside it. A voice with no face
+   * (the narrator, the broadcast, the 자판기) gets the page without the slot: no empty frame.
+   */
+  private layoutFor(portrait: boolean): void {
+    const left = portrait ? 70 : 8;
+    this.slot.setVisible(portrait);
+    this.corners.setVisible(portrait);
+    this.margin.setX(left);
+    for (const r of this.rules) r.setX(left + 1).setSize(BOX.w - left - 6, 16);
+    this.text.at(portrait ? TEXT_X : left + 8, 9);
+    this.tab.setX(portrait ? 72 : 10);
+    this.name.at(portrait ? 79 : 17, -12);
   }
 
   private tick(_time: number, delta: number): void {
@@ -266,4 +288,18 @@ export class DialogueBox {
     this.onOpenChange?.(false);
     r?.(choice);
   }
+}
+
+/**
+ * A speaker's portrait frame: `portrait-<speaker id>/<face>`, the face asked for or else the
+ * neutral one; undefined for a speaker the art has no portrait of.
+ */
+function portraitFrame(scene: Phaser.Scene, speaker: string, face?: string): string | undefined {
+  const atlas = scene.textures.get("portraits");
+  for (const f of [face, "neutral"]) {
+    if (!f) continue;
+    const frame = `portrait-${speaker}/${f}`;
+    if (atlas.has(frame)) return frame;
+  }
+  return undefined;
 }
