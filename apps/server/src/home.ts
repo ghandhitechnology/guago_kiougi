@@ -4,16 +4,19 @@
  * 집's room sends them back to school when the time is up (`MapRoom.letGoHome`).
  */
 import { matchMaker } from "@colyseus/core";
+import { guarded } from "./background.ts";
 import type { Live } from "./live/index.ts";
 import type { MapRoom } from "./map-room.ts";
 import { places } from "./places.ts";
 import { HOME_MAP } from "./world-maps.ts";
 
 export function sendHomeOnExpel(l: Live): () => void {
-  return l.onSentHome((characterId) => {
-    const place = places.get(characterId);
-    if (!place || place.mapId === HOME_MAP) return;
-    const room = matchMaker.getLocalRoomById(place.roomId) as MapRoom | undefined;
-    room?.relocate(characterId, HOME_MAP, "main", "home");
-  });
+  return l.onSentHome(
+    guarded("send home", (characterId: string) => {
+      const place = places.get(characterId);
+      if (!place || place.mapId === HOME_MAP) return;
+      const room = matchMaker.getLocalRoomById(place.roomId) as MapRoom | undefined;
+      room?.relocate(characterId, HOME_MAP, "main", "home");
+    }),
+  );
 }

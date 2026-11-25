@@ -33,7 +33,7 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
-import { background } from "./background.ts";
+import { background, guarded } from "./background.ts";
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { Dueling } from "./duel/hub.ts";
@@ -225,20 +225,25 @@ export class WorldRoom extends Room {
       send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
       blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
     });
-    this.unlisten = places.listen((characterId, mapId, channel) => {
-      this.social?.moved(characterId);
-      const member = this.byCharacter.get(characterId);
-      if (!member || (member.entry.map === mapId && member.entry.ch === channel)) return;
-      member.entry.map = mapId;
-      member.entry.ch = channel;
-      this.broadcast(WORLD_MESSAGES.presence, {
-        t: "map",
-        id: characterId,
-        map: mapId,
-        ch: channel,
-      } satisfies PresenceMessage);
-    });
-    this.clock.setInterval(() => this.forget(), 60_000);
+    this.unlisten = places.listen(
+      guarded("world presence move", (characterId: string, mapId: string, channel: number) => {
+        this.social?.moved(characterId);
+        const member = this.byCharacter.get(characterId);
+        if (!member || (member.entry.map === mapId && member.entry.ch === channel)) return;
+        member.entry.map = mapId;
+        member.entry.ch = channel;
+        this.broadcast(WORLD_MESSAGES.presence, {
+          t: "map",
+          id: characterId,
+          map: mapId,
+          ch: channel,
+        } satisfies PresenceMessage);
+      }),
+    );
+    this.clock.setInterval(
+      guarded("world forget", () => this.forget()),
+      60_000,
+    );
   }
 
   override async onJoin(client: Client): Promise<void> {

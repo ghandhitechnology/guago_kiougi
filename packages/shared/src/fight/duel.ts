@@ -78,6 +78,10 @@ export interface DuelTiming {
   readonly wins: number;
   /** Rounds played at most (drawn rounds count). */
   readonly maxRounds: number;
+  /** A round in which nobody lands a hit for this long is decided on health at once. */
+  readonly idle: number;
+  /** Fighting time over the whole match; past it the round is decided on health, then the match. */
+  readonly matchCap: number;
 }
 
 /** What a character has on: worn books and tools in slot order. Levels, grades and 필기 do not
@@ -242,6 +246,8 @@ export class DuelFloor implements PvpHook {
   hit: FightEvent | null = null;
   private roundFrom = 0;
   private fightTicks = 0;
+  /** Tick of the last damage either side dealt this round. */
+  private lastDamage = 0;
   private readonly kind: MonsterKind;
   private readonly bodies: Monster[] = [];
   private readonly hideAll: Uint8Array;
@@ -400,7 +406,9 @@ export class DuelFloor implements PvpHook {
       const m = w.monsters[i] as Monster;
       if (m.alive && !m.dying) m.gone = true;
     }
-    for (const f of this.fighters) if (!f.out) this.keepInside(f.player);
+    for (const f of this.fighters) {
+      if (!f.out && f.player.joined && f.player.id === f.id) this.keepInside(f.player);
+    }
     this.rules(w);
   }
 
@@ -454,6 +462,7 @@ export class DuelFloor implements PvpHook {
     if (!q.joined || q.down || w.tick < q.invulnerableUntil || amount <= 0) return 0;
     hurtPlayer(w, q, amount, from ? from.player.entity : 0, 0);
     q.flash = true;
+    this.lastDamage = w.tick;
     if (q.down) f.downs++;
     if (!from) return amount;
     from.damage += amount;
@@ -628,21 +637,28 @@ export class DuelFloor implements PvpHook {
     switch (this.phase) {
       case DuelPhase.Countdown:
         if (tick < this.phaseEnds) return;
-        // Whatever was cast during the countdown goes: every round starts clean.
+        // Both sides start the fight from the same clean state, and move from now on.
         this.clearCasts(w);
+        for (const f of this.fighters) if (!f.out) this.freshen(f.player);
+        this.freeze(false);
         this.phase = DuelPhase.Fight;
         this.phaseEnds = tick + this.timing.round;
         this.roundFrom = tick;
+        this.lastDamage = tick;
         this.changed = true;
         return;
       case DuelPhase.Fight: {
         const a = this.sideLeft(1);
         const b = this.sideLeft(2);
-        if (a > 0 && b > 0 && tick < this.phaseEnds) return;
+        const capped = this.fightTicks + (tick - this.roundFrom) >= this.timing.matchCap;
+        const idle = tick - this.lastDamage >= this.timing.idle;
+        if (a > 0 && b > 0 && tick < this.phaseEnds && !capped && !idle) return;
         let winner = 0;
         let end: RoundEnd = RoundEnd.Knockout;
         if (a === 0 || b === 0) winner = a > 0 ? 1 : b > 0 ? 2 : 0;
         else {
+          // At the clock, at the match's cap, or after a lull with no hit landed (decided now,
+          // not a floor held for the whole clock): on health standing, a draw when it is equal.
           end = RoundEnd.Time;
           const ha = this.sideHealth(1);
           const hb = this.sideHealth(2);
@@ -653,11 +669,12 @@ export class DuelFloor implements PvpHook {
         const lost = this.score[2] as number;
         if (won >= this.timing.wins || lost >= this.timing.wins) {
           this.finish(won > lost ? 1 : 2);
-        } else if (this.rounds.length >= this.timing.maxRounds) {
+        } else if (this.rounds.length >= this.timing.maxRounds || capped) {
           this.finish(won > lost ? 1 : lost > won ? 2 : 0);
         } else {
           this.phase = DuelPhase.Pause;
           this.phaseEnds = tick + this.timing.pause;
+          this.freeze(true);
         }
         return;
       }
@@ -679,6 +696,7 @@ export class DuelFloor implements PvpHook {
   }
 
   private finish(winner: number): void {
+    this.freeze(true);
     this.phase = DuelPhase.Over;
     this.phaseEnds = 0;
     this.changed = true;
@@ -704,6 +722,7 @@ export class DuelFloor implements PvpHook {
     this.phaseEnds = w.tick + this.timing.countdown;
     this.changed = true;
     this.clearCasts(w);
+    this.freeze(true);
     const cx = (this.x0 + this.x1) / 2;
     for (const f of this.fighters) {
       if (f.out) continue;
@@ -742,6 +761,25 @@ export class DuelFloor implements PvpHook {
       f.chainMax = 0;
       this.wipe(f);
     }
+  }
+
+  /** Fighters still in the match stand still with their books shut, or are let go. */
+  private freeze(on: boolean): void {
+    for (const f of this.fighters) {
+      const p = f.player;
+      if (!f.out && p.joined && p.id === f.id) p.frozen = on;
+    }
+  }
+
+  /** Every clock a fight starts from: books staggered as on arrival, dodge ready, no buffs. */
+  private freshen(p: Player): void {
+    if (!p.joined) return;
+    for (let i = 0; i < MAX_WEAPONS; i++) p.ready[i] = i < p.kit.weapons.length ? 4 + i * 3 : 0;
+    p.dodgeReadyAt = 0;
+    p.attackSpeed = 0;
+    p.cooldownBuff = 0;
+    p.buffUntil = 0;
+    p.casts = 0;
   }
 
   /** A stand-in with no statuses, stacks or hit memory left from the round before. */
@@ -799,6 +837,7 @@ export class DuelFloor implements PvpHook {
     for (const n of w.minions) if (n.alive && n.owner === p.index) w.killMinion(n);
     p.team = 0;
     p.party = null;
+    p.frozen = false;
     p.statusMask = 0;
     p.slow = 0;
     p.flash = false;

@@ -245,11 +245,12 @@ export const PROOF_NOTE = book<OrbitAttack>({
   attack: null,
   levels: [],
   signature: { proofCap: 5, qedDamage: 4, qedChain: 0 },
-  cues: { body: "fx-qed", hit: "fx-qed" },
+  cues: { body: "fx-qed-big", hit: "fx-qed-big" },
   evolution: {
     id: "complete-proof",
     attack: null,
     levels: [],
+    cues: { hit: "evo-complete-proof" },
     signature: { proofCap: 5, qedDamage: 6, qedChain: 3 },
   },
 });

@@ -89,8 +89,15 @@
     {
       "idx": 12,
       "version": "7",
-      "when": 1795613175097,
-      "tag": "0012_raid_bosses",
+      "when": 1795614353138,
+      "tag": "0012_duel_origins",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795620615639,
+      "tag": "0013_raid_bosses",
       "breakpoints": true
     }
   ]

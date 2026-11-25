@@ -31,6 +31,7 @@ import {
   tierOf,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { guarded } from "../background.ts";
 import { type Db, describeError } from "../db/index.ts";
 import { type Executor, isTransient, type Queryable } from "../economy/executor.ts";
 import { timeFromDb } from "../economy/rows.ts";
@@ -254,8 +255,18 @@ export class RaidHub {
     await this.load();
     this.lastPoll = this.o.clock.now();
     await this.poll();
-    this.timers.push(setInterval(() => this.safely("raid poll", () => this.poll()), POLL_MS));
-    this.timers.push(setInterval(() => this.safely("raid save", () => this.save()), RAID_SAVE_MS));
+    this.timers.push(
+      setInterval(
+        guarded("raid poll", () => this.poll()),
+        POLL_MS,
+      ),
+    );
+    this.timers.push(
+      setInterval(
+        guarded("raid save", () => this.save()),
+        RAID_SAVE_MS,
+      ),
+    );
     for (const t of this.timers) t.unref();
   }
 
@@ -265,15 +276,6 @@ export class RaidHub {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     await this.save();
-  }
-
-  /** A timer's work: nothing it throws, now or later, may reach the process. */
-  private safely(what: string, work: () => Promise<unknown>): void {
-    try {
-      work().catch((error: unknown) => this.log(`${what} failed: ${describeError(error)}`));
-    } catch (error) {
-      this.log(`${what} failed: ${describeError(error)}`);
-    }
   }
 
   /** The raid of `bossId` now standing, once it is ready to fight. */

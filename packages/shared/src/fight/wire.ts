@@ -718,8 +718,8 @@ export interface SnapshotSink {
   self(s: WireSelf): void;
   /** Level ups, phases, merits, rolls, knock-outs, boss cues, objectives: `type` is a `Priv`. */
   note(type: number, a: number, b: number, c: number): void;
-  /** The boss's bar, phase, shield and gimmick state changed. */
-  boss(b: WireBoss): void;
+  /** The boss's bar, phase, shield and gimmick state changed (`Priv.Boss`). */
+  boss?(b: WireBoss): void;
 }
 
 /**
@@ -1100,7 +1100,7 @@ export class SnapshotReader {
           b.hp = r.f32();
           b.max = r.f32();
           b.shield = r.u8() / 255;
-          sink.boss(b);
+          sink.boss?.(b);
           break;
         }
         default:

@@ -171,7 +171,7 @@ export function stepWeapons(w: FightWorld): void {
     if (!p.joined) continue;
     w.actAs(p.index);
     const weapons = p.kit.weapons;
-    if (p.down) {
+    if (p.down || p.frozen) {
       p.casts = 0;
       continue;
     }
