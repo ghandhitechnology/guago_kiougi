@@ -20,6 +20,7 @@ import {
   vendingWeek,
 } from "@guago/content";
 import {
+  type Amounts,
   addBookExp,
   addExp,
   allInBag,
@@ -43,6 +44,7 @@ import {
   type OpOutcome,
   type OpRequests,
   type Purse,
+  pay,
   payClubFee,
   pilgi,
   pilgiChance,
@@ -76,6 +78,24 @@ export interface InternalRequests {
   grant: GrantRequest;
   /** The 동아리 founding fee, run inside the founding transaction (social/fees.ts). */
   "club.found": Record<string, never>;
+  /** An admin's grant or removal (moderation/grants.ts), run inside its audit transaction. */
+  "admin.adjust": AdminAdjustRequest;
+}
+
+/**
+ * Items and currency an admin gives or takes, checked by `checkAdminAdjust` in moderation before
+ * it gets here. Booked as `admin.grant` and `admin.remove`; who and why ride in the request, so
+ * the operation's record and the audit row say the same.
+ */
+export interface AdminAdjustRequest {
+  admin: string;
+  reason: string;
+  /** Whole amounts per currency: positive is given, negative taken. */
+  amounts: Amounts;
+  /** Definitions to make: books as 교과서 copies, tools at level 1. */
+  add: readonly string[];
+  /** Item ids to take away. */
+  remove: readonly string[];
 }
 
 /** What combat credits one character with since its last flush (PLAN §6 drops, §9 EXP). */
@@ -215,6 +235,38 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
       const r = payClubFee(l.purse, env.page);
       if (!r.ok) return no(r.error);
       return ok({ purse: r.purse, ledger: r.ledger });
+    },
+  },
+
+  "admin.adjust": {
+    client: false,
+    rows: (req) => ({ items: req.remove }),
+    currencies: (req) => Object.keys(req.amounts),
+    apply(l, req, env) {
+      const gain: Amounts = {};
+      const cost: Amounts = {};
+      for (const [c, n] of Object.entries(req.amounts) as [keyof Amounts, number][]) {
+        if (n > 0) gain[c] = n;
+        else if (n < 0) cost[c] = -n;
+      }
+      const paid = pay(l.purse, cost, "admin.remove");
+      if (!paid) return no("insufficient");
+      const given = earn(paid.purse, gain, "admin.grant");
+      if (req.remove.some((id) => !l.items.has(id))) return no("item_missing");
+      const put = req.add.map((def) =>
+        isBook(def)
+          ? newBookRow(textbook(env.newId(), def))
+          : newToolRow({ id: env.newId(), def, level: 1 }),
+      );
+      const taken = new Set(req.remove);
+      return ok({
+        purse: given.purse,
+        ledger: [...paid.ledger, ...given.ledger],
+        put,
+        remove: req.remove,
+        itemKey: (id) => (taken.has(id) ? "admin.remove" : "admin.grant"),
+        outcome: { admin: req.admin, items: put.map((r) => r.id), removed: req.remove },
+      });
     },
   },
 

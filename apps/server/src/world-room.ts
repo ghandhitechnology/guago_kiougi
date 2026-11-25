@@ -35,6 +35,7 @@ import {
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
+import { adminMutes } from "./moderation/mutes.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
@@ -388,7 +389,12 @@ export class WorldRoom extends Room {
     if (!cleaned.ok) return { code: cleaned.code };
     const now = Date.now();
     const standing = this.standingOf(me.characterId, now);
-    if (standing.mutedUntil > now) return { code: "muted", until: standing.mutedUntil };
+    // An admin mute and the filter's own stack: refused until the later one ends. A mute until
+    // lifted carries no end.
+    const mutedUntil = Math.max(standing.mutedUntil, adminMutes.until(me.characterId, now));
+    if (mutedUntil > now) {
+      return { code: "muted", ...(Number.isFinite(mutedUntil) ? { until: mutedUntil } : {}) };
+    }
 
     let recipients: Member[];
     let target: string | null = null;

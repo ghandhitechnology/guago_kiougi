@@ -1,5 +1,6 @@
 import { matchMaker } from "@colyseus/core";
 import { WORLD_ROOM } from "@guago/shared";
+import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
@@ -22,8 +23,15 @@ const economy = createEconomy(db, {
   onLevel: (id, level) => worldRoom()?.setLevel(id, level),
   onChange: (id, change) => worldRoom()?.notify(id, change),
 });
+// Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
+const admin = await createModerationStack({
+  db,
+  executor: economy.executor,
+  secret: config.serverSecret,
+});
 const auth = createAuthService({
   db,
+  gate: admin.moderation.gate,
   onSessionsRevoked: evictAccount,
   onCharacterCreated: economy.giveKit,
   limits: { signupsPerIpPerDay: config.signupsPerIpPerDay },
@@ -39,7 +47,7 @@ const server = createGameServer(
   auth,
   config,
   studentLooks,
-  { log: chatLog, social },
+  { filter: admin.filter, log: chatLog, social },
   { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
@@ -60,5 +68,10 @@ setInterval(
   },
   10 * 60 * 1000,
 ).unref();
+setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
 await serveMetrics(config.metricsPort);
-console.log(`game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}`);
+// Its own port on a loopback or Tailscale address (config.ts), never through the game port.
+await admin.listen({ host: config.adminHost, port: config.adminPort, origin: config.adminOrigin });
+console.log(
+  `game server on :${config.port}, metrics on 127.0.0.1:${config.metricsPort}, admin on ${config.adminHost}:${config.adminPort}`,
+);

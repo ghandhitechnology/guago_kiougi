@@ -60,16 +60,24 @@ export async function authenticateJoin(ctx: AuthContext): Promise<RoomAuth> {
 export type SeatSlot = "map" | "world";
 
 interface Live {
-  evict: () => void;
+  evict: (code?: number) => void;
   released: Promise<void>;
   tokenHash: string;
 }
 
 const live = new Map<string, Map<SeatSlot, Live>>();
 
-/** Closes every seat of the account, after a new login, a logout or a recovery. */
-export function evictAccount(accountId: string): void {
-  for (const seat of live.get(accountId)?.values() ?? []) seat.evict();
+/**
+ * Closes every seat of the account, after a new login, a logout or a recovery, or with
+ * moderation's own close code (`CLOSE_KICKED`, `CLOSE_BANNED`) so the client can tell them apart.
+ */
+export function evictAccount(accountId: string, code: number = CLOSE_SESSION_REPLACED): void {
+  for (const seat of live.get(accountId)?.values() ?? []) seat.evict(code);
+}
+
+/** Whether the account holds any seat in this process. */
+export function isSeated(accountId: string): boolean {
+  return live.has(accountId);
 }
 
 const EVICT_WAIT_MS = 5000;
@@ -82,7 +90,7 @@ async function claim(
   accountId: string,
   slot: SeatSlot,
   tokenHash: string,
-  evict: () => void,
+  evict: (code?: number) => void,
 ): Promise<() => void> {
   let release!: () => void;
   const mine: Live = { evict, released: new Promise((r) => (release = r)), tokenHash };
@@ -117,6 +125,8 @@ interface Seat {
   characterId: string;
   saved: { x: number; y: number };
   evicted: boolean;
+  /** The code the seat was closed with once evicted. */
+  closeCode: number;
   release: () => void;
   reconnection?: Reconnection | undefined;
 }
@@ -156,9 +166,10 @@ export class RoomSeats {
       characterId: "",
       saved: { x: 0, y: 0 },
       evicted: false,
+      closeCode: CLOSE_SESSION_REPLACED,
       release: () => {},
     };
-    seat.release = await claim(accountId, this.slot, tokenHash, () => this.evict(seat));
+    seat.release = await claim(accountId, this.slot, tokenHash, (code) => this.evict(seat, code));
     try {
       const { auth } = use();
       // The session was checked at matchmaking; a logout or recovery since then voids the seat.
@@ -198,7 +209,7 @@ export class RoomSeats {
     delete seat.reconnection;
     seat.client = client;
     // Taken by a newer session while the socket was coming back.
-    if (seat.evicted) client.leave(CLOSE_SESSION_REPLACED);
+    if (seat.evicted) client.leave(seat.closeCode);
   }
 
   /** Writes the place back and frees the account's seat. Call before removing the player. */
@@ -232,13 +243,15 @@ export class RoomSeats {
     }
   }
 
-  private evict(seat: Seat): void {
+  private evict(seat: Seat, code = CLOSE_SESSION_REPLACED): void {
+    if (seat.evicted) return;
     seat.evicted = true;
+    seat.closeCode = code;
     const { client } = seat;
     if (seat.reconnection instanceof Deferred) seat.reconnection.reject(false);
     // A joining client is closed too: its onJoin then fails, or ends at once if already past.
     else if (client.state === ClientState.JOINED || client.state === ClientState.JOINING) {
-      client.leave(CLOSE_SESSION_REPLACED);
+      client.leave(code);
     }
   }
 }
