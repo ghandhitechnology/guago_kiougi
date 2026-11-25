@@ -49,10 +49,19 @@ export const ko = {
   "look.face": "얼굴",
   "look.uniform": "교복",
   "look.accessory": "소품",
+  "look.jacket": "겉옷",
 
   "accessory.none": "없음",
   "accessory.glasses": "안경",
   "accessory.goggles": "고글",
+  "accessory.headphones": "헤드폰",
+  "accessory.hairclip": "머리핀",
+  "accessory.mask": "마스크",
+  "accessory.lanyard": "학생증 줄",
+
+  "coat.none": "없음",
+  "coat.labcoat": "실험 가운",
+  "coat.raincoat": "우비",
 
   "skin.fair": "21호",
   "skin.warm": "23호",
@@ -64,6 +73,12 @@ export const ko = {
   "hair.long": "생머리",
   "hair.ponytail": "포니테일",
   "hair.curly": "곱슬",
+  "hair.buzz": "반삭",
+  "hair.twintails": "양갈래",
+  "hair.bun": "똥머리",
+  "hair.braids": "땋은 머리",
+  "hair.shag": "덥수룩",
+  "hair.undercut": "투블럭",
 
   "hairColor.black": "흑발",
   "hairColor.brown": "갈색",
@@ -79,9 +94,14 @@ export const ko = {
   "face.bright": "밝음",
   "face.sleepy": "졸림",
   "face.sharp": "승부",
+  "face.goofy": "엉뚱",
+  "face.shy": "수줍음",
+  "face.cool": "시크",
 
   "uniform.blazer": "동복",
   "uniform.shirt": "하복",
+  "uniform.gym": "체육복",
+  "uniform.cardigan": "가디건",
 
   "major.math": "수학",
   "major.physics": "물리",

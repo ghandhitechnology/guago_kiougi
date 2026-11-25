@@ -132,7 +132,7 @@ export class EmoteWheel {
       const a = -Math.PI / 2 + (i * 2 * Math.PI) / wheel.length;
       const at = { x: Math.round(Math.cos(a) * RADIUS), y: Math.round(Math.sin(a) * RADIUS) };
       const back = scene.add.image(0, 0, "ui", "wheel-slot/idle");
-      const icon = scene.add.image(0, 0, "ui", `emote-icon/${e.id}`);
+      const icon = scene.add.image(0, 0, "ui", `emote-bubble/${e.id}0`);
       const slot = scene.add.container(0, 0, [back, icon]).setScale(0.3).setAlpha(0);
       const zone = scene.add
         .zone(-SLOT / 2, -SLOT / 2, SLOT, SLOT)

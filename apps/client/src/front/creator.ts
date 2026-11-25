@@ -1,4 +1,5 @@
 import type { ArtMetadata } from "@guago/art";
+import { LAUNCH_ACCESSORIES, LAUNCH_JACKETS } from "@guago/content";
 import { checkName } from "@guago/shared";
 import * as Phaser from "phaser";
 import {
@@ -333,7 +334,7 @@ export class CreatorScreen extends Screen {
       // One thing on the face at a time: the account API keeps one part per layer.
       new Stepper({
         label: t("look.accessory"),
-        values: [NONE, ...o.accessories],
+        values: [NONE, ...o.accessories.filter((a) => LAUNCH_ACCESSORIES.includes(a))],
         value: this.wornAccessory(),
         text: named("accessory"),
         onChange: (v) => {
@@ -341,6 +342,18 @@ export class CreatorScreen extends Screen {
           this.look = { ...this.look, accessories: v === NONE ? others : [v, ...others] };
           this.recompose();
           this.react("page");
+        },
+      }),
+      new Stepper({
+        label: t("look.jacket"),
+        values: [NONE, ...o.jackets.filter((a) => LAUNCH_JACKETS.includes(a))],
+        value: this.wornJacket(),
+        text: named("coat"),
+        onChange: (v) => {
+          const others = this.look.accessories.filter((a) => !o.jackets.includes(a));
+          this.look = { ...this.look, accessories: v === NONE ? others : [...others, v] };
+          this.recompose();
+          this.react("spin");
         },
       }),
     ];
@@ -546,13 +559,20 @@ export class CreatorScreen extends Screen {
   private randomize(): void {
     this.look = randomLook(this.meta);
     const { body, hair, hairColor, face, uniform } = this.look;
-    [body, hair, hairColor, face, uniform, this.wornAccessory()].forEach((v, i) => {
+    const worn = [body, hair, hairColor, face, uniform, this.wornAccessory(), this.wornJacket()];
+    worn.forEach((v, i) => {
       const row = this.steppers[i];
       if (row) row.value = v;
     });
     this.list.setRows(this.steppers);
     this.recompose();
     this.react("spin");
+  }
+
+  /** The coat being worn, or none. */
+  private wornJacket(): string {
+    const o = lookOptions(this.meta);
+    return this.look.accessories.find((a) => o.jackets.includes(a)) ?? NONE;
   }
 
   /** The accessory-layer part being worn, or none. */

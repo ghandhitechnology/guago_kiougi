@@ -140,8 +140,9 @@ export function openJacketEditor(
         if (!look) return;
         const dressed = normalizeLook(meta, {
           ...look,
-          accessories: [...look.accessories.filter((a) => a !== "varsity"), "varsity"],
+          accessories: ["varsity", ...look.accessories.filter((a) => a !== "varsity")],
           jacket,
+          emblem,
         });
         const key = composeDoll(scene, meta, dressed);
         if (doll) {

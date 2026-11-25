@@ -60,6 +60,8 @@ export class PlayerActor extends Actor {
   private stillFor = 0;
   private fidgetAt = fidgetDelay();
   private fidgeting = false;
+  /** The emote being played, if one is: walking or turning cuts it short. */
+  private emoting: string | undefined;
   private lastX: number | undefined;
   private lastY: number | undefined;
   /** Called when a foot lands, with the feet position: footstep sounds hang on it. */
@@ -74,7 +76,9 @@ export class PlayerActor extends Actor {
     this.stride = walk ? (speed * walk.frames.length) / walk.fps : 32;
     this.playIdle();
     this.body.on("animationcomplete", (anim: Phaser.Animations.Animation) => {
-      if (FIDGETS.some((f) => anim.key.endsWith(`/${f}`))) {
+      const name = anim.key.slice(anim.key.lastIndexOf("/") + 1);
+      if ((FIDGETS as readonly string[]).includes(name) || name === this.emoting) {
+        this.emoting = undefined;
         this.fidgeting = false;
         this.stillFor = 0;
         this.fidgetAt = fidgetDelay();
@@ -85,6 +89,18 @@ export class PlayerActor extends Actor {
 
   private anim(name: string): string {
     return lookAnim(this.rig, this.look, this.dir, name);
+  }
+
+  /**
+   * Plays one of the rig's emote animations (PLAN §12) where the body stands, then goes back to
+   * breathing. An id the rig has no animation for does nothing.
+   */
+  emote(id: string): void {
+    const key = this.anim(id);
+    if (!this.body.scene.anims.exists(key)) return;
+    this.fidgeting = true;
+    this.emoting = id;
+    this.body.play(key);
   }
 
   private playIdle(): void {
@@ -108,6 +124,7 @@ export class PlayerActor extends Actor {
       if (!this.walking) {
         this.walking = true;
         this.fidgeting = false;
+        this.emoting = undefined;
         this.phase = 0;
         this.body.anims.stop();
       }
@@ -128,6 +145,7 @@ export class PlayerActor extends Actor {
         );
       } else if (turned) {
         if (this.fidgeting) this.fidgeting = false;
+        this.emoting = undefined;
         this.playIdle();
       } else if (!this.fidgeting && this.stillFor >= this.fidgetAt) {
         this.fidgeting = true;

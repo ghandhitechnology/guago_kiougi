@@ -1,5 +1,5 @@
 import { cells, disc, grid, lit, stack, turn } from "../../draw.ts";
-import { type SpriteDef, sprite, variant } from "../../format.ts";
+import { type Paint, type SpriteDef, sprite, variant } from "../../format.ts";
 import { UI } from "../../ui-legend.ts";
 
 /**
@@ -36,16 +36,20 @@ const idcard = sprite({
 
 // Emotes ----------------------------------------------------------------------------------------
 
+/** Sparkles and the calendar's red mark: they stand alone and take no outline. */
+const EMOTE_LONE = "+!";
+
 /**
- * A 12×12 icon from a fill mask: every clear pixel touching the fill (8 ways) becomes ink, and
- * the mask is centred.
+ * A 12×12 bubble frame from a fill mask: every clear pixel touching the fill (8 ways) becomes
+ * ink, sparkles aside (`ink` off for a drawing inked by hand). The mask is centred, then moved
+ * by (dx, dy) for a second frame.
  */
-function icon(mask: string): string {
+function icon(mask: string, dx = 0, dy = 0, ink = true): string {
   const m = cells(mask);
   const h = m.length;
   const w = m[0]?.length ?? 0;
-  const ox = Math.floor((12 - w) / 2);
-  const oy = Math.floor((12 - h) / 2);
+  const ox = Math.floor((12 - w) / 2) + dx;
+  const oy = Math.floor((12 - h) / 2) + dy;
   const at = (x: number, y: number) => {
     const c = m[y - oy]?.[x - ox];
     return c !== undefined && c !== "." ? c : undefined;
@@ -53,14 +57,24 @@ function icon(mask: string): string {
   return grid(12, 12, (x, y) => {
     const c = at(x, y);
     if (c) return c;
-    const near = [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => at(x + dx, y + dy)));
+    if (!ink) return ".";
+    const near = [-1, 0, 1].some((ny) =>
+      [-1, 0, 1].some((nx) => {
+        const n = at(x + nx, y + ny);
+        return n !== undefined && !EMOTE_LONE.includes(n);
+      }),
+    );
     return near ? "o" : ".";
   });
 }
 
-const EMOTE_MASKS: Readonly<Record<string, string>> = {
-  // 인사: an open hand raised.
-  wave: stack(
+/**
+ * The emote bubbles (PLAN §12), named by the content ids in `EMOTES`, two frames each: the
+ * wheel shows frame 0, the bubble over a head plays both. 화이팅, 절 and 멘붕 are the emote
+ * artist's drawings, which match the body animations of the same names.
+ */
+const EMOTE_MASKS: Readonly<Record<string, readonly [string, string]>> = (() => {
+  const wave = stack(
     ".y.y.y....",
     ".y.y.y....",
     ".y.y.y..y.",
@@ -70,22 +84,9 @@ const EMOTE_MASKS: Readonly<Record<string, string>> = {
     ".yyyyyz...",
     "..yyyzz...",
     "..yyzz....",
-  ),
-  // 박수: two palms meeting.
-  clap: stack(
-    ".y.y..y.y.",
-    ".y.y..y.y.",
-    ".yyy..yyy.",
-    "yyyy..yyyy",
-    "yyyy..yyyy",
-    ".yyy..yyz.",
-    ".yyy..yyz.",
-    "..yyyyzz..",
-  ),
-  // ㅋㅋ.
-  lol: stack("RRRR.RRRR", "...R....R", "RRRR.RRRR", "...r....r", "...r....r", "...r....r"),
-  // 졸림: Z and a small z.
-  sleepy: stack(
+  );
+  const lol = stack("RRRR.RRRR", "...R....R", "RRRR.RRRR", "...r....r", "...r....r", "...r....r");
+  const sleepy = stack(
     "bbbbb.....",
     "...bb.....",
     "..bb......",
@@ -93,33 +94,8 @@ const EMOTE_MASKS: Readonly<Record<string, string>> = {
     "bbbbb..nn.",
     "......nn..",
     ".....nnnn.",
-  ),
-  // 화이팅: a flame with a gold heart.
-  fighting: stack(
-    "....R.....",
-    "....RR....",
-    "...RRR..R.",
-    "...RRRR.RR",
-    "..RRRRRRR.",
-    ".rrrrgrrr.",
-    ".rrrgggrr.",
-    ".rrgggggr.",
-    "..rggggr..",
-    "...rrrr...",
-  ),
-  // 절: a head bowed low, eyes shut.
-  bow: stack(
-    "..hhhhhh..",
-    ".hhhhhhhh.",
-    "hhhhhhhhhh",
-    "hhhhhhhhhh",
-    "hyyyyyyyyh",
-    "yykkyykkyy",
-    ".yyyyyyyy.",
-    "..yyyyyy..",
-  ),
-  // 춤: two beamed notes.
-  dance: stack(
+  );
+  const dance = stack(
     "...ffffff",
     "...ffffff",
     "...f....f",
@@ -129,35 +105,159 @@ const EMOTE_MASKS: Readonly<Record<string, string>> = {
     "ffff.ffff",
     "ffff.ffff",
     ".ff...ff.",
-  ),
-  // 멘붕: a spiral.
-  meltdown: stack(
-    ".44444444.",
-    "4........4",
-    "4.444444.4",
-    "4.4....4.4",
-    "4.4.44.4.4",
-    "4.4.4..4.4",
-    "4.4.4444.4",
-    "4.4......4",
-    "4.44444444",
-  ),
-};
+  );
+  /** D-1 on the calendar, after the emote artist's 16×16; drawn whole, ink included. */
+  const meltdown = stack(
+    "..o.....o...",
+    ".oooooooooo.",
+    ".oxxxxxxxxo.",
+    ".orrrrrrrro.",
+    ".oooooooooo.",
+    ".oWWWWWWWWo.",
+    ".oooWWWWooo.",
+    ".ooWoW!WWoo.",
+    ".ooWoWWWWoo.",
+    ".oooWWWWWoo.",
+    ".oppppppppo.",
+    ".oooooooooo.",
+  );
+  return {
+    // 인사: an open hand raised, waving.
+    wave: [icon(wave), icon(wave, 1, 0)],
+    // 박수: two palms, apart and meeting.
+    clap: [
+      icon(
+        stack(
+          ".y.y..y.y.",
+          ".y.y..y.y.",
+          ".yyy..yyy.",
+          "yyyy..yyyy",
+          "yyyy..yyyy",
+          ".yyy..yyz.",
+          ".yyy..yyz.",
+          "..yyyyzz..",
+        ),
+      ),
+      icon(
+        stack(
+          "+.........+",
+          "...y.yy.y..",
+          "...y.yy.y..",
+          "...yyyyyy..",
+          "..yyyyyyyy.",
+          "..yyyyyyyy.",
+          "...yyyyyz..",
+          "...yyyyyz..",
+          "....yyzz...",
+        ),
+      ),
+    ],
+    // ㅋㅋ, shaking with laughter.
+    lol: [icon(lol), icon(lol, 1, -1)],
+    // 졸림: Z and a small z, drifting up.
+    sleepy: [icon(sleepy), icon(sleepy, 0, -1)],
+    // 화이팅: a raised fist, punched up with sparkles.
+    fighting: [
+      icon(
+        stack(
+          "............",
+          "............",
+          "..vvvvv.....",
+          "..VVVVVV....",
+          "..vvvvvV....",
+          "..VVVVVi....",
+          "...iiii.....",
+          "...NnnN.....",
+          "...NnnN.....",
+          "............",
+          "............",
+          "............",
+        ),
+      ),
+      icon(
+        stack(
+          "+.......+...",
+          "..vvvvv.....",
+          "..VVVVVV....",
+          "..vvvvvV....",
+          "..VVVVVi....",
+          "...iiii.....",
+          "...NnnN.....",
+          "...NnnN.....",
+          "............",
+          "............",
+          "............",
+          "............",
+        ),
+      ),
+    ],
+    // 절: bowed to the floor, then lower.
+    bow: [
+      icon(
+        stack(
+          "............",
+          "............",
+          "............",
+          "....bbnn....",
+          "..bbnnnnNN..",
+          ".bnnnnnnkk..",
+          ".kknnnnkkk..",
+          ".kk...VVk...",
+          "............",
+          ".SSSSSSSSS..",
+          "............",
+          "............",
+        ),
+      ),
+      icon(
+        stack(
+          "............",
+          "............",
+          "............",
+          "............",
+          "...bbnnNN...",
+          ".bbnnnnnkk..",
+          ".kknnnnkkk..",
+          ".kk...VVk...",
+          "............",
+          ".SSSSSSSSS..",
+          "............",
+          "............",
+        ),
+      ),
+    ],
+    // 춤: two beamed notes, bouncing.
+    dance: [icon(dance), icon(dance, 0, 1)],
+    // 멘붕: the calendar shakes.
+    meltdown: [meltdown, icon(meltdown, 1, 0, false)],
+  };
+})();
 
-const emoteIcons = sprite({
+const emoteBubbles = sprite({
   ...ui,
-  name: "emote-icon",
+  name: "emote-bubble",
   size: [12, 12],
   palette: {
     ...UI,
     y: "flesh.pale",
     z: "flesh.light",
-    h: "ink.dark",
-    k: "flesh.deep",
+    v: "clay.pale",
+    V: "clay.light",
+    i: "clay.dark",
     f: "plum.light",
-    "4": "sea.mid",
+    "+": "gold.pale",
+    "!": "red.mid",
   },
-  frames: Object.fromEntries(Object.entries(EMOTE_MASKS).map(([id, m]) => [id, icon(m)])),
+  lone: EMOTE_LONE,
+  frames: Object.fromEntries(
+    Object.entries(EMOTE_MASKS).flatMap(([id, [a, b]]) => [
+      [`${id}0`, a],
+      [`${id}1`, b],
+    ]),
+  ),
+  anim: Object.fromEntries(
+    Object.keys(EMOTE_MASKS).map((id) => [id, { frames: [`${id}0`, `${id}1`], fps: 4 }]),
+  ),
 });
 
 /** A slot of the emote wheel, and the slot under the pointer. */
@@ -413,7 +513,7 @@ function paper(style: "plain" | "fold" | "torn"): string {
   });
 }
 
-function paperSprite(name: string, fill: string, shade: string, edge: string): SpriteDef {
+function paperSprite(name: string, fill: Paint, shade: Paint, edge: Paint): SpriteDef {
   return sprite({
     ...ui,
     name,
@@ -493,7 +593,7 @@ const tape = sprite({
 
 export default [
   idcard,
-  emoteIcons,
+  emoteBubbles,
   wheelSlot,
   wheelHub,
   crown,

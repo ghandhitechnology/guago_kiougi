@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { spriteAnim } from "../art.ts";
 import { emblemTexture } from "../social/emblem.ts";
 import { Label, measure, wrap } from "../ui/text.ts";
 import { paint, sliceOf } from "../ui/theme.ts";
@@ -193,7 +194,7 @@ export class WorldOverlays {
    */
   emote(id: string, emoteId: string): void {
     const p = this.plates.get(id);
-    const frame = `emote-icon/${emoteId}`;
+    const frame = `emote-bubble/${emoteId}0`;
     if (!p || !this.scene.textures.getFrame("ui", frame)) return;
     const w = 18;
     const h = 17;
@@ -202,9 +203,10 @@ export class WorldOverlays {
     const tail = this.scene.add
       .image(Math.floor(w / 2) - 2, h - 1, "ui", "bubble-tail/idle")
       .setOrigin(0);
-    const icon = this.scene.add.image(3, 3, "ui", frame).setOrigin(0);
+    const icon = this.scene.add.sprite(3, 3, "ui", frame).setOrigin(0);
+    const anim = spriteAnim("emote-bubble", emoteId);
+    if (this.scene.anims.exists(anim)) icon.play(anim);
     this.pushBubble(id, p, [back, tail, icon], w, h, 2400);
-    this.scene.tweens.add({ targets: icon, y: 2, duration: 160, yoyo: true, delay: 140 });
   }
 
   /** Taps and long presses on a nameplate or a body ask the world view's listener. */

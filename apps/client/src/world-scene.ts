@@ -783,7 +783,7 @@ export class WorldScene extends Phaser.Scene {
     this.unsocial?.();
     worldView.onSelfEmote = (id) => {
       this.ownEmote = { id, at: performance.now() };
-      if (this.selfActor) playEmote(this.selfActor.body, id);
+      playEmote(this.selfActor, id);
     };
     this.unsocial = link?.on((e) => {
       if (e.type === "social" && e.event.t === "emote") {
@@ -801,8 +801,7 @@ export class WorldScene extends Phaser.Scene {
     if (session.link?.isBlocked(from)) return;
     const own = sid === this.selfId;
     if (own && this.ownEmote?.id === id && performance.now() - this.ownEmote.at < 2500) return;
-    const body = own ? this.selfActor?.body : this.players.get(sid)?.actor.body;
-    if (body) playEmote(body, id);
+    playEmote(own ? this.selfActor : this.players.get(sid)?.actor, id);
   }
 
   /** The emote last picked on the wheel, played on the own body at once. */

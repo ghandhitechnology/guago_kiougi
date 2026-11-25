@@ -28,6 +28,22 @@ export function emoteAllowed(id: string): boolean {
   return EMOTES.some((e) => e.id === id && e.wheel);
 }
 
+/**
+ * Accessories every new student may pick in the creator (PLAN §16: glasses and five more). The
+ * art draws more (the 코스튬 진열장's stock, Page rewards); those are worn only once owned.
+ */
+export const LAUNCH_ACCESSORIES: readonly string[] = [
+  "glasses",
+  "goggles",
+  "headphones",
+  "hairclip",
+  "mask",
+  "lanyard",
+];
+
+/** Coats every new student may pick in the creator; the 과잠 comes only with a club. */
+export const LAUNCH_JACKETS: readonly string[] = ["labcoat", "raincoat"];
+
 export interface EmblemPart {
   readonly id: string;
   /** Club level that unlocks the part (PLAN §12: a larger roster of emblem parts). */

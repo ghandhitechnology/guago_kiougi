@@ -1,4 +1,13 @@
-import type { ArtMetadata, RigMeta } from "@guago/art";
+import {
+  type ArtMetadata,
+  drawOrder,
+  outlineColors,
+  packRgba,
+  type RigMeta,
+  stackLayers,
+} from "@guago/art";
+import { LAUNCH_ACCESSORIES } from "@guago/content";
+import { type Emblem, encodeEmblem } from "@guago/shared";
 import * as Phaser from "phaser";
 import { lookAnim, lookTexture } from "./art.ts";
 
@@ -28,6 +37,8 @@ export interface DollLook {
   readonly accessories: readonly string[];
   /** The 과잠's colour, a `jacket` slot option; the slot's first colour when absent. */
   readonly jacket?: string;
+  /** A club's crest on the 과잠's back: shape and symbol, in the `emblem` and `mark` slots. */
+  readonly emblem?: Emblem;
   readonly book?: string;
 }
 
@@ -86,6 +97,7 @@ export function normalizeLook(meta: ArtMetadata, look: Partial<DollLook>): DollL
       ...(look.accessories ?? []).filter((a) => o.jackets.includes(a)).slice(0, 1),
     ],
     ...(jacket === undefined ? {} : { jacket }),
+    ...(look.emblem === undefined || jacket === undefined ? {} : { emblem: look.emblem }),
     ...(look.book === undefined ? {} : { book: look.book }),
   };
 }
@@ -99,8 +111,9 @@ export function randomLook(meta: ArtMetadata, rand: () => number = Math.random):
     hairColor: any(o.hairColor),
     face: any(o.face),
     uniform: any(o.uniform),
-    // Most students wear nothing on their face; some wear one thing.
-    accessories: rand() < 0.4 ? [any(o.accessories)] : [],
+    // Most students wear nothing on their face; some wear one thing anyone may pick.
+    accessories:
+      rand() < 0.4 ? [any(o.accessories.filter((a) => LAUNCH_ACCESSORIES.includes(a)))] : [],
   };
 }
 
@@ -119,6 +132,7 @@ export function dollLook(look: DollLook): string {
     look.uniform,
     look.accessories.join("+") || "-",
     look.jacket ?? "-",
+    look.emblem ? encodeEmblem(look.emblem) : "-",
     look.book ?? "-",
   ].join("~");
 }
@@ -136,6 +150,50 @@ function hex(c: string): number {
   return Number.parseInt(c.slice(1), 16);
 }
 
+/** An atlas's pixels as packed colours, read once per texture. */
+interface Pixels {
+  readonly px: Int32Array;
+  readonly width: number;
+}
+const sheets = new WeakMap<object, Pixels>();
+
+function pixelsOf(scene: Phaser.Scene, key: string): Pixels {
+  const texture = scene.textures.get(key);
+  const image = texture.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+  const known = sheets.get(image);
+  if (known) return known;
+  const c = document.createElement("canvas");
+  c.width = image.width;
+  c.height = image.height;
+  const cx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
+  cx.drawImage(image, 0, 0);
+  const made = { px: packRgba(cx.getImageData(0, 0, c.width, c.height).data), width: c.width };
+  sheets.set(image, made);
+  return made;
+}
+
+/** Copies an atlas frame's opaque pixels into a `w`-wide layer at (x, y), frame trim included. */
+function blit(
+  sheet: Pixels,
+  f: Phaser.Textures.Frame,
+  out: Int32Array,
+  w: number,
+  x: number,
+  y: number,
+) {
+  const h = out.length / w;
+  for (let v = 0; v < f.cutHeight; v++) {
+    const ty = y + f.y + v;
+    if (ty < 0 || ty >= h) continue;
+    for (let u = 0; u < f.cutWidth; u++) {
+      const tx = x + f.x + u;
+      if (tx < 0 || tx >= w) continue;
+      const c = sheet.px[(f.cutY + v) * sheet.width + f.cutX + u] as number;
+      if (c >= 0) out[ty * w + tx] = c;
+    }
+  }
+}
+
 /**
  * The texture for a look, composited on first use. Each call holds the texture once; hand it
  * back with `releaseDoll` when the doll wearing it goes.
@@ -147,13 +205,13 @@ export function composeDoll(scene: Phaser.Scene, meta: ArtMetadata, look: DollLo
 
   const rig = rigOf(meta);
   const atlas = scene.textures.get(rig.atlas);
-  const image = atlas.getSourceImage() as CanvasImageSource;
   const [w, h] = rig.size;
   const canvas = document.createElement("canvas");
   canvas.width = rig.frames.length * w;
   canvas.height = (rig.directions.length + 1) * h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-  ctx.imageSmoothingEnabled = false;
+  const sheet = pixelsOf(scene, rig.atlas);
+  const ui = look.emblem ? pixelsOf(scene, "ui") : undefined;
 
   const partsOf = (layer: string): readonly string[] => {
     const first = rig.parts[layer]?.[0];
@@ -173,47 +231,84 @@ export function composeDoll(scene: Phaser.Scene, meta: ArtMetadata, look: DollLo
         return first ? [first] : [];
     }
   };
-  const stamp = (layer: string, dir: string, frame: string, cx: number, cy: number): void => {
+  // Parts drawn under another layer (glasses, headphones under the hair) move in the order.
+  const chosen: Record<string, string> = {};
+  for (const layer of rig.layers) {
+    const part = partsOf(layer)[0];
+    if (part !== undefined) chosen[layer] = part;
+  }
+  const order = drawOrder(
+    rig.layers.filter((l) => l !== "shadow"),
+    chosen,
+    (layer, part) => rig.under?.[layer]?.[part],
+  );
+  const outline = outlineColors(meta);
+  const jacketPart = partsOf("jacket")[0];
+
+  /** One layer of one frame as packed colours, `-1` clear. */
+  const layerOf = (layer: string, dir: string, frame: string): Int32Array => {
+    const out = new Int32Array(w * h).fill(-1);
     for (const part of partsOf(layer)) {
       const name = rig.frameKey
         .replace("{layer}", layer)
         .replace("{part}", part)
         .replace("{dir}", dir)
         .replace("{frame}", frame);
-      if (!atlas.has(name)) continue;
-      const f = atlas.get(name);
-      ctx.drawImage(
-        image,
-        f.cutX,
-        f.cutY,
-        f.cutWidth,
-        f.cutHeight,
-        cx + f.x,
-        cy + f.y,
-        f.cutWidth,
-        f.cutHeight,
-      );
+      if (atlas.has(name)) blit(sheet, atlas.get(name), out, w, 0, 0);
     }
+    // The crest goes on the 과잠's back panel, inside the jacket layer, before stacking.
+    if (layer === "jacket" && ui && look.emblem && jacketPart) {
+      const at = rig.anchors?.[`jacket/${jacketPart}/emblem`]?.[`${dir}/${frame}`];
+      const uiTexture = scene.textures.get("ui");
+      if (at) {
+        for (const crest of [
+          `crest/shape/${look.emblem.shape}`,
+          `crest/symbol/${look.emblem.symbol}`,
+        ]) {
+          if (uiTexture.has(crest)) blit(ui, uiTexture.get(crest), out, w, at[0], at[1]);
+        }
+      }
+    }
+    return out;
+  };
+
+  const cell = ctx.createImageData(w, h);
+  const paint = (px: Int32Array, cx: number, cy: number) => {
+    const d = cell.data;
+    for (let i = 0; i < w * h; i++) {
+      const c = px[i] as number;
+      if (c < 0) {
+        d[i * 4 + 3] = 0;
+        continue;
+      }
+      d[i * 4] = c >> 16;
+      d[i * 4 + 1] = (c >> 8) & 0xff;
+      d[i * 4 + 2] = c & 0xff;
+      d[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(cell, cx, cy);
   };
   rig.directions.forEach((dir, row) => {
     rig.frames.forEach((frame, col) => {
-      for (const layer of rig.layers) {
-        if (layer !== "shadow") stamp(layer, dir, frame, col * w, row * h);
-      }
+      const layers = order.map((layer) => layerOf(layer, dir, frame));
+      const { px } = stackLayers(layers, w, h, -1, rig.clean ?? false, (c) => outline.has(c));
+      paint(px, col * w, row * h);
     });
   });
   const shadowRow = rig.directions.length;
-  stamp("shadow", rig.directions[0] ?? "down", rig.frames[0] ?? "", 0, shadowRow * h);
+  paint(layerOf("shadow", rig.directions[0] ?? "down", rig.frames[0] ?? ""), 0, shadowRow * h);
 
   // Slot key colours to the look's colours.
-  const chosen: Readonly<Record<string, string | undefined>> = {
+  const picked: Readonly<Record<string, string | undefined>> = {
     skin: look.body,
     hair: look.hairColor,
     jacket: look.jacket,
+    emblem: look.emblem?.shapeColor,
+    mark: look.emblem?.symbolColor,
   };
   const swap = new Map<number, number>();
   for (const [slotName, slot] of Object.entries(meta.slots)) {
-    const option = chosen[slotName] ?? Object.keys(slot.options)[0];
+    const option = picked[slotName] ?? Object.keys(slot.options)[0];
     const colors = option === undefined ? undefined : slot.options[option];
     if (!colors) continue;
     for (const [step, keyColor] of Object.entries(slot.keys)) {

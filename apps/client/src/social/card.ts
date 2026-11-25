@@ -192,7 +192,7 @@ export class PlayerCard {
             uniform: look.uniform,
             accessories: [...look.accessories],
           },
-          who.body ?? { clubId: 0, jacket: "" },
+          who.body ?? { clubId: 0, jacket: "", emblem: "" },
         ),
       );
       const key = composeDoll(scene, meta, dressed);

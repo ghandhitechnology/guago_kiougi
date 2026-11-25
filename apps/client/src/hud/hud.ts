@@ -308,7 +308,7 @@ export class Hud {
     this.emote = new Piece(scene, 38, 27, { dx: -70, dy: 0 });
     this.emote.root.add([
       scene.add.image(0, 0, "ui", "touch-btn/idle").setOrigin(0),
-      scene.add.image(8, 8, "ui", "emote-icon/wave").setOrigin(0),
+      scene.add.image(8, 8, "ui", "emote-bubble/wave0").setOrigin(0),
     ]);
     this.tappable(
       this.emote.root,

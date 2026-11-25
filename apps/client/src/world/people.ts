@@ -53,14 +53,25 @@ const JACKET_PART = "varsity";
  * else, so leaving a club takes the jacket off.
  */
 export function clubDress<
-  L extends { readonly accessories: readonly string[]; readonly jacket?: string },
->(look: L, p: Pick<SyncedBody, "clubId" | "jacket">): L {
+  L extends {
+    readonly accessories: readonly string[];
+    readonly jacket?: string;
+    readonly emblem?: Emblem;
+  },
+>(look: L, p: Pick<SyncedBody, "clubId" | "jacket" | "emblem">): L {
   const rest = look.accessories.filter((a) => a !== JACKET_PART);
   if (!p.clubId || !p.jacket) {
-    const { jacket: _drop, ...plain } = look;
+    const { jacket: _drop, emblem: _crest, ...plain } = look;
     return { ...plain, accessories: rest } as unknown as L;
   }
-  return { ...look, accessories: [...rest, JACKET_PART], jacket: p.jacket };
+  const emblem = decodeEmblem(p.emblem);
+  return {
+    ...look,
+    // First, so it is the one jacket-layer part kept over a coat of the student's own.
+    accessories: [JACKET_PART, ...rest],
+    jacket: p.jacket,
+    ...(emblem ? { emblem } : {}),
+  };
 }
 
 class WorldPeople {
