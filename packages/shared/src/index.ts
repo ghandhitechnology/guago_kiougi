@@ -3,6 +3,7 @@ export * from "./chat.ts";
 export * from "./collision.ts";
 export * from "./combat.ts";
 export * from "./constants.ts";
+export * from "./fight/index.ts";
 export * from "./growth.ts";
 export * from "./input-queue.ts";
 export * from "./items.ts";
