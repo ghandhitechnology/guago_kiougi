@@ -48,7 +48,7 @@ export function bakedFiles(id: string) {
  * Bakes what the game draws of a map as images instead of tiles: its ground (terrain, tones,
  * decals, still details, edges and shadows) by the same renderer as the contact sheet, in the
  * theme the game lights (`ambient.unlit`, else the map's theme), and a mask image: red is ground
- * shadow, green is inside an edge's region (a rift's torn cells, cut along the drawn edge), blue
+ * shadow, green is inside a torn edge's region (a rift's cells, cut along the drawn edge), blue
  * is wall: solid tiles that are not a prop's footprint (walls, wall faces, buildings, the
  * stands), which stop light. Returns the bytes written per map.
  */
@@ -73,7 +73,10 @@ export function bakeMaps(
     writeFileSync(join(dir, MAP_DIR, bakedFiles(map.id).ground), groundPng);
 
     const inside = new Uint8Array(img.w * img.h);
+    // Only a torn edge marks an inside; an interior's wall caps are walls, not a rift.
     for (const edge of map.scene.edges ?? []) {
+      const names = typeof edge.overlay === "string" ? [edge.overlay] : edge.overlay;
+      if (names.includes("wall-top")) continue;
       const m = edgeInside(map.scene, meta, edge);
       for (let i = 0; i < m.length; i++) inside[i] = Math.max(inside[i] as number, m[i] as number);
     }
