@@ -5,7 +5,7 @@
  * the raid system call. Nothing here runs on a map's simulation tick: events land in memory and
  * the database work happens in batches and in the background.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   CODEX_SETS,
@@ -98,8 +98,13 @@ export interface LiveOptions {
   world: () => LiveWorld | undefined;
   /** Student look options, to tell the school uniform. */
   looks?: () => LookOptions;
-  /** Lets the admin route inject combat and navigation events (test servers only). */
+  /**
+   * A test server: the admin route may also move the clock, free bosses, restart the Page and
+   * inject combat and navigation events. Off, it only reads.
+   */
   testEvents?: boolean;
+  /** Bearer token `POST /admin/live` requires (`SERVER_SECRET`); without it the route is off. */
+  adminSecret?: string;
   log?: (line: string) => void;
 }
 
@@ -900,6 +905,9 @@ export function createLive(db: Db, o: LiveOptions) {
   };
 
   async function admin(body: Record<string, unknown>): Promise<unknown> {
+    if (!o.testEvents && !ADMIN_READS.has(String(body.cmd))) {
+      throw new Error(`${String(body.cmd)} is for test servers (LIVE_TEST_EVENTS=1)`);
+    }
     switch (body.cmd) {
       case "state":
         return { page: page.view(), freed: page.freedBosses() };
@@ -925,13 +933,11 @@ export function createLive(db: Db, o: LiveOptions) {
         await progress.flush();
         return { ok: true };
       case "restart":
-        if (!o.testEvents) throw new Error("restart is for test servers (LIVE_TEST_EVENTS=1)");
         await page.restart();
         await page.tick();
         return { page: page.view() };
       case "credit": {
         // Income as combat hands it to the grant buffer, for the pool's measurement.
-        if (!o.testEvents) throw new Error("credit is for test servers (LIVE_TEST_EVENTS=1)");
         const credit = body.credit as Parameters<IncomeTracker["credit"]>[1];
         for (let i = 0; i < Number(body.times ?? 1); i++) {
           income.credit(String(body.character), credit);
@@ -941,7 +947,6 @@ export function createLive(db: Db, o: LiveOptions) {
         return { measured: income.measure(String(body.character)) };
       }
       case "event": {
-        if (!o.testEvents) throw new Error("events are for test servers (LIVE_TEST_EVENTS=1)");
         const name = String(body.name) as keyof typeof events;
         const fn = events[name] as ((...args: unknown[]) => unknown) | undefined;
         if (!fn) throw new Error(`no event ${name}`);
@@ -955,15 +960,35 @@ export function createLive(db: Db, o: LiveOptions) {
   }
 
   const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
-  /** `POST /admin/live` from this machine only: the clock, bosses and (test servers) events. */
+  const secret = o.adminSecret ? createHash("sha256").update(o.adminSecret).digest() : undefined;
+  /** The bearer token, compared in constant time over digests of equal length. */
+  const authorized = (header: string | undefined) => {
+    const token = /^Bearer (.+)$/.exec(header ?? "")?.[1];
+    if (!secret || !token) return false;
+    return timingSafeEqual(createHash("sha256").update(token).digest(), secret);
+  };
+  /**
+   * `POST /admin/live`: from this machine, not through a proxy (any forwarding header refuses),
+   * and with `Authorization: Bearer <SERVER_SECRET>`. Reads always; the rest on test servers.
+   */
   const adminRoute = (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     if (req.url !== "/admin/live" || req.method !== "POST") return next();
-    if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) {
+    const proxied = PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
+    if (!secret || !LOOPBACK.has(req.socket.remoteAddress ?? "") || proxied) {
       res.statusCode = 404;
       return res.end();
     }
+    if (!authorized(req.headers.authorization)) {
+      res.statusCode = 401;
+      return res.end();
+    }
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > ADMIN_BODY_MAX) req.destroy();
+      else chunks.push(c);
+    });
     req.on("end", () => {
       void (async () => {
         res.setHeader("content-type", "application/json");
@@ -1067,6 +1092,12 @@ export type Live = ReturnType<typeof createLive>;
 
 /** Every map a Page's lifecycle opens; anything else is campus and always open. */
 const ERA_MAPS = new Set(LIFECYCLES.flatMap((l) => l.steps.flatMap((s) => s.maps ?? [])));
+
+/** Admin commands a live server answers; the rest are for test servers. */
+const ADMIN_READS = new Set(["state", "notebook"]);
+/** Headers a forwarding proxy adds: a request carrying one did not start on this machine. */
+const PROXY_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "via"];
+const ADMIN_BODY_MAX = 64 * 1024;
 
 const NO_RULES: RuleState = {
   restedUntil: null,

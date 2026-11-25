@@ -5,6 +5,7 @@
  * ends with the economy's invariant check, which includes the conduct ledger.
  */
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   type Character,
   CLUB_EXP_FOR_NOTICE,
@@ -50,7 +51,9 @@ afterEach(async () => {
 /** Extra connection pools a test opened, closed after it. */
 const pools: Db[] = [];
 
-async function world(o: { listen?: (id: string, name: string) => void } = {}) {
+async function world(
+  o: { listen?: (id: string, name: string) => void; testEvents?: boolean; secret?: string } = {},
+) {
   const clock = new LiveClock({ realMs: 0, gameMs: T0, rate: 1 }, () => 0);
   const page = new PageClock(db, clock);
   await page.load(1);
@@ -63,7 +66,15 @@ async function world(o: { listen?: (id: string, name: string) => void } = {}) {
       live?.onApplied(id, name, r);
     },
   });
-  live = createLive(db, { clock, page, economy, world: () => undefined, log: () => {} });
+  live = createLive(db, {
+    clock,
+    page,
+    economy,
+    world: () => undefined,
+    log: () => {},
+    ...(o.testEvents ? { testEvents: true } : {}),
+    ...(o.secret ? { adminSecret: o.secret } : {}),
+  });
   await page.tick();
   return { clock, page, economy, live };
 }
@@ -344,5 +355,66 @@ describe("operation ids", () => {
     }
     expect(heard.filter((n) => n === "quest.claim")).toHaveLength(1);
     expect(clubActivity.take().get(c.id)).toBe(CLUB_EXP_FOR_NOTICE.weekly);
+  });
+});
+
+describe("admin route", () => {
+  /** One request through the route as Node would hand it over. */
+  async function call(
+    w: World,
+    body: unknown,
+    o: { from?: string; headers?: Record<string, string> } = {},
+  ): Promise<{ status: number; body: string }> {
+    const req = Object.assign(new EventEmitter(), {
+      url: "/admin/live",
+      method: "POST",
+      headers: o.headers ?? {},
+      socket: { remoteAddress: o.from ?? "127.0.0.1" },
+      destroy() {},
+    });
+    return new Promise((resolve) => {
+      const res = {
+        statusCode: 200,
+        setHeader() {},
+        end(text = "") {
+          resolve({ status: res.statusCode, body: String(text) });
+        },
+      };
+      w.live.adminRoute(req as never, res as never, () => resolve({ status: -1, body: "" }));
+      req.emit("data", Buffer.from(JSON.stringify(body)));
+      req.emit("end");
+    });
+  }
+
+  it("takes only this machine's direct requests that carry the secret", async () => {
+    const w = await world({ secret: "s3cret" });
+    const bearer = { authorization: "Bearer s3cret" };
+    expect((await call(w, { cmd: "state" })).status).toBe(401);
+    expect(
+      (await call(w, { cmd: "state" }, { headers: { authorization: "Bearer nope" } })).status,
+    ).toBe(401);
+    expect((await call(w, { cmd: "state" }, { headers: bearer, from: "10.0.0.2" })).status).toBe(
+      404,
+    );
+    const proxied = { ...bearer, "x-forwarded-for": "203.0.113.9" };
+    expect((await call(w, { cmd: "state" }, { headers: proxied })).status).toBe(404);
+    expect((await call(w, { cmd: "state" }, { headers: bearer })).status).toBe(200);
+    // A live server only reads: the clock and the bosses stay where they are.
+    const before = w.clock.now();
+    for (const cmd of [
+      { cmd: "step", by: "1w" },
+      { cmd: "rate", rate: 9 },
+      { cmd: "free", boss: "pythagoreans" },
+      { cmd: "flush" },
+    ]) {
+      expect((await call(w, cmd, { headers: bearer })).status).toBe(400);
+    }
+    expect([w.clock.now(), w.clock.rate]).toEqual([before, 1]);
+    // A test server moves the clock with the same secret.
+    const t = await world({ secret: "s3cret", testEvents: true });
+    expect((await call(t, { cmd: "step", by: "1w" }, { headers: bearer })).status).toBe(200);
+    // No secret configured: the route is off.
+    const off = await world();
+    expect((await call(off, { cmd: "state" }, { headers: bearer })).status).toBe(404);
   });
 });

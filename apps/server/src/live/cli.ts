@@ -1,6 +1,8 @@
 /**
  * The living world's admin commands, sent to the running server on this machine
- * (`POST /admin/live`, loopback only). PORT picks the server (default 2567).
+ * (`POST /admin/live`, loopback only, with SERVER_SECRET as the bearer token). PORT picks the
+ * server (default 2567). A live server answers `state` and `notebook` only; the rest need a test
+ * server (LIVE_TEST_EVENTS=1).
  *
  *   pnpm live state                     the Page as the server sees it
  *   pnpm live step <1w|3d|5h|90m>       moves the server clock forward
@@ -8,8 +10,8 @@
  *   pnpm live free <boss> [name]        frees a boss, as the raid system will, with the final hit
  *   pnpm live notebook                  the 0조 연구노트
  *   pnpm live flush                     writes every pending grant and quest progress now
- *   pnpm live restart                   the Page starts over (LIVE_TEST_EVENTS=1 only)
- *   pnpm live event <name> <args…>      a combat or navigation event (LIVE_TEST_EVENTS=1 only)
+ *   pnpm live restart                   the Page starts over
+ *   pnpm live event <name> <args…>      a combat or navigation event
  */
 import { config } from "../config.ts";
 
@@ -37,7 +39,7 @@ if (command === "event") {
 
 const res = await fetch(`http://127.0.0.1:${config.port}/admin/live`, {
   method: "POST",
-  headers: { "content-type": "application/json" },
+  headers: { "content-type": "application/json", authorization: `Bearer ${config.serverSecret}` },
   body: JSON.stringify(body),
 });
 console.log(JSON.stringify(await res.json(), null, 2));

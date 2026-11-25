@@ -24,6 +24,7 @@ import {
   WORLD_MESSAGES,
   WORLD_ROOM,
 } from "@guago/shared";
+import { config } from "../../../apps/server/src/config.ts";
 import { signIn } from "./account.ts";
 
 const { values } = parseArgs({
@@ -53,7 +54,7 @@ function check(ok: boolean, what: string): void {
 async function admin(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const res = await fetch(`${BASE}/admin/live`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${config.serverSecret}` },
     body: JSON.stringify(body),
   });
   const out = (await res.json()) as Record<string, unknown>;

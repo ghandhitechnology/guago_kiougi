@@ -43,6 +43,7 @@ const live = createLive(db, {
   world: worldRoom,
   looks: studentLooks,
   testEvents: config.liveTestEvents,
+  adminSecret: config.serverSecret,
 });
 provideLive(live);
 const auth = createAuthService({
