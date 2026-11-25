@@ -147,6 +147,13 @@ export class Catalog {
   readonly rules: SimRules;
   readonly monsters: MonsterArt[] = [];
   readonly books: BookArt[] = [];
+  /** Each book's evolved form, by the same index. */
+  readonly evolved: BookArt[] = [];
+  /**
+   * Evolved forms drawn with art no content cue names: the art lane's `evo-<evolution id>`
+   * sprites, used for the evolved body where the evolution's cue repeats the base book's.
+   */
+  readonly unnamed: string[] = [];
   /** Reaction index to its burst art and sound. */
   readonly reactions: { readonly vfx: string | null; readonly sfx: string }[] = [];
   readonly statusIds: readonly string[];
@@ -187,30 +194,8 @@ export class Catalog {
     }
     for (const id of this.rules.books) {
       const def = BOOKS.find((b) => b.id === id);
-      const cls = (def?.subject ?? "math") as ClassId as HitClass;
-      const [light, deep] = CLASS_RAMP[cls] ?? CLASS_RAMP.math;
-      const cues = def?.cues;
-      const real = (name: string | undefined) => (name && meta.sprites[name] ? name : null);
-      const body = real(cues?.body);
-      const hit = real(cues?.hit);
-      const area = real(cues?.area);
-      const kind = def?.attack?.kind ?? "none";
-      this.books.push({
-        id,
-        cls,
-        kind,
-        body,
-        bodyAnim: firstAnim(meta, body),
-        hit,
-        hitAnim: firstAnim(meta, hit),
-        area,
-        areaAnim: firstAnim(meta, area),
-        cast: cues?.cast ?? `sfx.book.${id}.cast`,
-        impact: cues?.impact ?? `sfx.book.${id}.hit`,
-        color: this.color(light),
-        deep: this.color(deep),
-        turns: body === "fx-bolt" || body === "fx-graph-beam" || body === "fx-scalpel",
-      });
+      this.books.push(this.bookArt(id, def, false));
+      this.evolved.push(this.bookArt(id, def, true));
     }
     for (const id of this.rules.books) this.shapes.push(shapeOf(BOOKS.find((b) => b.id === id)));
     for (const r of REACTIONS) {
@@ -237,8 +222,56 @@ export class Catalog {
     return this.shapes[index] ?? NO_SHAPE;
   }
 
-  book(index: number): BookArt {
-    return (this.books[index] ?? this.books[0]) as BookArt;
+  book(index: number, evolved = false): BookArt {
+    const list = evolved ? this.evolved : this.books;
+    return (list[index] ?? list[0] ?? this.books[0]) as BookArt;
+  }
+
+  /** A book's art, base or evolved, from its content cues. */
+  private bookArt(id: string, def: (typeof BOOKS)[number] | undefined, evolved: boolean): BookArt {
+    const meta = this.meta;
+    const cls = (def?.subject ?? "math") as ClassId as HitClass;
+    const [light, deep] = CLASS_RAMP[cls] ?? CLASS_RAMP.math;
+    const base = def?.cues;
+    const cues = evolved ? def?.evolution.cues : base;
+    const real = (name: string | undefined) => (name && meta.sprites[name] ? name : null);
+    let body = real(cues?.body);
+    if (evolved && def && cues?.body === base?.body) {
+      const own = `evo-${def.evolution.id}`;
+      if (meta.sprites[own]) {
+        body = own;
+        this.unnamed.push(own);
+      }
+    }
+    const hit = real(cues?.hit);
+    const area = real(cues?.area);
+    const kind = (evolved ? def?.evolution.attack?.kind : undefined) ?? def?.attack?.kind ?? "none";
+    return {
+      id,
+      cls,
+      kind,
+      body,
+      bodyAnim: firstAnim(meta, body),
+      hit,
+      hitAnim: firstAnim(meta, hit),
+      area,
+      areaAnim: firstAnim(meta, area),
+      cast: cues?.cast ?? `sfx.book.${id}.cast`,
+      impact: cues?.impact ?? `sfx.book.${id}.hit`,
+      color: this.color(light),
+      deep: this.color(deep),
+      turns: body === "fx-graph-beam" || body === "evo-fourier" || body === "fx-scalpel",
+    };
+  }
+
+  /** The animation key of a sprite's named animation, or null when it has none by that name. */
+  anim(sprite: string, name: string): string | null {
+    return this.meta.sprites[sprite]?.anims[name] ? `${sprite}/${name}` : null;
+  }
+
+  /** Frames of a sprite's named animation. */
+  frames(sprite: string, name: string): readonly string[] {
+    return this.meta.sprites[sprite]?.anims[name]?.frames ?? [];
   }
 
   has(sprite: string): boolean {

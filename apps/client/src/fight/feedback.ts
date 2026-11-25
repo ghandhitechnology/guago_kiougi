@@ -177,7 +177,7 @@ export class Feedback {
     // Sparks: the class's colour, the hit's weight.
     const color = art?.color ?? cat.color("stone.bright");
     if (blocked) {
-      this.effects.oneShot("fx-spark", "fx-spark/hit", x, mid, 1);
+      this.effects.oneShot("fx-shield-block", null, x, mid, 1);
       this.ctx.particles.burst(Bit.Spark, x, mid, 5, cat.color("stone.bright"), 110, 0);
       this.ctx.sound.cue("sfx.monster.rational.hit", x, y, true);
     } else if (!dot) {
@@ -361,9 +361,41 @@ export class Feedback {
     }
   }
 
-  /** A monster's tell fired. */
+  /** A monster's tell fired: a bomber's blast, the golem's shockwave, a charge's kick-off. */
   fired(a: Active): void {
     this.ctx.sound.cue("combat.telegraph.fire", a.x, a.y, true);
+    const cat = this.ctx.cat;
+    if (a.def === 5) {
+      const scale = Math.max(0.6, a.radius / 30);
+      this.effects.oneShot(
+        "fx-burst",
+        "fx-burst/blast",
+        a.x,
+        a.y,
+        1,
+        Layer.Ground,
+        undefined,
+        scale,
+        true,
+      );
+      this.ctx.particles.burst(Bit.Debris, a.x, a.y, 6, cat.color("clay.light"), 80, 2);
+      this.ctx.lights.flash(a.x, a.y - 6, cat.color("clay.light"), a.radius + 20, 1.2, 260);
+    } else if (a.def === 9) {
+      const scale = Math.max(0.4, a.radius / 70);
+      this.effects.oneShot(
+        "fx-shockwave",
+        "fx-shockwave/out",
+        a.x,
+        a.y,
+        1,
+        Layer.Ground,
+        undefined,
+        scale,
+        true,
+      );
+    } else if (a.def === 1) {
+      this.effects.oneShot("fx-dust", null, a.x, a.y, 1, Layer.Ground, undefined, 1, true);
+    }
     const d = Math.hypot(a.x - this.ctx.selfX, a.y - this.ctx.selfY);
     if (d < 120) this.trauma(0.12 * (1 - d / 120));
   }
@@ -429,15 +461,7 @@ export class Feedback {
       case 17: {
         // A 치유형 healed its neighbours: a green ring that says "this one first".
         this.ctx.particles.burst(Bit.Mote, x, y - 8, 8, cat.color("grass.light"), 30, 0);
-        this.effects.oneShot(
-          "fx-pickup",
-          "fx-pickup/twinkle",
-          x,
-          y - 12,
-          1,
-          Layer.Glow,
-          cat.color("grass.light"),
-        );
+        this.effects.oneShot("fx-heal", null, x, y, 1, Layer.Glow);
         if (near) this.ctx.sound.cue("sfx.monster.element-water.attack", x, y, false);
         return;
       }

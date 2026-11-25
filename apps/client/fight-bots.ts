@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Plugin } from "vite";
 
@@ -11,9 +11,18 @@ import type { Plugin } from "vite";
  */
 export function fightBots(gameServer: string): Plugin {
   let child: ChildProcess | null = null;
+  const root = path.resolve(import.meta.dirname, "../..");
+  // The crowd's pid is kept on disk too, so a dev server that restarted can still stop it.
+  const pidFile = path.join(root, ".local/crowd.pid");
   const stop = () => {
     child?.kill();
     child = null;
+    try {
+      process.kill(Number(readFileSync(pidFile, "utf8")));
+    } catch {
+      // Already gone.
+    }
+    rmSync(pidFile, { force: true });
   };
   return {
     name: "guago-fight-bots",
@@ -25,7 +34,6 @@ export function fightBots(gameServer: string): Plugin {
         const follow = q.get("follow") ?? "";
         stop();
         if (n > 0) {
-          const root = path.resolve(import.meta.dirname, "../..");
           mkdirSync(path.join(root, ".local"), { recursive: true });
           const log = openSync(path.join(root, ".local/crowd.log"), "w");
           const ws = gameServer.replace(/^http/, "ws");
@@ -37,6 +45,7 @@ export function fightBots(gameServer: string): Plugin {
             ],
             { cwd: root, stdio: ["ignore", log, log] },
           );
+          if (child.pid) writeFileSync(pidFile, String(child.pid));
           child.on("exit", () => {
             child = null;
           });

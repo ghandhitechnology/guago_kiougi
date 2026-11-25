@@ -40,6 +40,14 @@ const NAMES: Readonly<Record<string, string>> = {
   biology: "무대생명",
   earth: "무대지구",
 };
+/** The stage's students whose books are worn evolved (`evolved=1`). */
+const EVOLVED_NAMES: Readonly<Record<string, string>> = {
+  math: "진화수학",
+  physics: "진화물리",
+  chemistry: "진화화학",
+  biology: "진화생명",
+  earth: "진화지구",
+};
 /** The camera frames the body, not the feet. */
 const CHEST_PX = 10;
 
@@ -81,8 +89,12 @@ async function call(method: "GET" | "POST", route: string, body?: unknown) {
  * Signs this browser in as the stage's player of class `cls`, making the account on first use.
  * Returns who is playing, as the front end hands it to the world.
  */
-async function signIn(cls: string, meta: ReturnType<typeof artMetadata>): Promise<unknown> {
-  const loginId = `stage_${cls}`;
+async function signIn(
+  cls: string,
+  meta: ReturnType<typeof artMetadata>,
+  evolved: boolean,
+): Promise<unknown> {
+  const loginId = evolved ? `evo_${cls}` : `stage_${cls}`;
   const password = `stage-${cls}-fights-well`;
   let me = await call("GET", API.me);
   const mine = me.status === 200 && (me.body.account as { loginId?: string })?.loginId === loginId;
@@ -98,7 +110,7 @@ async function signIn(cls: string, meta: ReturnType<typeof artMetadata>): Promis
     const i = MAJORS.indexOf(cls as (typeof MAJORS)[number]);
     const pick = (xs: readonly string[], k: number) => xs[(i * 3 + k) % xs.length] as string;
     const made = await call("POST", API.character, {
-      name: NAMES[cls] ?? "무대",
+      name: (evolved ? EVOLVED_NAMES[cls] : NAMES[cls]) ?? "무대",
       major: cls,
       look: {
         body: pick(o.body, 0),
@@ -168,9 +180,10 @@ export class FightStage extends Phaser.Scene {
 
   private async start(tier: Tier): Promise<void> {
     const cls = this.params.get("cls") ?? "math";
-    const entry = await signIn(cls, artMetadata(this));
+    const evolved = this.params.get("evolved") === "1";
+    const entry = await signIn(cls, artMetadata(this), evolved);
     const bots = Number(this.params.get("bots") ?? 0);
-    const follow = encodeURIComponent(NAMES[cls] ?? "");
+    const follow = encodeURIComponent((evolved ? EVOLVED_NAMES[cls] : NAMES[cls]) ?? "");
     await fetch(`/__fight/bots?n=${bots}&follow=${follow}`).catch(() => undefined);
     const client = new Client(ROOMS_PATH);
     const room = await client.joinOrCreate(MAP_ROOM, {}, MapState);
@@ -204,6 +217,17 @@ export class FightStage extends Phaser.Scene {
     });
     const mode = this.params.get("mode");
     if (mode !== null) room.send(MODE_MESSAGE, [Number(mode)]);
+    // The books worn evolved, from the inventory, so the player's own casts take their form.
+    const inv = await call("GET", API.inventory);
+    const items = (inv.body.items ?? []) as {
+      kind: string;
+      def: string;
+      slot: number | null;
+      evolved: boolean;
+    }[];
+    this.fight.setEvolved(
+      items.filter((i) => i.kind === "book" && i.slot !== null && i.evolved).map((i) => i.def),
+    );
     if (this.params.get("hud") !== "0") await bindHud(this, this.fight, entry);
     if (this.params.get("readout") === "1") this.makeReadout();
     this.expose();

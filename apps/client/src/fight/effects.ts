@@ -77,6 +77,13 @@ export class Active {
   alpha = 1;
   /** Rock specimen or polygon, cycled per cast. */
   variant = 0;
+  /** The body's animation key, chosen once (a direction, a specimen, a face). */
+  key = "";
+}
+
+/** One of sixteen directions for art drawn turned in steps of 22.5°, 0 pointing right. */
+export function dir16(angle: number): number {
+  return ((Math.round(angle / (Math.PI / 8)) % 16) + 16) % 16;
 }
 
 export interface EffectHooks {
@@ -102,6 +109,9 @@ export class Effects {
   private readonly pool: Active[] = [];
   private others = 0;
   private rockTurn = 0;
+  private turn = 0;
+  /** Books the local player wears evolved, by rules index (from its inventory). */
+  private readonly evolvedOwn = new Set<number>();
 
   constructor(ctx: FightContext, bodies: Bodies, hooks: EffectHooks) {
     this.ctx = ctx;
@@ -112,6 +122,12 @@ export class Effects {
 
   get count(): number {
     return this.live.length;
+  }
+
+  /** Which of the local player's books are evolved, by rules index. */
+  setEvolved(books: Iterable<number>): void {
+    this.evolvedOwn.clear();
+    for (const b of books) this.evolvedOwn.add(b);
   }
 
   private take(): Active {
@@ -127,6 +143,7 @@ export class Effects {
     a.chainN = 0;
     a.art = null;
     a.variant = 0;
+    a.key = "";
     return a;
   }
 
@@ -173,7 +190,7 @@ export class Effects {
     a.fx = f.fx;
     a.kind = f.kind;
     a.owner = f.owner;
-    a.def = f.def;
+    a.def = enemy ? f.def : f.def & 127;
     a.cast = f.cast;
     a.start = tick + f.start;
     a.x = f.x;
@@ -203,7 +220,10 @@ export class Effects {
     a.own = own || enemy;
     a.mine = own;
     a.enemy = enemy;
-    a.art = enemy ? null : this.ctx.cat.book(f.def);
+    // Bit 7 of `def` marks an evolved weapon once the wire carries it; the local player's own
+    // evolved books are known from its inventory meanwhile.
+    const evolved = !enemy && ((f.def & 128) !== 0 || (own && this.evolvedOwn.has(f.def & 127)));
+    a.art = enemy ? null : this.ctx.cat.book(f.def & 127, evolved);
     a.alpha = own || enemy ? 1 : this.ctx.restraint.others;
     if (a.predicted) {
       // The swing already on screen keeps going; the server's path takes over smoothly.
@@ -230,7 +250,7 @@ export class Effects {
   /** The first swing the client predicted for this book that has not been answered yet. */
   private adopt(f: WireFx): Active | undefined {
     for (const a of this.live) {
-      if (!a.predicted || a.def !== f.def) continue;
+      if (!a.predicted || a.def !== (f.def & 127)) continue;
       if (a.kind !== f.kind) continue;
       return a;
     }
@@ -268,6 +288,7 @@ export class Effects {
         return false;
     }
     const a = this.take();
+    a.art = this.ctx.cat.book(book, this.evolvedOwn.has(book));
     a.fx = 0;
     a.kind = kind;
     a.owner = this.ctx.selfId;
@@ -292,7 +313,6 @@ export class Effects {
     a.own = true;
     a.mine = true;
     a.enemy = false;
-    a.art = art;
     a.alpha = 1;
     a.predicted = true;
     a.predictedAt = this.ctx.now;
@@ -386,6 +406,28 @@ export class Effects {
 
   // Kinds ----------------------------------------------------------------------------------
 
+  /**
+   * The animation a moving body plays, chosen once: one of sixteen turned drawings by heading,
+   * a rock's specimen, the next of several loops (acid then base, Na, He, Fe), or for art made of
+   * single frames (the 수열 digits) the next frame, marked with `#`.
+   */
+  private bodyKey(a: Active, name: string, enemy: boolean): string {
+    if (enemy) return "proj-shadow/fly";
+    const sp = this.ctx.cat.meta.sprites[name];
+    if (!sp) return "";
+    const anims = sp.anims;
+    if (anims.d0) return `${name}/d${dir16(a.angle)}`;
+    const keys = Object.keys(anims);
+    if (name === "fx-rock" || name === "evo-rock-cycle")
+      return `${name}/${keys[a.variant % Math.max(1, keys.length)]}`;
+    const loops = keys.filter((k) => anims[k]?.loop);
+    if (loops.length > 1) return `${name}/${loops[this.turn++ % loops.length]}`;
+    if (loops.length === 1) return `${name}/${loops[0]}`;
+    if (keys.length > 1 && keys.every((k) => (anims[k]?.frames.length ?? 0) === 1))
+      return `#${sp.frames[this.turn++ % sp.frames.length]}`;
+    return keys[0] ? `${name}/${keys[0]}` : "";
+  }
+
   private shot(a: Active, t: number, clock: number): boolean {
     const cat = this.ctx.cat;
     const life = a.speed > 0 ? a.length / a.speed : 20;
@@ -409,14 +451,9 @@ export class Effects {
     const art = a.art;
     const body = enemy ? "proj-shadow" : (art?.body ?? "fx-book");
     const name = cat.has(body) ? body : "fx-book";
-    const anim =
-      name === "fx-rock"
-        ? (["fx-rock/igneous", "fx-rock/sedimentary", "fx-rock/metamorphic"][a.variant] ?? null)
-        : enemy
-          ? "proj-shadow/fly"
-          : name === body
-            ? (art?.bodyAnim ?? null)
-            : "fx-book/spin";
+    if (!a.key) a.key = this.bodyKey(a, name, enemy);
+    const still = a.key.startsWith("#");
+    const anim = still ? null : a.key || null;
     // A red rim under every enemy shot: danger is red, and only danger.
     if (enemy) {
       const rim = this.piece(a, 0, Layer.Glow, true);
@@ -425,7 +462,7 @@ export class Effects {
       rim.s.setPosition(Math.round(x), Math.round(y));
     }
     const p = this.piece(a, enemy ? 1 : 0);
-    const s = show(p, cat.atlas(name), cat.frame(name), anim, false);
+    const s = show(p, cat.atlas(name), still ? a.key.slice(1) : cat.frame(name), anim, false);
     s.setVisible(true).setAlpha(a.alpha);
     if (art?.turns) s.setRotation(a.angle);
     s.setPosition(Math.round(x), Math.round(y - (enemy ? 2 : 4)));
@@ -519,6 +556,27 @@ export class Effects {
     // Grow in over the first two ticks, out over the last two.
     const grow = Math.min(1, t / 2, (a.duration - t) / 2);
     const turn = (2 * Math.PI * t) / Math.max(1, a.period);
+    if (cat.meta.sprites[body]?.frames.includes(`${body}/rod`)) {
+      // A pendulum: the pivot over the player, the rod in beads, the bob at the end.
+      const ang = a.angle + (a.sweep / 2) * Math.sin(turn) + a.spin * t;
+      const r = a.radius * (0.5 + 0.5 * grow);
+      const px = tmp.x;
+      const py = tmp.y - 10;
+      const beads = Math.max(2, Math.min(MAX_PIECES - 2, Math.round(r / 5)));
+      for (let i = 0; i <= beads + 1; i++) {
+        const p = this.piece(a, i);
+        const f = i / (beads + 1);
+        const frame = i === 0 ? `${body}/pivot` : i === beads + 1 ? `${body}/bob` : `${body}/rod`;
+        show(p, cat.atlas(body), frame, null);
+        p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, grow * 2));
+        p.s.setPosition(
+          Math.round(px + Math.cos(ang) * r * f),
+          Math.round(py + Math.sin(ang) * r * f * 0.7),
+        );
+      }
+      this.hideFrom(a, beads + 2);
+      return false;
+    }
     for (let i = 0; i < n; i++) {
       let ang: number;
       if (a.sweep > 0) ang = a.angle + (a.sweep / 2) * Math.sin(turn) + a.spin * t;
@@ -629,29 +687,96 @@ export class Effects {
       }
       const ex = to.x;
       const ey = to.headY + 6;
-      const d = Math.hypot(ex - fx, ey - fy);
-      const bolt = this.piece(a, used++, Layer.Glow, true);
-      const variant =
-        ["fx-bolt/a", "fx-bolt/b", "fx-bolt/c"][(k + Math.floor(t)) % 3] ?? "fx-bolt/a";
-      show(bolt, COMBAT, cat.frame("fx-bolt"), variant, false);
-      bolt.s
-        .setOrigin(0, 0.5)
-        .setRotation(Math.atan2(ey - fy, ex - fx))
-        .setScale(d / 32, 1);
-      bolt.s
-        .setVisible(true)
-        .setAlpha(a.alpha * fade)
-        .setPosition(Math.round(fx), Math.round(fy));
+      used = this.zigzag(a, used, fx, fy, ex, ey, k, fade);
+      if (used >= MAX_PIECES - 1) break;
       const node = this.piece(a, used++, Layer.Glow, true);
       show(node, COMBAT, cat.frame("fx-bolt-node"), "fx-bolt-node/strike", false);
       node.s
         .setVisible(true)
         .setAlpha(a.alpha * fade)
         .setPosition(Math.round(ex), Math.round(ey));
-      if (used >= MAX_PIECES - 1) break;
     }
     this.hideFrom(a, used);
     return false;
+  }
+
+  /**
+   * Lightning from one point to another, never turned off the drawn angles: half the straight
+   * run, the 45° run, the other half, each laid from the 0° and 45° bolt drawings turned only by
+   * right angles (which keep every pixel), with the a, b and c variants swapped every frame.
+   */
+  private zigzag(
+    a: Active,
+    used: number,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    k: number,
+    fade: number,
+  ): number {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    const diag = Math.min(ax, ay);
+    const sx = Math.sign(dx) || 1;
+    const sy = Math.sign(dy) || 1;
+    const horizontal = ax >= ay;
+    const rest = (horizontal ? ax : ay) - diag;
+    let x = x0;
+    let y = y0;
+    const legs: [number, number, number][] = [
+      [horizontal ? sx : 0, horizontal ? 0 : sy, rest / 2],
+      [sx, sy, diag],
+      [horizontal ? sx : 0, horizontal ? 0 : sy, rest / 2],
+    ];
+    const flick = Math.floor(this.ctx.now / 50);
+    for (const [ux, uy, len] of legs) {
+      if (len < 1) continue;
+      const diagonal = ux !== 0 && uy !== 0;
+      const sprite = diagonal ? "fx-bolt-diag" : "fx-bolt";
+      // Pixels covered along each axis by one drawing.
+      const step = diagonal ? 20 : 32;
+      const rot = diagonal
+        ? ux > 0
+          ? uy > 0
+            ? 0
+            : -Math.PI / 2
+          : uy > 0
+            ? Math.PI / 2
+            : Math.PI
+        : ux > 0
+          ? 0
+          : ux < 0
+            ? Math.PI
+            : uy > 0
+              ? Math.PI / 2
+              : -Math.PI / 2;
+      const n = Math.ceil(len / step);
+      for (let i = 0; i < n && used < MAX_PIECES - 1; i++) {
+        const part = Math.min(step, len - i * step) / step;
+        const p = this.piece(a, used++, Layer.Glow, true);
+        const v = ["a", "b", "c"][(k + i + flick) % 3] as string;
+        const frames = this.ctx.cat.frames(sprite, v);
+        show(
+          p,
+          COMBAT,
+          frames[flick % Math.max(1, frames.length)] ?? this.ctx.cat.frame(sprite),
+          null,
+        );
+        if (diagonal) p.s.setOrigin(3 / 26, 3 / 26).setScale(part, part);
+        else p.s.setOrigin(0, 6 / 13).setScale(part, 1);
+        p.s
+          .setRotation(rot)
+          .setAlpha(a.alpha * fade)
+          .setVisible(true);
+        p.s.setPosition(Math.round(x + ux * step * i), Math.round(y + uy * step * i));
+      }
+      x += ux * len;
+      y += uy * len;
+    }
+    return used;
   }
 
   private cone(a: Active, t: number): boolean {
@@ -673,6 +798,44 @@ export class Effects {
       return false;
     }
     const body = art?.body && cat.has(art.body) && art.kind === "cone" ? art.body : "fx-slash";
+    const anims = cat.meta.sprites[body]?.anims ?? {};
+    const fade = a.alpha * Math.min(1, (life - t) / 2);
+    if (anims.fan0) {
+      // A spray drawn in sixteen directions: the one nearest the aim, never turned.
+      const p = this.piece(a, 0, Layer.Glow, cat.meta.sprites[body]?.blend === "add");
+      const fresh = a.pulses === 0;
+      if (fresh) a.pulses = 1;
+      show(p, cat.atlas(body), cat.frame(body), `${body}/fan${dir16(a.angle)}`, fresh);
+      p.s
+        .setVisible(true)
+        .setAlpha(fade)
+        .setPosition(Math.round(x), Math.round(y - 8));
+      return false;
+    }
+    if (cat.meta.sprites[body]?.frames.includes(`${body}/bond`)) {
+      // A whip of atoms laid along the aim: carbon, bond, carbon …, the tip snapping at the end.
+      const n = Math.min(MAX_PIECES, Math.max(2, Math.round(a.length / 7)));
+      const grow = Math.min(1, (t - a.a + 1) / 2);
+      const shown = Math.max(1, Math.round(n * grow));
+      for (let i = 0; i < n; i++) {
+        const p = this.piece(a, i);
+        const last = i === shown - 1;
+        const frame = last ? `${body}/tip0` : i % 2 === 0 ? `${body}/carbon` : `${body}/bond`;
+        show(
+          p,
+          cat.atlas(body),
+          cat.meta.sprites[body]?.frames.includes(frame) ? frame : `${body}/carbon`,
+          null,
+        );
+        const d = 6 + i * 7;
+        p.s.setVisible(i < shown).setAlpha(fade);
+        p.s.setPosition(
+          Math.round(x + Math.cos(a.angle) * d),
+          Math.round(y - 8 + Math.sin(a.angle) * d),
+        );
+      }
+      return false;
+    }
     const p = this.piece(a, 0, Layer.Glow, body !== "fx-slash");
     const fresh = a.pulses === 0;
     if (fresh) a.pulses = 1;
@@ -833,8 +996,10 @@ export class Effects {
       }
       return false;
     }
+    if (!enemy && cat.has("fx-forecast-ring"))
+      return this.forecastCircle(a, t, strikes, sinceStrike, charging, progress, delay);
     // A circle.
-    const art = enemy ? "tele-circle" : cat.has("fx-forecast") ? "tele-circle" : "tele-circle";
+    const art = "tele-circle";
     const p = this.piece(a, 0, Layer.Ground);
     const fill = cat.meta.sprites[art]?.anims.fill?.frames ?? [];
     const fire = cat.meta.sprites[art]?.anims.fire?.frames ?? [];
@@ -852,6 +1017,71 @@ export class Effects {
       .setAlpha(a.alpha * (strikes > 0 && !charging ? Math.min(1, (FLASH - sinceStrike) / 3) : 1));
     // The player's own telegraph is amber, never hazard red.
     if (!enemy) p.s.setTint(this.ctx.cat.color("gold.light"));
+    return false;
+  }
+
+  /**
+   * The player's own circular 예보: the amber ring traced over the delay, then whatever the book
+   * sends down: a meteor falling the last stretch of the delay, a vent rumbling up and erupting,
+   * the crater or lava left where it lands.
+   */
+  private forecastCircle(
+    a: Active,
+    t: number,
+    strikes: number,
+    sinceStrike: number,
+    charging: boolean,
+    progress: number,
+    delay: number,
+  ): boolean {
+    const cat = this.ctx.cat;
+    const art = a.art;
+    const r = Math.max(8, a.radius);
+    const scale = Math.max(0.5, r / 32);
+    const struck = strikes > 0 && !charging;
+    const p = this.piece(a, 0, Layer.Ground);
+    const warn = cat.frames("fx-forecast-ring", "warn");
+    const brk = cat.frames("fx-forecast-ring", "break");
+    const frame = struck
+      ? (brk[Math.floor(sinceStrike * 2) % Math.max(1, brk.length)] ?? "")
+      : (warn[Math.min(warn.length - 1, Math.floor(progress * warn.length))] ?? "");
+    if (frame) show(p, COMBAT, frame, null);
+    p.s
+      .setOrigin(0.5, 0)
+      .setScale(scale, scale)
+      .setPosition(Math.round(a.x), Math.round(a.y - 20 * scale));
+    p.s.setVisible(true).setAlpha(a.alpha * (struck ? Math.min(1, (FLASH - sinceStrike) / 3) : 1));
+    const body = art?.body && cat.has(art.body) ? art.body : null;
+    const sp = body ? cat.meta.sprites[body] : undefined;
+    const left = strikes === 0 ? delay - t : -1;
+    if (body && sp?.anims.fall) {
+      // The meteor comes down over the last twelve ticks.
+      const q = this.piece(a, 1, Layer.Glow, sp.blend === "add");
+      const fallT = 12;
+      if (left > 0 && left < fallT) {
+        const f = 1 - left / fallT;
+        show(q, cat.atlas(body), cat.frame(body), `${body}/fall`, false);
+        q.s.setVisible(true).setAlpha(a.alpha);
+        q.s.setPosition(Math.round(a.x + 40 * (1 - f)), Math.round(a.y - 4 - 100 * (1 - f)));
+      } else q.s.setVisible(false);
+    } else if (body && sp?.anims.erupt) {
+      // The vent: smoking, rumbling the last half of the delay, erupting on the strike.
+      const q = this.piece(a, 1, Layer.Ground);
+      const anim = struck ? "erupt" : progress > 0.5 ? "rumble" : "smoke";
+      show(q, cat.atlas(body), cat.frame(body), `${body}/${anim}`, false);
+      q.s
+        .setOrigin(0.5, 1)
+        .setVisible(true)
+        .setAlpha(a.alpha)
+        .setPosition(Math.round(a.x), Math.round(a.y + 2));
+    }
+    if (struck && a.landed === false) {
+      a.landed = true;
+      const hit = art?.hit && cat.has(art.hit) ? art.hit : null;
+      if (hit && cat.meta.sprites[hit]?.anims.land)
+        this.oneShot(hit, `${hit}/land`, a.x, a.y, a.alpha, Layer.Ground, undefined, scale, true);
+    }
+    if (!struck && charging && strikes > 0) a.landed = false;
     return false;
   }
 
@@ -876,6 +1106,32 @@ export class Effects {
     if (a.mine) {
       cx = this.ctx.selfX;
       cy = this.ctx.selfY;
+    }
+    const ring = art?.body ? cat.meta.sprites[art.body] : undefined;
+    if (art?.body && ring?.anims.out) {
+      // The ring is drawn once per radius: the frame nearest the wave's radius now, on the
+      // way out and, for a pull, the inward ring on the way back.
+      const back = pull && since >= out + a.duration && ring.anims.back;
+      const frames = (back ? ring.anims.back?.frames : ring.anims.out.frames) ?? [];
+      let best = frames[0] ?? "";
+      let bestD = Number.POSITIVE_INFINITY;
+      for (const f of frames) {
+        const m = /(\d+)$/.exec(f);
+        if (!m) continue;
+        const d = Math.abs(Number(m[1]) - r);
+        if (d < bestD) {
+          bestD = d;
+          best = f;
+        }
+      }
+      const p = this.piece(a, 0, Layer.Ground);
+      show(p, cat.atlas(art.body), best, null);
+      const h = ring.size[1];
+      p.s.setOrigin(0.5, 0).setPosition(Math.round(cx), Math.round(cy - h / 2));
+      p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, (life - t) / 3));
+      if (ring.blend === "add") p.s.setBlendMode(Phaser.BlendModes.ADD);
+      this.hideFrom(a, 1);
+      return false;
     }
     const n = Math.min(MAX_PIECES, Math.max(8, Math.round(r / 5)));
     for (let i = 0; i < n; i++) {
@@ -914,6 +1170,17 @@ export class Effects {
     const name = art?.area && cat.has(art.area) ? art.area : null;
     const fadeIn = Math.min(1, t / 2);
     const fadeOut = Math.min(1, (life - t) / 4);
+    // What hangs over the area (a storm cloud, a falling weight) rides above it.
+    const over =
+      art?.body && art.body !== name && art.kind === "zone" && cat.has(art.body) ? art.body : null;
+    if (over) {
+      const p = this.piece(a, 1);
+      const anims = cat.meta.sprites[over]?.anims ?? {};
+      const loop = Object.keys(anims).find((k) => anims[k]?.loop) ?? Object.keys(anims)[0] ?? "";
+      show(p, cat.atlas(over), cat.frame(over), loop ? `${over}/${loop}` : null, false);
+      p.s.setVisible(true).setAlpha(a.alpha * fadeIn * fadeOut);
+      p.s.setPosition(Math.round(cx), Math.round(cy - Math.max(18, r * 0.55)));
+    }
     if (name) {
       const p = this.piece(a, 0, Layer.Ground);
       const sp = cat.meta.sprites[name];
@@ -944,7 +1211,7 @@ export class Effects {
       p.s.setOrigin(0.5, 0).setScale(scale, scale);
       p.s.setPosition(Math.round(cx), Math.round(cy - (h / 2) * scale));
       p.s.setVisible(true).setAlpha(a.alpha);
-      this.hideFrom(a, 1);
+      this.hideFrom(a, over ? 2 : 1);
       return false;
     }
     // No art yet: a slow ring of motes in the class colour, with a ground ring under it.

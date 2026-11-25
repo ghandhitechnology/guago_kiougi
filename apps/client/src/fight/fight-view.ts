@@ -140,6 +140,8 @@ export class FightView {
   private readonly lastCast: number[] = [];
   private rollAt = -1e9;
   private readonly ghosts: Phaser.GameObjects.Sprite[] = [];
+  /** 중화's shield around the player while it holds. */
+  private bubble: Phaser.GameObjects.Sprite | null = null;
   private readonly trail: { x: number; y: number }[] = [];
   private readonly dim: Phaser.GameObjects.Image;
   private dimLevel = 0;
@@ -748,8 +750,29 @@ export class FightView {
     this.keys?.update(now);
   }
 
-  /** The local player's roll ghosts and invulnerable shimmer. */
+  /** The local player's roll ghosts and invulnerable shimmer, and the shield's bubble. */
   private selfFrame(now: number): void {
+    const shielded = this.selfShield > 0 && this.bodies.self !== null;
+    if (shielded && !this.bubble && this.cat.has("fx-shield-bubble")) {
+      const b = new Phaser.GameObjects.Sprite(
+        this.scene,
+        0,
+        0,
+        COMBAT,
+        this.cat.frame("fx-shield-bubble"),
+      );
+      this.view.addEffect(b);
+      b.play("fx-shield-bubble/hold");
+      this.bubble = b;
+      this.ctx.sound.self("sfx.reaction.neutralize");
+    } else if (!shielded && this.bubble) {
+      const b = this.bubble;
+      this.bubble = null;
+      b.play("fx-shield-bubble/pop");
+      b.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => b.destroy());
+    }
+    if (this.bubble)
+      this.bubble.setPosition(Math.round(this.ctx.selfX), Math.round(this.ctx.selfY + 2));
     const self = this.bodies.self;
     const since = now - this.rollAt;
     const rolling = since < DODGE.invulnerableSeconds * 1000 + 60;
@@ -927,6 +950,19 @@ export class FightView {
     };
   }
 
+  /**
+   * The books the local player wears in their evolved form (book ids), from its inventory: its
+   * own casts are drawn evolved until the effect records carry the flag themselves.
+   */
+  setEvolved(bookIds: readonly string[]): void {
+    const set: number[] = [];
+    for (const id of bookIds) {
+      const i = this.cat.rules.books.indexOf(id);
+      if (i >= 0) set.push(i);
+    }
+    this.effects.setEvolved(set);
+  }
+
   /** Changes the quality tier: particle caps, other players' restraint, the lights kept. */
   setTier(tier: Tier): void {
     this.ctx.tier = tier;
@@ -971,6 +1007,7 @@ export class FightView {
     this.ctx.lights.destroy();
     this.ctx.sound.stop();
     for (const g of this.ghosts) g.destroy();
+    this.bubble?.destroy();
     for (const a of this.arrows) a.destroy();
     this.dim.destroy();
     this.banner.destroy();
