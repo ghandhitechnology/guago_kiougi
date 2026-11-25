@@ -64,6 +64,8 @@ export interface Destination {
   readonly write: boolean;
   /** What took them: shown as the door they came through. */
   readonly via: string;
+  /** The channel to seat them in when it has room (a dueling floor and back). */
+  readonly roomId?: string;
 }
 
 /** What the story needs from a map room; `MapRoom` is one. */
@@ -82,6 +84,8 @@ export interface StoryRoom {
    * at, or its own wandering again with undefined.
    */
   holdGoal(sessionId: string, at: { x: number; y: number } | undefined): void;
+  /** The body is fighting a duel: no scene takes it until the duel lets it go. */
+  inDuel(sessionId: string): boolean;
   /** Walks a body to a spot over `ms` (0 puts it there), the room's own way. */
   walkBody(sessionId: string, x: number, y: number, ms: number): void;
   sendOn(sessionId: string, to: Destination): void;
@@ -267,6 +271,7 @@ class Director {
   /** A body was seated: the scene it is owed starts. */
   async arrived(room: StoryRoom, sessionId: string, characterId: string, zones: readonly string[]) {
     try {
+      if (room.inDuel(sessionId)) return;
       const showing = this.showings.get(room.roomId);
       if (showing) {
         const run = this.start(room, sessionId, characterId, showing.scene, "shared", 0);
@@ -292,7 +297,7 @@ class Director {
 
   /** Walked into a room zone: a beat staged there may start. */
   zonesChanged(room: StoryRoom, sessionId: string, characterId: string, zones: readonly string[]) {
-    if (room.owner || this.bySession.has(sessionId)) return;
+    if (room.owner || this.bySession.has(sessionId) || room.inDuel(sessionId)) return;
     background("story beats", this.beatsAt(room, sessionId, characterId, zones));
   }
 
@@ -638,7 +643,7 @@ class Director {
   /** 복습: a scene from the story log, again, in a private copy of its map. */
   private async replay(room: StoryRoom, sessionId: string, characterId: string, id: string) {
     const scene = sceneById(id);
-    if (!scene || room.owner || this.bySession.has(sessionId)) return;
+    if (!scene || room.owner || this.bySession.has(sessionId) || room.inDuel(sessionId)) return;
     if (OPENING_SCENES.includes(id) || id === "expel-home") return;
     if (!reached(sceneFrom(id))) return;
     const map = stageMap(scene);
@@ -681,6 +686,7 @@ class Director {
     const showing: Showing = { room, scene, runs: new Set(), done: new Set(), ended, end };
     this.showings.set(room.roomId, showing);
     for (const [sessionId, characterId] of present) {
+      if (room.inDuel(sessionId)) continue;
       showing.runs.add(this.start(room, sessionId, characterId, scene, "shared", 0).id);
     }
     const ms = sceneLength(scene, (k) => KO[k] ?? "") * SHARED_SLACK + SHARED_EXTRA_MS;

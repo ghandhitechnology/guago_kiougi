@@ -149,12 +149,23 @@ export class Player {
   aiGoalUntil = 0;
   /** Damage the player took in the last ticks, for the AI's caution. */
   lastHurt = -1000;
+  /** Tick it last landed a hit on anything: with `lastHurt`, whether it is in a fight. */
+  lastHit = -1000;
   /** Connection dropped: the server plays it until it comes back. */
   away = false;
   /** Multiplies every EXP this player earns: the server's modifiers (숙면, 졸음, 급식 …). */
   expMult = 1;
   /** The kit at a new level; set by whoever seated the player. */
   rebuild: ((level: number) => PlayerKit) | null = null;
+  /** Duel side (duel.ts): 1 or 2 while fighting a duel on this world, 0 everywhere else. */
+  team = 0;
+  /** A fighter's statuses and slow, carried over from its stand-in; 0 off a duel floor. */
+  statusMask = 0;
+  slow = 0;
+  /** Hit this tick, for the wire's flash; only a duel sets it. */
+  flash = false;
+  /** Held still with its books shut: a duel's countdown and pause (duel.ts). */
+  frozen = false;
 
   constructor(index: number) {
     this.index = index;
@@ -234,6 +245,8 @@ export class Monster {
   killedWith: Weapon | null = null;
   /** Set when it should leave without a death (despawned, escaped). */
   gone = false;
+  /** A duel fighter's stand-in (duel.ts): hits on it land on this player index; -1 otherwise. */
+  fighter = -1;
 
   constructor(index: number, statuses: number) {
     this.index = index;
@@ -476,7 +489,35 @@ export interface Grant {
   drop: SimDrop;
 }
 
-const MONSTER_CAP = 512;
+/**
+ * Player-versus-player on a world (duel.ts). Null on every world but a duel floor's, so on a
+ * field no player has a stand-in and nothing a player casts can reach another player.
+ */
+export interface PvpHook {
+  /** Before players' books, effects and minions act: fighters' stand-ins take their places. */
+  before(w: FightWorld): void;
+  /** After: what struck the stand-ins moves the fighters; rounds are decided. */
+  after(w: FightWorld): void;
+  /** Stand-ins `actor` may not see (its own side's, or all of them for a non-fighter). */
+  hidden(actor: number): Uint8Array | null;
+  /** A hit on stand-in `m` lands on its fighter; returns what was dealt. */
+  land(
+    w: FightWorld,
+    by: Player | null,
+    m: Monster,
+    amount: number,
+    fromX: number,
+    fromY: number,
+    knock: number,
+    flags: number,
+    cast: number,
+    slot: number,
+  ): number;
+  /** The Hit event `land` wrote last, or null. */
+  readonly hit: FightEvent | null;
+}
+
+export const MONSTER_CAP = 512;
 const EFFECT_CAP = 1024;
 const MINION_CAP = 256;
 const PICKUP_CAP = 1024;
@@ -556,6 +597,8 @@ export class FightWorld {
   readonly scratch = new Int32Array(1024);
   readonly scratch2 = new Int32Array(1024);
   readonly scratch3 = new Int32Array(256);
+  /** Player-versus-player, only on a duel floor's world. */
+  pvp: PvpHook | null = null;
 
   constructor(map: FightMap, rules: SimRules, field: FieldRule | null, seed: number) {
     this.map = map;
@@ -711,7 +754,8 @@ export class FightWorld {
   private effectCursor = 0;
 
   freeMonster(): Monster | null {
-    const n = this.monsters.length;
+    // Past the pool are a duel's stand-ins, which are never spawned into.
+    const n = MONSTER_CAP;
     for (let k = 0; k < n; k++) {
       const i = (this.monsterCursor + k) % n;
       const m = this.monsters[i] as Monster;
@@ -793,6 +837,12 @@ export class FightWorld {
     }
     this.drops.length = 0;
     for (const k of this.pickups) if (k.alive) this.drops.push(k);
+  }
+
+  /** The players' books, effects and minions of `actor` act next: on a duel floor they see
+   * only the other side's stand-ins. */
+  actAs(actor: number): void {
+    if (this.pvp) this.monsterHash.skip = this.pvp.hidden(actor);
   }
 
   // ── Players ──────────────────────────────────────────────────────────────
@@ -942,7 +992,13 @@ export function resetPlayer(p: Player): void {
   p.aiGoalY = 0;
   p.aiGoalUntil = 0;
   p.lastHurt = -1000;
+  p.lastHit = -1000;
   p.away = false;
   p.expMult = 1;
   p.rebuild = null;
+  p.team = 0;
+  p.statusMask = 0;
+  p.slow = 0;
+  p.flash = false;
+  p.frozen = false;
 }

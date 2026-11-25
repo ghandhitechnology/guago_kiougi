@@ -1,5 +1,5 @@
 import { sprite } from "../../format.ts";
-import { clean, ell, framesOf, line, names, Pic, paintAt, put } from "../../fx.ts";
+import { clean, ell, framesOf, line, names, Pic, paintAt, path, put } from "../../fx.ts";
 import { dieFace, dieSpin, groundAxes, MATH, MATH_LONE } from "./math-kit.ts";
 
 /**
@@ -99,25 +99,79 @@ const fourierSprite = sprite({
   anim: { travel: { frames: names("wave", 4), fps: 16, jump: 1 } },
 });
 
-/** 기댓값 정리: the die turned inside out, navy with chalk pips, and an arrow that only climbs. */
+/**
+ * 기댓값 정리: the die turned inside out, navy with chalk pips, and the expectation climbing out
+ * of it: a chalk chart line that zigzags up from the die's face and leaves its top corner as an
+ * arrow. The arrow stands upright in every frame, spinning or landed, so the die reads as a
+ * rising chart from across a field.
+ */
 const NAVY_DIE = ["m", "d", "W", "o"] as const;
+
+function rising(die: Pic, k: number): Pic {
+  const pic = Pic.blank(24, 24);
+  put(pic, die, 2, 8);
+  const lift = k % 2;
+  const trace: [number, number][] = [
+    [6, 18],
+    [9, 14 - lift],
+    [12, 16 - lift],
+    [19, 6 - lift],
+  ];
+  const art = Pic.blank(24, 24);
+  path(art, trace, "W");
+  path(
+    art,
+    trace.map(([x, y]) => [x + 1, y] as [number, number]),
+    "W",
+  );
+  const [tx, ty] = trace[3] as [number, number];
+  path(
+    art,
+    [
+      [tx - 4, ty - 1],
+      [tx + 1, ty - 1],
+      [tx + 1, ty + 4],
+    ],
+    "W",
+  );
+  path(
+    art,
+    [
+      [tx - 3, ty],
+      [tx, ty],
+      [tx, ty + 3],
+    ],
+    "W",
+  );
+  // A navy edge where the chalk leaves the die.
+  const edged = art.clone();
+  for (let y = 0; y < 24; y++)
+    for (let x = 0; x < 24; x++) {
+      if (art.at(x, y) !== ".") continue;
+      if ([art.at(x - 1, y), art.at(x + 1, y), art.at(x, y - 1), art.at(x, y + 1)].includes("W"))
+        edged.set(x, y, "o");
+    }
+  for (let y = 0; y < 24; y++)
+    for (let x = 0; x < 24; x++) {
+      const ch = edged.at(x, y);
+      if (ch === "W") pic.set(x, y, "W");
+      else if (ch === "o" && pic.at(x, y) === ".") pic.set(x, y, "o");
+    }
+  return clean(pic, MATH_LONE);
+}
+
 const expectation = sprite({
   ...evo,
   name: "evo-expectation",
-  size: [14, 14],
-  origin: [7, 8],
+  size: [24, 24],
+  origin: [9, 16],
   frames: {
     ...framesOf(
       "spin",
-      [0, 1, 2, 3].map((k) => dieSpin(k, ...NAVY_DIE)),
+      [0, 1, 2, 3].map((k) => rising(dieSpin(k, ...NAVY_DIE), k)),
     ),
     ...Object.fromEntries(
-      [1, 2, 3, 4, 5, 6].map((n) => {
-        const face = dieFace(n, ...NAVY_DIE);
-        // The rising mark in the corner: this face can only be matched or beaten.
-        put(face, ".W.\nWWW", 9, 0);
-        return [`face${n}`, face.toString()];
-      }),
+      [1, 2, 3, 4, 5, 6].map((n) => [`face${n}`, rising(dieFace(n, ...NAVY_DIE), 0).toString()]),
     ),
   },
   anim: {

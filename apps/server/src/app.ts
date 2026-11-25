@@ -8,6 +8,7 @@ import type { AuthService } from "./auth/service.ts";
 import { channels } from "./channels.ts";
 import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
+import { type Dueling, provideDueling } from "./duel/hub.ts";
 import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { enterRoute } from "./enter.ts";
@@ -37,6 +38,8 @@ export function createGameServer(
     grants?: GrantBuffer;
     live?: Live;
     trading?: Trading;
+    /** The 콜로세움 (duel/hub.ts); without it no map has a dueling floor. */
+    dueling?: Dueling;
   } = {},
   world: { channelSeats?: number; emptyGraceSeconds?: number } = {},
 ) {
@@ -63,7 +66,9 @@ export function createGameServer(
     ...(economy.ops ? { ops: economy.ops } : {}),
     ...(live ? { handlers: live.handlers } : {}),
     ...(economy.trading ? { trading: economy.trading } : {}),
+    ...(economy.dueling ? { dueling: economy.dueling } : {}),
   });
+  provideDueling(economy.dueling);
   const ops = economy.ops;
   if (ops) provideFightServices({ loadouts: inventoryLoadouts((id) => ops.snapshot(id)) });
   if (world.channelSeats !== undefined) channels.seats = world.channelSeats;

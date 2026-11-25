@@ -1,3 +1,4 @@
+ALTER TABLE "accounts" ADD COLUMN "entry_generation" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "characters" ADD COLUMN "opening_beat" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "characters" ADD COLUMN "opening_play" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "characters" ADD COLUMN "story_seen" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint

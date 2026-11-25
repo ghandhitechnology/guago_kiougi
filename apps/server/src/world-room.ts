@@ -36,6 +36,7 @@ import {
 import { background } from "./background.ts";
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
+import type { Dueling } from "./duel/hub.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import type { WorldHandler } from "./live/index.ts";
 import { mutedUntil, mutes } from "./moderation/mutes.ts";
@@ -91,6 +92,8 @@ interface Services {
   handlers?: readonly WorldHandler[];
   /** Direct trades and the 매점 게시판's reads (trade/room.ts). */
   trading?: Trading | undefined;
+  /** Challenges, the duel queue and matches (duel/hub.ts). */
+  dueling?: Dueling | undefined;
 }
 
 let services: Services | undefined;
@@ -104,6 +107,7 @@ export function provideWorldServices(s: {
   social?: Social;
   handlers?: readonly WorldHandler[];
   trading?: Trading;
+  dueling?: Dueling;
 }): void {
   services = {
     filter: s.filter ?? ChatFilter.fromFile(),
@@ -112,6 +116,7 @@ export function provideWorldServices(s: {
     social: s.social,
     ...(s.handlers ? { handlers: s.handlers } : {}),
     trading: s.trading,
+    dueling: s.dueling,
   };
 }
 
@@ -216,6 +221,16 @@ export class WorldRoom extends Room {
       send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
       blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
     });
+    use().dueling?.attach({
+      on: (type, schema, run) =>
+        this.handle(type, schema, (client, message) => {
+          const me = this.members.get(client.sessionId);
+          if (me) void run(me.characterId, message).then((a) => this.answer(me, a.type, a.body));
+        }),
+      member: (id) => this.byCharacter.get(id)?.entry,
+      send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
+      blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
+    });
     this.unlisten = places.listen((characterId, mapId, channel) => {
       this.social?.moved(characterId);
       const member = this.byCharacter.get(characterId);
@@ -268,6 +283,7 @@ export class WorldRoom extends Room {
     const dropped = this.members.get(client.sessionId);
     if (dropped && this.byCharacter.get(dropped.characterId) === dropped) {
       use().trading?.left(dropped.characterId);
+      use().dueling?.left(dropped.characterId);
     }
     if (this.kicked.has(client.sessionId) || !this.seats.mayReconnect(client)) return;
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
@@ -295,8 +311,10 @@ export class WorldRoom extends Room {
   override async onLeave(client: Client): Promise<void> {
     const member = this.members.get(client.sessionId);
     if (member) {
-      if (this.byCharacter.get(member.characterId) === member)
+      if (this.byCharacter.get(member.characterId) === member) {
         use().trading?.left(member.characterId);
+        use().dueling?.left(member.characterId);
+      }
       this.members.delete(client.sessionId);
       // A newer seat of the same character may already be in (after the eviction wait ran out).
       if (this.byCharacter.get(member.characterId) === member) {
@@ -319,6 +337,7 @@ export class WorldRoom extends Room {
     this.unlisten?.();
     this.social?.dispose();
     use().trading?.detach();
+    use().dueling?.detach();
     await use().log?.flush();
   }
 

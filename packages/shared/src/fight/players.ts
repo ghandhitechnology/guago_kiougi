@@ -28,6 +28,12 @@ const REGEN_TICKS = 10;
 /** A shove decays like knockback; a server roll keeps its speed. */
 const SHOVE_DECAY = 0.85;
 
+/**
+ * On a duel floor the dodge is the fighter's own in every mode: the server's dodge reads
+ * monsters' tells, and a duel has none.
+ */
+const DUEL_AUTO = MODE_AUTO.map((a) => ({ ...a, dodge: false })) as unknown as typeof MODE_AUTO;
+
 /** Starts a roll the server imposes (an auto dodge): the same distance, not predicted. */
 export function forceRoll(w: FightWorld, p: Player, dx: number, dy: number): void {
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -61,7 +67,7 @@ function move(w: FightWorld, p: Player, mx: number, my: number, flags: number): 
     mx,
     my,
     flags,
-    p.kit.speed,
+    p.kit.speed * (1 - p.slow),
     ready,
   );
   p.x = b.x;
@@ -84,6 +90,13 @@ export function stepPlayers(w: FightWorld, inputs: FightInputs | undefined): voi
     const x0 = p.x;
     const y0 = p.y;
     const list = inputs?.get(p.id);
+    if (p.frozen) {
+      // Between a duel's rounds: the inputs are spent and nothing moves.
+      if (list && list.length > 0) p.seq = (list[list.length - 1] as FightInput).seq;
+      p.movedX = 0;
+      p.movedY = 0;
+      continue;
+    }
     if (p.down) {
       if (list && list.length > 0) p.seq = (list[list.length - 1] as FightInput).seq;
       knockedOut(w, p);
@@ -92,7 +105,7 @@ export function stepPlayers(w: FightWorld, inputs: FightInputs | undefined): voi
       continue;
     }
     const mode = p.away ? Mode.Auto : p.mode;
-    const auto = MODE_AUTO[mode];
+    const auto = p.team > 0 ? DUEL_AUTO[mode] : MODE_AUTO[mode];
     let playerDodge = false;
     if (!auto.move) {
       for (const input of list ?? []) {
@@ -142,6 +155,8 @@ export function stepPlayers(w: FightWorld, inputs: FightInputs | undefined): voi
 /** A downed player: revived by someone channelling beside them, or wakes at the spawn. */
 function knockedOut(w: FightWorld, p: Player): void {
   const tick = w.tick;
+  // A duel's knock-out lasts until its round is decided (duel.ts); a teammate may still revive.
+  const dueling = p.team > 0;
   const r = w.players[p.reviver];
   if (r?.joined && !r.down) {
     const dx = r.x - p.x;
@@ -158,13 +173,13 @@ function knockedOut(w: FightWorld, p: Player): void {
       const ev = w.event(Ev.Revive);
       ev.a = p.index;
       ev.b = r.index;
-      w.event(Ev.Merit).a = r.index;
+      if (!dueling) w.event(Ev.Merit).a = r.index;
       return;
     }
   } else {
     p.reviver = -1;
   }
-  if (tick - p.downAt >= REVIVE_WINDOW) {
+  if (!dueling && tick - p.downAt >= REVIVE_WINDOW) {
     // Nobody came: wake at the map's arrival point (the 보건실 until it exists).
     p.downAt = -1;
     p.reviver = -1;
@@ -181,6 +196,8 @@ function knockedOut(w: FightWorld, p: Player): void {
 /** Starts `by` reviving `target` if both qualify; true when the channel began or continues. */
 export function startRevive(w: FightWorld, by: Player, target: Player): boolean {
   if (!by.joined || by.down || !target.joined || !target.down || by === target) return false;
+  // Only a duel teammate gets a fighter up, and a fighter gets nobody else up.
+  if (by.team !== target.team) return false;
   const dx = by.x - target.x;
   const dy = by.y - target.y;
   const reach = KNOCKOUT.reviveRange + REVIVE_SLACK;

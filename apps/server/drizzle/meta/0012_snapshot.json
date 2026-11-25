@@ -1,6 +1,6 @@
 {
-  "id": "e1be4148-908f-49a4-ab1e-2e2e846d7d50",
-  "prevId": "9194531e-9590-4434-9dfc-1d59d9906635",
+  "id": "5e495895-c466-4187-8e9f-8bfe5e09b834",
+  "prevId": "72bda569-65d6-487a-90ac-1017b0c85ddd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -64,13 +64,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "entry_generation": {
-          "name": "entry_generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         }
       },
       "indexes": {
@@ -590,27 +583,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
-        },
-        "opening_beat": {
-          "name": "opening_beat",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "opening_play": {
-          "name": "opening_play",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "story_seen": {
-          "name": "story_seen",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
         },
         "live_session": {
           "name": "live_session",
@@ -1520,6 +1492,115 @@
         "conduct_ledger_amount_check": {
           "name": "conduct_ledger_amount_check",
           "value": "\"conduct_ledger\".\"amount\" <> 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.duel_origins": {
+      "name": "duel_origins",
+      "schema": "",
+      "columns": {
+        "character_id": {
+          "name": "character_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "map_id": {
+          "name": "map_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "x": {
+          "name": "x",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "y": {
+          "name": "y",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "duel_origins_character_id_characters_id_fk": {
+          "name": "duel_origins_character_id_characters_id_fk",
+          "tableFrom": "duel_origins",
+          "tableTo": "characters",
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.duel_records": {
+      "name": "duel_records",
+      "schema": "",
+      "columns": {
+        "character_id": {
+          "name": "character_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "played": {
+          "name": "played",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "won": {
+          "name": "won",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "duel_records_character_id_characters_id_fk": {
+          "name": "duel_records_character_id_characters_id_fk",
+          "tableFrom": "duel_records",
+          "tableTo": "characters",
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "duel_records_counts_check": {
+          "name": "duel_records_counts_check",
+          "value": "\"duel_records\".\"won\" >= 0 and \"duel_records\".\"won\" <= \"duel_records\".\"played\""
         }
       },
       "isRLSEnabled": false

@@ -4,6 +4,7 @@
  * grids that go through the same parser and checks as typed ones. Nothing here knows colours:
  * every call names legend characters.
  */
+import type { Anim } from "./format.ts";
 import { Pic } from "./paint.ts";
 
 export { Pic };
@@ -278,6 +279,168 @@ export function recolor(p: Pic, from: string, to: string): Pic {
  */
 export function aimed(n: number, draw: (angle: number) => Pic): Pic[] {
   return Array.from({ length: n }, (_, k) => draw((k / n) * Math.PI * 2));
+}
+
+// Lines laid at any angle ---------------------------------------------------------------------
+
+/** The sixteen aims in radians: aim `a` is `a × 22.5°` clockwise from right, with y down. */
+export const AIM16: readonly number[] = Array.from(
+  { length: 16 },
+  (_, a) => (a / 16) * Math.PI * 2,
+);
+
+/**
+ * A square canvas whose centre is a point on a line's axis, the line running at `angle`. `t` is
+ * the distance along the line from that point and `n` the distance across it, positive to the
+ * right of travel (down for aim 0).
+ */
+export interface Axis {
+  readonly size: number;
+  readonly ux: number;
+  readonly uy: number;
+  /** Pixel position (for `line`, `put`) of a point given along and across. */
+  at(t: number, n: number): Pt;
+  /** Along and across for a pixel's centre. */
+  of(px: number, py: number): { t: number; n: number };
+}
+
+export function axis(size: number, angle: number): Axis {
+  const c = size / 2;
+  const ux = Math.cos(angle);
+  const uy = Math.sin(angle);
+  return {
+    size,
+    ux,
+    uy,
+    at: (t, n) => [c + t * ux - n * uy - 0.5, c + t * uy + n * ux - 0.5],
+    of: (px, py) => {
+      const dx = px + 0.5 - c;
+      const dy = py + 0.5 - c;
+      return { t: dx * ux + dy * uy, n: -dx * uy + dy * ux };
+    },
+  };
+}
+
+/**
+ * Which side of a line faces up the screen (left, for a line running straight up or down): the
+ * sign that makes `n × side` positive there. Lit faces and far lips go on that side.
+ */
+export function upSide(ax: Axis): 1 | -1 {
+  const vx = -ax.uy;
+  const vy = ax.ux;
+  if (Math.abs(vy) > 0.01) return vy < 0 ? 1 : -1;
+  return vx < 0 ? 1 : -1;
+}
+
+/** Clears every pixel whose centre lies outside `from`..`to` along the axis. */
+export function keepAlong(p: Pic, ax: Axis, from: number, to: number): Pic {
+  for (let y = 0; y < p.h; y++)
+    for (let x = 0; x < p.w; x++) {
+      const { t } = ax.of(x, y);
+      if (t < from || t >= to) p.set(x, y, ".");
+    }
+  return p;
+}
+
+/** Positive remainder. */
+export const wrap = (v: number, m: number): number => ((v % m) + m) % m;
+
+/**
+ * A strip laid tile by tile along a line on the ground, drawn at all sixteen aims so the client
+ * never turns or stretches it. The client places full tiles along the true line, each at the
+ * nearest aim, then one quarter-length partial tile and a cap (see `capFrames`).
+ */
+export interface LineArt {
+  /** Tile length along the line, in pixels. */
+  readonly length: number;
+  /** Canvas side; its centre is the tile's start on the line's axis (the sprite's origin). */
+  readonly canvas: number;
+  /** Full-tile variants, laid in turn so a long line does not repeat. Defaults to 1. */
+  readonly variants?: number;
+  /** Characters `clean` leaves alone once a tile is cut to its length. */
+  readonly lone?: string;
+  /** One stage of one tile: pixels from `from` to `to` along the aim. */
+  readonly draw: (ax: Axis, stage: number, variant: number, from: number, to: number) => Pic;
+}
+
+export interface LineAnim {
+  readonly stages: readonly number[];
+  readonly fps: number;
+  readonly loop?: boolean;
+}
+
+/**
+ * Frames and anims for a `LineArt`. Frames are `d{aim}-{stage}`, `d{aim}v{variant}-{stage}` and
+ * `d{aim}q{quarters}-{stage}`; anims are `{name}{aim}`, `{name}{aim}v{variant}` and
+ * `{name}{aim}q{quarters}`, with `{name}` alone for aim 0. Tiles reach half a pixel past both
+ * ends, so rounding where they are placed never leaves a gap between two.
+ */
+export function lineFrames(
+  art: LineArt,
+  anims: Readonly<Record<string, LineAnim>>,
+): { frames: Record<string, string>; anim: Record<string, Anim> } {
+  const stages = [...new Set(Object.values(anims).flatMap((a) => a.stages))];
+  const frames: Record<string, string> = {};
+  const anim: Record<string, Anim> = {};
+  const L = art.length;
+  AIM16.forEach((angle, a) => {
+    const ax = axis(art.canvas, angle);
+    const kinds: [suffix: string, variant: number, to: number][] = [
+      ...Array.from({ length: art.variants ?? 1 }, (_, v): [string, number, number] => [
+        v ? `v${v}` : "",
+        v,
+        L + 0.5,
+      ]),
+      ...[1, 2, 3].map((q): [string, number, number] => [`q${q}`, 0, (q * L) / 4 + 0.5]),
+    ];
+    for (const [suffix, variant, to] of kinds) {
+      for (const k of stages) {
+        frames[`d${a}${suffix}-${k}`] = clean(
+          keepAlong(art.draw(ax, k, variant, -0.5, to), ax, -0.5, to),
+          art.lone,
+        ).toString();
+      }
+      for (const [name, an] of Object.entries(anims)) {
+        anim[`${name}${a}${suffix}`] = {
+          frames: an.stages.map((k) => `d${a}${suffix}-${k}`),
+          fps: an.fps,
+          loop: an.loop ?? true,
+          jump: 1,
+        };
+      }
+    }
+  });
+  for (const name of Object.keys(anims)) anim[name] = anim[`${name}0`] as Anim;
+  return { frames, anim };
+}
+
+/**
+ * A line's end cap at all sixteen aims: the canvas centre is the line's end on its axis, the
+ * line coming from behind (negative `t`). The same cap at the opposite aim closes the start.
+ */
+export function capFrames(
+  canvas: number,
+  draw: (ax: Axis, stage: number) => Pic,
+  anims: Readonly<Record<string, LineAnim>>,
+  lone?: string,
+): { frames: Record<string, string>; anim: Record<string, Anim> } {
+  const stages = [...new Set(Object.values(anims).flatMap((a) => a.stages))];
+  const frames: Record<string, string> = {};
+  const anim: Record<string, Anim> = {};
+  AIM16.forEach((angle, a) => {
+    const ax = axis(canvas, angle);
+    for (const k of stages) frames[`d${a}-${k}`] = clean(draw(ax, k), lone).toString();
+    for (const [name, an] of Object.entries(anims)) {
+      anim[`${name}${a}`] = {
+        frames: an.stages.map((k) => `d${a}-${k}`),
+        fps: an.fps,
+        loop: an.loop ?? true,
+        jump: 1,
+      };
+    }
+  });
+  for (const name of Object.keys(anims)) anim[name] = anim[`${name}0`] as Anim;
+  return { frames, anim };
 }
 
 /** Frame names and anims for `aimed` sets: frames `${prefix}${dir}-${step}`, one anim per direction. */

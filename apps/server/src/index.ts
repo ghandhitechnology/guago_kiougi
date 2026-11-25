@@ -4,9 +4,13 @@ import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
 import { background } from "./background.ts";
+import { channels } from "./channels.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
+import { createDueling, localRooms } from "./duel/hub.ts";
+import { dbOrigins } from "./duel/origins.ts";
+import { dbRecords } from "./duel/records.ts";
 import { createEconomy } from "./economy/index.ts";
 import { startLedgerMaintenance } from "./economy/ledger.ts";
 import { dbModes } from "./fight/carry.ts";
@@ -88,6 +92,16 @@ const social = createSocial(db, {
   mayPin: (id) => live.isFloorLeader(id),
 });
 const trading = createTrading({ db, executor: economy.executor, clock: () => clock.date() });
+// Anyone a crash left on a dueling floor is back where they stood before any room opens.
+const duelOrigins = dbOrigins(db);
+const strandedFighters = await duelOrigins.restoreAll();
+if (strandedFighters > 0) console.log(`put ${strandedFighters} fighters back from a duel floor`);
+const dueling = createDueling({
+  records: dbRecords(db),
+  rooms: localRooms((map) => channels.openExtra(map)),
+  origins: duelOrigins,
+  strict: config.local,
+});
 const server = createGameServer(
   auth,
   config,
@@ -99,6 +113,7 @@ const server = createGameServer(
     grants: economy.grants,
     live,
     trading,
+    dueling,
   },
   { channelSeats: config.channelSeats },
 );

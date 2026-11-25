@@ -426,6 +426,12 @@ export function damageMonster(
     }
   }
   if (kind.behavior === Behavior.Zeno) dmg = w.rules.zenoDamage(m.hp, m.maxHp, dmg, kind.halvings);
+  if (m.fighter >= 0) {
+    // A duel fighter's stand-in: the hit lands on the player (duel.ts).
+    const dealt = w.pvp ? w.pvp.land(w, p, m, dmg, fromX, fromY, knock, flags, cast, slot) : 0;
+    hitEvent = dealt > 0 && w.pvp ? w.pvp.hit : null;
+    return dealt;
+  }
   if (dmg > m.hp) dmg = m.hp;
   m.hp -= dmg;
   m.flash = true;
@@ -443,6 +449,7 @@ export function damageMonster(
   }
   hitEvent = null;
   if (p) {
+    p.lastHit = w.tick;
     const ev = w.event(Ev.Hit);
     ev.a = p.index;
     ev.b = m.index;

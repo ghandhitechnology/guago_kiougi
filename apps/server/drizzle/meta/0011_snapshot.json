@@ -1,5 +1,5 @@
 {
-  "id": "9194531e-9590-4434-9dfc-1d59d9906635",
+  "id": "72bda569-65d6-487a-90ac-1017b0c85ddd",
   "prevId": "1c94e8c8-7072-4927-90f1-715e488f8fe9",
   "version": "7",
   "dialect": "postgresql",
@@ -64,13 +64,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "entry_generation": {
-          "name": "entry_generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         }
       },
       "indexes": {
@@ -1499,6 +1492,61 @@
         "conduct_ledger_amount_check": {
           "name": "conduct_ledger_amount_check",
           "value": "\"conduct_ledger\".\"amount\" <> 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.duel_records": {
+      "name": "duel_records",
+      "schema": "",
+      "columns": {
+        "character_id": {
+          "name": "character_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "played": {
+          "name": "played",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "won": {
+          "name": "won",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "duel_records_character_id_characters_id_fk": {
+          "name": "duel_records_character_id_characters_id_fk",
+          "tableFrom": "duel_records",
+          "tableTo": "characters",
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "duel_records_counts_check": {
+          "name": "duel_records_counts_check",
+          "value": "\"duel_records\".\"won\" >= 0 and \"duel_records\".\"won\" <= \"duel_records\".\"played\""
         }
       },
       "isRLSEnabled": false

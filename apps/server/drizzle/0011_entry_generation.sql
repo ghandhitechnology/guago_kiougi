@@ -1,1 +1,0 @@
-ALTER TABLE "accounts" ADD COLUMN "entry_generation" integer DEFAULT 0 NOT NULL;

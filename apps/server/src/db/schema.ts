@@ -974,3 +974,34 @@ export const tradePairs = pgTable(
     check("trade_pairs_order_check", sql`${t.a} < ${t.b}`),
   ],
 );
+
+/**
+ * Casual duels per character (PLAN §14): played and won, for the player card. Ranked seasons
+ * (`arena_ratings`, PLAN §20) come with Page 4. Written once per finished match, off the tick.
+ */
+export const duelRecords = pgTable(
+  "duel_records",
+  {
+    characterId: uuid("character_id")
+      .primaryKey()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    played: integer("played").notNull().default(0),
+    won: integer("won").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("duel_records_counts_check", sql`${t.won} >= 0 and ${t.won} <= ${t.played}`)],
+);
+
+/**
+ * Where a fighter stood before its duel, for as long as the match lasts (duel/origins.ts): the
+ * server puts every row back at start, so a crash never leaves anyone on the floor.
+ */
+export const duelOrigins = pgTable("duel_origins", {
+  characterId: uuid("character_id")
+    .primaryKey()
+    .references(() => characters.id, { onDelete: "cascade" }),
+  mapId: text("map_id").notNull(),
+  x: doublePrecision("x").notNull(),
+  y: doublePrecision("y").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+});
