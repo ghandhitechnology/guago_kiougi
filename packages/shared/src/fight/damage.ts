@@ -449,6 +449,7 @@ export function damageMonster(
   }
   hitEvent = null;
   if (p) {
+    p.lastHit = w.tick;
     const ev = w.event(Ev.Hit);
     ev.a = p.index;
     ev.b = m.index;

@@ -35,13 +35,19 @@ export const DUEL_NORMS: DuelNorms = {
   mass: 1,
 };
 
-/** Best of three, at most five rounds counting draws; 75 s a round, decided on health at time. */
+/**
+ * Best of three, at most five rounds counting draws; 75 s a round, decided on health at time. A
+ * round with no hit landed for 20 s is a draw, and five minutes of fighting ends the match, so
+ * two players standing still cannot hold a floor.
+ */
 export const DUEL_TIMING: DuelTiming = {
   countdown: ticks(3),
   round: ticks(75),
   pause: ticks(4),
   wins: 2,
   maxRounds: 5,
+  idle: ticks(20),
+  matchCap: ticks(300),
 };
 
 /** Seconds a queued match waits for everyone to accept, and a challenge for its answer. */
