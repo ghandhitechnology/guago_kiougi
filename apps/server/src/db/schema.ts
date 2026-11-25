@@ -1,6 +1,7 @@
 /** Tables shaped as PLAN §20. Only what the server uses today; later milestones add columns. */
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -101,6 +102,24 @@ export const characters = pgTable(
     poolSheetBook: text("pool_sheet_book"),
     /** 숙면 ends here (PLAN §11). */
     restedUntil: at("rested_until"),
+    // The living world (PLAN §9, §11): set by the live operations only.
+    /** When the player came back online; the pool stops filling here until it is claimed. */
+    poolStoppedAt: at("pool_stopped_at"),
+    /** The best income rate last measured, in the last field hunted, for the next pool. */
+    huntRates: jsonb("hunt_rates"),
+    /** 명령퇴사: home until, then −30% EXP until `penalty_until`. */
+    homeUntil: at("home_until"),
+    penaltyUntil: at("penalty_until"),
+    drowsy: boolean("drowsy").notNull().default(false),
+    mealId: text("meal_id"),
+    mealUntil: at("meal_until"),
+    /** Award ids (PLAN §11 joke awards). */
+    titles: jsonb("titles").notNull().default([]),
+    patrolCatches: integer("patrol_catches").notNull().default(0),
+    expulsions: integer("expulsions").notNull().default(0),
+    /** Full daily boards in a row, ending on board day `board_streak_day` (개근상). */
+    boardStreak: integer("board_streak").notNull().default(0),
+    boardStreakDay: integer("board_streak_day"),
     /** Bumped by every applied item or currency operation; change notices carry it. */
     rev: bigint("rev", { mode: "number" }).notNull().default(0),
     createdAt: at("created_at").notNull().defaultNow(),
@@ -244,6 +263,11 @@ export const items = pgTable(
     tradableAt: at("tradable_at"),
     /** Equipped slot among the items of its kind, null in the bag. */
     slot: smallint("slot"),
+    /**
+     * The live 매점 게시판 listing holding it. A listed item has left the bag: no operation
+     * loads it but the listing's own (buy, cancel, expiry).
+     */
+    listingId: uuid("listing_id").references((): AnyPgColumn => listings.id),
     createdAt: at("created_at").notNull().defaultNow(),
     updatedAt: at("updated_at").notNull().defaultNow(),
   },
@@ -265,6 +289,8 @@ export const items = pgTable(
       sql`jsonb_typeof(${t.affixes}) = 'array' and jsonb_array_length(${t.affixes}) <= 3`,
     ),
     check("items_slot_check", sql`${t.slot} between 0 and 5`),
+    check("items_listing_check", sql`${t.listingId} is null or ${t.slot} is null`),
+    index("items_listing_idx").on(t.listingId).where(sql`${t.listingId} is not null`),
   ],
 );
 
@@ -306,8 +332,12 @@ export const codexUnlocks = pgTable(
 
 /**
  * Every unit that enters or leaves a character, one row per (operation, currency, source or
- * sink). Items are booked as `item:<def>`, +1 when made and -1 when used up, with their id. The
- * `economy_daily` view sums it by Korean calendar day (PLAN §13).
+ * sink). Items are booked as `item:<def>`, +1 when made or received and -1 when used up or
+ * given, with their id. Combat grants are `coalesced`: one row per character, Korean day,
+ * currency and source, which each grant adds to (`entries` counts them), so a horde does not
+ * write a row per player every five seconds. Per-operation rows older than
+ * `LEDGER_RAW_DAYS` are compacted the same way (`ledger.ts`). The `economy_daily` view reads
+ * closed days from `economy_daily_totals` and today from here (PLAN §13).
  */
 export const economyLedger = pgTable(
   "economy_ledger",
@@ -323,12 +353,22 @@ export const economyLedger = pgTable(
     sourceOrSink: text("source_or_sink").notNull(),
     amount: amount("amount").notNull(),
     itemId: uuid("item_id"),
+    coalesced: boolean("coalesced").notNull().default(false),
+    /** Operations summed into this row: 1 unless `coalesced`. */
+    entries: integer("entries").notNull().default(1),
   },
   (t) => [
     index("economy_ledger_day_idx").on(t.day, t.currency, t.sourceOrSink),
+    uniqueIndex("economy_ledger_coalesced_key")
+      .on(t.characterId, t.day, t.currency, t.sourceOrSink)
+      .where(sql`${t.coalesced}`),
     index("economy_ledger_character_idx").on(t.characterId, t.currency),
     index("economy_ledger_item_idx").on(t.itemId).where(sql`${t.itemId} is not null`),
     check("economy_ledger_amount_check", sql`${t.amount} <> 0`),
+    check(
+      "economy_ledger_coalesced_check",
+      sql`${t.entries} >= 1 and (${t.coalesced} or ${t.entries} = 1) and not (${t.coalesced} and ${t.itemId} is not null)`,
+    ),
     check(
       "economy_ledger_item_check",
       sql`(${t.itemId} is null) = (${t.currency} not like 'item:%') and (${t.itemId} is null or ${t.amount} in (1, -1))`,
@@ -354,6 +394,75 @@ export const operations = pgTable(
     at: at("at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.characterId, t.opId] }), index("operations_at_idx").on(t.at)],
+);
+
+/** Closed Korean days of `economy_ledger` summed by currency and source or sink (PLAN §13). */
+export const economyDailyTotals = pgTable(
+  "economy_daily_totals",
+  {
+    day: date("day").notNull(),
+    currency: text("currency").notNull(),
+    sourceOrSink: text("source_or_sink").notNull(),
+    amount: amount("amount").notNull(),
+    entries: bigint("entries", { mode: "number" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.currency, t.sourceOrSink] })],
+);
+
+// Trading (PLAN §13 "Player trading") ---------------------------------------------------------
+
+/**
+ * 매점 게시판 listings. A listing holds what it sells: a unique item (`item_id`, the item row
+ * pointing back through `listing_id`) or `qty` units of a stack taken out of the seller's
+ * materials. `qty` is what is still for sale; it is 0 once the listing is closed, whether sold,
+ * cancelled or expired, and whatever was left has gone back to the seller.
+ */
+export const listings = pgTable(
+  "listings",
+  {
+    id: uuid("id").primaryKey(),
+    sellerId: uuid("seller_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    state: text("state").notNull().default("live"),
+    category: text("category").notNull(),
+    /** A book or tool def, or a stack id. */
+    defId: text("def_id").notNull(),
+    grade: smallint("grade").notNull().default(0),
+    itemId: uuid("item_id"),
+    /** What a unique item shows on the board (`ListedItem`); it cannot change while listed. */
+    item: jsonb("item"),
+    qty: bigint("qty", { mode: "number" }).notNull(),
+    listedQty: bigint("listed_qty", { mode: "number" }).notNull(),
+    unitPrice: amount("unit_price").notNull(),
+    fee: amount("fee").notNull(),
+    createdAt: at("created_at").notNull().defaultNow(),
+    expiresAt: at("expires_at").notNull(),
+    closedAt: at("closed_at"),
+  },
+  (t) => [
+    index("listings_seller_idx").on(t.sellerId, t.createdAt),
+    uniqueIndex("listings_item_key").on(t.itemId).where(sql`${t.state} = 'live'`),
+    index("listings_category_idx")
+      .on(t.category, t.unitPrice, t.id)
+      .where(sql`${t.state} = 'live'`),
+    index("listings_def_idx")
+      .on(t.defId, t.grade, t.unitPrice, t.id)
+      .where(sql`${t.state} = 'live'`),
+    index("listings_expiry_idx").on(t.expiresAt).where(sql`${t.state} = 'live'`),
+    index("listings_closed_idx").on(t.closedAt).where(sql`${t.state} <> 'live'`),
+    check("listings_state_check", sql`${t.state} in ('live', 'sold', 'cancelled', 'expired')`),
+    check(
+      "listings_qty_check",
+      sql`${t.listedQty} >= 1 and ${t.qty} between 0 and ${t.listedQty} and (${t.state} = 'live') = (${t.qty} > 0)`,
+    ),
+    check(
+      "listings_item_check",
+      sql`(${t.itemId} is null) = (${t.item} is null) and (${t.itemId} is null or ${t.listedQty} = 1)`,
+    ),
+    check("listings_price_check", sql`${t.unitPrice} > 0 and ${t.fee} >= 0`),
+    check("listings_closed_check", sql`(${t.state} = 'live') = (${t.closedAt} is null)`),
+  ],
 );
 
 // Social (PLAN §12, §20) ---------------------------------------------------------------------
@@ -565,6 +674,49 @@ export const boardPosts = pgTable(
 );
 
 /**
+ * Every completed direct trade and board sale (PLAN §13: kept, searchable from the admin page).
+ * No foreign keys: the log outlives characters. `from_id` is the seller, or the first party of
+ * a direct trade; `item_ids` and `defs` hold everything that changed hands, for search. Board
+ * sales also fill the one good they sold, which the price history reads.
+ */
+export const tradeLog = pgTable(
+  "trade_log",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    kind: text("kind").notNull(),
+    opId: text("op_id").notNull(),
+    at: at("at").notNull().defaultNow(),
+    fromId: uuid("from_id").notNull(),
+    toId: uuid("to_id").notNull(),
+    itemIds: uuid("item_ids").array().notNull(),
+    defs: text("defs").array().notNull(),
+    /** 솔방울 that left the game in tax on this trade. */
+    tax: amount("tax").notNull(),
+    /** Both sides in full: item views, stacks, 솔방울 sent and received. */
+    payload: jsonb("payload").notNull(),
+    listingId: uuid("listing_id"),
+    defId: text("def_id"),
+    grade: smallint("grade"),
+    qty: bigint("qty", { mode: "number" }),
+    unitPrice: amount("unit_price"),
+  },
+  (t) => [
+    uniqueIndex("trade_log_op_key").on(t.kind, t.toId, t.opId),
+    index("trade_log_from_idx").on(t.fromId, t.at),
+    index("trade_log_to_idx").on(t.toId, t.at),
+    index("trade_log_at_idx").on(t.at),
+    index("trade_log_items_idx").using("gin", t.itemIds),
+    index("trade_log_defs_idx").using("gin", t.defs),
+    index("trade_log_price_idx").on(t.defId, t.grade, t.at).where(sql`${t.kind} = 'board'`),
+    check("trade_log_kind_check", sql`${t.kind} in ('board', 'direct')`),
+    check(
+      "trade_log_board_check",
+      sql`(${t.kind} = 'board') = (${t.listingId} is not null and ${t.defId} is not null and ${t.grade} is not null and ${t.qty} > 0 and ${t.unitPrice} > 0)`,
+    ),
+  ],
+);
+
+/**
  * The report queue (PLAN §12), read by the admin page. `context` holds the reported player's
  * last lines from `chat_log`, attached by the server. No foreign keys: reports outlive
  * characters. One open report per reporter, target and category.
@@ -594,5 +746,161 @@ export const reports = pgTable(
       sql`${t.category} in ('abuse', 'sexual', 'spam', 'cheat', 'trade', 'name', 'other')`,
     ),
     check("reports_state_check", sql`${t.state} in ('open', 'resolved', 'dismissed')`),
+  ],
+);
+
+// The living world (PLAN §10, §11, §15, §20) -------------------------------------------------
+
+/**
+ * Server-wide state, one row (PLAN §20 `server_state`): the live Page, when its rift opened, the
+ * last milestone announced, and the server clock's anchor (`clock_*`): game time is
+ * `clock_game_ms + (wall ms − clock_real_ms) × clock_rate`.
+ */
+export const serverState = pgTable(
+  "server_state",
+  {
+    id: smallint("id").primaryKey().default(1),
+    currentPage: integer("current_page").notNull(),
+    /** Game time the live Page's rift opened. */
+    pageOpenedAt: at("page_opened_at").notNull(),
+    /** The last milestone whose announcement went out. */
+    milestone: text("milestone").notNull(),
+    clockRealMs: doublePrecision("clock_real_ms").notNull(),
+    clockGameMs: doublePrecision("clock_game_ms").notNull(),
+    clockRate: doublePrecision("clock_rate").notNull().default(1),
+    /** Board day and week the server last turned over (announcements, 층장). */
+    lastDay: integer("last_day").notNull(),
+    lastWeek: integer("last_week").notNull(),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check("server_state_one_row", sql`${t.id} = 1`),
+    check("server_state_rate_check", sql`${t.clockRate} > 0`),
+  ],
+);
+
+/** The 0조 연구노트 (PLAN §10, §20 `notebook`): one row per Page once its rift has opened. */
+export const notebook = pgTable("notebook", {
+  page: integer("page").primaryKey(),
+  openedAt: at("opened_at").notNull(),
+  sealedAt: at("sealed_at"),
+});
+
+/** Each boss freed on a Page: when, who landed the final hit, who topped the boards. */
+export const notebookBosses = pgTable(
+  "notebook_bosses",
+  {
+    page: integer("page")
+      .notNull()
+      .references(() => notebook.page, { onDelete: "cascade" }),
+    bossId: text("boss_id").notNull(),
+    freedAt: at("freed_at").notNull(),
+    finalHitBy: uuid("final_hit_by").references(() => characters.id, { onDelete: "set null" }),
+    /** Kept as written that day: the notebook keeps the name even if the character goes. */
+    finalHitName: text("final_hit_name"),
+    /** `[{ board, id, name }]`. */
+    boardLeaders: jsonb("board_leaders").notNull().default([]),
+  },
+  (t) => [primaryKey({ columns: [t.page, t.bossId] })],
+);
+
+/** 벌점 and 상점 with their reasons (PLAN §11): `demerits` and `merits` are their sums. */
+export const conductLedger = pgTable(
+  "conduct_ledger",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    operationId: text("operation_id").notNull(),
+    kind: text("kind").notNull(),
+    amount: integer("amount").notNull(),
+    reason: text("reason").notNull(),
+    at: at("at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("conduct_ledger_character_idx").on(t.characterId, t.kind),
+    check("conduct_ledger_kind_check", sql`${t.kind} in ('demerit', 'merit')`),
+    check("conduct_ledger_amount_check", sql`${t.amount} <> 0`),
+  ],
+);
+
+/** Per board week counts: `merit` picks the 층장, `meal` the 다 먹었상. */
+export const weeklyTally = pgTable(
+  "weekly_tally",
+  {
+    week: integer("week").notNull(),
+    kind: text("kind").notNull(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    n: integer("n").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.week, t.kind, t.characterId] }),
+    index("weekly_tally_rank_idx").on(t.week, t.kind, t.n),
+    check("weekly_tally_kind_check", sql`${t.kind} in ('merit', 'meal')`),
+  ],
+);
+
+/** The week's five 층장 (PLAN §11), chosen from the week before. */
+export const floorLeaders = pgTable(
+  "floor_leaders",
+  {
+    week: integer("week").notNull(),
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    rank: smallint("rank").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.week, t.characterId] })],
+);
+
+/** Lifetime kills by monster, for the 오개념 entries (PLAN §15). Written by batched progress. */
+export const killCounts = pgTable(
+  "kill_counts",
+  {
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    monsterId: text("monster_id").notNull(),
+    kills: bigint("kills", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.characterId, t.monsterId] }),
+    check("kill_counts_check", sql`${t.kills} >= 0`),
+  ],
+);
+
+/**
+ * 도움 notices (PLAN §15): posted by a player below the frontier, taken by one helper whose
+ * `help:<id>` quest row carries the progress.
+ */
+export const helpNotices = pgTable(
+  "help_notices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    posterId: uuid("poster_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    posterLevel: integer("poster_level").notNull(),
+    template: text("template").notNull(),
+    slots: jsonb("slots").notNull(),
+    count: integer("count").notNull(),
+    /** `help-finish`: the poster's quest row the helper helps finish. */
+    questId: text("quest_id"),
+    state: text("state").notNull().default("open"),
+    helperId: uuid("helper_id").references(() => characters.id, { onDelete: "set null" }),
+    postedAt: at("posted_at").notNull(),
+    expiresAt: at("expires_at").notNull(),
+  },
+  (t) => [
+    index("help_notices_open_idx").on(t.state, t.expiresAt),
+    uniqueIndex("help_notices_poster_key")
+      .on(t.posterId)
+      .where(sql`${t.state} in ('open', 'taken')`),
+    uniqueIndex("help_notices_helper_key").on(t.helperId).where(sql`${t.state} = 'taken'`),
+    check("help_notices_state_check", sql`${t.state} in ('open', 'taken', 'done', 'cancelled')`),
+    check("help_notices_count_check", sql`${t.count} >= 1`),
   ],
 );

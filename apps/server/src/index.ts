@@ -6,22 +6,48 @@ import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
+import { startLedgerMaintenance } from "./economy/ledger.ts";
+import { LiveClock } from "./live/clock.ts";
+import { provideLive, provideLivePage } from "./live/current.ts";
+import { createLive } from "./live/index.ts";
+import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
 import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
 import { createSocial } from "./social/index.ts";
+import { startListingSweeper } from "./trade/board.ts";
+import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
 
 assertServable(config);
 studentLooks();
 
 const db = createDb(config.databaseUrl);
+// The server clock and the Page state come first: every operation reads time and the live Page
+// from them (PLAN §10).
+const clock = new LiveClock({ realMs: Date.now(), gameMs: Date.now(), rate: 1 });
+const page = new PageClock(db, clock);
+await page.load(config.liveClockRate);
+provideLivePage(page.live);
 const economy = createEconomy(db, {
+  now: () => clock.date(),
+  page: page.live,
   onLevel: (id, level) => worldRoom()?.setLevel(id, level),
   onChange: (id, change) => worldRoom()?.notify(id, change),
+  onApplied: (id, name, result) => live.onApplied(id, name, result),
+  onCredit: (id, credit) => live.credit(id, credit),
 });
+const live = createLive(db, {
+  clock,
+  page,
+  economy,
+  world: worldRoom,
+  looks: studentLooks,
+  testEvents: config.liveTestEvents,
+});
+provideLive(live);
 const auth = createAuthService({
   db,
   onSessionsRevoked: evictAccount,
@@ -34,17 +60,26 @@ const social = createSocial(db, {
   fees: executorFees(db, economy.executor),
   jackets: clubJackets,
   log: chatLog,
+  mayPin: (id) => live.isFloorLeader(id),
 });
+const trading = createTrading({ db, executor: economy.executor, clock: () => clock.date() });
 const server = createGameServer(
   auth,
   config,
   studentLooks,
   { log: chatLog, social },
-  { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants },
+  {
+    ops: economy.ops,
+    routes: economy.routes(auth),
+    grants: economy.grants,
+    live,
+    trading,
+  },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
 onShutdown("grants", () => economy.grants.flush());
+onShutdown("quest progress", () => live.stop());
 onShutdown("chat log", () => chatLog.flush());
 onShutdown("database", () => db.pool.end());
 
@@ -52,6 +87,14 @@ await server.listen(config.port);
 // The one WorldRoom exists from the start, so two first joins can never make two.
 await matchMaker.createRoom(WORLD_ROOM, {});
 economy.grants.start();
+await live.start();
+startLedgerMaintenance(db, () => clock.now());
+startListingSweeper(
+  db,
+  economy.executor,
+  () => clock.date(),
+  (id, change) => worldRoom()?.notify(id, change),
+);
 setInterval(
   () => {
     auth.sweep().catch(() => {});

@@ -12,6 +12,7 @@ import {
   craftedCodex,
   type Drop,
   dropLedger,
+  dropOrigin,
   goodsOf,
   ledgerKey,
   STARTER_BOOKS,
@@ -27,6 +28,7 @@ import {
   BOOK_EXP_FROM_OWNER,
   bind,
   bindCost,
+  type Currency,
   claimPool,
   completeQuest,
   earn,
@@ -39,7 +41,6 @@ import {
   mergeTools,
   NO_STATS,
   type OpError,
-  type OpName,
   type OpOutcome,
   type OpRequests,
   type Purse,
@@ -55,9 +56,14 @@ import {
   type Wearer,
   type Worn,
 } from "@guago/shared";
+import { type LiveRequests, liveOps } from "../live/ops.ts";
+import type { LiveLoaded, LiveRows, LiveWrite } from "../live/rows.ts";
+import type { ExpireRequest, TradeCommitRequest } from "../trade/ops.ts";
+import type { Queryable } from "./executor.ts";
 import {
   type CharacterRow,
   type ItemRow,
+  type ListingRow,
   newBookRow,
   newToolRow,
   poolNow,
@@ -70,12 +76,17 @@ import {
   worn,
 } from "./rows.ts";
 
-/** Operations only the server starts: the starter kit and combat's batched grants. */
+/**
+ * Operations only the server starts: the starter kit, combat's batched grants, the commit of a
+ * direct trade both sides confirmed, and a listing's expiry.
+ */
 export interface InternalRequests {
   kit: Record<string, never>;
   grant: GrantRequest;
   /** The 동아리 founding fee, run inside the founding transaction (social/fees.ts). */
   "club.found": Record<string, never>;
+  "trade.commit": TradeCommitRequest;
+  "listing.expire": ExpireRequest;
 }
 
 /** What combat credits one character with since its last flush (PLAN §6 drops, §9 EXP). */
@@ -85,8 +96,16 @@ export interface GrantRequest {
   drops: Drop[];
 }
 
-export type Requests = OpRequests & InternalRequests;
+export type Requests = OpRequests & InternalRequests & LiveRequests;
 export type AnyOp = keyof Requests;
+/** Operations over listings or several characters; the rest touch one character's own rows. */
+export type PartyOp =
+  | "listing.create"
+  | "listing.buy"
+  | "listing.cancel"
+  | "listing.expire"
+  | "trade.commit";
+export type SoloOp = Exclude<AnyOp, PartyOp>;
 
 /** The world an operation runs in. `page` is the live Page: fees and catch-up follow it. */
 export interface Ctx {
@@ -103,10 +122,17 @@ export interface Env extends Ctx {
 
 /** The rows an operation reads and locks, besides the character row itself. */
 export interface Rows {
+  /** Items in the bag or worn. A listed item is out of the bag and never among them. */
   items?: readonly string[];
   /** Every equipped item, for slot rules and the books that share their owner's EXP. */
   worn?: boolean;
   quests?: readonly string[];
+  /** Items held in a listing; only that listing's own operations name them. */
+  listed?: readonly string[];
+  /** Count the character's live listings. */
+  listingCount?: boolean;
+  /** Living-world rows (live/rows.ts). */
+  live?: LiveRows;
 }
 
 export interface Loaded {
@@ -118,6 +144,11 @@ export interface Loaded {
   readonly quests: ReadonlyMap<string, QuestRow>;
   /** The touched currencies only; a missing one is zero. */
   readonly purse: Purse;
+  /** The same balances exactly, for rules whose amounts pass 2^53 (trading). */
+  readonly exact: Readonly<Partial<Record<Currency, bigint>>>;
+  /** Live listings, when the operation asked for `listingCount`. */
+  readonly listingCount: number;
+  readonly live: LiveLoaded;
 }
 
 export type CharacterChange = Partial<
@@ -127,18 +158,37 @@ export type CharacterChange = Partial<
   >
 >;
 
+/** A ledger entry in exact units, for amounts that pass 2^53. */
+export interface ExactEntry {
+  readonly currency: Currency;
+  readonly amount: bigint;
+  readonly key: string;
+}
+
+/** An item that changes owner, whole and unchanged, out of the bag or a listing. */
+export interface Give {
+  readonly id: string;
+  readonly to: string;
+  /** When the new owner may trade it on (PLAN §13 re-trade cooldown). */
+  readonly tradableAt: Date;
+}
+
 /** An operation's answer, in rows. Items in `put` are whole rows, new or changed. */
 export interface Applied {
   character?: CharacterChange;
   purse?: Purse;
-  ledger?: readonly LedgerEntry[];
+  ledger?: readonly (LedgerEntry | ExactEntry)[];
   put?: readonly ItemRow[];
   remove?: readonly string[];
+  /** Items this character hands to another party; booked -1 here and +1 there. */
+  give?: readonly Give[];
   /** `source_or_sink` for items made or used up: one key, or one per item id. */
   itemKey?: string | ((id: string) => string);
   quests?: readonly QuestRow[];
   codex?: readonly string[];
   outcome?: OpOutcome;
+  /** Living-world writes (live/rows.ts). */
+  live?: LiveWrite;
 }
 
 export type Step = { ok: true; value: Applied } | { ok: false; error: OpError };
@@ -148,8 +198,102 @@ export interface OpDef<R> {
   readonly client: boolean;
   rows(req: R, character: CharacterRow): Rows;
   /** Currencies touched, once the rows are loaded (a book's 낱장 depend on which book). */
-  currencies(req: R, loaded: Omit<Loaded, "purse" | "worn">, ctx: Ctx): readonly string[];
+  currencies(
+    req: R,
+    loaded: Omit<Loaded, "purse" | "exact" | "worn" | "listingCount" | "live">,
+    ctx: Ctx,
+  ): readonly string[];
   apply(loaded: Loaded, req: R, env: Env): Step;
+}
+
+/** A trade's record for the admin search (PLAN §13), written in the operation's transaction. */
+export interface TradeLogRow {
+  kind: "board" | "direct";
+  fromId: string;
+  toId: string;
+  itemIds: string[];
+  defs: string[];
+  tax: bigint;
+  payload: unknown;
+  board?: { listingId: string; def: string; grade: number; qty: number; unitPrice: bigint };
+}
+
+/** What every party of an operation loaded, and the listings it locked. */
+export interface World {
+  readonly initiator: string;
+  readonly parties: ReadonlyMap<string, Loaded>;
+  readonly listings: ReadonlyMap<string, ListingRow>;
+  /** What the operation's `facts` read, once everything was locked. */
+  readonly facts: Readonly<Record<string, boolean>>;
+}
+
+export interface PartyApplied {
+  /** Each party's answer; a party left out is written with no change but its `rev`. */
+  readonly parties: ReadonlyMap<string, Applied>;
+  /** Listings new or changed, as whole rows. */
+  readonly listings?: readonly ListingRow[];
+  readonly log?: TradeLogRow;
+}
+
+export type PartyStep = { ok: true; value: PartyApplied } | { ok: false; error: OpError };
+
+/** Rows locked before the parties' own rows are named. */
+export interface Locked {
+  readonly initiator: string;
+  readonly characters: ReadonlyMap<string, CharacterRow>;
+  readonly listings: ReadonlyMap<string, ListingRow>;
+}
+
+/**
+ * An operation over several characters, listings or both. The executor locks the characters in
+ * one fixed order, then the listings, then each party's rows, and writes every party in the one
+ * transaction.
+ */
+export interface PartyOpDef<R> {
+  readonly client: boolean;
+  /**
+   * Everyone besides the initiator, read before any lock. Only facts that never change may name
+   * them (a listing's seller, the two sides of a trade); everything else is checked once locked.
+   */
+  others(q: Queryable, req: R, initiator: string): Promise<readonly string[]>;
+  /** Listings to lock, after the characters. */
+  listings?(req: R): readonly string[];
+  /**
+   * Every party is recorded under the one operation id, so a retry from either side finds the
+   * result (both sides of a direct trade started it). Otherwise only the initiator is, and the
+   * others under `<id>@<initiator>`, which no client id can take.
+   */
+  readonly shared?: boolean;
+  /** The parties hear of it some other way (a trade window's `done`), not by `onChange`. */
+  readonly quiet?: boolean;
+  rows(req: R, party: string, locked: Locked): Rows;
+  /** Yes-or-no facts outside the economy's rows, read in the transaction (a block). */
+  facts?(q: Queryable, req: R, locked: Locked): Promise<Record<string, boolean>>;
+  currencies(
+    req: R,
+    party: string,
+    loaded: Omit<Loaded, "purse" | "exact" | "worn" | "listingCount" | "live">,
+    locked: Locked,
+    ctx: Ctx,
+  ): readonly string[];
+  apply(world: World, req: R, env: Env): PartyStep;
+}
+
+/** A one-character operation as a party operation of its initiator alone. */
+export function solo<R>(def: OpDef<R>): PartyOpDef<R> {
+  return {
+    client: def.client,
+    others: async () => [],
+    rows: (req, _party, locked) =>
+      def.rows(req, locked.characters.get(locked.initiator) as CharacterRow),
+    currencies: (req, _party, loaded, _locked, ctx) => def.currencies(req, loaded, ctx),
+    apply(world, req, env) {
+      const step = def.apply(world.parties.get(world.initiator) as Loaded, req, env);
+      return step.ok
+        ? { ok: true, value: { parties: new Map([[world.initiator, step.value]]) } }
+        : step;
+    },
+  };
 }
 
 const ok = (value: Applied): Step => ({ ok: true, value });
@@ -165,7 +309,7 @@ const tierOf = (c: CharacterRow): Tier => TIERS[c.tier] ?? (TIERS[0] as Tier);
 const wearer = (c: CharacterRow): Wearer => ({ tier: tierOf(c), major: c.major, minor: c.minor });
 
 /** EXP to the character, and 10% of it to each equipped book (PLAN §8), capped at the owner. */
-function gainExp(l: Loaded, exp: number): { character: CharacterChange; put: ItemRow[] } {
+export function gainExp(l: Loaded, exp: number): { character: CharacterChange; put: ItemRow[] } {
   if (exp <= 0) return { character: {}, put: [] };
   const next = addExp(l.character.level, l.character.exp, exp);
   const put = l.worn
@@ -187,7 +331,9 @@ const wornAmong = (rows: readonly ItemRow[]): Worn[] =>
 
 const isBook = (def: string) => BOOKS.some((b) => b.id === def);
 
-export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
+export const OPS: { [K in SoloOp]: OpDef<Requests[K]> } = {
+  // The living world's operations (PLAN §9, §11, §15), in live/ops.ts.
+  ...liveOps({ gainExp }),
   kit: {
     client: false,
     rows: () => ({}),
@@ -197,7 +343,7 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
       let loadout: readonly Worn[] = [];
       const put: ItemRow[] = [];
       for (const [slot, def] of STARTER_BOOKS[l.character.major].entries()) {
-        const row = newBookRow(textbook(env.newId(), def));
+        const row = newBookRow(textbook(env.newId(), def), "kit");
         const r = equip(loadout, wearable(row), slot, wearer(l.character));
         if (!r.ok) return no(r.error);
         loadout = r.state;
@@ -234,7 +380,10 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
           purse = r.purse;
           ledger.push(...r.ledger);
         } else if (drop.item.kind === "tool") {
-          const row = newToolRow({ id: env.newId(), def: drop.item.tool, level: 1 });
+          const row = newToolRow(
+            { id: env.newId(), def: drop.item.tool, level: 1 },
+            dropOrigin(drop.source),
+          );
           tools.push(row);
           keys.set(row.id, ledgerKey(drop.source));
         }
@@ -259,7 +408,7 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
       if (!isBook(req.def)) return no("unknown_def");
       const r = bind(l.purse, { id: env.newId(), def: req.def, page: env.page });
       if (!r.ok) return no(r.error);
-      const row = newBookRow(r.state.item);
+      const row = newBookRow(r.state.item, "craft");
       return ok({
         purse: r.state.purse,
         ledger: r.ledger,
@@ -507,10 +656,6 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
   },
 };
 
-export function isClientOp(name: string): name is OpName {
-  return name in OPS && OPS[name as AnyOp].client;
-}
-
 // Grants from combat --------------------------------------------------------------------------
 
 const KEY_PART = /^[a-z0-9-]{1,40}$/;
@@ -528,6 +673,7 @@ export function checkDrop({ item, source }: Drop): string | null {
     return "source";
   }
   if (!KEY_PART.test(source.fieldId) || !KEY_PART.test(source.monsterId)) return "source";
+  if (source.era !== undefined && (source.era !== true || source.rank !== "boss")) return "source";
   switch (item?.kind) {
     case "coin":
       return whole(item.amount, MAX_COIN) ? null : "coin";

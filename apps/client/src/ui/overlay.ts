@@ -83,7 +83,7 @@ export class Toaster {
     const n = note(this.scene, text, 300);
     const x = Math.round((W - n.w) / 2);
     n.box.setPosition(x, -n.h - 2).setDepth(2000);
-    sound("open");
+    sound("toast");
     slide(n.box, { x, y: 4 }, 160, () => {
       this.scene.time.delayedCall(2200, () => {
         slide(n.box, { x, y: -n.h - 2 }, 140, () => {
