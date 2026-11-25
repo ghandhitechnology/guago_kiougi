@@ -1,6 +1,6 @@
 import { clean, finish, hline, ovalShadow, rect, vline } from "../../interior.ts";
 import { greek, hash } from "../../page1.ts";
-import { lobes, Pic } from "../../paint.ts";
+import { Pic } from "../../paint.ts";
 
 /**
  * 그림자 동굴: the cave from the story, kept by the city. Prisoners' bench chained facing the
@@ -298,7 +298,7 @@ function cutout(kind: string): Pic {
   const x = Math.floor((16 - grid.w) / 2);
   p.put(grid, x, 0);
   // The pole runs on down to a stand, long enough to hold the figure over the wall.
-  const pole = x + grid.rows[grid.h - 1]!.indexOf("b");
+  const pole = x + (grid.rows[grid.h - 1]?.indexOf("b") ?? 0);
   for (let y = grid.h; y < 37; y++) p.set(pole, y, "b");
   p.put(".SS.\nSKMS\n.dd.", 6, 37);
   return finish(p);

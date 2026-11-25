@@ -1,4 +1,4 @@
-import { clean, finish, hline, IL, ovalShadow, rect, rim, vline } from "../../interior.ts";
+import { clean, finish, hline, ovalShadow, rect, rim, vline } from "../../interior.ts";
 import { greek, hash } from "../../page1.ts";
 import { Pic } from "../../paint.ts";
 

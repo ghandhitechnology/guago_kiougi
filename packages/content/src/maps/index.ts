@@ -18,6 +18,7 @@ import p1Agora from "./p1-agora.ts";
 // Page 1 hunting fields and the 생태공원.
 import p1Colonnade from "./p1-colonnade.ts";
 import p1CrotonSchool from "./p1-croton-school.ts";
+import p1EleaTrack from "./p1-elea-track.ts";
 import p1ShadowCave from "./p1-shadow-cave.ts";
 import saebyeok from "./saebyeok.ts";
 import silheom from "./silheom.ts";
@@ -56,6 +57,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   p1Agora,
   p1ShadowCave,
   p1CrotonSchool,
+  p1EleaTrack,
 ];
 
 /**
