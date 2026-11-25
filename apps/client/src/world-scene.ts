@@ -36,7 +36,7 @@ import { playEmote } from "./emotes.ts";
 import type { WorldEntry } from "./entry.ts";
 import { Curtain } from "./fade.ts";
 import { hud } from "./hud/store.ts";
-import { t, tMaybe } from "./i18n/index.ts";
+import { t } from "./i18n/index.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
 import { ensureMap, enteredMap, mapReady, wallsOf } from "./map-data.ts";
@@ -50,6 +50,7 @@ import { StepSounds } from "./sound/steps.ts";
 import { worldUi } from "./ui/world-ui.ts";
 import { builtView } from "./world/map-view.ts";
 import { WorldOverlays } from "./world/overlays.ts";
+import { clubDress, worldPeople } from "./world/people.ts";
 import { session } from "./world/session.ts";
 import { worldView } from "./world/view.ts";
 import { emitWorld, onWorld } from "./world-events.ts";
@@ -432,6 +433,7 @@ export class WorldScene extends Phaser.Scene {
     }
     for (const sid of this.players.keys()) this.overlays.remove(sid);
     if (this.selfId) this.overlays.remove(this.selfId);
+    worldPeople.clear();
     for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
     this.monsters.clear();
     this.players.clear();
@@ -518,6 +520,8 @@ export class WorldScene extends Phaser.Scene {
       if (!p.sid) continue;
       if (p.sid === this.selfId) {
         this.self?.onServer(p);
+        worldPeople.seen(p.sid, p);
+        this.dressSelf(p);
         this.serverSelf = { x: p.x / POS_SCALE, y: p.y / POS_SCALE };
         if (
           this.caughtAt &&
@@ -532,19 +536,26 @@ export class WorldScene extends Phaser.Scene {
         continue;
       }
       seated.add(p.sid);
-      // Everyone wears their own look; a body whose look has not synced yet wears the default
-      // until it arrives, then is dressed again.
+      worldPeople.seen(p.sid, p);
+      // Everyone wears their own look, a club member the club's 과잠 over it; a body whose look
+      // has not synced yet wears the default until it arrives, then is dressed again.
       // Schema fields are accessors, so a spread would drop them: read each one.
       const l = p.look;
       const look = l?.body
-        ? normalizeLook(this.meta, {
-            body: l.body,
-            hair: l.hair,
-            hairColor: l.hairColor,
-            face: l.face,
-            uniform: l.uniform,
-            accessories: [...l.accessories],
-          })
+        ? normalizeLook(
+            this.meta,
+            clubDress(
+              {
+                body: l.body,
+                hair: l.hair,
+                hairColor: l.hairColor,
+                face: l.face,
+                uniform: l.uniform,
+                accessories: [...l.accessories],
+              },
+              p,
+            ),
+          )
         : undefined;
       const lookId = look ? dollLook(look) : this.look;
       let r = this.players.get(p.sid);
@@ -570,6 +581,7 @@ export class WorldScene extends Phaser.Scene {
     for (const sid of this.players.keys()) {
       if (seated.has(sid)) continue;
       this.overlays.remove(sid);
+      worldPeople.gone(sid);
       worldView.others.delete(sid);
     }
     this.prune(this.players, seated);
@@ -655,18 +667,46 @@ export class WorldScene extends Phaser.Scene {
   /** Emotes come over the world link: the body that made one plays it with a word over its head. */
   private listenSocial(link: WorldLink | undefined): void {
     this.unsocial?.();
+    worldView.onSelfEmote = (id) => {
+      this.ownEmote = { id, at: performance.now() };
+      if (this.selfActor) playEmote(this.selfActor.body, id);
+    };
     this.unsocial = link?.on((e) => {
-      if (e.type === "social" && e.event.t === "emote") this.emote(e.event.sid, e.event.e);
+      if (e.type === "social" && e.event.t === "emote") {
+        this.emote(e.event.sid, e.event.e, e.event.id);
+      }
     });
   }
 
-  /** Plays an emote on the body of the player in session `sid` of this map room. */
-  private emote(sid: string, id: string): void {
-    const body = sid === this.selfId ? this.selfActor?.body : this.players.get(sid)?.actor.body;
-    if (!body) return;
-    const word = tMaybe(`emote.${id}`);
-    if (word) this.overlays.say(sid, word);
-    playEmote(body, id);
+  /**
+   * Plays an emote on the body of the player in session `sid` of this map room; the emote wheel
+   * puts its icon over the head. A blocked player's emote is not shown, and the server's echo of
+   * the player's own is skipped: it already played when picked.
+   */
+  private emote(sid: string, id: string, from: string): void {
+    if (session.link?.isBlocked(from)) return;
+    const own = sid === this.selfId;
+    if (own && this.ownEmote?.id === id && performance.now() - this.ownEmote.at < 2500) return;
+    const body = own ? this.selfActor?.body : this.players.get(sid)?.actor.body;
+    if (body) playEmote(body, id);
+  }
+
+  /** The emote last picked on the wheel, played on the own body at once. */
+  private ownEmote: { id: string; at: number } | undefined;
+
+  /** The own body's look follows the club: the 과잠 goes on when joining and off when leaving. */
+  private dressSelf(p: PlayerState): void {
+    if (!this.entry) return;
+    const look = normalizeLook(this.meta, clubDress({ ...this.entry.character.look }, p));
+    const id = dollLook(look);
+    if (id === this.selfLook) return;
+    composeDoll(this, this.meta, look);
+    this.selfLook = id;
+    if (this.selfActor) {
+      this.here?.view.removeEntity(this.selfActor.body);
+      this.selfActor.destroy();
+      this.selfActor = undefined;
+    }
   }
 
   /** A guard saw the player: a quick dip to ink, and back at the entrance when it lifts. */

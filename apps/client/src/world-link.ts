@@ -61,7 +61,6 @@ import {
   ResultLog,
   ROOMS_PATH,
   SOCIAL_OP_ID,
-  type SocialDone,
   type SocialEvent,
   type SocialRequests,
   type SocialSnapshot,

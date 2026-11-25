@@ -1,7 +1,6 @@
 import { EMOTES } from "@guago/content";
 import * as Phaser from "phaser";
 import { WORLD_SCENE } from "../entry.ts";
-import { t } from "../i18n/index.ts";
 import { uiHasKeyboard } from "../ui/focus.ts";
 import { sound } from "../ui/sound.ts";
 import { Label } from "../ui/text.ts";
