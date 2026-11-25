@@ -170,7 +170,8 @@ function recolor(c: HTMLCanvasElement, choice: Record<string, string>): void {
   ctx.putImageData(data, 0, 0);
 }
 
-type Backdrop = "checker" | string;
+/** A flat colour, the checkerboard, or a ground tile repeated at the drawing's scale. */
+type Backdrop = "checker" | string | HTMLCanvasElement;
 
 function paintBackdrop(
   ctx: CanvasRenderingContext2D,
@@ -179,6 +180,13 @@ function paintBackdrop(
   bg: Backdrop,
   cell: number,
 ): void {
+  if (typeof bg !== "string") {
+    const scale = cell / 2;
+    const tw = bg.width * scale;
+    const th = bg.height * scale;
+    for (let y = 0; y < h; y += th) for (let x = 0; x < w; x += tw) ctx.drawImage(bg, x, y, tw, th);
+    return;
+  }
   if (bg !== "checker") {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
@@ -429,12 +437,55 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
   }
 }
 
+// Combat effects ----------------------------------------------------------------------------
+
+/**
+ * Every combat effect playing at ×1 and ×3 on the two grounds it must read on: the field at
+ * night and sunlit Greek dirt. Effects meant for additive blending say `add`; the sheet draws
+ * them plainly, as the palette-locked art is.
+ */
+{
+  const ground = (set: string, theme: string): HTMLCanvasElement | string => {
+    const index = meta.tilesets[set]?.masks[0]?.[0];
+    if (index === undefined || !atlases.has(`tiles-${theme}`)) return "checker";
+    // Four tiles square, so the texture does not repeat every 16 pixels.
+    const c = canvas(32, 32);
+    const ctx = ctx2d(c);
+    const list = meta.tilesets[set]?.masks[0] ?? [index];
+    for (let k = 0; k < 4; k++) {
+      ctx.drawImage(
+        tileImage(theme, list[k % list.length] as number),
+        (k % 2) * 16,
+        Math.floor(k / 2) * 16,
+      );
+    }
+    return c;
+  };
+  const grounds = [ground("lawn-field", "field-night"), ground("marble-dust", "greece")];
+  const s = section("combat-effects", "combat effects");
+  for (const [name, sp] of Object.entries(meta.sprites)) {
+    if (sp.atlas !== "combat") continue;
+    const box = el("article");
+    box.id = name;
+    box.append(el("h3", "name", (sp as { blend?: string }).blend ? `${name}  add` : name));
+    const frames = sp.frames.map((f) => frameImage(sp.atlas, f));
+    for (const [anim, a] of Object.entries(sp.anims)) {
+      const imgs = a.frames.map((f) => frames[sp.frames.indexOf(f)] as HTMLCanvasElement);
+      const r = row(box, `${anim} ${a.fps}fps`);
+      for (const scale of [1, 3]) {
+        for (const g of grounds) r.append(cell(player(imgs, a.fps, scale, g)));
+      }
+    }
+    s.append(box);
+  }
+}
+
 // Sprites -----------------------------------------------------------------------------------
 
 {
   const s = section("sprites", "sprites");
   for (const [name, sp] of Object.entries(meta.sprites)) {
-    if (sp.atlas === "ui") continue;
+    if (sp.atlas === "ui" || sp.atlas === "combat") continue;
     const box = el("article");
     box.id = name;
     box.append(el("h3", "name", name));

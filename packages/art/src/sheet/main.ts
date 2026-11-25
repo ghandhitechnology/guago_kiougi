@@ -15,6 +15,7 @@ import type { SceneMeta } from "../scene.ts";
 import { galmuriDir } from "./font.ts";
 import { mapSheets } from "./maps-static.ts";
 import {
+  combatSheet,
   loadFonts,
   paletteSheet,
   rigSheet,
@@ -68,6 +69,7 @@ if (values.png) {
         ),
         palette: paletteSheet(fonts),
         sprites: spriteSheet(fonts, art),
+        combat: combatSheet(fonts, art),
         rigs: rigSheet(fonts, art),
         terrain: terrainSheet(fonts, art),
         ...uiSheets(art, built, sceneMeta, atlases),

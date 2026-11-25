@@ -1,7 +1,8 @@
-import { type Client, Room } from "@colyseus/core";
+import { type AuthContext, type Client, Room } from "@colyseus/core";
 import { LAWN, mapSize } from "@guago/content";
 import {
   createWorld,
+  dressPlayer,
   MapState,
   MonsterState,
   PlayerState,
@@ -11,11 +12,18 @@ import {
   TICK_RATE_HZ,
   TILE_SIZE,
 } from "@guago/shared";
+import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 
 /** One map instance: runs the shared simulation at 20 Hz and mirrors it into the synced state. */
 export class MapRoom extends Room<{ state: MapState }> {
   override state = new MapState();
   private world!: SimWorld;
+  private seats = new RoomSeats(LAWN.id, (id) => this.state.players.get(id));
+
+  /** Only a browser with a live session and a character gets a seat. */
+  static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
+    return authenticateJoin(ctx);
+  }
 
   override onCreate(): void {
     const { w, h } = mapSize(LAWN);
@@ -26,20 +34,30 @@ export class MapRoom extends Room<{ state: MapState }> {
       this.world = step(this.world);
       this.sync();
     }, TICK_RATE_HZ);
+    this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
   }
 
-  override onJoin(client: Client): void {
+  override async onJoin(client: Client): Promise<void> {
+    const character = await this.seats.join(client);
+    const here = character.mapId === LAWN.id;
     const player = new PlayerState();
-    player.x = LAWN.spawn.x;
-    player.y = LAWN.spawn.y;
+    player.x = here ? character.x : LAWN.spawn.x;
+    player.y = here ? character.y : LAWN.spawn.y;
+    dressPlayer(player, character);
     this.state.players.set(client.sessionId, player);
   }
 
   override onDrop(client: Client): void {
-    this.allowReconnection(client, RECONNECT_SECONDS).catch(() => {});
+    if (!this.seats.mayReconnect(client)) return;
+    this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
 
-  override onLeave(client: Client): void {
+  override onReconnect(client: Client): void {
+    this.seats.reconnected(client);
+  }
+
+  override async onLeave(client: Client): Promise<void> {
+    await this.seats.leave(client);
     this.state.players.delete(client.sessionId);
   }
 

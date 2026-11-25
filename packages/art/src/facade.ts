@@ -45,7 +45,16 @@ export const GLASS: Legend = {
   B: "wood.dark",
 };
 
-export type GlassState = "sky" | "blind" | "dark" | "open" | "lit" | "poster" | "plant" | "face";
+export type GlassState =
+  | "sky"
+  | "open2"
+  | "blind"
+  | "dark"
+  | "open"
+  | "lit"
+  | "poster"
+  | "plant"
+  | "face";
 
 /** One row of glass, 12 wide, for row `r` of `h`. */
 type Glass = (r: number, h: number) => string;
