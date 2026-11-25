@@ -20,7 +20,7 @@ import { shade } from "../../paint.ts";
  * then the ground itself: cracks with gold light deep inside, slabs that tip up, rock that is
  * really rock. Big, angular, and always under the monsters, never over them.
  */
-const EARTH: Legend = {
+export const EARTH: Legend = {
   ".": null,
   o: "gold.deep",
   d: "gold.dark",
@@ -42,12 +42,12 @@ const EARTH: Legend = {
   ":": "stone.light",
   ";": "stone.mid",
 };
-const LONE = "*',:;";
-const fx = { group: "combat", outline: false, palette: EARTH, lone: LONE } as const;
+export const EARTH_LONE = "*',:;";
+const fx = { group: "combat", outline: false, palette: EARTH, lone: EARTH_LONE } as const;
 
 // 지구는 둥글다 -------------------------------------------------------------------------------
 
-const FW = 48;
+export const FW = 48;
 
 /**
  * 예보: the forecast traced on the ground where the fault will open, in five stages from a dotted
@@ -122,7 +122,7 @@ const gape = (x: number, k: number): number =>
   ([0.6, 2.2, 3.2, 1.6, 0.6, 0][k] as number) * (0.55 + 0.45 * Math.sin((Math.PI * x) / FW));
 
 /** A slab tipped up beside the crack: a lit top face and a dark front face. */
-function slab(pic: Pic, x: number, y: number, w: number, tall: number, side: -1 | 1): void {
+export function slab(pic: Pic, x: number, y: number, w: number, tall: number, side: -1 | 1): void {
   if (tall <= 0) return;
   for (let i = 0; i < w; i++) {
     const top = y - Math.round(tall * (side === 1 ? 1 - i / w : i / w) * 0.6 + tall * 0.4);
@@ -180,7 +180,7 @@ function fault(k: number): Pic {
       pic.set(x, Math.round(yAt(x) + (r() - 0.5) * 6), r() < 0.5 ? ":" : ";");
     }
   }
-  return clean(pic, LONE);
+  return clean(pic, EARTH_LONE);
 }
 
 function paintOverCrack(pic: Pic, yAt: (x: number) => number, k: number): void {
@@ -289,7 +289,7 @@ function stoneShape(seed: number): (x: number, y: number) => boolean {
  * glowing lava, sedimentary is sandstone laid in flat bands, metamorphic is gneiss with its
  * bands folded into waves.
  */
-function specimen(kind: "igneous" | "sedimentary" | "metamorphic"): Pic {
+export function specimen(kind: "igneous" | "sedimentary" | "metamorphic"): Pic {
   const inside = stoneShape(kind === "igneous" ? 3 : kind === "sedimentary" ? 8 : 12);
   const base = shade(12, 12, inside, { outline: "K", dark: "q", mid: "a", light: "s" });
   if (kind === "igneous") {
@@ -336,7 +336,7 @@ function specimen(kind: "igneous" | "sedimentary" | "metamorphic"): Pic {
   return clean(base);
 }
 
-const ROCK: Legend = {
+export const ROCK: Legend = {
   ...EARTH,
   // Sandstone.
   F: "wood.mid",
@@ -356,7 +356,7 @@ const rock = sprite({
   name: "fx-rock",
   group: "combat",
   palette: ROCK,
-  lone: LONE,
+  lone: EARTH_LONE,
   size: [12, 12],
   origin: [6, 6],
   frames: Object.fromEntries(
@@ -410,7 +410,7 @@ function rockHit(kind: (typeof KINDS)[number], k: number): Pic {
         0,
         0,
       );
-    return clean(pic, LONE);
+    return clean(pic, EARTH_LONE);
   }
   if (kind === "sedimentary") {
     const rx = [5, 9, 12, 13][k] as number;
@@ -446,7 +446,7 @@ function rockHit(kind: (typeof KINDS)[number], k: number): Pic {
     const y = cy - 3 + Math.sin(a) * d * 0.75 + (k === 3 ? 3 : 0);
     put(pic, k === 3 ? "nN" : (chips[i % 3] as string), x, y);
   }
-  return clean(pic, `${LONE}n`);
+  return clean(pic, `${EARTH_LONE}n`);
 }
 
 const rockHitSprite = sprite({
@@ -454,7 +454,7 @@ const rockHitSprite = sprite({
   group: "combat",
   outline: false,
   palette: { ...ROCK, R: "clay.light", r: "clay.mid" },
-  lone: `${LONE}n`,
+  lone: `${EARTH_LONE}n`,
   size: [32, 26],
   origin: [16, 17],
   frames: Object.fromEntries(
