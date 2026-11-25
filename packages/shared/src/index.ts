@@ -1,4 +1,5 @@
 export * from "./api.ts";
+export * from "./collision.ts";
 export * from "./combat.ts";
 export * from "./constants.ts";
 export * from "./growth.ts";

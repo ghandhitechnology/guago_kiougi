@@ -7,6 +7,7 @@ import {
   paint,
   type Rim,
   type Shape,
+  smooth,
   texture,
   tileOf,
 } from "../../paint.ts";
@@ -542,6 +543,51 @@ const lawnWalk = terrain({
   decals: LAWN_DECALS,
 });
 
+/**
+ * 보도블록 edged with a kerb where it meets bare dirt: worn shortcuts across the lawn end at the
+ * paving's kerb, not at a seam. The kerb's top is lit, its face drops two pixels to the dirt, and
+ * the dirt beside it lies in its shadow.
+ */
+function kerbPictures(): { outer: string[]; inner: string[] } {
+  const paver = Pic.of(pavers([], []));
+  const outer: string[] = [];
+  const inner: string[] = [];
+  SHAPES.forEach((shape) => {
+    for (const [kind, list, size] of [
+      ["outer", outer, 48],
+      ["inner", inner, 32],
+    ] as const) {
+      const isIn = inside(kind, { ...shape, radius: 2, holeRadius: 2 });
+      const pic = paint(size, size, isIn, {
+        fill: "K",
+        band: ["w", "k"],
+        lip: ["M", "S"],
+        under: "n",
+        beside: "n",
+      });
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (pic.at(x, y) === "K") pic.set(x, y, paver.at(x % 16, y % 16) as string);
+        }
+      }
+      list.push(smooth(despeckle(pic, isIn, "K"), "n").toString());
+    }
+  });
+  return { outer, inner };
+}
+
+const walkDirt = terrain({
+  name: "walk-dirt",
+  upper: "walk",
+  lower: "dirt",
+  themes: ["campus", "campus-golden", "golden-sun", "golden-warm", "campus-night"],
+  palette,
+  lone,
+  ...kerbPictures(),
+  base: DIRT_BASES.map((marks) => tileOf("b", marks)),
+  fill: [pavers([[1, 0]], []), pavers([], [[2, 1]]), pavers([[3, 1]], [])],
+});
+
 // 운동장 sand: decomposed granite, its grit lit from the top left. Every mark pairs a lit top
 // with a shaded underside, so the field reads as ground in any light and never as glints.
 
@@ -661,4 +707,51 @@ const lawnField = terrain({
   },
 });
 
-export default [lawnPath, lawnWalk, lawnField];
+/**
+ * The basketball court nobody uses: green urethane gone patchy, cracks with weeds in them. The
+ * lawn's lip throws its shadow onto the court.
+ */
+const courtSpeck = P(`
+  N.
+  .N
+`);
+const courtCrack = P(`
+  NN..
+  ..NN
+`);
+const lawnCourt = terrain({
+  name: "lawn-court",
+  upper: "grass",
+  lower: "court",
+  themes: ["campus", "campus-night", "field-night"],
+  palette,
+  lone,
+  ...lawnPictures(LAWN_RIM("N", ["e", "E"]), 2),
+  base: [
+    tileOf("B", [[4, 5, courtSpeck]]),
+    tileOf("B", [[10, 10, courtCrack]]),
+    tileOf("B", []),
+    tileOf("B", [
+      [2, 12, courtSpeck],
+      [11, 3, courtSpeck],
+    ]),
+  ],
+  fill: LAWN_MARKS.slice(1).map(lawnTile),
+  tones: LAWN_TONES,
+  decals: {
+    ...LAWN_DECALS,
+    weeds: {
+      on: "lower",
+      density: 0.05,
+      grid: `
+        .NN.....
+        ..NNN...
+        ...hhG..
+        ...GGG..
+        ...GG...
+      `,
+    },
+  },
+});
+
+export default [lawnPath, lawnWalk, lawnField, walkDirt, lawnCourt];
