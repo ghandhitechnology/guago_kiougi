@@ -26,7 +26,7 @@ export const MATERIALS: readonly MaterialDef[] = [
     currency: "pinecone",
     description: "pinecone",
     sources: ["drop", "pool", "quest"],
-    sinks: ["sink.pilgi", "sink.bind", "sink.forge", "sink.shop", "sink.stat-reset"],
+    sinks: ["sink.pilgi", "sink.bind", "sink.forge", "sink.shop", "sink.stat-reset", "sink.club"],
   },
   {
     currency: "sheet",
