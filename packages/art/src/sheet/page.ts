@@ -5,7 +5,7 @@
 
 import type { BuiltMap } from "@guago/content";
 import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
-import { drawOrder } from "../layer-order.ts";
+import { drawOrder, outlineColors, packRgba, stackLayers } from "../layer-order.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import { mapViews, overlay } from "./map-view.ts";
@@ -58,6 +58,7 @@ interface Meta {
       anims: Record<string, Anim>;
       looks: Record<string, { parts: Record<string, string>; slots: Record<string, string> }>;
       under?: Record<string, Record<string, string>>;
+      clean?: boolean;
     }
   >;
   tileGrid: { tile: number; margin: number; spacing: number; columns: number };
@@ -89,6 +90,7 @@ const CHECK_A = css.getPropertyValue("--check-a").trim();
 const CHECK_B = css.getPropertyValue("--check-b").trim();
 
 const meta: FullMeta = await (await fetch("dist/art.json")).json();
+const OUTLINES = outlineColors(meta);
 const atlases = new Map<string, Atlas>();
 await Promise.all(
   meta.atlases.map(async (name) => {
@@ -567,12 +569,26 @@ function composite(
 ): HTMLCanvasElement {
   const rig = meta.rigs[rigName];
   if (!rig) throw new Error(rigName);
-  const c = canvas(rig.size[0], rig.size[1]);
+  const [w, h] = rig.size;
+  const c = canvas(w, h);
   const ctx = ctx2d(c);
-  for (const layer of drawOrder(rig.layers, look.parts, (l, p) => rig.under?.[l]?.[p])) {
-    const part = look.parts[layer];
-    if (part) ctx.drawImage(frameImage(rig.atlas, `${rigName}/${layer}/${part}/${key}`), 0, 0);
+  const order = drawOrder(rig.layers, look.parts, (l, p) => rig.under?.[l]?.[p]);
+  const shadow = look.parts.shadow;
+  if (order.includes("shadow") && shadow) {
+    ctx.drawImage(frameImage(rig.atlas, `${rigName}/shadow/${shadow}/${key}`), 0, 0);
   }
+  const layers = order
+    .filter((layer) => layer !== "shadow" && look.parts[layer])
+    .map((layer) => {
+      const img = frameImage(rig.atlas, `${rigName}/${layer}/${look.parts[layer]}/${key}`);
+      return packRgba(ctx2d(img).getImageData(0, 0, w, h).data);
+    });
+  const { px } = stackLayers(layers, w, h, -1, rig.clean ?? false, (v) => OUTLINES.has(v));
+  const data = ctx.getImageData(0, 0, w, h);
+  px.forEach((v, i) => {
+    if (v >= 0) data.data.set([v >> 16, (v >> 8) & 255, v & 255, 255], i * 4);
+  });
+  ctx.putImageData(data, 0, 0);
   recolor(c, look.slots);
   return c;
 }

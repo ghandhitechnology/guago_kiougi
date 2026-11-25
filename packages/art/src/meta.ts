@@ -73,6 +73,14 @@ export interface RigMeta {
    */
   readonly under: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /**
+   * Stack the layers with `stackLayers` from `@guago/art` (exported from `layer-order.ts`) and
+   * `clean` on, before swapping slot colours in: a pixel a later layer leaves without any
+   * same-colour neighbour takes that layer's colour. Without it, hair cut by a clip or a strap
+   * keeps one-pixel crumbs. Outline colours are every ramp's `deep` step and every slot's `deep`
+   * key.
+   */
+  readonly clean: boolean;
+  /**
    * Points that follow the skeleton, keyed `{layer}/{part}/{anchor}`, then `{dir}/{frame}` to a
    * pixel in the frame. A frame left out has the point hidden. `jacket/varsity/emblem` is the
    * top left of the 과잠's back panel, where a club's 6×6 emblem is drawn after the jacket layer.

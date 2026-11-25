@@ -205,6 +205,12 @@ export interface RigDef {
    * a rig whose layers a player combines freely.
    */
   readonly probe?: "parts" | "pairs";
+  /**
+   * Hides the strays layers leave on each other: a pixel that loses every same-colour neighbour
+   * to a later layer takes that layer's colour (see `stackLayers`). For a rig whose parts are
+   * combined at run time, where no one can clean each combination by hand.
+   */
+  readonly clean?: boolean;
 }
 
 export function rig(def: Omit<RigDef, "kind">): RigDef {

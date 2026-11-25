@@ -326,6 +326,7 @@ export function metadata(
             looks: Object.fromEntries(
               r.looks.map((l) => [l.name, { parts: l.parts, slots: l.slots }]),
             ),
+            clean: r.clean,
             under: Object.fromEntries(
               r.layers
                 .map((l) => [

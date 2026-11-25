@@ -1,7 +1,8 @@
 import type { Anim, BonePose, Dir, Look, PartDef, Poses, RigDef, Vec } from "./format.ts";
 import { ArtError, checkLegend, parseGrid } from "./grid.ts";
-import { drawOrder } from "./layer-order.ts";
-import { type Indexed, indexed, stamp } from "./raster.ts";
+import { drawOrder, stackLayers } from "./layer-order.ts";
+import { DEEP_INDICES, slotOf } from "./palette.ts";
+import { CLEAR, type Indexed, indexed, stamp } from "./raster.ts";
 import { checkAnims, defaultOrigin } from "./sprite.ts";
 
 /** A part rendered alone for every direction and frame. Keys are `down/walk0`. */
@@ -36,6 +37,8 @@ export interface CompiledRig {
   readonly anim: Readonly<Record<string, Anim>>;
   readonly parts: readonly RigPart[];
   readonly looks: readonly RigLook[];
+  /** Whether looks are stacked with the `clean` rule. */
+  readonly clean: boolean;
   /**
    * Every part option worn on the first look in place of that look's own (and with `probe:
    * 'pairs'`, every two options of different layers together): a check-only set, so whatever a
@@ -59,6 +62,11 @@ interface ParsedPiece {
 
 /** Resolved position and pose of every bone for one direction and frame. */
 export type Skeleton = ReadonlyMap<string, { readonly offset: Vec; readonly pose: string }>;
+
+/** The darkest step of a ramp or slot: a colour allowed on the outline. */
+function isOutlineIndex(v: number): boolean {
+  return DEEP_INDICES.has(v) || slotOf(v)?.base === v;
+}
 
 /** Resolves a frame's bone poses, adding offsets down the parent chain. */
 export function resolveSkeleton(
@@ -227,16 +235,30 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
     const worn = order.map((layer) =>
       parts.find((q) => q.layer === layer && q.name === look.parts[layer]),
     );
+    const [w, h] = def.size;
+    const shown = worn.filter((p): p is RigPart => p !== undefined);
+    const below = shown.filter((p) => def.unchecked?.includes(p.layer));
+    const stacked = shown.filter((p) => !def.unchecked?.includes(p.layer));
     for (const key of skeletons.keys()) {
-      const all = indexed(def.size[0], def.size[1]);
-      const some = indexed(def.size[0], def.size[1]);
-      for (const p of worn) {
-        if (!p) continue;
-        const layer = p.layer;
-        const img = p.frames.get(key) as Indexed;
-        stamp(all, img, 0, 0);
-        if (!def.unchecked?.includes(layer)) stamp(some, img, 0, 0);
-      }
+      const imgs = stacked.map((p) => p.frames.get(key) as Indexed);
+      const { px, owner } = stackLayers(
+        imgs.map((img) => img.px),
+        w,
+        h,
+        CLEAR,
+        def.clean ?? false,
+        isOutlineIndex,
+      );
+      const some = indexed(w, h);
+      px.forEach((v, i) => {
+        some.px[i] = v;
+        const l = owner[i] as number;
+        const own = imgs[l];
+        if (own && own.px[i] === v) some.lone[i] = own.lone[i] as number;
+      });
+      const all = indexed(w, h);
+      for (const p of below) stamp(all, p.frames.get(key) as Indexed, 0, 0);
+      stamp(all, some, 0, 0);
       frames.set(key, all);
       checked.set(key, some);
     }
@@ -286,6 +308,7 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
     anim: def.anim,
     parts,
     looks,
+    clean: def.clean ?? false,
     probes,
   };
 }

@@ -29,7 +29,7 @@ import {
   type TerrainGrid,
   valueNoise,
 } from "./dualgrid.ts";
-import { drawOrder } from "./layer-order.ts";
+import { drawOrder, outlineColors, packRgba, stackLayers } from "./layer-order.ts";
 
 export type {
   Actor,
@@ -119,6 +119,7 @@ export interface SceneMeta {
       readonly slots?: Table<string>;
     }>;
     readonly under?: Table<Table<string>>;
+    readonly clean?: boolean;
   }>;
   readonly tileGrid: {
     readonly tile: number;
@@ -1026,6 +1027,17 @@ function renderPass(ctx: Ctx, passTheme: string, view: Rect, groundOnly = false)
   return out;
 }
 
+const outlines = new WeakMap<SceneMeta, Set<number>>();
+/** The metadata's outline colours, worked out once per metadata. */
+function outlineOf(meta: SceneMeta): Set<number> {
+  let set = outlines.get(meta);
+  if (!set) {
+    set = outlineColors(meta);
+    outlines.set(meta, set);
+  }
+  return set;
+}
+
 /** Composites a rig look into one image, with its shadow layer kept apart. */
 function composeDoll(ctx: Ctx, o: Doll) {
   const r = ctx.meta.rigs[o.rig];
@@ -1044,13 +1056,24 @@ function composeDoll(ctx: Ctx, o: Doll) {
     const part = look.parts[layer];
     return part ? `${o.rig}/${layer}/${part}/${dir}/${frame}` : null;
   };
-  const img = new Canvas(r.size[0], r.size[1]);
+  const [w, h] = r.size;
+  const layers: Int32Array[] = [];
   for (const layer of drawOrder(r.layers, look.parts, (l, p) => r.under?.[l]?.[p])) {
     if (layer === "shadow") continue;
     const k = key(layer);
     const found = k ? frameOf(ctx, r.atlas, k) : undefined;
-    if (found) place(img, found, [0, 0], [0, 0], slotMap, false);
+    if (!found) continue;
+    const one = new Canvas(w, h);
+    place(one, found, [0, 0], [0, 0], NO_MAP, false);
+    layers.push(packRgba(one.data));
   }
+  const { px } = stackLayers(layers, w, h, -1, r.clean ?? false, (c) => outlineOf(ctx.meta).has(c));
+  const img = new Canvas(w, h);
+  px.forEach((c, i) => {
+    if (c < 0) return;
+    const out = slotMap.get(c) ?? c;
+    img.data.set([out >> 16, (out >> 8) & 255, out & 255, 255], i * 4);
+  });
   const sk = key("shadow");
   const shadow = sk ? frameOf(ctx, r.atlas, sk) : undefined;
   return { img, origin: r.origin, shadow };

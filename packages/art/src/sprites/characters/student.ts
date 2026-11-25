@@ -1,5 +1,12 @@
 import { type Dir, rig, type Vec } from "../../format.ts";
-import { glasses, goggles } from "../../student/accessories.ts";
+import {
+  glasses,
+  goggles,
+  hairclip,
+  headphones,
+  lanyard,
+  mask,
+} from "../../student/accessories.ts";
 import { frame, shadow, skin, walkArms, withKo } from "../../student/base.ts";
 import { textbook } from "../../student/book.ts";
 import { bright, cool, goofy, sharp, shy, sleepy } from "../../student/faces.ts";
@@ -54,6 +61,7 @@ const lean = (d: Dir): Vec => (d === "side" ? [1, 0] : d === "down" ? [0, 1] : [
 export default rig({
   name: "student",
   probe: "pairs",
+  clean: true,
   ...frame,
   parts: {
     shadow: { blob: shadow },
@@ -62,7 +70,7 @@ export default rig({
     jacket: { varsity },
     face: { bright, sleepy, sharp, goofy, shy, cool },
     hair: { crop, spiky, bob, long, ponytail, curly, buzz, twintails, bun, braids, shag, undercut },
-    accessory: { glasses, goggles },
+    accessory: { glasses, goggles, headphones, hairclip, mask, lanyard },
     book: { textbook },
   },
   frames: {

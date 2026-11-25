@@ -4,7 +4,7 @@
  * files), so what shows here is what the game will load.
  */
 
-import { drawOrder } from "../layer-order.ts";
+import { drawOrder, outlineColors, packRgba, stackLayers } from "../layer-order.ts";
 import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import { type BmFont, measure, parseBmFont, place } from "./bmfont.ts";
@@ -48,6 +48,7 @@ interface Meta {
       layers: string[];
       looks: Record<string, { parts: Record<string, string>; slots: Record<string, string> }>;
       under?: Record<string, Record<string, string>>;
+      clean?: boolean;
     }
   >;
   fonts: Record<string, { image: string; data: string; tint: boolean }>;
@@ -185,11 +186,15 @@ class PageKit implements Kit {
     const c = canvas(r.size[0], r.size[1]);
     const ctx = ctx2d(c);
     const a = this.atlases.get(r.atlas);
+    const [w, h] = r.size;
+    const layers: Int32Array[] = [];
     for (const layer of drawOrder(r.layers, look.parts, (l, p) => r.under?.[l]?.[p])) {
       const part = look.parts[layer];
       const f = part && a?.frames[`${rig}/${layer}/${part}/${key}`];
       if (layer === "shadow" || !a || !f) continue;
-      ctx.drawImage(
+      const one = canvas(w, h);
+      const octx = ctx2d(one);
+      octx.drawImage(
         a.img,
         f.frame.x,
         f.frame.y,
@@ -200,7 +205,15 @@ class PageKit implements Kit {
         f.frame.w,
         f.frame.h,
       );
+      layers.push(packRgba(octx.getImageData(0, 0, w, h).data));
     }
+    const outlines = outlineColors(this.meta);
+    const { px: stacked } = stackLayers(layers, w, h, -1, r.clean ?? false, (v) => outlines.has(v));
+    const base = ctx.getImageData(0, 0, w, h);
+    stacked.forEach((v, i) => {
+      if (v >= 0) base.data.set([v >> 16, (v >> 8) & 255, v & 255, 255], i * 4);
+    });
+    ctx.putImageData(base, 0, 0);
     const swap = new Map<number, [number, number, number]>();
     for (const [slot, def] of Object.entries(this.meta.slots)) {
       const option = def.options[look.slots[slot] ?? Object.keys(def.options)[0] ?? ""];
