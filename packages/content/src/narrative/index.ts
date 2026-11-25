@@ -5,7 +5,7 @@
 import { CODEX, CODEX_KO } from "./codex.ts";
 import { CUTSCENES, CUTSCENES_KO } from "./cutscenes.ts";
 import { DUEL_COPY } from "./duel.ts";
-import { EGG_BARKS, EGG_DESCRIPTIONS, EGGS, EGGS_KO } from "./eggs.ts";
+import { EGG_BARKS, EGG_DESCRIPTIONS, EGG_PROPS, EGGS, EGGS_KO } from "./eggs.ts";
 import { HELP_COPY } from "./help.ts";
 import { BARKS, DESCRIPTIONS, HUB_KO } from "./hub.ts";
 import { MEALS_COPY } from "./meals.ts";
@@ -20,6 +20,7 @@ import { SOCIAL_COPY } from "./social-lines.ts";
 import { SPEAKERS, SPEAKERS_KO } from "./speakers.ts";
 import { STUDY_DESCRIPTIONS, STUDY_KO, STUDY_TERMS } from "./study.ts";
 import { ANNOUNCEMENTS, AWARD_FRAME, AWARDS, SYSTEM, SYSTEM_KO } from "./system.ts";
+import { THINGS_COPY } from "./things.ts";
 import { TRADE_COPY } from "./trade.ts";
 
 function merge(...tables: Strings[]): Strings {
@@ -33,7 +34,10 @@ function merge(...tables: Strings[]): Strings {
   return out;
 }
 
-/** Live-world copy (급식, school rules, notices, refusals, social, trade, moderation, duels). */
+/**
+ * Live-world copy (급식, school rules, notices, refusals, social, trade, moderation, duels) and
+ * what the maps' objects say.
+ */
 const COPY: readonly CopyPart[] = [
   MEALS_COPY,
   SCHOOL_LIFE_COPY,
@@ -43,6 +47,7 @@ const COPY: readonly CopyPart[] = [
   TRADE_COPY,
   MODERATION_COPY,
   DUEL_COPY,
+  THINGS_COPY,
 ];
 const parts = <K extends Exclude<keyof CopyPart, "ko">>(k: K) =>
   COPY.flatMap((p) => (p[k] ?? []) as NonNullable<CopyPart[K]>[number][]);
@@ -58,6 +63,7 @@ export const NARRATIVE: Narrative = {
   descriptions: [
     ...DESCRIPTIONS,
     ...EGG_DESCRIPTIONS,
+    ...EGG_PROPS,
     ...STUDY_DESCRIPTIONS,
     ...parts("descriptions"),
   ],
