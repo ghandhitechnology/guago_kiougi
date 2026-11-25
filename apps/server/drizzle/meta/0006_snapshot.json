@@ -1,5 +1,5 @@
 {
-  "id": "1a6f9083-5393-4303-872d-e799e9a014ba",
+  "id": "b7187bd1-c61d-4ba9-8fb7-1bcefffd0c1c",
   "prevId": "81d977bc-0094-4c4f-9ea4-85b53632cd5d",
   "version": "7",
   "dialect": "postgresql",
@@ -1775,13 +1775,6 @@
           "type": "smallint",
           "primaryKey": false,
           "notNull": true
-        },
-        "paid": {
-          "name": "paid",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         }
       },
       "indexes": {},
@@ -2861,63 +2854,6 @@
         "materials_def_check": {
           "name": "materials_def_check",
           "value": "\"materials\".\"def_id\" ~ '^(ink|binding|(sheet|snack):[a-z0-9-]{1,40})$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.merit_daily": {
-      "name": "merit_daily",
-      "schema": "",
-      "columns": {
-        "character_id": {
-          "name": "character_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "day": {
-          "name": "day",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "n": {
-          "name": "n",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "merit_daily_character_id_characters_id_fk": {
-          "name": "merit_daily_character_id_characters_id_fk",
-          "tableFrom": "merit_daily",
-          "tableTo": "characters",
-          "columnsFrom": ["character_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "merit_daily_character_id_day_key_pk": {
-          "name": "merit_daily_character_id_day_key_pk",
-          "columns": ["character_id", "day", "key"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "merit_daily_n_check": {
-          "name": "merit_daily_n_check",
-          "value": "\"merit_daily\".\"n\" >= 0"
         }
       },
       "isRLSEnabled": false

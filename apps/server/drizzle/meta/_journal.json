@@ -47,8 +47,15 @@
     {
       "idx": 6,
       "version": "7",
-      "when": 1795588659670,
-      "tag": "0006_live_review",
+      "when": 1795588282365,
+      "tag": "0006_social_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795589050500,
+      "tag": "0007_live_review",
       "breakpoints": true
     }
   ]

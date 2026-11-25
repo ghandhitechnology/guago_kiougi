@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/main.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "burst": "node src/burst.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"

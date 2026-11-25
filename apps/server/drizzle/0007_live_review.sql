@@ -7,6 +7,7 @@ CREATE TABLE "merit_daily" (
 	CONSTRAINT "merit_daily_n_check" CHECK ("merit_daily"."n" >= 0)
 );
 --> statement-breakpoint
+ALTER TABLE "characters" ADD COLUMN "live_session" text;--> statement-breakpoint
 ALTER TABLE "floor_leaders" ADD COLUMN "paid" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "merit_daily" ADD CONSTRAINT "merit_daily_character_id_characters_id_fk" FOREIGN KEY ("character_id") REFERENCES "public"."characters"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 -- Rows written before the flag existed were paid when they were written.
