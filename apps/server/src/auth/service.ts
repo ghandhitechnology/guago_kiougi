@@ -20,6 +20,7 @@ import {
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { type Db, pgErrorCode } from "../db/index.ts";
 import { accounts, characters, loginFailures, sessions } from "../db/schema.ts";
+import { livePage } from "../live/current.ts";
 import {
   dummyHash,
   HashBusy,
@@ -41,8 +42,6 @@ export const DEFAULT_LIMITS = {
   failuresPerIp: 50,
 };
 export type Limits = typeof DEFAULT_LIMITS;
-/** 기수 for new characters. Becomes the live Page once server state exists (PLAN §10). */
-export const CURRENT_COHORT = 1;
 /** Where a new character first stands. */
 export const START_MAP = LAWN;
 
@@ -332,7 +331,7 @@ export function createAuthService({
               mapId: START_MAP.id,
               x: START_MAP.spawn.x,
               y: START_MAP.spawn.y,
-              cohort: CURRENT_COHORT,
+              cohort: livePage(),
             })
             .returning();
           if (!made) throw new Error("insert returned no character");
