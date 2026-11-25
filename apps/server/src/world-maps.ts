@@ -134,11 +134,12 @@ function placesAt(map: BuiltMap, x: number, y: number): string[] {
 }
 
 /**
- * Who stands where, decided once for the whole hub. A cast member is around when their barks
- * have begun at the current milestone (or they have none, like the cat). Each stands at one spot
- * only: the spot in their home (`CAST_ART`), else in the place their barks name, else the first
- * spot the maps list for them. There they say the lines of that place, plus lines for places
- * not built yet.
+ * Who stands where, decided once for the whole hub. A cast member stands somewhere only with a
+ * body in the cast table (`CAST_ART`; a voice like the school broadcast never does), and only
+ * once their barks have begun at the current milestone (or when they have none, like the cat).
+ * Each stands at one spot: the spot in their home, else in the place their barks name, else the
+ * first spot the maps list for them. There they say the lines of that place and of places not
+ * built yet, or, when none are left, every line they have now.
  */
 function cast(): Map<string, Npc[]> {
   const barks = narrative.NARRATIVE.barks;
@@ -149,7 +150,7 @@ function cast(): Map<string, Npc[]> {
   for (const speaker of new Set(spots.map((s) => s.spot.speaker))) {
     const own = barks.filter((b) => b.speaker === speaker);
     const now = own.filter(current);
-    if (own.length > 0 && now.length === 0) continue;
+    if (!CAST_ART[speaker] || (own.length > 0 && now.length === 0)) continue;
     const mine = spots.filter((s) => s.spot.speaker === speaker);
     const named = new Set(now.flatMap((b) => (b.where ? [b.where] : [])));
     const lives = CAST_ART[speaker]?.home;
@@ -158,9 +159,10 @@ function cast(): Map<string, Npc[]> {
       mine.find((s) => s.places.some((p) => named.has(p))) ??
       mine[0];
     if (!home) continue;
-    const lines = now
-      .filter((b) => !b.where || home.places.includes(b.where) || !builtPlaces.has(b.where))
-      .map((b) => b.text);
+    const here = now.filter(
+      (b) => !b.where || home.places.includes(b.where) || !builtPlaces.has(b.where),
+    );
+    const lines = (here.length > 0 ? here : now).map((b) => b.text);
     out.get(home.map.id)?.push({
       key: String(home.index),
       speaker,

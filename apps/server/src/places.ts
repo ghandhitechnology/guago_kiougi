@@ -28,7 +28,12 @@ class Places {
   enter(characterId: string, place: Place): void {
     const before = this.byCharacter.get(characterId);
     this.byCharacter.set(characterId, place);
-    if (before?.mapId !== place.mapId || before.channel !== place.channel) {
+    // A new map, channel or room instance: friends see where and in which channel.
+    if (
+      before?.mapId !== place.mapId ||
+      before.channel !== place.channel ||
+      before.roomId !== place.roomId
+    ) {
       this.emit(characterId, place.mapId, place.channel);
     }
   }

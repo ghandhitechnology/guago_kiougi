@@ -38,10 +38,12 @@ import {
   TILE_SIZE,
   type Transfer,
   type Usable,
+  wearClub,
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
 import { channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
+import { clubTags } from "./club-tags.ts";
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
@@ -164,6 +166,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   private retireTimer: Delayed | undefined;
   private graceMs = 30_000;
   private ticks!: TickClock;
+  private unlistenClubs: (() => void) | undefined;
 
   /**
    * Map rooms are never matchmade by a client: every seat is reserved by the server for a
@@ -220,6 +223,12 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    // A club joined, left or restyled shows under the name at once.
+    this.unlistenClubs = clubTags.listen((characterId, tag) => {
+      for (const pawn of this.pawns.values()) {
+        if (pawn.character.id === characterId) wearClub(pawn.state, tag);
+      }
+    });
     // Made for a seat that may never be taken.
     this.emptied();
   }
@@ -327,6 +336,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.facing = player.facing;
     state.seq = 0;
     dressPlayer(state, character);
+    wearClub(state, clubTags.get(character.id));
     view.add(state, OWNER_TAG);
     pawn.zones = zonesAt(this.def.zones, player.x, player.y);
     pawn.zoneTile = this.tileOf(player.x, player.y);
@@ -367,6 +377,7 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override onDispose(): void {
     channels.forget(this.roomId);
+    this.unlistenClubs?.();
     this.metrics.dispose();
   }
 
@@ -553,6 +564,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.x = wire(x);
     state.y = wire(y);
     dressPlayer(state, pawn.character);
+    wearClub(state, clubTags.get(pawn.character.id));
     const back: Pawn = { ...pawn, slot, state, leaving: false, queue: new InputQueue() };
     pawn.client.view?.add(state, OWNER_TAG);
     this.pawns.set(id, back);
