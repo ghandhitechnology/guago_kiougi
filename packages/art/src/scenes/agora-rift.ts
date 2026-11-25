@@ -6,8 +6,8 @@ import { type Prop, scene } from "../scene.ts";
  * page. Through the hole it is afternoon in another century: a marble terrace, a tortoise that
  * cannot be caught, columns rising against a gold sky over the sea. That daylight is the only
  * light on the field. It warms the sand near the tear and throws the shadows of the goal and
- * the columns that came up through it away into the dark. 오답 pour out of the hole; one
- * student stands in the light to meet them, and the notebook's pages are pulled in past her.
+ * the columns that came up through it away into the dark. 오답 pour out of the hole, two
+ * students hold the line in the light, and the notebook's pages are pulled in past them.
  */
 
 const RIFT = ["rift-sun", "rift-warm", "rift-ember"];
@@ -128,18 +128,12 @@ export default scene({
     { prop: "olive", at: [398, 128], raw: true },
     { prop: "amphora", at: [282, 140], raw: true },
     { prop: "amphora-tipped", at: [296, 152], raw: true },
-    // The pack coming out of the tear into the light: 오답, a 유리수 병사, the tortoise that
-    // cannot be caught, a fire spirit.
+    // The pack coming out of the tear into the light: 오답 of both kinds, a 유리수 병사, the
+    // tortoise that cannot be caught, a fire and a water spirit. The front of it is already in
+    // the fight; the rest is still spilling over the lip.
     { actor: "odap", anim: "hit", shadow: "shadow-s/blob", at: [268, 222] },
     { actor: "odap", anim: "hop", index: 1, play: true, shadow: "shadow-s/blob", at: [292, 230] },
-    {
-      actor: "odap-pencil",
-      anim: "hop",
-      index: 3,
-      play: true,
-      shadow: "shadow-s/blob",
-      at: [284, 248],
-    },
+    { actor: "odap-pencil", anim: "idle", play: true, shadow: "shadow-s/blob", at: [300, 252] },
     {
       actor: "rational",
       anim: "walk",
@@ -157,12 +151,30 @@ export default scene({
       flip: true,
     },
     { actor: "element-fire", anim: "idle", play: true, shadow: "shadow-s/blob", at: [322, 188] },
-    // Two students holding the line: one mid-swing, one throwing her book.
+    { actor: "odap", anim: "hop", index: 2, play: true, shadow: "shadow-s/blob", at: [314, 166] },
+    { actor: "odap", anim: "idle", index: 3, play: true, shadow: "shadow-s/blob", at: [342, 176] },
+    {
+      actor: "odap-pencil",
+      anim: "hop",
+      play: true,
+      shadow: "shadow-s/blob",
+      at: [292, 184],
+      flip: true,
+    },
+    {
+      actor: "element-water",
+      anim: "move",
+      play: true,
+      shadow: "shadow-s/blob",
+      at: [352, 206],
+      flip: true,
+    },
+    // Two students holding the line: one mid-swing, one throwing a book.
     { rig: "student", look: "club", dir: "side", anim: "attack", index: 1, at: [242, 222] },
     { rig: "student", look: "curls", dir: "side", anim: "attack", index: 2, at: [204, 198] },
-    // What the last hit left behind.
-    { actor: "pickup-page", anim: "flutter", play: true, shadow: "shadow-s/blob", at: [238, 250] },
-    { actor: "pickup-cone", anim: "spin", play: true, shadow: "shadow-s/blob", at: [252, 254] },
+    // What the last one to go down left behind.
+    { actor: "pickup-page", anim: "flutter", play: true, shadow: "shadow-s/blob", at: [250, 252] },
+    { actor: "pickup-cone", anim: "spin", play: true, shadow: "shadow-s/blob", at: [264, 255] },
   ],
   overhead: [
     ...tops(columns),
@@ -183,15 +195,15 @@ export default scene({
     { prop: "fx-slash", anim: "swing", index: 1, at: [260, 214], raw: true },
     { prop: "fx-spark", anim: "hit", index: 1, at: [268, 214], raw: true },
     { prop: "fx-book", anim: "spin", play: true, at: [236, 190], raw: true },
-    { prop: "fx-pop", anim: "die", index: 1, at: [246, 240], raw: true },
-    // Pages of the notebook, pulled in toward the tear: three sizes, tilting and curling, some
-    // still coming in from past the edge of the screen.
+    { prop: "fx-pop", anim: "die", index: 2, at: [257, 246], raw: true },
+    // Pages of the notebook, pulled in toward the tear: three sizes, each tumbling on its own
+    // beat, caught at different points of the way in.
     {
       prop: "page-l",
       anim: "turn",
       play: true,
-      at: [40, 150],
-      drift: { to: [296, 96], period: 9 },
+      at: [30, 140],
+      drift: { to: [300, 100], period: 9, phase: 4.05 },
     },
     {
       prop: "page-m",
@@ -199,46 +211,46 @@ export default scene({
       play: true,
       index: 1,
       at: [-10, 236],
-      drift: { to: [288, 124], period: 11, phase: 2 },
+      drift: { to: [290, 130], period: 11, phase: 3.3 },
     },
     {
       prop: "page-s",
       anim: "turn",
       play: true,
-      index: 2,
-      at: [140, 278],
-      drift: { to: [318, 136], period: 7, phase: 3 },
+      index: 7,
+      at: [40, 280],
+      drift: { to: [290, 140], period: 7, phase: 3.5 },
     },
     {
       prop: "page-m",
       anim: "turn",
       play: true,
-      index: 3,
+      index: 4,
       at: [70, 96],
-      drift: { to: [280, 84], period: 10, phase: 6 },
+      drift: { to: [282, 84], period: 10, phase: 6.0 },
     },
     {
       prop: "page-s",
       anim: "turn",
       play: true,
       at: [-6, 120],
-      drift: { to: [300, 110], period: 12, phase: 1 },
+      drift: { to: [300, 110], period: 12, phase: 3.0 },
     },
     {
       prop: "page-l",
       anim: "turn",
       play: true,
-      index: 2,
-      at: [470, 230],
-      drift: { to: [360, 150], period: 8, phase: 1.5 },
+      index: 6,
+      at: [480, 150],
+      drift: { to: [400, 110], period: 8, phase: 4.0 },
     },
     {
       prop: "page-s",
       anim: "turn",
       play: true,
-      index: 1,
-      at: [478, 120],
-      drift: { to: [400, 104], period: 6, phase: 4 },
+      index: 3,
+      at: [480, 100],
+      drift: { to: [420, 120], period: 6, phase: 2.4 },
     },
     // Scraps of the field lifting off at the lip.
     {
