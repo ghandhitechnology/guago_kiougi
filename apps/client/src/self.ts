@@ -78,7 +78,9 @@ export class SelfMover {
     if (seen && seen.x === s.x && seen.y === s.y && seen.seq === s.seq && seen.facing === s.facing)
       return;
     const before = p.body;
-    if (this.serverDriven) {
+    // The server walks the body, but a roll the player asked for is still theirs to predict:
+    // while one runs, the server's word is reconciled like any other.
+    if (this.serverDriven && !p.rolling) {
       p.reset(body);
       this.follow(before, p.body);
       return;
@@ -125,6 +127,11 @@ export class SelfMover {
 
   get ready(): boolean {
     return this.predictor !== undefined;
+  }
+
+  /** Walking speed, px/s: the server's for this player, slowed as the server slows it. */
+  setSpeed(speed: number): void {
+    if (this.predictor && this.predictor.speed !== speed) this.predictor.speed = speed;
   }
 
   /** Asks for a dodge or a manual cast on the next tick. */
@@ -177,14 +184,18 @@ export class SelfMover {
       // reconnect, on top of a prediction that has started over.
       let input: MoveInput | undefined;
       if (!live) input = undefined;
-      else if (this.serverDriven) {
-        // Only what the player still asks for itself goes out (스킬 수동's dodge).
-        input = this.flags ? p.tick(0, 0, this.takeFlags()) : undefined;
-      } else if (p.rolling || this.flags & InputFlag.Dodge) {
+      else if (p.rolling || this.flags & InputFlag.Dodge) {
+        // A roll carries the body on its own path in every control mode: the lead jumps with
+        // it and the drawing eases. Where the server walks the body, the roll goes its own way.
         // A roll carries the body on its own path: the lead jumps with it and the drawing eases.
         const before = p.body;
-        input = p.tick(mx, my, this.takeFlags());
+        input = this.serverDriven
+          ? p.tick(0, 0, this.takeFlags())
+          : p.tick(mx, my, this.takeFlags());
         this.follow(before, p.body);
+      } else if (this.serverDriven) {
+        // Only what the player still asks for itself goes out (스킬 수동's casts).
+        input = this.flags ? p.tick(0, 0, this.takeFlags()) : undefined;
       } else {
         input = this.nextInput(p, this.lead, mx, my);
       }

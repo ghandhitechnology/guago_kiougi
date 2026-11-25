@@ -96,6 +96,8 @@ export interface FeedbackHooks {
   wears(bookId: string): boolean;
   /** The local player's kill streak passed a mark. */
   streak(mark: number): void;
+  /** The class of the student in a seat, for the sound of their hits. */
+  classOf(slot: number): string;
 }
 
 export class Feedback {
@@ -279,7 +281,7 @@ export class Feedback {
         { heavy: heavy || collision, crit, kill },
         art?.impact ?? "",
         mon?.hitCue ?? "",
-        mon?.dieCue ?? "",
+        mon?.dieCue ?? (b.cat === Cat.Player ? "combat.knockout" : ""),
       );
     }
   }
@@ -414,6 +416,23 @@ export class Feedback {
     this.ctx.numbers.show(-1, x, y - 26, amount, NumberStyle.Hurt);
     this.ctx.particles.burst(Bit.Spark, x, y - 10, 4, cat.color("red.light"), 90, 0);
     const src = this.bodies.get(source);
+    if (src?.cat === Cat.Player) {
+      // A duel: the other student's class lands on the player, heavy, with the hit's own spark.
+      this.ctx.sound.hit(
+        this.hooks.classOf(src.slot) as HitClass,
+        false,
+        src.x,
+        src.y,
+        { heavy: true, crit: false, kill: (flags & HurtFlag.Down) !== 0 },
+        "",
+        "",
+        "",
+      );
+      this.effects.oneShot("fx-hit-heavy", "fx-hit-heavy/hit", x, y - 12, 1);
+      const d = Math.hypot(x - src.x, y - src.y) || 1;
+      this.ctx.trauma.nudge(((x - src.x) / d) * 1.5, ((y - src.y) / d) * 1.5);
+      return;
+    }
     const cue =
       src?.art?.attackCue &&
       flags & (HurtFlag.Charge | HurtFlag.Blast | HurtFlag.Slam | HurtFlag.Shot)
@@ -588,16 +607,16 @@ export class Feedback {
 
   /** Others' hits seen as a flash bit: a quiet sound, rate-limited by the mixer. */
   otherHit(b: Body, cls: string): void {
-    if (b.cat !== Cat.Monster || !b.art) return;
+    if (b.cat === Cat.Minion) return;
     this.ctx.sound.hit(
       cls as "math",
       false,
       b.x,
       b.y,
-      { heavy: false, crit: false, kill: false },
+      { heavy: b.cat === Cat.Player, crit: false, kill: false },
       "",
-      b.art.hitCue,
-      b.art.dieCue,
+      b.art?.hitCue ?? "",
+      b.art?.dieCue ?? "",
     );
     if (this.ctx.restraint.otherSparks > 0 && Math.random() < this.ctx.restraint.otherSparks) {
       this.effects.oneShot(

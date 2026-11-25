@@ -14,6 +14,7 @@ import { BOOKS } from "@guago/content";
 import { API, lookOptions, MAJORS } from "@guago/shared";
 import * as Phaser from "phaser";
 import { setQualityTier, TIERS, type Tier } from "../render/index.ts";
+import { session } from "../world/session.ts";
 import type { FightView } from "./fight-view.ts";
 
 const params = new URLSearchParams(location.search);
@@ -246,5 +247,20 @@ export function installFightDev(world: DevWorld): void {
     measure,
     dev: (cmd: string, a?: unknown, b?: unknown) => world.current()?.room.send("dev", [cmd, a, b]),
     audio,
+    /**
+     * The 콜로세움's requests over the world link, for recordings until the duel panels land:
+     * challenge a player by name (answers with the challenge id), accept a challenge by id.
+     */
+    duel: async (type: "challenge" | "accept", arg: string | number) => {
+      const link = session.link;
+      if (!link) return { ok: false };
+      let req: Record<string, unknown> = { id: arg };
+      if (type === "challenge") {
+        const who = [...link.presence.values()].find((p) => p.name === arg);
+        if (!who) return { ok: false, code: "offline" };
+        req = { id: who.id };
+      }
+      return link.request(`duel.${type}` as never, req as never);
+    },
   };
 }

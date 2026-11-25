@@ -21,6 +21,8 @@ const FADE_MS = 160;
 const RISE = 105;
 const SIDE = 22;
 const GRAVITY = 300;
+/** A number starting on another starts this much higher, px: a line of the small font. */
+const LINE = 9;
 /** The player's own body, around their feet: no number is drawn over it. */
 const BODY_HALF_W = 9;
 const BODY_TOP = 28;
@@ -205,10 +207,31 @@ export class DamageNumbers {
       side = this.side;
     }
     n.x = x;
-    n.y = y;
+    n.y = this.clear(n, x, y);
     n.total = 0;
     n.vx = side * SIDE * (0.6 + Math.random() * 0.8) * (big(n.style) ? 0.5 : 1);
     n.vy = -RISE * (0.9 + Math.random() * 0.2) * (big(n.style) ? 1.1 : 1);
+  }
+
+  /**
+   * The height a new number at (x, y) can start at without covering one already up there: it
+   * starts a line above, so numbers landing on one spot read as a short column, never a smudge.
+   */
+  private clear(n: Num, x: number, y: number): number {
+    const w = n.text.width;
+    for (let tries = 0; tries < 4; tries++) {
+      let moved = false;
+      for (const p of this.pool) {
+        if (!p.alive || p === n) continue;
+        const px = p.text.x;
+        const py = p.text.y;
+        if (Math.abs(px - x) * 2 >= w + p.text.width || Math.abs(py - y) >= LINE) continue;
+        y = py - LINE;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    return y;
   }
 
   /** Lets the oldest ordinary hit go early when too many are up. */

@@ -26,6 +26,7 @@ import {
   castFlag,
   DODGE,
   expToNext,
+  type FloorView,
   InputFlag,
   KNOCKOUT,
   MAX_AIM,
@@ -278,6 +279,7 @@ export class FightView {
       impact: (a, x, y) => this.feedback.impact(a, x, y),
       burst: (kind, x, y, r, owner) => this.feedback.burst(kind, x, y, r, owner),
       fired: (a) => this.feedback.fired(a),
+      fighter: (id) => this.isFighter(id),
     });
     this.pickups = new Pickups(this.ctx, this.effects.pieces);
     this.overlays = new Overlays(this.ctx);
@@ -288,6 +290,7 @@ export class FightView {
       elite: (b, x, y) => this.eliteArrived(b, x, y),
       wears: (bookId) => this.ownBooks.includes(this.cat.rules.books.indexOf(bookId)),
       streak: (mark) => this.streakMark(mark),
+      classOf: (slot) => this.room.state?.players.get(String(slot))?.major || "math",
     });
     this.own = undefined;
     this.bodies.crowd = (options.field ?? true) || (options.floors ?? false);
@@ -341,7 +344,8 @@ export class FightView {
     };
     this.aimSink = sinkControls;
     this.keys = controls ? new FightKeys(sinkControls) : null;
-    this.aim = controls && field ? new MouseAim(scene) : null;
+    // The mouse aims wherever a fight can happen: a field, or a floor for duels.
+    this.aim = controls && (field || (options.floors ?? false)) ? new MouseAim(scene) : null;
     this.reticle = this.aim
       ? scene.add.image(0, 0, "ui", "reticle/idle").setDepth(DEPTH_RETICLE).setVisible(false)
       : null;
@@ -470,7 +474,8 @@ export class FightView {
       for (const m of this.reader.members.values()) {
         if (!m.flash || this.feedback.mineThisMessage.has(m.id)) continue;
         const b = this.bodies.get(m.id);
-        if (!b || b.cat !== Cat.Monster) continue;
+        if (!b || (b.cat !== Cat.Monster && !(this.duelOn && b.cat === Cat.Player && !b.self)))
+          continue;
         if (Math.abs(b.x - this.ctx.selfX) > 300 || Math.abs(b.y - this.ctx.selfY) > 200) continue;
         this.feedback.otherHit(b, this.nearestClass(b.x, b.y));
         this.otherSoundAt = now;
@@ -590,6 +595,7 @@ export class FightView {
   }
 
   private dodge(): void {
+    if (this.held) return;
     if (MODE_AUTO[this.state.mode as 0]?.dodge) return;
     if (!this.canRoll()) return;
     this.options.mover?.queue(InputFlag.Dodge);
@@ -613,7 +619,7 @@ export class FightView {
   private cast(slot: number): void {
     this.state.picked = slot;
     if (this.keys) this.keys.picked = slot;
-    if (!this.own || this.own.down > 0 || slot >= this.ownBooks.length) return;
+    if (!this.own || this.own.down > 0 || slot >= this.ownBooks.length || this.held) return;
     if (MODE_AUTO[this.state.mode as 0]?.books) return;
     if (!this.bookReady(slot)) {
       this.ctx.sound.self("ui.error");
@@ -1192,6 +1198,54 @@ export class FightView {
   /** The local player's party by name; they stand out of the crowd. */
   setAllies(names: ReadonlySet<string>): void {
     this.allies = names;
+  }
+
+  /**
+   * The duel floor's state from the map room (`FloorView`): its fighters stand out of the crowd
+   * and their effects are drawn at full strength; on a floor, hits on players land with the
+   * whole hit feel.
+   */
+  setFloor(v: FloorView | null): void {
+    const sids = new Set<string>();
+    if (v && v.match !== 0) for (const f of v.fighters) if (f.sid) sids.add(f.sid);
+    this.fighters = sids;
+    this.duelOn = sids.size > 0;
+    this.bodies.duel = this.duelOn;
+    this.rankStudents();
+  }
+
+  /** A match on this map's floor holds the fighters still (countdown, pause, result). */
+  setHeld(held: boolean): void {
+    this.held = held;
+  }
+
+  private duelOn = false;
+  private held = false;
+
+  /** The local player's slot, or -1 before it is known. */
+  get selfSlot(): number {
+    return this.ctx.selfSlot;
+  }
+
+  /** The share of walking speed the local player's statuses take away (a duel's slows), 0 to 1. */
+  selfSlow(): number {
+    const self = this.bodies.self;
+    if (!self || self.status === 0) return 0;
+    let slow = 0;
+    const st = this.cat.rules.statuses;
+    for (let i = 0; i < st.length; i++) {
+      if ((self.status & (1 << i)) === 0) continue;
+      const v = (st[i] as { slow: number }).slow;
+      if (v > slow) slow = v;
+    }
+    return Math.max(0, Math.min(1, slow));
+  }
+
+  /** Whether the entity is a fighter on this map's duel floor. */
+  private isFighter(entity: number): boolean {
+    if (!this.duelOn) return false;
+    const b = this.bodies.get(entity);
+    return b !== undefined && b.cat === Cat.Player && (b.rank === Rank.Fighter || b.self);
   }
 
   /** Who each student is to the local player: self, party, the other side of a duel, or crowd. */

@@ -186,6 +186,8 @@ export class Bodies {
   self: Body | null = null;
   /** In a fight (a field or a duel floor) the crowd steps back; in town everyone looks alike. */
   crowd = false;
+  /** A match is on this map's floor: students can be hit, and their flash shows. */
+  duel = false;
   monsters = 0;
   players = 0;
 
@@ -400,7 +402,7 @@ export class Bodies {
       if (m.state !== b.state) this.stateChanged(b, m.state);
       if (m.hp !== b.hp) b.hp = m.hp;
       if (m.status !== b.status) b.status = m.status;
-      if (m.flash && b.flash <= 0 && b.cat === Cat.Monster) {
+      if (m.flash && b.flash <= 0 && (b.cat === Cat.Monster || (this.duel && !b.self))) {
         // Someone hit it; the local player's own hits upgrade this when their record arrives.
         b.flash = 2;
         b.flashMode = 1;

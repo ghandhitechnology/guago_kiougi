@@ -4,9 +4,12 @@ import { type BuiltMap, narrative, snapshotReaderForMap } from "@guago/content";
 import {
   type Caught,
   type DoorRattle,
+  DUEL_MESSAGES,
   distanceToArea,
   encodeInput,
   type Facing,
+  type FloorView,
+  fenceFloor,
   type Halt,
   INPUT_MESSAGE,
   type Interaction,
@@ -16,6 +19,7 @@ import {
   NULL_SINK,
   nearestUsable,
   PLAYER_RADIUS,
+  PLAYER_SPEED,
   POS_SCALE,
   portalAt,
   reachTo,
@@ -111,6 +115,10 @@ interface Here {
   readonly walls: { collision: BuiltMap["collision"] };
   /** Doors the Page clock keeps shut, as the server last said. */
   closed: ReadonlySet<string>;
+  /** Dueling floors with a match on, walled round (`MapState.fenced`), as the server last said. */
+  fenced: string;
+  /** The floor's state from the room's `duel` message, while this map has one. */
+  floor: FloorView | null;
   /** Every body of the room's fight, drawn from its snapshots, the player's own included. */
   readonly fight: FightView;
   readonly unbindHud: () => void;
@@ -248,6 +256,7 @@ export class WorldScene extends Phaser.Scene {
   private arrive(seat: MapSeat): () => void {
     const { room, seating } = seat;
     this.room = room;
+    this.floorView = null;
     this.live = true;
     // A door is a new room: a new reader, sized for its map, which reads every snapshot from the
     // first, in order.
@@ -281,6 +290,11 @@ export class WorldScene extends Phaser.Scene {
     });
     room.onMessage(MAP_MESSAGES.halt, (m: Halt) => {
       if (this.room === room) this.here?.patrols?.halt(m.patrol);
+    });
+    room.onMessage(DUEL_MESSAGES.floor, (v: FloorView) => {
+      if (this.room !== room) return;
+      this.floorView = v;
+      if (this.here?.room === room) this.onFloor(v);
     });
     room.onDrop(() => {
       if (this.room === room) this.live = false;
@@ -415,10 +429,13 @@ export class WorldScene extends Phaser.Scene {
       untier,
       walls,
       closed,
+      fenced: "",
+      floor: null,
       patrols,
       fight,
       unbindHud,
     };
+    if (this.floorView) this.onFloor(this.floorView);
     this.selfInside = portalAt(map.portals, x, y);
     this.doorAt = undefined;
     this.roomZone = map.zones.find((z) => z.kind === "room" && this.zones.includes(z.id))?.id;
@@ -559,11 +576,42 @@ export class WorldScene extends Phaser.Scene {
     }
     if (!this.here) return;
     for (const [key, n] of state.npcs) this.here.npcs.get(key)?.face(n.facing);
-    if ([...state.closed].join() !== [...this.here.closed].join()) {
+    const fenced = [...state.fenced].join();
+    if ([...state.closed].join() !== [...this.here.closed].join() || fenced !== this.here.fenced) {
       const closed = new Set(state.closed);
       this.here.closed = closed;
-      this.here.walls.collision = wallsOf(this.here.map, closed).collision;
+      this.here.fenced = fenced;
+      // A floor with a match on is walled round; the prediction walks the same walls.
+      let collision = wallsOf(this.here.map, closed).collision;
+      for (const id of state.fenced) {
+        const arena = this.here.map.arenas.find((a) => a.id === id);
+        if (arena) collision = fenceFloor(collision, arena.rect);
+      }
+      this.here.walls.collision = collision;
     }
+  }
+
+  /** The floor's state as the room last told everyone in it. */
+  private floorView: FloorView | null = null;
+
+  /** A duel floor changed: who fights there, and whether the fighters are held still. */
+  private onFloor(v: FloorView): void {
+    const here = this.here;
+    if (!here) return;
+    here.floor = v;
+    here.fight.setFloor(v);
+  }
+
+  /**
+   * The player is fighting on a floor whose match holds everyone still: the countdown, a pause
+   * between rounds, the result. Prediction stands until the fight is on.
+   */
+  private heldByFloor(): boolean {
+    const v = this.here?.floor;
+    const sid = this.room?.sessionId;
+    if (!v || !sid || v.match === 0) return false;
+    if (!v.fighters.some((f) => f.sid === sid && !f.out)) return false;
+    return v.phase === "countdown" || v.phase === "pause" || v.phase === "over";
   }
 
   /**
@@ -739,8 +787,15 @@ export class WorldScene extends Phaser.Scene {
     this.lastTime = time;
     const here = this.here;
 
+    const held = this.heldByFloor();
+    here?.fight.setHeld(held);
+    if (this.self && here) {
+      // The server's walking speed, slowed as the server slows it on a duel floor.
+      const own = here.room.state.players.get(String(here.fight.selfSlot))?.speed || PLAYER_SPEED;
+      this.self.setSpeed(own * (1 - here.fight.selfSlow()));
+    }
     const move = (): [number, number] => {
-      this.lastMove = this.holding ? [0, 0] : sampleMove(this.keys);
+      this.lastMove = this.holding || held ? [0, 0] : sampleMove(this.keys);
       return this.lastMove;
     };
     // Held keys go quiet at a door, but the inputs that bring the server's body up to the drawn

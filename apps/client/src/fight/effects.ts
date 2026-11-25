@@ -268,6 +268,8 @@ export interface EffectHooks {
   burst(kind: number, x: number, y: number, radius: number, owner: number): void;
   /** A tell fired. */
   fired(a: Active): void;
+  /** Whether an entity fights on this map's duel floor: its effects are never dimmed. */
+  fighter(id: number): boolean;
 }
 
 const tmp = { x: 0, y: 0 };
@@ -434,8 +436,10 @@ export class Effects {
       this.hooks.burst(f.def, f.x, f.y, f.radius, f.owner);
       return;
     }
+    // The other side of a duel is drawn as fully as the player's own: it is the fight.
+    const fighter = !own && !enemy && this.hooks.fighter(f.owner);
     // Other players' fireworks are capped; a dropped one is only not drawn.
-    if (!own && !enemy && this.others >= this.ctx.restraint.otherEffects) return;
+    if (!own && !enemy && !fighter && this.others >= this.ctx.restraint.otherEffects) return;
     let a: Active | undefined;
     if (own) a = this.adopt(f);
     const fresh = !a;
@@ -484,7 +488,7 @@ export class Effects {
     if (!enemy && !evolved && f.kind === FxKind.Wave && this.ctx.cat.book(book).kind !== "wave")
       evolved = true;
     a.art = enemy ? null : this.ctx.cat.book(book, evolved);
-    a.alpha = own || enemy ? 1 : this.ctx.restraint.others;
+    a.alpha = own || enemy || fighter ? 1 : this.ctx.restraint.others;
     if (a.predicted) {
       // The swing already on screen keeps going; the server's path takes over smoothly.
       a.predicted = false;
