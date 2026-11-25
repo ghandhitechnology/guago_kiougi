@@ -246,4 +246,19 @@ export const ko = {
 
   "trade.confirm": "확정",
   "trade.put": "올리기",
+
+  "market.tab": "매점",
+  "market.browse": "사기",
+  "market.mine": "내 물건",
+  "market.sell": "팔기",
+  "market.all": "전체",
+  "market.cheap": "싼 순",
+  "market.dear": "비싼 순",
+  "market.buy": "사기",
+  "market.cancel": "내리기",
+  "market.list": "붙이기",
+  "market.price": "개당 가격",
+  "market.state.sold": "팔림",
+  "market.state.cancelled": "내림",
+  "market.state.expired": "기한 끝",
 } as const;

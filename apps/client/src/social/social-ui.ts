@@ -12,6 +12,7 @@ import { Board } from "./board.ts";
 import { type CardTarget, PlayerCard } from "./card.ts";
 import { clubTab } from "./club.ts";
 import { friendsTab } from "./friends.ts";
+import { marketTab } from "./market.ts";
 import { watchModeration } from "./moderation.ts";
 import { watchNews } from "./news.ts";
 import { PartyFrames } from "./party-frames.ts";
@@ -153,6 +154,7 @@ function registerSocialTabs(): void {
     friendsTab(() => current?.link, { whisper: (name) => current?.whisper(name), card }),
   );
   registerMenuTab(clubTab(() => current?.link, { card }));
+  registerMenuTab(marketTab(() => current?.link));
   registerMenuTab({
     id: "board",
     label: t("board.title"),
