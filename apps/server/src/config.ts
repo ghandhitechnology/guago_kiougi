@@ -1,4 +1,4 @@
-import { SERVER_PORT } from "@guago/shared";
+import { CLOCK_MAX_RATE, SERVER_PORT } from "@guago/shared";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -15,6 +15,12 @@ function positiveInt(value: string | undefined, fallback: number, name: string):
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
   return n;
+}
+
+function clockRate(value: string | undefined): number {
+  const rate = positiveInt(value, 1, "LIVE_CLOCK_RATE");
+  if (rate > CLOCK_MAX_RATE) throw new Error(`LIVE_CLOCK_RATE must be at most ${CLOCK_MAX_RATE}`);
+  return rate;
 }
 
 /** Server settings from the environment; `.env.example` lists each with its default. */
@@ -40,7 +46,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     /** PLAN §12: 3. A dormitory behind one address may need more. */
     signupsPerIpPerDay: positiveInt(env.SIGNUPS_PER_IP_PER_DAY, 3, "SIGNUPS_PER_IP_PER_DAY"),
     /** Server clock rate on a fresh database (PLAN §25 M4: a time-compressed test server). */
-    liveClockRate: positiveInt(env.LIVE_CLOCK_RATE, 1, "LIVE_CLOCK_RATE"),
+    liveClockRate: clockRate(env.LIVE_CLOCK_RATE),
     /** Lets `POST /admin/live` inject combat and navigation events and restart the Page. */
     liveTestEvents: env.LIVE_TEST_EVENTS === "1",
   };

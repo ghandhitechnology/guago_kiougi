@@ -33,8 +33,24 @@ export function reanchor(
   change: { stepMs?: number; rate?: number },
 ): ClockAnchor {
   const rate = change.rate ?? anchor.rate;
-  if (!(rate > 0 && rate <= CLOCK_MAX_RATE)) throw new Error(`clock rate ${rate} out of range`);
-  return { realMs, gameMs: clockAt(anchor, realMs) + Math.max(0, change.stepMs ?? 0), rate };
+  const step = change.stepMs ?? 0;
+  if (!(step >= 0 && step <= CLOCK_MAX_STEP_MS)) throw new Error(`clock step ${step} out of range`);
+  return checkAnchor({ realMs, gameMs: clockAt(anchor, realMs) + step, rate });
+}
+
+/** One step moves the clock at most a Theme: twelve Pages of thirteen weeks. */
+export const CLOCK_MAX_STEP_MS = 156 * 7 * 24 * 3600 * 1000;
+/** Game time stays a valid `Date` with room to spare (year 10,000). */
+const CLOCK_MAX_MS = 253_402_300_800_000;
+
+/** The anchor, if it can run a clock: finite, a rate in range, game time a valid date. */
+export function checkAnchor(a: ClockAnchor): ClockAnchor {
+  if (!(a.rate > 0 && a.rate <= CLOCK_MAX_RATE))
+    throw new Error(`clock rate ${a.rate} out of range`);
+  if (!Number.isFinite(a.realMs) || !(a.gameMs >= 0 && a.gameMs < CLOCK_MAX_MS)) {
+    throw new Error(`clock anchor ${JSON.stringify(a)} out of range`);
+  }
+  return a;
 }
 
 export const SECOND_MS = 1000;
