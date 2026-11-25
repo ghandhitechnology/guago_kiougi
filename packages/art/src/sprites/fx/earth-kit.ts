@@ -96,16 +96,19 @@ const cloudSprite = sprite({
   },
 });
 
-/** Rain under the cloud: slanting streaks over a radius-40 patch and the rings they leave. */
+/**
+ * Rain under the cloud: slanting streaks over a radius-40 patch and the splashes they leave.
+ * Every streak and splash has a slate edge on its right, so pale rain holds on sunlit dirt.
+ */
 export function rain(rx: number, k: number): Pic {
   const ry = rx * 0.5;
-  const w = Math.ceil(rx * 2 + 4);
+  const w = Math.ceil(rx * 2 + 6);
   const h = Math.ceil(ry * 2 + 24);
   const cx = w / 2;
   const cy = h - ry - 2;
   const pic = Pic.blank(w, h);
   const r = rng(Math.round(rx));
-  const drops = Math.round(rx * 0.6);
+  const drops = Math.round(rx * 0.75);
   for (let i = 0; i < drops; i++) {
     const a = r() * Math.PI * 2;
     const d = Math.sqrt(r());
@@ -113,18 +116,24 @@ export function rain(rx: number, k: number): Pic {
     const gy = cy + Math.sin(a) * ry * d;
     const fall = ((r() * 24 + k * 8) % 24) | 0;
     const top = gy - 22 + fall;
-    if (fall < 18) line(pic, gx + 3, top, gx, top + 4, i % 3 ? "v" : "w");
-    else put(pic, "v.v", gx - 1, gy);
+    if (fall < 18) {
+      line(pic, gx + 3, top, gx, top + 4, "v");
+      put(pic, "w", gx + 3, top);
+    } else put(pic, "w.w", gx - 1, gy);
   }
-  return clean(pic, `${EARTH_LONE}vw`);
+  const out = pic.clone();
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      if (out.at(x, y) === "." && "vw".includes(pic.at(x - 1, y) ?? ".")) out.set(x, y, "n");
+  return clean(out, `${EARTH_LONE}vwn`);
 }
 
 const rainArea = sprite({
   ...fx,
   name: "fx-rain",
-  lone: `${EARTH_LONE}vw`,
-  size: [84, 64],
-  origin: [42, 42],
+  lone: `${EARTH_LONE}vwn`,
+  size: [86, 64],
+  origin: [43, 42],
   frames: framesOf(
     "r",
     [0, 1, 2].map((k) => rain(40, k)),
@@ -134,61 +143,85 @@ const rainArea = sprite({
 
 /**
  * The strike the storm saves up: a gold bolt straight down from the cloud base to the ground,
- * a flash where it lands, then the afterimage. Drawn tall; the client scales it in y only.
+ * a flash where it lands, then the afterimage. A two-pixel white core, pale and gold either
+ * side, two forks, and an umber edge outside it all: drawn on normal blend, so the edge darkens
+ * sunlit dirt and the strike reads there as well as on grass at night.
  */
 function thunder(k: number): Pic {
   const w = 24;
   const h = 64;
+  const cx = 12;
   const pic = Pic.blank(w, h);
   if (k === 2) {
     put(
       pic,
-      paintAt(w, h, (x, y) =>
-        ell(x, y, 12, 60, 9, 3) < 1 && ell(x, y, 12, 60, 7, 2) > 1 ? "l" : null,
-      ),
+      paintAt(w, h, (x, y) => {
+        const e = ell(x, y, cx, 60, 10, 3.4);
+        return e < 1 && e > 0.62 ? (e > 0.86 ? "o" : "l") : null;
+      }),
       0,
       0,
     );
     return clean(pic, EARTH_LONE);
   }
   const r = rng(11 + k);
-  const pts: [number, number][] = [[12, 0]];
-  for (let y = 6; y < 58; y += 6) pts.push([12 + Math.round((r() - 0.5) * 8), y]);
-  pts.push([12, 60]);
-  path(pic, pts, k === 0 ? "W" : "p");
+  const pts: [number, number][] = [[cx, 0]];
+  for (let y = 6; y < 58; y += 6) pts.push([cx + Math.round((r() - 0.5) * 7), y]);
+  pts.push([cx, 60]);
+  const core = k === 0 ? "W" : "p";
+  path(pic, pts, core);
   path(
     pic,
     pts.map(([x, y]) => [x + 1, y] as [number, number]),
-    k === 0 ? "p" : "l",
+    core,
     false,
     ".",
   );
-  // A gold glow either side, and an umber edge outside it so the strike holds on bright dirt.
-  const glow = pic.clone();
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      if (pic.at(x, y) !== ".") continue;
-      if (pic.at(x - 1, y) !== "." || pic.at(x + 1, y) !== ".") glow.set(x, y, k === 0 ? "l" : "m");
-    }
-  const edged = glow.clone();
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      if (glow.at(x, y) !== ".") continue;
-      if (glow.at(x - 1, y) !== "." || glow.at(x + 1, y) !== ".") edged.set(x, y, "o");
-    }
+  // Two forks off the bolt, a pixel wide.
+  for (const [i, dir] of [
+    [3, -1],
+    [6, 1],
+  ] as const) {
+    const [x, y] = pts[i] as [number, number];
+    path(
+      pic,
+      [
+        [x, y],
+        [x + dir * 3, y + 3],
+        [x + dir * 4, y + 7],
+      ],
+      k === 0 ? "p" : "l",
+      false,
+      ".",
+    );
+  }
+  const ring = (src: Pic, ch: string): Pic => {
+    const out = src.clone();
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        if (src.at(x, y) !== ".") continue;
+        if ((src.at(x - 1, y) ?? ".") !== "." || (src.at(x + 1, y) ?? ".") !== ".") out.set(x, y, ch);
+      }
+    return out;
+  };
+  let out = ring(pic, k === 0 ? "p" : "l");
+  out = ring(out, k === 0 ? "l" : "m");
+  out = ring(out, "o");
   put(
-    glow,
-    paintAt(w, h, (x, y) => (ell(x, y, 12, 60, 7, 2.5) < 1 ? (k === 0 ? "W" : "p") : null)),
+    out,
+    paintAt(w, h, (x, y) => {
+      const e = ell(x, y, cx + 0.5, 60, 8, 3);
+      return e < 1 ? (e < 0.55 ? (k === 0 ? "W" : "p") : e < 0.85 ? "l" : "o") : null;
+    }),
     0,
     0,
   );
-  return clean(glow, EARTH_LONE);
+  return clean(out, EARTH_LONE);
 }
 
 const thunderSprite = sprite({
   ...fx,
   name: "fx-thunder",
-  blend: "add",
   size: [24, 64],
   origin: [12, 60],
   frames: framesOf("t", [0, 1, 2].map(thunder)),
@@ -199,26 +232,30 @@ const thunderSprite = sprite({
 
 /**
  * 예보 for a circle: an amber survey ring on the ground with a crosshair, its dashes closing up
- * and its ticks lengthening as the strike nears, then a solid white ring that says now. Drawn at
- * radius 32; the client scales it (in whole pixels) to the mark's radius.
+ * and its ticks lengthening as the strike nears, then a solid white ring that says now. A
+ * two-pixel trace over an umber rim and an umber shadow under every lit pixel, so even the first
+ * stage holds on sunlit dirt. Drawn per radius (24, 32, 40, 48); the client picks the nearest.
  */
-function forecastRing(k: number): Pic {
-  const w = 72;
-  const h = 40;
+function forecastRing(r: number, k: number): Pic {
+  const w = 104;
+  const h = 56;
   const cx = w / 2;
   const cy = h / 2;
-  const rx = 32;
-  const ry = 16;
-  const gaps = [0.5, 0.35, 0.2, 0.08, 0][k] as number;
+  const rx = r;
+  const ry = r / 2;
+  const gaps = [0.4, 0.28, 0.16, 0.06, 0][k] as number;
+  const dashes = Math.round(r / 2);
   const pic = paintAt(w, h, (x, y) => {
     const e = (ell(x, y, cx, cy, rx, ry) - 1) * ry;
-    if (e > 0.6 || e < (k >= 2 ? -1.6 : -0.6)) return null;
+    if (e > 0.8 || e < -1.6) return null;
     const a = (Math.atan2(y - cy, (x - cx) * 0.5) + Math.PI) / (Math.PI * 2);
-    if ((a * 16) % 1 < gaps) return null;
-    if (k === 4) return e > -0.4 ? "o" : "W";
-    return e > 0 ? "o" : k >= 2 ? "l" : "m";
+    if ((a * dashes) % 1 < gaps) return null;
+    if (k === 4) return e > -0.2 ? "o" : "W";
+    if (e > 0) return "o";
+    if (k >= 2) return e > -0.8 ? "l" : "m";
+    return e > -0.8 ? "m" : "d";
   });
-  const tick = [2, 3, 4, 5, 5][k] as number;
+  const tick = [3, 4, 5, 6, 6][k] as number;
   for (const [dx, dy] of [
     [1, 0],
     [-1, 0],
@@ -227,23 +264,48 @@ function forecastRing(k: number): Pic {
   ] as const) {
     const ex = cx + dx * rx;
     const ey = cy + dy * ry;
-    line(pic, ex - dx * tick, ey - dy * Math.ceil(tick / 2), ex + dx, ey + dy, k === 4 ? "W" : "d");
+    const ch = k === 4 ? "W" : k >= 2 ? "l" : "d";
+    line(pic, ex - dx * tick, ey - dy * Math.ceil(tick / 2), ex + dx, ey + dy, ch);
+    line(pic, ex - dx * tick + dy, ey - dy * Math.ceil(tick / 2) + dx, ex + dx + dy, ey + dy + dx, ch);
   }
-  line(pic, cx - 3, cy, cx + 3, cy, k >= 3 ? "l" : "m");
-  line(pic, cx, cy - 2, cx, cy + 2, k >= 3 ? "l" : "m");
-  return clean(pic, EARTH_LONE);
+  const cross = k >= 3 ? "l" : "m";
+  line(pic, cx - 4, cy, cx + 3, cy, cross);
+  line(pic, cx, cy - 2, cx, cy + 2, cross);
+  const out = pic.clone();
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      if (out.at(x, y) === "." && "mlWpd".includes(pic.at(x, y - 1) ?? ".")) out.set(x, y, "o");
+  return clean(out, EARTH_LONE);
 }
+
+export const RING_R = [24, 32, 40, 48] as const;
 
 const forecastRingSprite = sprite({
   ...fx,
   name: "fx-forecast-ring",
-  size: [72, 40],
-  origin: [36, 20],
-  frames: framesOf("f", [0, 1, 2, 3, 4].map(forecastRing)),
-  anim: {
-    warn: { frames: names("f", 4), fps: 2, loop: false, jump: 1 },
-    break: { frames: ["f4", "f3", "f4"], fps: 12, jump: 1 },
-  },
+  size: [104, 56],
+  origin: [52, 28],
+  frames: Object.fromEntries(
+    RING_R.flatMap((r) =>
+      [0, 1, 2, 3, 4].map((k) => [`r${r}-${k}`, forecastRing(r, k).toString()]),
+    ),
+  ),
+  anim: Object.fromEntries(
+    RING_R.flatMap((r) => {
+      const warn = { frames: names(`r${r}-`, 4), fps: 2, loop: false, jump: 1 };
+      const brk = { frames: [`r${r}-4`, `r${r}-3`, `r${r}-4`], fps: 12, jump: 1 };
+      return [
+        [`warn${r}`, warn],
+        [`break${r}`, brk],
+        ...(r === 32
+          ? [
+              ["warn", warn],
+              ["break", brk],
+            ]
+          : []),
+      ];
+    }),
+  ),
 });
 
 // 천체 관측 일지 ------------------------------------------------------------------------------
@@ -385,7 +447,8 @@ const craterSprite = sprite({
 
 /**
  * The tide as a ring on the ground: an amber band of sunset water with white foam on its leading
- * edge, outward on the way out and inward on the way back. One frame per radius.
+ * edge and spray thrown ahead of it, outward on the way out and inward on the way back, and the
+ * ground it has passed left dark and wet behind it, thinning out. One frame per radius.
  */
 export function tide(r: number, outward: boolean, canvas: number): Pic {
   const w = canvas;
@@ -394,14 +457,21 @@ export function tide(r: number, outward: boolean, canvas: number): Pic {
   const cy = h / 2;
   const ry = r * 0.5;
   return clean(
-    paintAt(w, h, (x, y) => {
+    paintAt(w, h, (x, y, px, py) => {
       const e = (ell(x, y, cx, cy, r, ry) - 1) * ry;
-      if (e > 1 || e < -4) return null;
       const lead = outward ? e : -4 - e;
+      if (lead > 3.4 || lead < -9) return null;
+      if (lead > 1) {
+        // Spray: broken pairs of foam thrown ahead.
+        const blob = (Math.floor(px / 2) * 7 + py * 13 + r * 3) % 9;
+        return blob < (lead < 2.2 ? 3 : 1) ? (blob === 0 ? "W" : "w") : null;
+      }
       if (lead > 0) return "W";
       if (lead > -1) return "w";
       if (lead > -2.4) return (x + y * 3) % 7 === 0 ? "w" : y < cy ? "l" : "m";
-      return "d";
+      if (lead > -4) return "d";
+      if (lead > -5.6) return "o";
+      return (Math.floor(px / 2) + py) % 2 === 0 ? "d" : null;
     }),
     EARTH_LONE,
   );
@@ -411,11 +481,11 @@ const TIDE_R = [24, 36, 48, 60, 72, 84, 96];
 const tideSprite = sprite({
   ...fx,
   name: "atk-tide",
-  size: [200, 104],
-  origin: [100, 52],
+  size: [216, 112],
+  origin: [108, 56],
   frames: {
-    ...Object.fromEntries(TIDE_R.map((r) => [`out${r}`, tide(r, true, 200).toString()])),
-    ...Object.fromEntries(TIDE_R.map((r) => [`in${r}`, tide(r, false, 200).toString()])),
+    ...Object.fromEntries(TIDE_R.map((r) => [`out${r}`, tide(r, true, 216).toString()])),
+    ...Object.fromEntries(TIDE_R.map((r) => [`in${r}`, tide(r, false, 216).toString()])),
   },
   anim: {
     out: { frames: TIDE_R.map((r) => `out${r}`), fps: 14, loop: false, jump: 1 },
