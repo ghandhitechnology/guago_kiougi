@@ -89,10 +89,20 @@ export interface AuthServiceOptions {
   db: Db;
   /** Called after an account's sessions are replaced or revoked, to close its live seat. */
   onSessionsRevoked?: (accountId: string) => void | Promise<void>;
+  /**
+   * Called inside the transaction that makes a character, so what it gives (the starter kit)
+   * exists exactly when the character does.
+   */
+  onCharacterCreated?: (tx: Pick<Db, "execute">, characterId: string) => Promise<void>;
   limits?: Partial<Limits>;
 }
 
-export function createAuthService({ db, onSessionsRevoked, limits }: AuthServiceOptions) {
+export function createAuthService({
+  db,
+  onSessionsRevoked,
+  onCharacterCreated,
+  limits,
+}: AuthServiceOptions) {
   const limit: Limits = { ...DEFAULT_LIMITS, ...limits };
   const windowStart = sql`now() - make_interval(mins => ${LOGIN_WINDOW_MINUTES})`;
 
@@ -311,20 +321,24 @@ export function createAuthService({ db, onSessionsRevoked, limits }: AuthService
     ): Promise<Result<Character>> {
       if (isBannedName(req.name)) return fail("name_banned");
       try {
-        const [row] = await db
-          .insert(characters)
-          .values({
-            accountId,
-            name: req.name,
-            major: req.major,
-            look: req.look,
-            mapId: START_MAP.id,
-            x: START_MAP.spawn.x,
-            y: START_MAP.spawn.y,
-            cohort: CURRENT_COHORT,
-          })
-          .returning();
-        if (!row) throw new Error("insert returned no character");
+        const row = await db.transaction(async (tx) => {
+          const [made] = await tx
+            .insert(characters)
+            .values({
+              accountId,
+              name: req.name,
+              major: req.major,
+              look: req.look,
+              mapId: START_MAP.id,
+              x: START_MAP.spawn.x,
+              y: START_MAP.spawn.y,
+              cohort: CURRENT_COHORT,
+            })
+            .returning();
+          if (!made) throw new Error("insert returned no character");
+          await onCharacterCreated?.(tx, made.id);
+          return made;
+        });
         return ok(toCharacter(row));
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);

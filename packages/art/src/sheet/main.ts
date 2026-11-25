@@ -14,10 +14,12 @@ import { COLORS, colorIndex } from "../palette.ts";
 import type { SceneMeta } from "../scene.ts";
 import { galmuriDir } from "./font.ts";
 import { mapSheets } from "./maps-static.ts";
+import { portraitNames } from "./speakers.ts";
 import {
   combatSheet,
   loadFonts,
   paletteSheet,
+  portraitSheet,
   rigSheet,
   sceneScreens,
   sceneSheet,
@@ -67,6 +69,7 @@ if (values.png) {
         ...Object.fromEntries(
           [...sceneScreens(sceneMeta, atlases)].map(([name, png]) => [`scene-${name}`, png]),
         ),
+        portraits: portraitSheet(fonts, art, portraitNames()),
         palette: paletteSheet(fonts),
         sprites: spriteSheet(fonts, art),
         combat: combatSheet(fonts, art),
@@ -149,6 +152,11 @@ const server = createServer((req, res) => {
     if (path === "/") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(HTML);
+      return;
+    }
+    if (path === "/speakers.json") {
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify(portraitNames()));
       return;
     }
     let file: string | null = null;
