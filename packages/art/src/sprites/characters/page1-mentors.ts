@@ -213,7 +213,7 @@ const orderFace = addPoses(pythagoreanFace, {
   },
 });
 
-function pythagorean(name: string, skinTone: string, beans: boolean) {
+export function pythagorean(name: string, skinTone: string, beans: boolean) {
   return bake(
     rig({
       name,
@@ -281,8 +281,8 @@ function pythagorean(name: string, skinTone: string, beans: boolean) {
   );
 }
 
-const pythagoreanFirst = pythagorean("pythagorean-campus", "deep", false);
-const pythagoreanBean = pythagorean("pythagorean-bean", "warm", true);
+export const pythagoreanFirst = pythagorean("pythagorean-campus", "deep", false);
+export const pythagoreanBean = pythagorean("pythagorean-bean", "warm", true);
 
 /** 아리스타르코스 can talk, squint at the sun, and chalk the orbit on the ground again. */
 const aristarchusTalking = addPoses(aristarchusFace, {

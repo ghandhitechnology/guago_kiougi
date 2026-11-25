@@ -8,7 +8,12 @@
  */
 import type { Anim, FramePose, Legend, Look, Paint, PartDef, RigDef } from "./format.ts";
 import { part, rig } from "./format.ts";
+import { Pic } from "./paint.ts";
+import { colorIndex, DEEP_INDICES, nameOf, rampsOf, slotOf } from "./palette.ts";
+import { CLEAR } from "./raster.ts";
+import { type CompiledRig, compileRig } from "./rig.ts";
 import { bake, base, feet, shins } from "./sprites/bosses/freed.ts";
+import { clean, seal } from "./sprites/bosses/kit.ts";
 import { frame, garment, ink, lone, shadow, skin } from "./sprites/characters/student.ts";
 
 export { bake, feet, shins };
@@ -67,8 +72,8 @@ export interface DressSpec {
   readonly cloth: Ramp;
   /** Belt or girdle colour; defaults to the cloth's outline. */
   readonly belt?: string;
-  /** `short` ends at the knee, `long` at the ankle. */
-  readonly length: "short" | "long";
+  /** `short` ends at the knee, `long` at the ankle, `kid` is a child's tunic. */
+  readonly length: "short" | "long" | "kid";
   /** Sleeves: `short` cloth to the elbow, `bare` arms, `long` cloth to the wrist. */
   readonly sleeves?: "short" | "bare" | "long";
   /** A himation over the left shoulder and across the body, in its own colour. */
@@ -78,7 +83,8 @@ export interface DressSpec {
 }
 
 /** Rows of the torso grid, the belt included, cut to the dress length and closed at the hem. */
-function torso(rows: readonly string[], length: "short" | "long", w: number): string[] {
+function torso(rows: readonly string[], length: "short" | "long" | "kid", w: number): string[] {
+  if (length === "kid") return [rows[0], rows[3], rows[4], "K".repeat(w)] as string[];
   const keep = length === "long" ? rows.length : 7;
   return [...rows.slice(0, keep), "K".repeat(w)];
 }
@@ -579,14 +585,27 @@ export function person(spec: PersonSpec): RigDef {
     lookParts[layer] = layer;
   }
   const look: Look = { parts: lookParts, slots: { skin: spec.skin } };
+  // Talking is the person's own idle pose with the mouth going.
+  const idle0: FramePose = spec.frames?.idle0 ?? {};
+  const speaking = (head: string): FramePose =>
+    typeof idle0 === "function"
+      ? (d) => ({ ...(idle0(d) as Record<string, unknown>), head }) as never
+      : ({ ...idle0, head } as never);
+  const talk = spec.anim.talk
+    ? {}
+    : { talk: { frames: ["talk0", "talk1", "talk0", "idle0"], fps: 4 } as Anim };
   return bake(
     rig({
       name: spec.name,
       ...frame,
       group: spec.group ?? "page1-cast",
       parts,
-      frames: { ...base, ...spec.frames },
-      anim: spec.anim,
+      frames: {
+        ...base,
+        ...(spec.anim.talk ? {} : { talk0: speaking("talk"), talk1: speaking("rest") }),
+        ...spec.frames,
+      },
+      anim: { ...spec.anim, ...talk },
       looks: { [spec.lookName ?? "town"]: look },
     }),
   );
@@ -594,3 +613,102 @@ export function person(spec: PersonSpec): RigDef {
 
 export const IDLE: Anim = { frames: ["idle0", "idle0", "idle1", "idle1"], fps: 2 };
 export const WALK: Anim = { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 6 };
+
+// Groups ----------------------------------------------------------------------------------------
+
+/** One member of a group frame: a person's frame (`down/idle0`) with its feet at `at`. */
+export interface Placed {
+  readonly person: RigDef;
+  readonly key: string;
+  readonly at: readonly [number, number];
+  readonly flip?: boolean;
+}
+
+const compiled = new Map<string, CompiledRig>();
+function compiledOf(def: RigDef): CompiledRig {
+  const name = def.name as string;
+  let c = compiled.get(name);
+  if (!c) {
+    c = compileRig(def, name, `group ${name}`);
+    compiled.set(name, c);
+  }
+  return c;
+}
+
+/** A palette index with the look's slot keys resolved to the colours the look chose. */
+function resolve(index: number, slots: Readonly<Record<string, string>>): number {
+  const slot = slotOf(index);
+  if (!slot) return index;
+  const option = slot.options[slots[slot.name] ?? Object.keys(slot.options)[0] ?? ""];
+  const name = option?.[index - slot.base];
+  return name ? colorIndex(name) : index;
+}
+
+/**
+ * Several people in one sprite frame, for things that move as one or fill a place as props:
+ * the Pythagoreans walking in step, a row of spectators. Members are drawn back to front in the
+ * order given, then the seams are cleaned and sealed like a baked figure.
+ */
+export function group(
+  size: readonly [number, number],
+  frames: Readonly<Record<string, readonly Placed[]>>,
+): { palette: Legend; lone: string; frames: Record<string, string>; shadow: string } {
+  const pool = [..."ABCDEFHIJKLMNPQRSTUVWXYZabcdfghijkmnopqrstuvwxyz0123456789#$=?<>[]{}()|/"];
+  const legend: Record<string, Paint | null> = { ".": null };
+  const charOf = new Map<string, string>();
+  const loneChars = new Set<string>();
+  const char = (index: number, alone: boolean): string => {
+    const key = `${index}${alone ? "!" : ""}`;
+    let ch = charOf.get(key);
+    if (!ch) {
+      ch = pool.shift() as string;
+      charOf.set(key, ch);
+      legend[ch] = (nameOf(index).split(" / ")[0] as string).trim() as Paint;
+      if (alone) loneChars.add(ch);
+    }
+    return ch;
+  };
+  const deepIndex = (index: number): number =>
+    DEEP_INDICES.has(index) ? index : ((rampsOf(index)[0]?.indices[0] ?? index) as number);
+  const pics = new Map<string, Pic>();
+  const shadowPic = Pic.blank(size[0], size[1]);
+  for (const [name, members] of Object.entries(frames)) {
+    const p = Pic.blank(size[0], size[1]);
+    for (const m of members) {
+      const c = compiledOf(m.person);
+      const look = c.looks[0];
+      const img = look?.checked.get(m.key);
+      if (!look || !img) throw new Error(`group ${name}: no frame ${m.key} on ${c.name}`);
+      const ox = m.at[0] - c.origin[0];
+      const oy = m.at[1] - c.origin[1];
+      for (let y = 0; y < img.h; y++)
+        for (let x = 0; x < img.w; x++) {
+          const i = y * img.w + x;
+          const v = img.px[i] as number;
+          if (v === CLEAR) continue;
+          const tx = ox + (m.flip ? img.w - 1 - x : x);
+          const index = resolve(v, look.slots);
+          p.set(tx, oy + y, char(index, img.lone[i] === 1));
+          char(deepIndex(index), false);
+        }
+      // A blob shadow under each member's feet.
+      for (let dx = -5; dx <= 5; dx++)
+        for (let dy = -1; dy <= 1; dy++)
+          if (Math.abs(dx) + Math.abs(dy) * 4 < 7) shadowPic.set(m.at[0] + dx, m.at[1] + dy, "z");
+    }
+    pics.set(name, p);
+  }
+  const keep = [...loneChars].join("");
+  const deepOf: Record<string, string> = {};
+  for (const [k, ch] of charOf) {
+    if (k.endsWith("!")) continue;
+    deepOf[ch] = charOf.get(String(deepIndex(Number(k)))) as string;
+  }
+  const deep = [...new Set(Object.values(deepOf))].join("");
+  const out: Record<string, string> = {};
+  for (const [name, p] of pics) {
+    out[name] = clean(seal(clean(p, keep, deep), deepOf, keep), keep, deep).toString();
+  }
+  legend.z = "ink.dark";
+  return { palette: legend, lone: keep, frames: out, shadow: shadowPic.toString() };
+}
