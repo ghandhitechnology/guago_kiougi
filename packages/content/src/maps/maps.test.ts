@@ -1,9 +1,10 @@
-import { isSolidTile } from "@guago/shared";
+import { gridOf, isSolidTile } from "@guago/shared";
 import { describe, expect, it } from "vitest";
 import { applyRules, buildMap, readPlan } from "./build.ts";
 import { type ArtIndex, checkMap, checkScenes, narrowTiles, reach } from "./check.ts";
 import type { MapSource, Stamp } from "./format.ts";
 import { interiorWalls, mountY } from "./interior.ts";
+import { buildPatrol, patrolPose, roundTime, sees } from "./patrols.ts";
 import { place } from "./props.ts";
 import { parseStamp } from "./stamp.ts";
 
@@ -196,6 +197,42 @@ describe("interior walls", () => {
       frame: "open",
       at: [80, mountY(6)],
     });
+  });
+});
+
+describe("patrols", () => {
+  // Out along a row of tiles and back: 4 tiles at 2 tiles a second, a second at each end.
+  const p = buildPatrol({
+    id: "p",
+    walker: "guard",
+    route: [
+      [1, 1],
+      [5, 1],
+    ],
+    loop: "pingpong",
+    speed: 2,
+    pause: 1,
+    cone: { length: 4, angle: 90 },
+  });
+
+  it("walks out, stands looking back the way it came, and walks home", () => {
+    expect(roundTime(p)).toBe(6);
+    expect(patrolPose(p, 1)).toMatchObject({ x: 56, y: 24, facing: 0 });
+    expect(patrolPose(p, 2.5)).toMatchObject({ x: 88, y: 24 });
+    expect(patrolPose(p, 2.5).facing).toBeCloseTo(Math.PI);
+    expect(patrolPose(p, 4)).toMatchObject({ x: 56, y: 24 });
+    expect(patrolPose(p, 6 + 1)).toEqual(patrolPose(p, 1));
+  });
+
+  it("sees ahead inside its cone and range, and never through a wall", () => {
+    const open = gridOf(12, 8);
+    const pose = patrolPose(p, 0);
+    expect(sees(open, p, pose, 24 + 48, 24)).toBe(true);
+    expect(sees(open, p, pose, 24 + 48, 24 + 30)).toBe(true);
+    expect(sees(open, p, pose, 24 + 20, 24 + 40)).toBe(false);
+    expect(sees(open, p, pose, 24 + 80, 24)).toBe(false);
+    expect(sees(open, p, pose, 24 - 16, 24)).toBe(false);
+    expect(sees(gridOf(12, 8, [[3, 1]]), p, pose, 24 + 48, 24)).toBe(false);
   });
 });
 

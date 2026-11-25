@@ -58,6 +58,8 @@ interface Pending {
 export interface GrantBufferOptions {
   /** A batch landed: its change notice, for the player's client. */
   onLanded?(characterId: string, change: ChangeNotice): void;
+  /** Credit accepted, as combat gave it (the 자습 pool measures income from it). */
+  onCredit?(characterId: string, credit: { exp: number; drops: readonly Drop[] }): void;
   /** Where refused credit and dropped batches are written; `console.error` by default. */
   log?(line: string): void;
 }
@@ -99,6 +101,11 @@ export class GrantBuffer {
       // A stack that would pass its bound starts a new entry instead of overflowing.
       if (key === null || checkDrop(stacked) !== null) p.tools.push(drop);
       else p.stacks.set(key, stacked);
+    }
+    try {
+      this.options.onCredit?.(characterId, credit);
+    } catch (error) {
+      this.log(`credit listener failed: ${describeError(error)}`);
     }
     return true;
   }

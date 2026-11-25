@@ -43,6 +43,7 @@ import {
   type OpOutcome,
   type OpRequests,
   type Purse,
+  payClubFee,
   pilgi,
   pilgiChance,
   resetStats,
@@ -54,6 +55,8 @@ import {
   type Wearer,
   type Worn,
 } from "@guago/shared";
+import { type LiveRequests, liveOps } from "../live/ops.ts";
+import type { LiveLoaded, LiveRows, LiveWrite } from "../live/rows.ts";
 import {
   type CharacterRow,
   type ItemRow,
@@ -73,6 +76,8 @@ import {
 export interface InternalRequests {
   kit: Record<string, never>;
   grant: GrantRequest;
+  /** The 동아리 founding fee, run inside the founding transaction (social/fees.ts). */
+  "club.found": Record<string, never>;
 }
 
 /** What combat credits one character with since its last flush (PLAN §6 drops, §9 EXP). */
@@ -82,7 +87,7 @@ export interface GrantRequest {
   drops: Drop[];
 }
 
-export type Requests = OpRequests & InternalRequests;
+export type Requests = OpRequests & InternalRequests & LiveRequests;
 export type AnyOp = keyof Requests;
 
 /** The world an operation runs in. `page` is the live Page: fees and catch-up follow it. */
@@ -104,6 +109,8 @@ export interface Rows {
   /** Every equipped item, for slot rules and the books that share their owner's EXP. */
   worn?: boolean;
   quests?: readonly string[];
+  /** Living-world rows (live/rows.ts). */
+  live?: LiveRows;
 }
 
 export interface Loaded {
@@ -115,6 +122,7 @@ export interface Loaded {
   readonly quests: ReadonlyMap<string, QuestRow>;
   /** The touched currencies only; a missing one is zero. */
   readonly purse: Purse;
+  readonly live: LiveLoaded;
 }
 
 export type CharacterChange = Partial<
@@ -136,6 +144,8 @@ export interface Applied {
   quests?: readonly QuestRow[];
   codex?: readonly string[];
   outcome?: OpOutcome;
+  /** Living-world writes (live/rows.ts). */
+  live?: LiveWrite;
 }
 
 export type Step = { ok: true; value: Applied } | { ok: false; error: OpError };
@@ -145,7 +155,7 @@ export interface OpDef<R> {
   readonly client: boolean;
   rows(req: R, character: CharacterRow): Rows;
   /** Currencies touched, once the rows are loaded (a book's 낱장 depend on which book). */
-  currencies(req: R, loaded: Omit<Loaded, "purse" | "worn">, ctx: Ctx): readonly string[];
+  currencies(req: R, loaded: Omit<Loaded, "purse" | "worn" | "live">, ctx: Ctx): readonly string[];
   apply(loaded: Loaded, req: R, env: Env): Step;
 }
 
@@ -162,7 +172,7 @@ const tierOf = (c: CharacterRow): Tier => TIERS[c.tier] ?? (TIERS[0] as Tier);
 const wearer = (c: CharacterRow): Wearer => ({ tier: tierOf(c), major: c.major, minor: c.minor });
 
 /** EXP to the character, and 10% of it to each equipped book (PLAN §8), capped at the owner. */
-function gainExp(l: Loaded, exp: number): { character: CharacterChange; put: ItemRow[] } {
+export function gainExp(l: Loaded, exp: number): { character: CharacterChange; put: ItemRow[] } {
   if (exp <= 0) return { character: {}, put: [] };
   const next = addExp(l.character.level, l.character.exp, exp);
   const put = l.worn
@@ -185,6 +195,8 @@ const wornAmong = (rows: readonly ItemRow[]): Worn[] =>
 const isBook = (def: string) => BOOKS.some((b) => b.id === def);
 
 export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
+  // The living world's operations (PLAN §9, §11, §15), in live/ops.ts.
+  ...liveOps({ gainExp }),
   kit: {
     client: false,
     rows: () => ({}),
@@ -201,6 +213,17 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
         put.push({ ...row, slot });
       }
       return ok({ put, itemKey: "kit", outcome: { items: put.map((r) => r.id) } });
+    },
+  },
+
+  "club.found": {
+    client: false,
+    rows: () => ({}),
+    currencies: () => ["pinecone"],
+    apply(l, _req, env) {
+      const r = payClubFee(l.purse, env.page);
+      if (!r.ok) return no(r.error);
+      return ok({ purse: r.purse, ledger: r.ledger });
     },
   },
 
