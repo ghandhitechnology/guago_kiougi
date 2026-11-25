@@ -134,7 +134,9 @@ export function createApiHandler(
     if (post && origin !== undefined && origin !== settings.clientOrigin) {
       return error(res, "forbidden");
     }
-    if (post && !String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+    // Bodies must be JSON, which an HTML form cannot send. Logout carries no body.
+    const json = String(req.headers["content-type"] ?? "").startsWith("application/json");
+    if (post && path !== API.logout && !json) {
       return error(res, "bad_request");
     }
     const token = readCookie(req.headers.cookie, cookieName);
