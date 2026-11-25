@@ -102,9 +102,24 @@ async function toWeek(week: number): Promise<PageView> {
 
 let bots: ChildProcess | undefined;
 
-/** A `pnpm loadtest` crowd on `map` until stopped. */
-function crowd(map: string, n: number, objectives: number, auto = 0.4): void {
+/** Players in the server's rooms, from its metrics. */
+async function seated(): Promise<number> {
+  try {
+    const res = await fetch(`${CONTROL}/metrics`);
+    const body = (await res.json()) as { rooms: { players: number }[] };
+    return body.rooms.reduce((a, r) => a + r.players, 0);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A `pnpm loadtest` crowd on `map` until stopped. The last crowd is let go first and its bodies
+ * waited out, so no bot enters while its old room is still writing where it stood.
+ */
+async function crowd(map: string, n: number, objectives: number, auto = 0.4): Promise<void> {
   stopCrowd();
+  for (let i = 0; i < 30 && (await seated()) > 0; i++) await sleep(1000);
   const args = [
     path.join(ROOT, "tools/loadtest/src/main.ts"),
     "--bots",
@@ -190,6 +205,15 @@ async function watch(
 }
 
 async function phases(raid: string, rate: number): Promise<string[]> {
+  // Rewards go out in the background after each phase closes: wait for the last of them.
+  for (let i = 0; i < 30; i++) {
+    const left = await db.pool.query(
+      "select count(*)::int as n from raid_participants where raid_id = $1 and tier > 0 and not paid",
+      [raid],
+    );
+    if (left.rows[0].n === 0) break;
+    await sleep(1000);
+  }
   const { rows } = await db.pool.query(
     `select phase, max_hp, calibration, started_at, ended_at from raid_phases
      where raid_id = $1 order by phase`,
@@ -203,7 +227,7 @@ async function phases(raid: string, rate: number): Promise<string[]> {
       [raid, p.phase],
     );
     const tokens = await db.pool.query(
-      `select coalesce(sum(l.amount), 0)::text as tokens, count(distinct l.operation_id)::int as ops
+      `select coalesce(sum(l.amount), 0)::text as tokens, count(distinct l.character_id)::int as ops
        from economy_ledger l
        where l.currency = 'token' and l.operation_id like $1`,
       [`raid:${raid}:${p.phase}`],
@@ -230,7 +254,7 @@ async function phases(raid: string, rate: number): Promise<string[]> {
         share === null ? "(share assumed 0.3)" : `(boss share measured ${share.toFixed(2)})`,
         `· lasted ${(ms / DAY_MS).toFixed(2)} Page days (${(ms / rate / 1000).toFixed(0)} s real)`,
         `· tiers ${tiers.rows.map((t) => `${RAID_TIER_NAMES[Number(t.tier)] || "none"} ${t.n}`).join(", ")}`,
-        `· paid ${tiers.rows.reduce((a, t) => a + Number(t.paid), 0)} characters, ${Number(tokens.rows[0]?.tokens ?? 0).toLocaleString()} 탐구 토큰 in ${tokens.rows[0]?.ops ?? 0} rewards, ${loot.rows[0]?.n ?? 0} loot ledger rows`,
+        `· paid ${tiers.rows.reduce((a, t) => a + Number(t.paid), 0)} characters, ${Number(tokens.rows[0]?.tokens ?? 0).toLocaleString()} 탐구 토큰 to ${tokens.rows[0]?.ops ?? 0} characters, ${loot.rows[0]?.n ?? 0} loot ledger rows`,
       ].join(" "),
     );
   }
@@ -316,7 +340,7 @@ say(
 page = await toWeek(3);
 say(`week ${page.week}: ${page.milestone}`);
 await watch("pythagoreans", page.openedAt, () => true, 20_000);
-crowd("p1-croton-school", BOTS, 0.4);
+await crowd("p1-croton-school", BOTS, 0.4);
 const pyth = await watch("pythagoreans", page.openedAt, (r) => r.freed, 600_000);
 stopCrowd();
 for (const l of await phases(pyth.id, rate)) say(l);
@@ -325,7 +349,7 @@ for (const l of await phases(pyth.id, rate)) say(l);
 page = await toWeek(6);
 say(`week ${page.week}: ${page.milestone}`);
 await watch("zeno", page.openedAt, () => true, 20_000);
-crowd("p1-elea-track", BOTS, 0.5);
+await crowd("p1-elea-track", BOTS, 0.5);
 const zeno = await watch("zeno", page.openedAt, (r) => r.freed, 600_000);
 stopCrowd();
 for (const l of await phases(zeno.id, rate)) say(l);
@@ -335,7 +359,7 @@ page = await toWeek(8);
 say(
   `week ${page.week}: ${page.milestone}; the bots hunt 아고라 변두리 until 아리스토텔레스 appears`,
 );
-crowd("p1-agora-edge", BOTS, 0, 0.5);
+await crowd("p1-agora-edge", BOTS, 0, 0.5);
 const era = await watch(
   "aristotle",
   page.openedAt,
@@ -346,7 +370,7 @@ page = await view();
 say(
   `week ${page.week}: ${page.milestone}; 아리스토텔레스 stands, 논제 1 at ${Math.round(era.max).toLocaleString()} HP`,
 );
-crowd("p1-lyceum", BOTS, 0.35);
+await crowd("p1-lyceum", BOTS, 0.35);
 const freed = await watch("aristotle", page.openedAt, (r) => r.freed, 3_600_000);
 stopCrowd();
 say("아리스토텔레스 freed. Each 논제:");
