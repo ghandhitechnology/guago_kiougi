@@ -237,9 +237,17 @@ function revive(k: number): Pic {
     if (e <= 1 && e > 0.7) return y < foot ? "W" : "s";
     return null;
   });
+  // The column's two edges, light rising up them in breaks.
+  for (const ex of [cx - 7, cx + 6]) {
+    for (let y = foot - 1; y > foot - 24; y--) {
+      const up = foot - y;
+      if ((up + k * 3) % 8 >= 5) continue;
+      pic.set(ex, y, up < 12 ? "W" : "c");
+    }
+  }
   const r = rng(5);
   for (let i = 0; i < 7; i++) {
-    const x = cx + (r() - 0.5) * 16;
+    const x = cx + (r() - 0.5) * 12;
     const y = foot - 2 - ((r() * 26 + k * 6) % 26);
     const life = (foot - y) / 26;
     put(pic, life < 0.5 ? "c\nW" : life < 0.8 ? "c" : "'", x, y);

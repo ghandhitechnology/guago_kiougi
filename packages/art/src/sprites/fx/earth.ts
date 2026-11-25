@@ -321,8 +321,7 @@ function specimen(kind: "igneous" | "sedimentary" | "metamorphic"): Pic {
   }
   const bands =
     kind === "sedimentary"
-      ? (_x: number, y: number) =>
-          ["b", "j", "B", "j", "J", "F"][Math.floor(y / 2 + 0.5) % 6] as string
+      ? (_x: number, y: number) => ["b", "B", "j", "F"][Math.floor(y / 2) % 4] as string
       : (x: number, y: number) =>
           ["N", "n", "e", "n"][Math.floor((y + 1.6 * Math.sin(x * 0.9)) / 1.5 + 8) % 4] as string;
   for (let y = 0; y < 12; y++)
@@ -331,8 +330,7 @@ function specimen(kind: "igneous" | "sedimentary" | "metamorphic"): Pic {
       if (ch === "." || ch === "K") continue;
       let b = bands(x, y);
       // Shade: the lit side one step up, the shadow side one step down.
-      if (ch === "s" && kind === "sedimentary") b = b === "J" ? "b" : b === "j" ? "J" : b;
-      if (ch === "q") b = kind === "sedimentary" ? "B" : "N";
+      if (ch === "q") b = kind === "sedimentary" ? "F" : "N";
       base.set(x, y, b);
     }
   return clean(base);

@@ -230,8 +230,8 @@ const books = sprite({
     /** 전자기 실습서: a lab manual with a bolt across it. */
     electro: book(
       paleCover("6", "8"),
-      stack("....77", "...77.", "..7777", "...77.", "..77..", ".77..."),
-      [6, 4],
+      stack("....88", "...88.", "..88..", ".8888.", "..88..", ".88...", "88...."),
+      [5, 4],
     ),
     /** 줌인 일반화학: a flask, half full. */
     zoomin: book(
@@ -243,7 +243,7 @@ const books = sprite({
     report: over(
       book(
         paleCover("1", "3"),
-        stack("...3...", "..33...", "..343..", ".34443.", ".34443.", "..333.."),
+        stack("...2...", "..22...", "..242..", ".24442.", ".24w42.", "..222.."),
         [5, 5],
       ),
       stack(".oooo.", "oSSSSo"),
@@ -271,7 +271,7 @@ const books = sprite({
     /** 암석 표본 상자: the specimen tray, three stones in their compartments. */
     rocks: book(
       paleCover("v", "g"),
-      stack("CCCCCCCCC", "CkCECaaCC", "CkCEECaaC", "CCCCCCCCC"),
+      stack("vvvvvvvvvv", "vqqvEEvllv", "vqqvCCvppv", "vvvvvvvvvv"),
       [4, 6],
     ),
   },

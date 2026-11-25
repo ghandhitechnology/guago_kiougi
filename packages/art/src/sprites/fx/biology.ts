@@ -179,8 +179,8 @@ function cut(pic: Pic, angle: number, r0: number, r1: number, dim: boolean): voi
   const mx1 = ax + Math.cos(angle) * (r0 + (r1 - r0) * 0.8);
   const my1 = ay + Math.sin(angle) * (r0 + (r1 - r0) * 0.8);
   line(pic, x0, y0, x1, y1, dim ? "l" : "p");
-  line(pic, mx0, my0 + 1, mx1, my1 + 1, dim ? "m" : "l");
-  if (!dim) line(pic, mx0, my0, mx1, my1, "W");
+  line(pic, mx0, my0 + 1, mx1, my1 + 1, dim ? "m" : "b");
+  if (!dim) line(pic, mx0 - Math.cos(angle) * 3, my0 - Math.sin(angle) * 3, mx1, my1, "W");
 }
 
 /** The fan: three cuts in quick order, top to bottom, each fading as the next lands. */
@@ -204,6 +204,26 @@ function fan(k: number): Pic {
     const fresh = i === k && k < 3;
     cut(pic, a, fresh ? 6 : 9, fresh ? 36 : 33, !fresh);
   });
+  // The blade itself at the apex, turned to the cut being made.
+  if (k < 3) {
+    const a = angles[k] as number;
+    line(
+      pic,
+      2 + Math.cos(a) * 1,
+      14 + Math.sin(a) * 1,
+      2 + Math.cos(a) * 5,
+      14 + Math.sin(a) * 5,
+      "W",
+    );
+    line(
+      pic,
+      2 + Math.cos(a) * 1,
+      15 + Math.sin(a) * 1,
+      2 + Math.cos(a) * 4,
+      15 + Math.sin(a) * 4,
+      "m",
+    );
+  }
   return clean(pic, LONE);
 }
 

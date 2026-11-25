@@ -394,7 +394,7 @@ function combust(k: number): Pic {
     const e = ell(x, y, cx, cy, 18, 7.5);
     if (e > 1) return null;
     if (k >= 3) return e > 0.86 ? "d" : e > 0.6 ? "o" : null;
-    return e > 0.86 ? "o" : e > 0.55 ? "k" : null;
+    return e > 0.86 ? "o" : e > 0.55 ? "d" : null;
   });
   if (k >= 4) return clean(pic);
   const r = rng(13);
@@ -409,7 +409,7 @@ function combust(k: number): Pic {
     const grown = k === 3 ? 0.4 : 1;
     const height = (5 + r() * 6) * grown * (1 + 0.25 * Math.sin(k * 2.1 + sx));
     const tongue = fire(12, 14, 12, [
-      { x: 6, h: height, w: 2.2 + r() * 0.8, lean: (r() - 0.5) * 3 + (k - 1) },
+      { x: 6, h: height * 1.15, w: 2.9 + r() * 1.1, lean: (r() - 0.5) * 3 + (k - 1) },
     ]);
     put(pic, tongue, sx - 6, sy - 12);
   }
