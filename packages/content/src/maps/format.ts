@@ -112,7 +112,9 @@ export type Zone =
       readonly density: number;
     }
   /** A place a group naturally stands around: the client may seat idle players here. */
-  | { readonly kind: "gather"; readonly id: string; readonly rect: TileRect };
+  | { readonly kind: "gather"; readonly id: string; readonly rect: TileRect }
+  /** Where a field's elite appears when its kill count comes round (PLAN §6, every 200 kills). */
+  | { readonly kind: "elite"; readonly id: string; readonly rect: TileRect };
 
 // Source ---------------------------------------------------------------------------------------
 
@@ -234,6 +236,7 @@ export interface MapSource extends Layers {
     | (Omit<Extract<Zone, { kind: "logout" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "monsters" }>, "rect"> & { readonly rect: TileRect | string })
     | (Omit<Extract<Zone, { kind: "gather" }>, "rect"> & { readonly rect: TileRect | string })
+    | (Omit<Extract<Zone, { kind: "elite" }>, "rect"> & { readonly rect: TileRect | string })
   )[];
 }
 

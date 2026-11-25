@@ -3,6 +3,8 @@ import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
+// Page 1 hunting fields and the 생태공원.
+import p1Colonnade from "./p1-colonnade.ts";
 
 export * from "./build.ts";
 export * from "./buildings.ts";
@@ -14,7 +16,12 @@ export * from "./props.ts";
 export * from "./stamp.ts";
 
 /** Every map written in the map format, in contact-sheet order. */
-export const MAP_SOURCES: readonly MapSource[] = [campusYard, campusField];
+export const MAP_SOURCES: readonly MapSource[] = [
+  campusYard,
+  campusField,
+  // Page 1 hunting fields and the 생태공원.
+  p1Colonnade,
+];
 
 /**
  * Maps that portals may lead to before they are built. A portal to one of these is declared,
@@ -31,6 +38,13 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "saebyeok",
   "agora",
   "eco-park",
+  // Page 1: the era town, the 위험 구역, the two lairs and the arena (narrative place ids).
+  "p1-agora",
+  "p1-shadow-cave",
+  "p1-croton-school",
+  "p1-elea-track",
+  "p1-lyceum",
+  "p1-olive-road",
 ]);
 
 /** Builds every map. */
