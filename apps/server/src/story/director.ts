@@ -35,6 +35,7 @@ import {
   INTERACT_REACH_PX,
   type Interaction,
   MINUTE_MS,
+  PLAYER_SPEED,
   type SceneCue,
   type SceneEnd,
   type SceneStart,
@@ -75,6 +76,8 @@ export interface StoryRoom {
   readonly mapDef: BuiltMap;
   tell(sessionId: string, type: string, body: unknown): void;
   bodyOf(sessionId: string): { x: number; y: number } | undefined;
+  /** The body's control mode walks it (완전 자동, 스킬 수동), not the player's keys. */
+  autoWalks(sessionId: string): boolean;
   /** Walks a body to a spot over `ms` (0 puts it there), the room's own way. */
   walkBody(sessionId: string, x: number, y: number, ms: number): void;
   sendOn(sessionId: string, to: Destination): void;
@@ -95,6 +98,8 @@ interface Run {
   met: number;
   /** `system` steps whose effect has landed. */
   readonly reached: Set<number>;
+  /** Where the body stood, and for how many story ticks, while a `near:` waits. */
+  still: { x: number; y: number; n: number } | undefined;
 }
 
 interface Showing {
@@ -108,6 +113,8 @@ interface Showing {
 
 /** Feet this close to a mark meet a `near:` step. */
 const NEAR_PX = 24;
+/** Story ticks (two fight ticks each) a body its mode walks stands idle before it walks on. */
+const IDLE_WALK_TICKS = 15;
 /** A shared scene ends when every viewer is done, or after its length and this much more. */
 const SHARED_SLACK = 1.5;
 const SHARED_EXTRA_MS = 8000;
@@ -221,7 +228,10 @@ class Director {
       settled.at.player ??
       stagingOf(scene.scene.id).start ??
       (scene.kind === "replay" ? firstMark(scene.scene) : undefined);
-    return markOf(room.mapDef, mark);
+    const at = markOf(room.mapDef, mark);
+    // A mark on a thing one uses (the cooler, the log book) is stood in front of.
+    const thing = room.mapDef.interactables.some((t) => t.id === mark);
+    return at && thing ? { x: at.x, y: at.y + 16 } : at;
   }
 
   private async instanceScene(
@@ -343,6 +353,7 @@ class Director {
       kind,
       met: Math.min(from, playSteps(scene).length),
       reached: new Set(),
+      still: undefined,
     };
     this.runs.set(run.id, run);
     this.bySession.set(sessionId, run.id);
@@ -399,12 +410,30 @@ class Director {
       if (until.startsWith("near:")) {
         const at = markOf(room.mapDef, until.slice(5));
         const body = room.bodyOf(run.sessionId);
-        if (at && body && Math.hypot(body.x - at.x, body.y - at.y) <= NEAR_PX)
+        if (!at || !body) continue;
+        if (Math.hypot(body.x - at.x, body.y - at.y) <= NEAR_PX) {
+          run.still = undefined;
           this.meet(run, until);
+        } else if (room.autoWalks(run.sessionId)) this.walkIdle(run, body, at);
       } else if (until.startsWith("home-minute:")) {
         if (this.homeMinutes(run.characterId) >= Number(until.slice(12))) this.meet(run, until);
       }
     }
+  }
+
+  /**
+   * A body its mode walks has nothing to walk to once a fight is over: when it has stood still a
+   * moment while the scene waits for it at a mark, it walks there.
+   */
+  private walkIdle(run: Run, body: { x: number; y: number }, at: { x: number; y: number }) {
+    const s = run.still;
+    if (!s || Math.hypot(s.x - body.x, s.y - body.y) > 1) {
+      run.still = { x: body.x, y: body.y, n: 0 };
+      return;
+    }
+    if (++s.n !== IDLE_WALK_TICKS) return;
+    const ms = (Math.hypot(at.x - body.x, at.y - body.y) / PLAYER_SPEED) * SECOND_MS;
+    run.room.walkBody(run.sessionId, at.x, at.y, ms);
   }
 
   /** Whole minutes of 명령퇴사 served (the home scene's `home-minute:<n>`). */

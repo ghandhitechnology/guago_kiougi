@@ -309,9 +309,10 @@ const map: MapSource = {
     cooler: [7, 4],
     logbook: [8, 4],
     "standing-desk": [37, 12],
-    window: [34, 2],
-    field: [34, 0],
-    sill: [38, 3],
+    // 23:40 plays at the cooler: the window beside it, its sill, the field beyond it.
+    window: [14, 2],
+    field: [14, 0],
+    sill: [11, 3],
     stairs: [3, 4],
   },
   npcs: [

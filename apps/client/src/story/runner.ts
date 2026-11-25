@@ -19,6 +19,7 @@ import {
   stagingOf,
 } from "@guago/content";
 import type { SceneStart } from "@guago/shared";
+import * as Phaser from "phaser";
 import type { DialogueLine } from "../ui/dialogue.ts";
 import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { worldUi } from "../ui/world-ui.ts";
@@ -37,6 +38,8 @@ const fill = (s: string, player: string) => s.replaceAll("{player}", player);
 
 /** Feet this close to an offered talk's spot can take it. */
 const OFFER_PX = 28;
+/** The longest a closed dialogue box is waited on to fold away. */
+const DIALOGUE_FOLD_MAX_MS = 800;
 /** Depth of prompts over the world, above names. */
 const PROMPT_DEPTH = 10;
 
@@ -289,6 +292,7 @@ export class SceneRunner {
       case "bubble": {
         const id = actorOf(step.line.speaker);
         await this.waitWalks([id]);
+        await this.frame(id);
         if (this.stage.actors.has(id))
           worldUi.bark(this.stage.key(id), fill(text(step.line.text), this.playerName));
         return this.sleep(1100 + Math.min(1600, text(step.line.text).length * 45));
@@ -437,16 +441,50 @@ export class SceneRunner {
       ...(l.face ? { face: l.face } : {}),
       ...(l.choice ? { choices: l.choice.map((c) => fill(text(c.text), this.playerName)) } : {}),
     }));
+    // A speaker on stage the held camera does not show is looked at before they speak.
+    await this.frame(actorOf(lines[0]?.speaker ?? ""));
     // Speakers on stage turn to the player as they talk.
     const me = this.host.playerBody();
     for (const l of lines) {
       const a = this.stage.actors.get(actorOf(l.speaker));
       if (a && me && !this.walks.has(a.id)) a.face(dirToward(a.x, a.y, me.x, me.y, "down"));
     }
+    await this.boxFolded();
     const picked = await worldUi.say(shown);
     const last = lines.at(-1);
     const reply = picked === undefined ? undefined : last?.choice?.[picked]?.reply;
     if (reply?.length) await this.say(reply);
+  }
+
+  /**
+   * Waits while a dialogue box that just closed is still folding away. `ui/dialogue.ts` lays a
+   * box down only when it is hidden, and its fold hides it when done even if it was opened again
+   * meanwhile: a line said during the fold would wait forever on a box nobody sees.
+   */
+  private async boxFolded(): Promise<void> {
+    const ui = this.host.ui as { dialogue?: { open: boolean; root?: { visible: boolean } } };
+    const box = ui.dialogue;
+    const t0 = this.host.scene.time.now;
+    while (box && !box.open && box.root?.visible) {
+      if (this.host.scene.time.now - t0 > DIALOGUE_FOLD_MAX_MS) return;
+      await new Promise((r) => this.host.ui.events.once(Phaser.Scenes.Events.POST_UPDATE, r));
+    }
+  }
+
+  /** Takes the camera to an actor on stage who is out of its view, before they speak. */
+  private async frame(id: string): Promise<void> {
+    const a = this.stage.actors.get(id);
+    if (!a) return;
+    const view = this.host.scene.cameras.main.worldView;
+    const margin = 24;
+    const inside =
+      a.x > view.x + margin &&
+      a.x < view.right - margin &&
+      a.y > view.y + margin &&
+      a.y < view.bottom - margin;
+    if (inside) return;
+    this.host.takeCamera(true);
+    await this.host.panTo(a.x, a.y - 12, 600);
   }
 
   private music(track: narrative.Music | null): void {

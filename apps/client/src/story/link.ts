@@ -25,6 +25,8 @@ const LIFT_AFTER_MS = 900;
 export class StoryLink {
   private room: Room<unknown, MapState> | undefined;
   private stage: Stage | undefined;
+  /** The room the stage's map was shown for: a scene for a newer room waits for its map. */
+  private stageRoom: Room<unknown, MapState> | undefined;
   private runner: SceneRunner | undefined;
   private pending: SceneStart | undefined;
   private readonly playerName: () => string;
@@ -36,6 +38,8 @@ export class StoryLink {
   /** A room was joined: its story messages come here. Returns the teardown. */
   attach(room: Room<unknown, MapState>): () => void {
     this.room = room;
+    // A scene waiting for the last room's map is that room's, and over.
+    this.pending = undefined;
     const offs = [
       room.onMessage(STORY_MESSAGES.scene, (m: SceneStart) => {
         if (this.room === room) this.start(m);
@@ -63,6 +67,7 @@ export class StoryLink {
   onMap(host: StageHost): void {
     this.stage?.destroy();
     this.stage = new Stage(host);
+    this.stageRoom = this.room;
     const waiting = this.pending;
     this.pending = undefined;
     if (waiting) this.start(waiting);
@@ -125,7 +130,8 @@ export class StoryLink {
 
   private start(m: SceneStart): void {
     const stage = this.stage;
-    if (!stage) {
+    // A scene can come from a room joined before the map it plays on is shown.
+    if (!stage || this.stageRoom !== this.room) {
       this.pending = m;
       return;
     }

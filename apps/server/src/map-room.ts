@@ -1339,6 +1339,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
     return p && { x: p.x, y: p.y };
   }
 
+  autoWalks(sessionId: string): boolean {
+    const p = this.pawns.get(sessionId)?.player;
+    return !!p && MODE_AUTO[p.mode].move;
+  }
+
   /** A scene walks a body to a spot: straight there over `ms`, its own inputs set aside. */
   walkBody(sessionId: string, x: number, y: number, ms: number): void {
     const p = this.pawns.get(sessionId)?.player;

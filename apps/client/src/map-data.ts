@@ -11,16 +11,25 @@ import * as Phaser from "phaser";
 import { loadArt } from "./art.ts";
 import { artMetadata, KEYS, mapAtlases, mapData } from "./render/assets.ts";
 import { loadMap, unloadMap } from "./render/index.ts";
+import { storyAtlases } from "./story/atlases.ts";
 
 /** Maps kept loaded: the one the player is on and the last two they left. */
 const KEEP = 3;
 
 const recent: string[] = [];
 
-/** Atlases the people a map can hold are drawn from: its cast spots and its patrols' walkers. */
+/**
+ * Atlases the people a map can hold are drawn from: its cast spots, its patrols' and its walks'
+ * walkers, and what the story's scenes staged on it bring.
+ */
 function castAtlases(meta: ArtMetadata, map: BuiltMap): string[] {
-  const out = new Set<string>();
-  for (const who of [...map.npcs.map((n) => n.speaker), ...map.patrols.map((p) => p.walker)]) {
+  const out = new Set<string>(storyAtlases(meta, map));
+  const people = [
+    ...map.npcs.map((n) => n.speaker),
+    ...map.patrols.map((p) => p.walker),
+    ...map.walks.map((w) => w.walker),
+  ];
+  for (const who of people) {
     const cast = CAST_ART[who];
     const atlas =
       cast?.kind === "rig" ? meta.rigs[cast.art]?.atlas : meta.sprites[cast?.art ?? ""]?.atlas;
