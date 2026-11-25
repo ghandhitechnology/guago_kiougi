@@ -3,6 +3,7 @@ import {
   type Collidable,
   type Facing,
   faceToward,
+  InputFlag,
   MOVE_DEADZONE,
   MOVE_MAX,
   type MoveInput,
@@ -27,6 +28,8 @@ export interface ServerSelf {
   readonly y: number;
   readonly facing: number;
   readonly seq: number;
+  /** Inputs left in a dodge roll it asked for. */
+  readonly roll?: number;
 }
 
 /**
@@ -48,6 +51,10 @@ export class SelfMover {
   private acc = 0;
   private readonly map: Collidable;
   private readonly send: (input: MoveInput) => void;
+  /** Flags for the next tick: a dodge, a manual cast (`InputFlag`, `castFlag`). */
+  private flags = 0;
+  /** The server walks the body (완전 자동, 스킬 수동's movement): draw its word, predict nothing. */
+  serverDriven = false;
   /** Largest correction seen, for development checks. */
   worstError = 0;
   corrections = 0;
@@ -71,7 +78,12 @@ export class SelfMover {
     if (seen && seen.x === s.x && seen.y === s.y && seen.seq === s.seq && seen.facing === s.facing)
       return;
     const before = p.body;
-    const error = p.reconcile(body, s.seq);
+    if (this.serverDriven) {
+      p.reset(body);
+      this.follow(before, p.body);
+      return;
+    }
+    const error = p.reconcile(body, s.seq, s.roll ?? 0);
     if (error > 0) {
       this.corrections++;
       this.worstError = Math.max(this.worstError, error);
@@ -115,6 +127,11 @@ export class SelfMover {
     return this.predictor !== undefined;
   }
 
+  /** Asks for a dodge or a manual cast on the next tick. */
+  queue(flags: number): void {
+    this.flags |= flags;
+  }
+
   /** The input for the tick now ending: the distance the lead got ahead of the prediction. */
   private nextInput(p: Predictor, lead: Body, mx: number, my: number): MoveInput | undefined {
     const step = (p.speed * TICK_MS) / 1000;
@@ -128,12 +145,18 @@ export class SelfMover {
     if (Math.hypot(qx, qy) < MOVE_DEADZONE) {
       // Nothing to catch up. Pressing into a wall still turns the player, on the server too.
       if ((mx === 0 && my === 0) || faceToward(p.body.facing, mx, my) === p.body.facing) {
-        return undefined;
+        return this.flags ? p.tick(0, 0, this.takeFlags()) : undefined;
       }
       qx = Math.sign(mx) * MOVE_DEADZONE;
       qy = Math.sign(my) * MOVE_DEADZONE;
     }
-    return p.tick(qx, qy);
+    return p.tick(qx, qy, this.takeFlags());
+  }
+
+  private takeFlags(): number {
+    const f = this.flags;
+    this.flags = 0;
+    return f;
   }
 
   /**
@@ -152,7 +175,19 @@ export class SelfMover {
       this.acc -= TICK_MS;
       // Nothing goes out while the connection is down: the SDK would deliver it after the
       // reconnect, on top of a prediction that has started over.
-      const input = live ? this.nextInput(p, this.lead, mx, my) : undefined;
+      let input: MoveInput | undefined;
+      if (!live) input = undefined;
+      else if (this.serverDriven) {
+        // Only what the player still asks for itself goes out (스킬 수동's dodge).
+        input = this.flags ? p.tick(0, 0, this.takeFlags()) : undefined;
+      } else if (p.rolling || this.flags & InputFlag.Dodge) {
+        // A roll carries the body on its own path: the lead jumps with it and the drawing eases.
+        const before = p.body;
+        input = p.tick(mx, my, this.takeFlags());
+        this.follow(before, p.body);
+      } else {
+        input = this.nextInput(p, this.lead, mx, my);
+      }
       if (input) this.send(input);
     }
     const k = Math.exp(-dtMs / SMOOTH_MS);

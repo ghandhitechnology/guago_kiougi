@@ -403,19 +403,34 @@ function life(): Partial<Placed> {
 }
 
 const lights: LightSource[] = [
-  // The wound: the school's night lying in the afternoon, a cool rim round it.
+  // The wound: the school's night lying in the afternoon, its cold spilling out over the dust.
   {
     at: px(WOUND[0], WOUND[1]),
-    radius: 96,
-    color: "navy.light",
-    intensity: 0.4,
+    radius: 150,
+    color: "navy.pale",
+    intensity: 0.9,
+    flicker: { amount: 0.06, period: 3.2 },
+    paint: {
+      bands: [],
+      region: "wound",
+      reach: [48],
+      ragged: 5,
+      rays: { at: px(WOUND[0], WOUND[1]), count: 9, amount: 0.25 },
+    },
+  },
+  // The 운동장's lamp, still lit on the far side.
+  {
+    at: [WOUND[0] * T + 22, WOUND[1] * T - 16],
+    radius: 44,
+    color: "gold.pale",
+    intensity: 0.6,
   },
   // The altar's fire.
   {
     at: [ALTAR[0] * T + 16, ALTAR[1] * T + 4],
     radius: 40,
     color: "gold.light",
-    intensity: 0.4,
+    intensity: 0.6,
     flicker: { amount: 0.2, period: 0.7 },
   },
 ];
@@ -654,7 +669,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.pale",
-  ambient: { color: "gold.pale", intensity: 1 },
+  ambient: { color: "gold.pale", intensity: 0.95 },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [

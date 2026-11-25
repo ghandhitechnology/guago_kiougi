@@ -188,8 +188,6 @@ const CYPRESSES: readonly Vec[] = [
 const grove = merge(trees("olive", OLIVES, 1), trees("cypress", CYPRESSES, 2));
 
 const lights: LightSource[] = [
-  // The first sun, level across the water from the east.
-  { at: [W * T, 20 * T], radius: 900, color: "rose.pale", intensity: 0.5 },
   // The altar's fire, lit for the greeting.
   {
     at: [ALTAR[0] * T + 16, ALTAR[1] * T + 4],
@@ -269,7 +267,7 @@ const map: MapSource = {
   theme: "greece",
   shade: "greece-shade",
   sky: "navy.dark",
-  ambient: { color: "rose.pale", intensity: 0.92 },
+  ambient: { color: "rose.pale", intensity: 0.94, sun: { dir: [-0.9, 0.08], color: "rose.light" } },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [{ prop: "dawn", at: [-60, 4], raw: true }],

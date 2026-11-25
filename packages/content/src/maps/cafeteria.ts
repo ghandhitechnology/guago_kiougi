@@ -83,7 +83,7 @@ const sun = (cx: number): LightSource => ({
   at: [cx + 14, 104],
   radius: 64,
   color: "gold.pale",
-  intensity: 0.5,
+  intensity: 0.75,
   paint: {
     bands: ["campus", "campus-lamp"],
     spill: { top: [cx - 13, cx + 13, 66], bottom: [cx - 2, cx + 36, 148] },
@@ -99,8 +99,7 @@ const lights: LightSource[] = [
     at: [264, 70],
     radius: 44,
     color: "gold.light",
-    intensity: 0.45,
-    paint: { bands: ["campus"], at: [264, 74], r: [40, 14], ragged: 2 },
+    intensity: 0.2,
   },
   ...TABLE_ROWS.flatMap((row) =>
     RUNS.map(
@@ -108,7 +107,7 @@ const lights: LightSource[] = [
         at: [(x + 4) * T, row * T + 4],
         radius: 72,
         color: "gold.pale",
-        intensity: 0.35,
+        intensity: 0.12,
         paint: { bands: ["campus-lamp"], at: [(x + 4) * T, row * T + 6], r: [72, 26], ragged: 3 },
       }),
     ),
@@ -122,7 +121,7 @@ const map: MapSource = {
   time: { clock: "12:40", phase: "noon", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "stone.pale", intensity: 0.86 },
+  ambient: { color: "stone.pale", intensity: 0.8, unlit: "campus" },
   plan: `
     ##########################################
     #||||||||||||||||||||||||||||||||||||||||#
