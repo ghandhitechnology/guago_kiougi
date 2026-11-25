@@ -5,6 +5,8 @@ import {
   addExp,
   allocateStats,
   bestWindowRate,
+  CATCH_UP_FADE,
+  CATCH_UP_MAX,
   catchUp,
   claimPool,
   completeQuest,
@@ -12,6 +14,7 @@ import {
   hasUnlock,
   POOL,
   poolFill,
+  QUEST_REWARD,
   questReward,
   repeatShare,
   resetStats,
@@ -49,7 +52,7 @@ describe("stats", () => {
 });
 
 describe("자습 pool", () => {
-  const rate = { exp: 100, pinecone: 10, sheets: 0.01 };
+  const rate = { exp: 100, pinecone: 10, sheets: 0.01, ink: 1 };
 
   it("fills at its share for up to 8 hours", () => {
     const fill = poolFill(rate, 20 * 3600, "field");
@@ -64,8 +67,10 @@ describe("자습 pool", () => {
     expect(fill.pinecone).toBeCloseTo(10 * POOL.studyHallShare * 11 * 3600, 6);
   });
 
-  it("applies catch-up to the pool", () => {
-    expect(poolFill(rate, 3600, "hub", false, 3).exp).toBeCloseTo(100 * POOL.share * 3600 * 3, 6);
+  it("applies catch-up to pool EXP only", () => {
+    const fill = poolFill(rate, 3600, "hub", false, 3);
+    expect(fill.exp).toBeCloseTo(100 * POOL.share * 3600 * 3, 6);
+    expect(fill.pinecone).toBeCloseTo(10 * POOL.share * 3600, 6);
   });
 
   it("takes the best ten-minute window by EXP", () => {
@@ -74,27 +79,37 @@ describe("자습 pool", () => {
       exp: t >= 500 && t < 1100 ? 5 : 1,
       pinecone: 1,
       sheets: 0,
+      ink: 0,
     }));
     expect(bestWindowRate(events).exp).toBeCloseTo(5, 9);
     expect(bestWindowRate(events.slice(0, 300)).exp).toBe(0);
   });
 
   it("pays the purse and books it under the pool", () => {
-    const r = claimPool({}, { exp: 50, pinecone: 12.7, sheets: 2.5, seconds: 60 }, "wangdo");
+    const r = claimPool(
+      {},
+      { exp: 50, pinecone: 12.7, sheets: 2.5, ink: 3.5, seconds: 60 },
+      "wangdo",
+    );
     if (!r.ok) throw new Error(r.error);
     expect(r.state.exp).toBe(50);
     expect(r.ledger).toEqual([
       { currency: "pinecone", amount: 12, key: "pool" },
+      { currency: "ink", amount: 3, key: "pool" },
       { currency: "sheet:wangdo", amount: 2, key: "pool" },
     ]);
   });
 });
 
 describe("EXP modifiers", () => {
-  it("catches up by Pages to the frontier, up to ×8", () => {
-    expect(catchUp(4, 4)).toBe(1);
-    expect(catchUp(1, 3)).toBe(3);
-    expect(catchUp(1, 12)).toBe(8);
+  it("catches up below the live band, fading to ×1 on arrival", () => {
+    // Live Page 4: its band starts at level 301.
+    expect(catchUp(301, 4)).toBe(1);
+    expect(catchUp(900, 4)).toBe(1);
+    expect(catchUp(1, 4)).toBe(CATCH_UP_MAX);
+    expect(catchUp(301 - CATCH_UP_FADE, 4)).toBe(CATCH_UP_MAX);
+    expect(catchUp(301 - CATCH_UP_FADE / 5, 4)).toBeCloseTo(1 + (CATCH_UP_MAX - 1) / 5, 9);
+    expect(catchUp(50, 1)).toBe(1);
   });
 
   it("rests for thirty minutes and gets drowsy after two hours of full auto", () => {
@@ -114,10 +129,16 @@ describe("수행평가", () => {
   it("pays in same-level kills, so a notice keeps its worth through a Page", () => {
     for (const level of [5, 50, 95]) {
       const daily = questReward("daily", level);
-      expect(daily.exp / expToNext(level)).toBeCloseTo(150 / killsPerLevel(level), 9);
-      expect(daily.pinecone).toBe(Math.round(monsterCoin(level, 1) * 150));
+      expect(daily.exp / expToNext(level)).toBeCloseTo(
+        QUEST_REWARD.daily.kills / killsPerLevel(level),
+        9,
+      );
+      expect(daily.pinecone).toBe(Math.round(monsterCoin(level, 1) * QUEST_REWARD.daily.kills));
     }
-    expect(questReward("repeat", 40, 2).exp).toBeCloseTo(monsterEXP(40, 1) * 50 * 0.6, 6);
+    expect(questReward("repeat", 40, 2).exp).toBeCloseTo(
+      monsterEXP(40, 1) * QUEST_REWARD.repeat.kills * 0.6,
+      6,
+    );
   });
 
   it("books rewards under the cadence", () => {

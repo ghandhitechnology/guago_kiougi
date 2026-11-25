@@ -3,7 +3,7 @@
  * simulation: each behaviour turns into hits per second on one target (`single`) and summed over
  * the horde around a kiting player (`aoe`), in units of the book's damage.
  *
- * A horde is taken as one monster per 30×30 px of attack area, at most 12 per attack.
+ * A horde is taken as one monster per 2000 px² of attack area (about 60 on a 480×270 screen), at most 8 per attack.
  */
 import {
   type Attack,
@@ -30,8 +30,8 @@ import {
   statEffects,
 } from "@guago/shared";
 
-export const DENSITY_AREA = 900;
-export const MAX_TARGETS = 12;
+export const DENSITY_AREA = 2000;
+export const MAX_TARGETS = 8;
 
 export const targets = (area: number) => Math.min(MAX_TARGETS, Math.max(1, area / DENSITY_AREA));
 

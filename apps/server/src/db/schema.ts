@@ -157,6 +157,28 @@ export const loginFailures = pgTable(
   ],
 );
 
+/**
+ * Every chat line, kept 90 days (PLAN §12, §20). `body` is the text as sent, before masking.
+ * Partitioned by UTC day: the migration declares `PARTITION BY RANGE (at)` and the
+ * `chat_log_maintain` function, which the server runs hourly to add tomorrow's partitions and
+ * drop those past retention. No foreign keys: the log outlives characters.
+ */
+export const chatLog = pgTable(
+  "chat_log",
+  {
+    id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity(),
+    channel: text("channel").notNull(),
+    /** Character id; null for system lines. */
+    senderId: uuid("sender_id"),
+    /** Whisper and system: the receiving character id. 주변: the map id. 전체: null. */
+    target: text("target"),
+    body: text("body").notNull(),
+    masked: boolean("masked").notNull(),
+    at: at("at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.id, t.at] }), index("chat_log_sender_idx").on(t.senderId, t.at)],
+);
+
 // Items and the economy (PLAN §8, §13, §20, §22) ---------------------------------------------
 
 /**

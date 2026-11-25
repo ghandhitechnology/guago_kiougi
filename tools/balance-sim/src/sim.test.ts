@@ -1,7 +1,7 @@
 import { expToNext } from "@guago/shared";
 import { describe, expect, it } from "vitest";
 import { newcomer, profiles } from "./profiles.ts";
-import { simulate } from "./sim.ts";
+import { chooseField, simulate } from "./sim.ts";
 
 // Guards the simulator's own bookkeeping, not the tuned outcome.
 describe("balance simulator", () => {
@@ -32,5 +32,14 @@ describe("balance simulator", () => {
     const levels = run.days.map((d) => d.level);
     expect(levels).toEqual([...levels].sort((a, b) => a - b));
     for (const b of run.books) expect(b.level).toBeLessThanOrEqual(levels.at(-1) ?? 1);
+  });
+
+  it("never hunts lower or slower for more damage, and stays inside the live band", () => {
+    for (const level of [5, 30, 70, 99]) {
+      const weak = chooseField(level, casual, 1e3 * 10 ** (level / 100));
+      const strong = chooseField(level, casual, 1e5 * 10 ** (level / 100));
+      expect(strong.monLevel).toBeGreaterThanOrEqual(weak.monLevel);
+      expect(strong.monLevel).toBeLessThanOrEqual(100);
+    }
   });
 });

@@ -4,6 +4,7 @@
  * involved, one roll in [0, 1) from the server's `Random`, and returns the new state with its
  * ledger entries. Nothing here downgrades or destroys a book except the two copies 제련 eats.
  */
+import { growth } from "./growth.ts";
 import { type Amounts, type Outcome, type Purse, pay, sheet } from "./ledger.ts";
 import { BookGrade, bookExpToNext, GRADE_MULTIPLIER } from "./numbers.ts";
 
@@ -49,16 +50,23 @@ export function pilgiChance(level: number, fails: number): number {
   return Math.min(1, pilgiBaseChance(level) + PILGI_PITY * fails);
 }
 
-/** 잉크 = 10 × 1.15ⁿ and 솔방울 = base × 1.15ⁿ × grade multiplier, rounded up (PLAN §8). */
+/**
+ * 잉크 = 10 × 1.15ⁿ and 솔방울 = base × 1.15ⁿ × grade multiplier × G(book level), rounded up.
+ * PLAN §8 has no G term; without it the 솔방울 cost stood still while income grew ×10 a Page.
+ */
 export const PILGI_INK_BASE = 10;
 export const PILGI_COIN_BASE = 100;
 export const PILGI_COST_GROWTH = 1.15;
 
-export function pilgiCost(level: number, grade: BookGrade): { ink: number; pinecone: number } {
+export function pilgiCost(
+  level: number,
+  grade: BookGrade,
+  bookLevel = 0,
+): { ink: number; pinecone: number } {
   const g = PILGI_COST_GROWTH ** level;
   return {
     ink: Math.ceil(PILGI_INK_BASE * g),
-    pinecone: Math.ceil(PILGI_COIN_BASE * g * (GRADE_MULTIPLIER[grade] ?? 1)),
+    pinecone: Math.ceil(PILGI_COIN_BASE * g * (GRADE_MULTIPLIER[grade] ?? 1) * growth(bookLevel)),
   };
 }
 
@@ -73,7 +81,7 @@ export function pilgi(
   roll: number,
 ): Outcome<Holding<BookItem> & { readonly success: boolean }> {
   const { item: book } = state;
-  const cost = pilgiCost(book.pilgi, book.grade);
+  const cost = pilgiCost(book.pilgi, book.grade, book.level);
   const paid = pay(state.purse, cost, "sink.pilgi");
   if (!paid) return { ok: false, error: "pilgi_cost" };
   const success = roll < pilgiChance(book.pilgi, book.pilgiFails);
@@ -102,7 +110,7 @@ export function pilgiExpectedAttempts(from: number, to: number): number {
 // ── 제본 ───────────────────────────────────────────────────────────────────
 
 /** 20 낱장 of a book, one 제본 재료 and a fee make one 교과서 copy at level 1. */
-export const BIND = { sheets: 20, binding: 1, fee: 200 } as const;
+export const BIND = { sheets: 20, binding: 1, fee: 10000 } as const;
 
 export function bindCost(book: string, page: number): Amounts {
   return {
@@ -130,7 +138,7 @@ export function bind(
 // ── 제련 ───────────────────────────────────────────────────────────────────
 
 /** Fee to forge three copies of `grade` into the next: ×3 per grade (PLAN §13). */
-export const FORGE_FEE_BASE = 1000;
+export const FORGE_FEE_BASE = 20000;
 export const FORGE_FEE_GROWTH = 3;
 
 export function forgeFee(grade: BookGrade, page: number): number {

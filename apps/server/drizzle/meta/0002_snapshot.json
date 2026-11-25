@@ -1,6 +1,6 @@
 {
-  "id": "9480bb86-3aeb-4f4e-855a-774e83e3cfd5",
-  "prevId": "5ad0b623-5f45-4352-aa13-1108a79087dd",
+  "id": "81ed0fe8-5f72-4246-a440-c2f487b19858",
+  "prevId": "75a2511f-db51-4ca0-8a24-e27cfbb1788b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -395,6 +395,102 @@
           "value": "\"characters\".\"rev\" >= 0"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.chat_log": {
+      "name": "chat_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "chat_log_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_id": {
+          "name": "sender_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target": {
+          "name": "target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "masked": {
+          "name": "masked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "chat_log_sender_idx": {
+          "name": "chat_log_sender_idx",
+          "columns": [
+            {
+              "expression": "sender_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "chat_log_id_at_pk": {
+          "name": "chat_log_id_at_pk",
+          "columns": [
+            "id",
+            "at"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.codex_unlocks": {

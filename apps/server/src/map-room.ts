@@ -12,6 +12,7 @@ import {
   TICK_RATE_HZ,
   TILE_SIZE,
 } from "@guago/shared";
+import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 
 /** One map instance: runs the shared simulation at 20 Hz and mirrors it into the synced state. */
@@ -45,6 +46,9 @@ export class MapRoom extends Room<{ state: MapState }> {
     player.y = here ? character.y : LAWN.spawn.y;
     dressPlayer(player, character);
     this.state.players.set(client.sessionId, player);
+    const { sessionId } = client;
+    const at = () => this.state.players.get(sessionId);
+    places.enter(character.id, { mapId: LAWN.id, roomId: this.roomId, sessionId, at });
   }
 
   override onDrop(client: Client): void {
@@ -57,6 +61,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override async onLeave(client: Client): Promise<void> {
+    places.leave(client.sessionId);
     await this.seats.leave(client);
     this.state.players.delete(client.sessionId);
   }

@@ -18,8 +18,9 @@ import {
   fieldPopulation,
   monsterById,
   PAGE1_FIELDS,
+  refillCap,
   STARTER_BOOKS,
-  spawnRate,
+  surgeShare,
   TOOLS,
   VENDING,
 } from "@guago/content";
@@ -43,9 +44,11 @@ import {
   feedSheets,
   forge,
   forgeFee,
+  growth,
   KNOCKOUT,
   type LedgerEntry,
   type LogoutPlace,
+  levelFactor,
   mergeTools,
   monsterCoin,
   monsterEXP,
@@ -56,6 +59,7 @@ import {
   pilgi,
   pilgiCost,
   poolFill,
+  poolTerms,
   questReward,
   Random,
   type Rate,
@@ -106,9 +110,21 @@ export interface Profile {
   readonly frontier: number;
 }
 
+/** What a run varies besides the profile; none of these are game constants. */
+export interface SimOptions {
+  /** Multiplies every EXP gain: the same as dividing `K(L)` by it. For tuning sweeps. */
+  readonly expScale?: number;
+  /** Replaces the pool share; the 자습실 keeps its ratio to the normal share. For sweeps. */
+  readonly poolShare?: number;
+  /** `built` follows the spending policy; `neglected` never binds, forges, feeds or writes 필기. */
+  readonly policy?: "built" | "neglected";
+}
+
 export interface DayRecord {
   readonly day: number;
   readonly level: number;
+  /** Average monster level hunted that day, to see hunting up. */
+  readonly monsterLevel: number;
   readonly page: number;
   readonly kpm: number;
   readonly dpsKpm: number;
@@ -127,6 +143,7 @@ export interface RunResult {
   readonly exp: number;
   readonly deaths: number;
   readonly sentHome: number;
+  readonly ink: { readonly earned: number; readonly spent: number };
 }
 
 const DAY = 86_400;
@@ -197,11 +214,17 @@ interface State {
   expBySource: Map<string, number>;
   deaths: number;
   sentHome: number;
+  ink: { earned: number; spent: number };
 }
 
 function bookLedger(s: State, entries: readonly LedgerEntry[]) {
-  for (const e of entries)
+  for (const e of entries) {
     if (e.currency === "pinecone") s.pinecones.set(e.key, (s.pinecones.get(e.key) ?? 0) + e.amount);
+    if (e.currency === "ink") {
+      if (e.amount > 0) s.ink.earned += e.amount;
+      else s.ink.spent -= e.amount;
+    }
+  }
 }
 
 function gainExp(s: State, amount: number, source: string, equipped: readonly BookItem[]) {
@@ -269,8 +292,20 @@ function newBook(s: State, def: string): BookItem {
   };
 }
 
-export function simulate(profile: Profile, days: number, seed: number): RunResult {
+export function simulate(
+  profile: Profile,
+  days: number,
+  seed: number,
+  options: SimOptions = {},
+): RunResult {
   const random = new Random(seed);
+  const expScale = options.expScale ?? 1;
+  const policy = options.policy ?? "built";
+  const terms = poolTerms(profile.logout);
+  const poolScale =
+    options.poolShare === undefined
+      ? 1
+      : (options.poolShare * (profile.logout === "study-hall" ? POOL_HALL_RATIO : 1)) / terms.share;
   const cls = profile.cls;
   const s: State = {
     level: 1,
@@ -282,13 +317,14 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
     demerits: 0,
     sentHomeMinutes: 0,
     rested: false,
-    poolRate: { exp: 0, pinecone: 0, sheets: 0 },
+    poolRate: { exp: 0, pinecone: 0, sheets: 0, ink: 0 },
     toolLuck: 0,
     nextId: 1,
     pinecones: new Map(),
     expBySource: new Map(),
     deaths: 0,
     sentHome: 0,
+    ink: { earned: 0, spent: 0 },
   };
   for (const id of STARTERS[cls]) s.copies.set(id, [newBook(s, id)]);
   const record: DayRecord[] = [];
@@ -304,14 +340,21 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
         DAY - profile.activeMinutes * 60,
         profile.logout,
         false,
-        catchUpFor(s.level, profile),
+        catchUp(s.level, profile.frontier),
       );
-      const claim = claimPool(s.purse, { ...fill, sheets: 0 }, undefined);
+      const scaled = {
+        ...fill,
+        exp: fill.exp * poolScale * expScale,
+        pinecone: fill.pinecone * poolScale,
+        ink: fill.ink * poolScale,
+        sheets: 0,
+      };
+      const claim = claimPool(s.purse, scaled, undefined);
       if (claim.ok) {
         s.purse = claim.state.purse;
         bookLedger(s, claim.ledger);
         gainExp(s, claim.state.exp, "pool", equippedBooks(s, cls));
-        spreadSheets(s, fill.sheets, classBooks, bookWeight, 1);
+        spreadSheets(s, fill.sheets * poolScale, classBooks, bookWeight, 1);
       }
     }
 
@@ -319,11 +362,10 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
     let minute = 0;
     let dayKpm = 0;
     let dayDps = 0;
+    let dayMonster = 0;
     let best: Rate = s.poolRate;
     while (minute < profile.activeMinutes) {
       const span = Math.min(CHUNK_MINUTES, profile.activeMinutes - minute);
-      const mix = fieldFor(s.level, profile.frontier);
-      const monLevel = Math.min(mix.max, Math.max(mix.min, s.level));
       const equipped = equippedBooks(s, cls);
       const owned: OwnedBook[] = equipped.map((b) => ({
         def: defOf(b.def),
@@ -339,18 +381,9 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
       });
       const mealDamage =
         menu === "damage" && minute * 60 < ASSUME.meal.seconds ? 1 + ASSUME.meal.amount : 1;
-      const hp = monsterHP(monLevel, 1) * mix.hp;
-      const dpsKpm = ((dmg.aoe * mealDamage * ASSUME.overkill) / hp) * 60;
-      const players =
-        mix.page < profile.frontier
-          ? Math.max(1, Math.round(profile.fieldPlayers / 3))
-          : profile.fieldPlayers;
-      const duty =
-        FIELD_PACING.surgeSeconds / (FIELD_PACING.surgeSeconds + FIELD_PACING.lullSeconds);
-      const supply = 60 * spawnRate(players, "surge") * duty;
-      const fieldKpm = Math.min(players * dpsKpm, supply, fieldPopulation(players) * 60);
-      const kpm = (fieldKpm / players) * (1 + ASSUME.overlap * (players - 1));
-      const deaths = (profile.deathsPerHour * span) / 60;
+      const hunt = chooseField(s.level, profile, dmg.aoe * mealDamage);
+      const { mix, monLevel, kpm, dpsKpm } = hunt;
+      const deaths = (hunt.deathsPerHour * span) / 60;
       s.deaths += deaths;
       s.demerits += deaths * KNOCKOUT.demeritsOnWake;
       const huntMinutes = Math.max(0, span - deaths * ASSUME.minutesPerDeath);
@@ -361,7 +394,8 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
       const sessionSeconds = minute * 60;
       const mealOn = sessionSeconds < ASSUME.meal.seconds;
       const base = expFalloff(s.level, monLevel);
-      let mult = restedMult(s.rested, sessionSeconds) * catchUpFor(s.level, profile);
+      let mult =
+        restedMult(s.rested, sessionSeconds) * catchUp(s.level, profile.frontier) * expScale;
       if (profile.mode === "auto") mult *= drowsyMult(sessionSeconds);
       if (mealOn && menu === "exp") mult *= 1 + ASSUME.meal.amount;
       if (s.sentHomeMinutes > 0) {
@@ -377,8 +411,11 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
         coinMult;
       const dropMult = fx.dropMult * (mealOn && menu === "drop" ? 1 + ASSUME.meal.amount : 1);
       const sheets = (kills * DROPS.pageChance.normal + elites * DROPS.pageChance.elite) * dropMult;
+      const mean = ([lo, hi]: readonly number[]) => ((lo ?? 0) + (hi ?? 0)) / 2;
       const ink =
-        (kills * DROPS.inkChance.normal * 1.5 + elites * DROPS.inkChance.elite * 7.5) * dropMult;
+        (kills * DROPS.inkChance.normal * mean(DROPS.inkCount.normal) +
+          elites * DROPS.inkChance.elite * mean(DROPS.inkCount.elite)) *
+        dropMult;
       const binding =
         (kills * DROPS.bindingChance.normal + elites * DROPS.bindingChance.elite) * dropMult;
 
@@ -401,27 +438,31 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
           exp: baseExp / (span * 60),
           pinecone: coins / (span * 60),
           sheets: sheets / (span * 60),
+          ink: ink / (span * 60),
         };
         if (rate.exp > best.exp || best === s.poolRate) best = rate;
       }
       dayKpm += kpm * span;
+      dayMonster += monLevel * span;
       dayDps += Math.min(dpsKpm, 9999) * span;
       minute += span;
     }
     if (profile.activeMinutes >= CHUNK_MINUTES) s.poolRate = best;
 
-    board(s, profile, day, classBooks, bookWeight);
+    board(s, profile, day, classBooks, expScale);
     if (s.demerits >= ASSUME.sentHome.demerits) {
       s.demerits = 0;
       s.sentHome++;
       s.sentHomeMinutes = ASSUME.sentHome.minutes;
     }
-    spend(s, profile, random);
+    if (policy === "built") spend(s, profile, random);
+    else placeStats(s);
     s.rested = profile.logout === "dorm";
     record.push({
       day,
       level: s.level,
-      page: fieldFor(s.level, profile.frontier).page,
+      monsterLevel: dayMonster / Math.max(1, profile.activeMinutes),
+      page: fieldFor(Math.min(s.level, profile.frontier * 100), profile.frontier).page,
       kpm: dayKpm / Math.max(1, profile.activeMinutes),
       dpsKpm: dayDps / Math.max(1, profile.activeMinutes),
     });
@@ -437,12 +478,56 @@ export function simulate(profile: Profile, days: number, seed: number): RunResul
     exp: s.exp,
     deaths: s.deaths,
     sentHome: s.sentHome,
+    ink: s.ink,
   };
 }
 
-function catchUpFor(level: number, profile: Profile): number {
-  const page = Math.min(profile.frontier, Math.max(1, Math.ceil(level / 100)));
-  return catchUp(page, profile.frontier);
+const POOL_HALL_RATIO = poolTerms("study-hall").share / poolTerms("field").share;
+
+interface Hunt {
+  readonly mix: FieldMix;
+  readonly monLevel: number;
+  readonly kpm: number;
+  readonly dpsKpm: number;
+  readonly deathsPerHour: number;
+}
+
+/**
+ * Where a player hunts: the monster level, from 30 below to 45 above their own and never past the
+ * live band, that pays the most EXP a minute. A field's kills are the lesser of what its players'
+ * damage allows and what refill and the standing horde supply; damage falls with the level
+ * factor and dying gets likelier the higher they go (monster damage grows ×10 a Page, so the
+ * danger is taken as G(d)³).
+ */
+export function chooseField(level: number, profile: Profile, aoe: number): Hunt {
+  const top = profile.frontier * 100;
+  const cycle = FIELD_PACING.surgeSeconds + FIELD_PACING.lullSeconds;
+  let best: Hunt | undefined;
+  let bestScore = -1;
+  for (let m = Math.min(top, level + 45); m >= Math.max(1, Math.min(top, level) - 30); m--) {
+    const mix = fieldFor(m, profile.frontier);
+    const hp = monsterHP(m, 1) * mix.hp;
+    const dpsKpm = ((aoe * levelFactor(level, m) * ASSUME.overkill) / hp) * 60;
+    const sealed = m <= (profile.frontier - 1) * 100;
+    const players = sealed
+      ? Math.max(1, Math.round(profile.fieldPlayers / 3))
+      : profile.fieldPlayers;
+    const supply =
+      60 * (refillCap(players, "surge") * surgeShare() + fieldPopulation(players) / cycle);
+    const fieldKpm = Math.min(players * dpsKpm, supply);
+    const kpm = (fieldKpm / players) * (1 + ASSUME.overlap * (players - 1));
+    const deathsPerHour = profile.deathsPerHour * Math.max(1, growth(m - level) ** 3);
+    const alive = Math.max(0, 1 - (deathsPerHour / 60) * ASSUME.minutesPerDeath);
+    const perKill =
+      (mix.exp * monsterEXP(m, 1) + monsterEXP(m, ELITE.rank) / ELITE.everyKills) *
+      expFalloff(level, m);
+    const score = kpm * alive * perKill;
+    if (score > bestScore * (1 + 1e-9)) {
+      bestScore = score;
+      best = { mix, monLevel: m, kpm, dpsKpm, deathsPerHour };
+    }
+  }
+  return best as Hunt;
 }
 
 /** 낱장 by drop weight: the class's own books directly, the rest through trading at a loss. */
@@ -480,20 +565,24 @@ function board(
   profile: Profile,
   day: number,
   classBooks: readonly BookDef[],
-  weight: (b: BookDef) => number,
+  expScale: number,
 ) {
   const target = classBooks.find((b) => !s.copies.has(b.id)) ?? classBooks[0];
   const turnIn = (cadence: "daily" | "weekly" | "repeat", done: number) => {
-    const mix = fieldFor(s.level, profile.frontier);
-    const fieldLevel = Math.min(mix.max, Math.max(mix.min, s.level));
-    const reward = questReward(cadence, fieldLevel, done, s.level, catchUpFor(s.level, profile));
+    const fieldLevel = Math.min(profile.frontier * 100, s.level);
+    const reward = questReward(
+      cadence,
+      fieldLevel,
+      done,
+      s.level,
+      catchUp(s.level, profile.frontier),
+    );
     const r = completeQuest(s.purse, reward, cadence, target?.id ?? "wangdo");
     if (!r.ok) return;
     s.purse = r.state.purse;
     bookLedger(s, r.ledger);
-    gainExp(s, r.state.exp, `quest.${cadence}`, equippedBooks(s, profile.cls));
+    gainExp(s, r.state.exp * expScale, `quest.${cadence}`, equippedBooks(s, profile.cls));
   };
-  void weight;
   if (profile.activeMinutes >= 15) for (let i = 0; i < BOARD.daily; i++) turnIn("daily", 0);
   if (profile.weeklies && day % 7 === 6) for (let i = 0; i < BOARD.weekly; i++) turnIn("weekly", 0);
   for (let i = 0; i < profile.repeatables; i++) turnIn("repeat", i);
@@ -598,7 +687,7 @@ function spend(s: State, profile: Profile, random: Random) {
   for (let attempt = 0; attempt < 500; attempt++) {
     const book = equipped().sort((a, b) => a.pilgi - b.pilgi)[0];
     if (!book) break;
-    const cost = pilgiCost(book.pilgi, book.grade);
+    const cost = pilgiCost(book.pilgi, book.grade, book.level);
     if ((s.purse.pinecone ?? 0) - cost.pinecone < reserve || (s.purse.ink ?? 0) < cost.ink) break;
     const r = pilgi({ item: book, purse: s.purse }, random.next());
     if (!r.ok) break;

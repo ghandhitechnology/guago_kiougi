@@ -6,6 +6,7 @@ import { bookById, toolSubject } from "@guago/content";
 import {
   type BookGrade,
   type BookItem,
+  catchUp,
   expToNext,
   type ItemKind,
   type ItemView,
@@ -20,7 +21,7 @@ import {
   type QuestReward,
   type QuestView,
   type Rate,
-  STAT_IDS,
+  type STAT_IDS,
   type Stats,
   statPoints,
   statsSpent,
@@ -47,7 +48,7 @@ export interface ItemRow {
 
 /** What the server measured for the 자습 pool at logout (`pool_rates`). */
 export interface PoolRates extends Rate {
-  readonly catchUp?: number;
+  /** 층장 of the week at logout: one more hour on the cap (PLAN §11). */
   readonly floorLeader?: boolean;
 }
 
@@ -236,26 +237,34 @@ export function itemView(row: ItemRow): ItemView {
     slot: row.slot,
   };
   if (row.kind === "book") {
-    const cost = pilgiCost(row.pilgi, row.grade as BookGrade);
+    const cost = pilgiCost(row.pilgi, row.grade as BookGrade, row.level);
     view.next = { chance: pilgiChance(row.pilgi, row.pilgiFails), ...cost };
   }
   return view;
 }
 
-/** The pool as it stands at `now`: what claiming it would pay. */
-export function poolNow(c: CharacterRow, now: Date): { fill: PoolFill; cap: number } | null {
+/**
+ * The pool as it stands at `now`: what claiming it would pay. Catch-up follows the character's
+ * level against the live Page (`frontier`), like every other EXP they earn.
+ */
+export function poolNow(
+  c: CharacterRow,
+  now: Date,
+  frontier: number,
+): { fill: PoolFill; cap: number } | null {
   if (!c.poolStartedAt || !c.poolRates || !c.poolPlace) return null;
   const rates = c.poolRates;
   const seconds = (now.getTime() - c.poolStartedAt.getTime()) / 1000;
   const floorLeader = rates.floorLeader === true;
+  const mult = catchUp(c.level, frontier);
   return {
-    fill: poolFill(rates, seconds, c.poolPlace, floorLeader, rates.catchUp ?? 1),
+    fill: poolFill(rates, seconds, c.poolPlace, floorLeader, mult),
     cap: poolTerms(c.poolPlace, floorLeader).cap,
   };
 }
 
-export function progressionView(c: CharacterRow, now: Date): ProgressionView {
-  const pool = poolNow(c, now);
+export function progressionView(c: CharacterRow, now: Date, frontier: number): ProgressionView {
+  const pool = poolNow(c, now, frontier);
   return {
     level: c.level,
     exp: c.exp,
