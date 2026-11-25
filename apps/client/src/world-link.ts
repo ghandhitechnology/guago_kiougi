@@ -24,6 +24,9 @@ import { Client, type Room } from "@colyseus/sdk";
 import {
   type Applicant,
   BOARD_POST_LENGTH,
+  type BoardData,
+  type BoardMessageName,
+  type BoardRequests,
   type ChangeNotice,
   type ChatLine,
   type ChatSend,
@@ -40,6 +43,7 @@ import {
   type FriendRequest,
   type HelpTemplate,
   isPlayerName,
+  isSocialType,
   LIVE_MESSAGES,
   type LivePush,
   type LiveReadKind,
@@ -64,6 +68,9 @@ import {
   type SocialType,
   type SpeakChannel,
   type SystemLine,
+  type TradeMessageName,
+  type TradeRequests,
+  type TradeUpdate,
   WORLD_MESSAGES,
   WORLD_ROOM,
   whisperTarget,
@@ -101,9 +108,18 @@ export type PresenceChange =
   /** Map or level changed; `entry` holds the new values. */
   | { kind: "update"; entry: PresenceEntry };
 
-/** A social request's answer: its data, or why it was not carried out. */
-export type RequestResult<K extends SocialType> =
-  | { ok: true; data: SocialDone<K> }
+/**
+ * Every request in the social shape (`n`, then one `done` or `refused`): the social systems',
+ * direct trade's and the 매점 게시판's reads, each with what its `done` carries.
+ */
+export type Requests = { [K in SocialType]: SocialRequests[K] } & {
+  [K in TradeMessageName]: { req: TradeRequests[K]; done: { session: string } };
+} & { [K in BoardMessageName]: { req: BoardRequests[K]; done: BoardData[K] } };
+export type RequestType = keyof Requests;
+
+/** A request's answer: its data, or why it was not carried out. */
+export type RequestResult<K extends RequestType> =
+  | { ok: true; data: Requests[K]["done"] }
   | { ok: false; code: SendCode; retryMs?: number; need?: number };
 
 /** The player's social state, as the server last told it. */
@@ -143,6 +159,8 @@ export type WorldEvent =
   | { type: "change"; change: ChangeNotice }
   /** After `social` has been updated with it. */
   | { type: "social"; event: SocialEvent }
+  /** A direct trade window as it changes: an invite, the offers, confirmations, the end. */
+  | { type: "trade"; update: TradeUpdate }
   /** The living world: a view read back, a notice done, a 도감 unlock, an award, a 도움 change. */
   | { type: "live"; push: LivePush };
 
@@ -170,7 +188,7 @@ export interface WorldLink {
    * `club.create` takes an operation id: `newOpId()`, and the same id again to retry after
    * `offline` or `timeout`, which never founds or charges twice.
    */
-  request<K extends SocialType>(type: K, req: SocialRequests[K]["req"]): Promise<RequestResult<K>>;
+  request<K extends RequestType>(type: K, req: Requests[K]["req"]): Promise<RequestResult<K>>;
   /**
    * One item or currency operation. `id` defaults to a fresh UUID; pass the earlier id to retry.
    * The result's `change` holds the new values to apply over the inventory snapshot.
@@ -272,7 +290,7 @@ export function connectWorld(
   const requests = new Map<
     number,
     {
-      resolve: (r: RequestResult<SocialType>) => void;
+      resolve: (r: RequestResult<RequestType>) => void;
       timer: ReturnType<typeof setTimeout> | undefined;
     }
   >();
@@ -344,7 +362,7 @@ export function connectWorld(
   };
   const armRequest = (n: number) =>
     setTimeout(() => settleRequest(n, { ok: false, code: "timeout" }), SEND_TIMEOUT_MS);
-  const settleRequest = (n: number, result: RequestResult<SocialType>) => {
+  const settleRequest = (n: number, result: RequestResult<RequestType>) => {
     const p = requests.get(n);
     if (!p) return;
     requests.delete(n);
@@ -454,6 +472,9 @@ export function connectWorld(
       emit({ type: "change", change });
     });
     joined.onMessage(WORLD_MESSAGES.social, onSocial);
+    joined.onMessage(WORLD_MESSAGES.trade, (update: TradeUpdate) =>
+      emit({ type: "trade", update }),
+    );
     joined.onMessage(LIVE_MESSAGES.push, (push: LivePush) => {
       if ("n" in push && push.n !== undefined) settleRead(push.n, { ok: true, value: push });
       // A 도움 notice's new state answers the oldest 도움 request still waiting.
@@ -464,7 +485,7 @@ export function connectWorld(
       emit({ type: "live", push });
     });
     joined.onMessage(WORLD_MESSAGES.done, (d: Done) => {
-      settleRequest(d.n, { ok: true, data: d.data as SocialDone<SocialType> });
+      settleRequest(d.n, { ok: true, data: d.data as Requests[RequestType]["done"] });
     });
     joined.onMessage(WORLD_MESSAGES.refused, (r: Refusal) => {
       if (r.n === undefined) return;
@@ -605,14 +626,14 @@ export function connectWorld(
     },
     request(type, req) {
       type R = RequestResult<typeof type>;
-      const local = precheck(type, req as Record<string, unknown>);
+      const local = isSocialType(type) ? precheck(type, req as Record<string, unknown>) : null;
       if (local) return Promise.resolve({ ok: false, code: local } as R);
       const open = room;
       if (!open || status !== "online") return Promise.resolve({ ok: false, code: "offline" } as R);
       const n = ++counter;
       return new Promise<R>((resolve) => {
         requests.set(n, {
-          resolve: resolve as (r: RequestResult<SocialType>) => void,
+          resolve: resolve as (r: RequestResult<RequestType>) => void,
           timer: armRequest(n),
         });
         const body = Object.fromEntries(Object.entries(req).filter(([, v]) => v !== undefined));

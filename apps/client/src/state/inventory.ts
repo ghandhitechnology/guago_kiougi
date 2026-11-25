@@ -104,6 +104,11 @@ export class Inventory {
     return r;
   }
 
+  /** A change the server reported outside an operation's result, as a finished trade's. */
+  applyChange(change: ChangeNotice): void {
+    this.apply(change);
+  }
+
   private apply(change: ChangeNotice): void {
     const s = this.snap;
     if (!s) return;

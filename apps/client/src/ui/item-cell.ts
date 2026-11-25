@@ -132,7 +132,12 @@ export class ItemCell extends Widget {
       g !== undefined && !locked ? `item/${GRADES[g] ?? "textbook"}` : "item-empty/idle",
     );
     this.icon.setVisible(!!item && !locked);
-    if (item) this.icon.setFrame(item.icon).setAlpha(item.dim ? 0.4 : 1);
+    // Atlas frames carry the art's top-left pivot; the icon is centred in its well.
+    if (item)
+      this.icon
+        .setFrame(item.icon)
+        .setOrigin(0.5)
+        .setAlpha(item.dim ? 0.4 : 1);
     const count = item?.count !== undefined && item.count > 1 ? String(item.count) : "";
     this.countText.set(count);
     this.countShadow.set(count);

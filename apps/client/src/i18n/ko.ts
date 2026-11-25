@@ -243,4 +243,7 @@ export const ko = {
 
   "settings.emote": "이모트",
   "moderation.back": "처음으로",
+
+  "trade.confirm": "확정",
+  "trade.put": "올리기",
 } as const;

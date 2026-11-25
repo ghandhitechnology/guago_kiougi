@@ -17,6 +17,7 @@ import { watchNews } from "./news.ts";
 import { PartyFrames } from "./party-frames.ts";
 import { openReport } from "./report.ts";
 import { Slips } from "./slips.ts";
+import { watchTrades } from "./trade.ts";
 import { EmoteWheel } from "./wheel.ts";
 import { line } from "./words.ts";
 
@@ -54,9 +55,12 @@ export function startSocialUi(
   opts: { chat: ChatPanel | undefined; hud: Hud; toTitle: () => void },
 ): SocialUi {
   const whisper = (name: string) => opts.chat?.open(name);
+  const slips = new Slips(scene);
+  const trades = watchTrades(scene, link, slips);
   const card = new PlayerCard(scene, link, {
     whisper,
     report: (target) => openReport(scene, link, target),
+    trade: (target) => void trades.ask(target),
   });
   let board: Board | undefined;
   const openBoard = () => {
@@ -91,7 +95,6 @@ export function startSocialUi(
   frames.setTop(opts.hud.leftBottom + 6);
   opts.hud.onLeftColumn = (y) => frames.setTop(y + 6);
 
-  const slips = new Slips(scene);
   const offSlips = watchInvites(link, slips);
   const offNews = watchNews(link);
   const offModeration = watchModeration(scene, link, opts.toTitle);
@@ -130,6 +133,7 @@ export function startSocialUi(
       opts.hud.onLeftColumn = undefined;
       card.destroy();
       frames.destroy();
+      trades.destroy();
       slips.destroy();
       wheel.destroy();
       board?.close();
