@@ -72,12 +72,15 @@ export function createSocial(db: Db, options: SocialOptions) {
 
     /** Drops lapsed friend requests, club invites and 대자보 posts. */
     async sweep(): Promise<void> {
-      try {
-        await friends.sweep();
-        await clubs.sweep();
-        await board.sweep();
-      } catch (error) {
-        console.error(`social sweep failed: ${describeError(error)}`);
+      // Each sweep on its own: one failing never skips the others for the round.
+      for (const [what, run] of [
+        ["friend requests", friends.sweep],
+        ["club invites", clubs.sweep],
+        ["대자보", board.sweep],
+      ] as const) {
+        await run().catch((error: unknown) => {
+          console.error(`social sweep of ${what} failed: ${describeError(error)}`);
+        });
       }
     },
   };

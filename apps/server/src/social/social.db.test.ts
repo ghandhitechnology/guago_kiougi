@@ -11,7 +11,7 @@ import { createEconomy } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { executorFees, MemoryWallet } from "./fees.ts";
 import { createSocial, type Social } from "./index.ts";
-import { Refuse } from "./tx.ts";
+import { Refuse, retries } from "./tx.ts";
 
 let db: Db;
 let wallet: MemoryWallet;
@@ -34,6 +34,21 @@ async function character(level = 1): Promise<string> {
 }
 
 const codeOf = (r: unknown) => (r instanceof Refuse ? r.code : "ok");
+
+/** Backends of this database waiting on a lock. */
+async function waitingOnLocks(): Promise<number> {
+  return count(sql`
+    select count(*) as n from pg_stat_activity
+    where datname = current_database() and wait_event_type = 'Lock'`);
+}
+
+async function until(test: () => Promise<boolean>, ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await test())) {
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
 
 async function count(query: ReturnType<typeof sql>): Promise<number> {
   const { rows } = await db.execute(query);
@@ -402,5 +417,35 @@ describe("requests from blocked players", () => {
     expect(
       await count(sql`select requests_in as n from social_counts where character_id = ${victim}`),
     ).toBe(1);
+  });
+});
+
+describe("lock order", () => {
+  it("lets a cancel wait behind a pair lock instead of deadlocking against it", async () => {
+    const [x, y] = [await character(), await character()];
+    // The sender holds the smaller id, so the receiver's counter is the larger one.
+    const [sender, receiver] = x < y ? [x, y] : [y, x];
+    expect(await social.friends.request(sender, receiver)).toBe("requested");
+    const before = retries.count;
+    // An accept's pair lock on its way: the smaller row taken, the larger next.
+    const other = await db.pool.connect();
+    try {
+      await other.query("begin");
+      await other.query("select 1 from social_counts where character_id = $1 for update", [sender]);
+      const cancel = social.friends.cancel(sender, receiver).then(codeOf, (e: unknown) => e);
+      await until(async () => (await waitingOnLocks()) > 0);
+      const second = await other
+        .query("select 1 from social_counts where character_id = $1 for update", [receiver])
+        .then(
+          () => "ok",
+          (e: unknown) => pgErrorCode(e).code,
+        );
+      await other.query(second === "ok" ? "commit" : "rollback");
+      expect(second).toBe("ok");
+      expect(await cancel).toBe("ok");
+      expect(retries.count).toBe(before);
+    } finally {
+      other.release();
+    }
   });
 });

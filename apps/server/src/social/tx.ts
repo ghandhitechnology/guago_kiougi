@@ -55,6 +55,12 @@ export function refusalOf(error: unknown): RefusalCode | undefined {
 const RETRY = new Set(["40P01", "40001"]);
 
 /**
+ * Transactions `transact` ran again after a deadlock or serialization failure. Lock order should
+ * make these never happen; a test that races two changes checks this stays put.
+ */
+export const retries = { count: 0 };
+
+/**
  * Runs `work` in a transaction. A `Refuse` (thrown or from a known constraint) rolls back and is
  * returned; a deadlock or serialization failure runs `work` again, up to three times.
  */
@@ -66,7 +72,10 @@ export async function transact<T>(db: Db, work: (tx: Tx) => Promise<T>): Promise
       if (error instanceof Refuse) return error;
       const known = refusalOf(error);
       if (known) return new Refuse(known);
-      if (attempt < 3 && RETRY.has(pgErrorCode(error).code ?? "")) continue;
+      if (attempt < 3 && RETRY.has(pgErrorCode(error).code ?? "")) {
+        retries.count++;
+        continue;
+      }
       throw error;
     }
   }

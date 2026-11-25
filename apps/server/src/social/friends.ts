@@ -131,6 +131,8 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
 
     async decline(me: string, other: string): Promise<true | Refuse> {
       return transact(db, async (tx) => {
+        // Deleting a request moves both counters; the pair lock takes them in id order first.
+        await lockPair(tx, me, other);
         if (await hasBlocked(tx, me, other)) throw new Refuse("no_request");
         const gone = await tx.execute(sql`
           delete from friend_requests where from_id = ${other} and to_id = ${me} returning 1`);
@@ -140,9 +142,13 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
     },
 
     async cancel(me: string, other: string): Promise<true | Refuse> {
-      const gone = await db.execute(sql`
-        delete from friend_requests where from_id = ${me} and to_id = ${other} returning 1`);
-      return gone.rows.length > 0 ? true : new Refuse("no_request");
+      return transact(db, async (tx) => {
+        await lockPair(tx, me, other);
+        const gone = await tx.execute(sql`
+          delete from friend_requests where from_id = ${me} and to_id = ${other} returning 1`);
+        if (gone.rows.length === 0) throw new Refuse("no_request");
+        return true as const;
+      });
     },
 
     async remove(me: string, other: string): Promise<true | Refuse> {
@@ -227,8 +233,20 @@ export function createFriendStore(db: Db, now: () => number = Date.now) {
     },
 
     /** Drops requests past `FRIEND_REQUEST_DAYS`. */
+    /** Drops lapsed requests a pair at a time, each under its pair lock like any other change. */
     async sweep(): Promise<void> {
-      await db.execute(sql`delete from friend_requests where created_at <= ${cutoff()}`);
+      const { rows } = await db.execute(sql`
+        select from_id, to_id from friend_requests where created_at <= ${cutoff()}
+        order by created_at limit 1000`);
+      for (const r of rows) {
+        const [from, to] = [r.from_id as string, r.to_id as string];
+        await transact(db, async (tx) => {
+          await lockPair(tx, from, to);
+          await tx.execute(sql`
+            delete from friend_requests
+            where from_id = ${from} and to_id = ${to} and created_at <= ${cutoff()}`);
+        });
+      }
     },
   };
 }
