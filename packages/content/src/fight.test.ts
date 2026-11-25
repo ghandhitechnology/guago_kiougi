@@ -230,6 +230,85 @@ describe("combat replay", () => {
     expect(viewers.reduce((a, x) => a + x.r.broken, 0)).toBe(0);
   });
 
+  it("decodes through joins mid-stream, leaves, index reuse and reconnects, players and monsters", () => {
+    let net: FightNet | undefined;
+    const clients = new Map<string, { v: ReturnType<typeof newViewer>; r: SnapshotReader }>();
+    let worst = 0;
+    let players = 0;
+    let monsters = 0;
+    let broken = 0;
+    const join = (w: FightWorld, id: string) => {
+      const p = w.playerById(id);
+      if (!net || !p) return;
+      const v = newViewer();
+      v.player = p;
+      net.viewers.add(v);
+      clients.set(id, { v, r: snapshotReaderForMap("p1-colonnade") });
+    };
+    const leave = (w: FightWorld, id: string) => {
+      const c = clients.get(id);
+      if (c) {
+        broken += c.r.broken;
+        net?.viewers.delete(c.v);
+      }
+      clients.delete(id);
+      w.removePlayer(id);
+    };
+    fight(23, session(9, 700), (w) => {
+      if (!net) {
+        net = new FightNet(w);
+        for (const id of ["p0", "p1", "p2"]) join(w, id);
+      }
+      const t = w.tick;
+      if (t === 120) for (const id of ["p3", "p4"]) join(w, id); // mid-stream
+      if (t === 200) leave(w, "p1");
+      if (t === 210) {
+        // A new body takes the freed index, and its client joins.
+        const q = w.addPlayer(
+          "late",
+          1,
+          w.map.spawn.x + 30,
+          w.map.spawn.y,
+          kitFor("math", ["wangdo"]),
+          5,
+        );
+        q.mode = Mode.Auto;
+        join(w, "late");
+      }
+      if (t === 300) {
+        // A reconnect: the server marks the viewer fresh, the client starts over.
+        const c = clients.get("p0");
+        if (c) {
+          c.v.fresh = true;
+          c.r.reset();
+        }
+      }
+      net.update();
+      for (const [, c] of clients) {
+        c.r.read(net.message(c.v).slice(), NULL_SINK);
+        for (const q of w.players) {
+          if (!q.joined || q === c.v.player) continue;
+          const seen = c.r.members.get(q.entity);
+          if (!seen) continue;
+          worst = Math.max(worst, Math.abs(seen.qx / Q - q.x), Math.abs(seen.qy / Q - q.y));
+          players++;
+        }
+        for (const m of w.monsters) {
+          if (!m.alive) continue;
+          const seen = c.r.members.get(m.entity);
+          if (!seen) continue;
+          worst = Math.max(worst, Math.abs(seen.qx / Q - m.x), Math.abs(seen.qy / Q - m.y));
+          monsters++;
+        }
+      }
+    });
+    for (const [, c] of clients) broken += c.r.broken;
+    expect(players).toBeGreaterThan(1000);
+    expect(monsters).toBeGreaterThan(1000);
+    expect(worst).toBeLessThanOrEqual(1.5 + 0.25);
+    expect(broken).toBe(0);
+  });
+
   it("decodes with the browser's reader setup on maps of different sizes, and fails loudly when misread", () => {
     const sizes: string[] = [];
     for (const id of ["p1-colonnade", "gaseolgwan-stairs"]) {
