@@ -108,3 +108,52 @@ export function interiorWalls(plan: string, spec: InteriorWalls): WallLayers {
   }
   return { objects, shadows, blocks };
 }
+
+// Walls by hand -------------------------------------------------------------------------------
+// For rooms whose walls are placed piece by piece instead of read from the plan.
+
+/**
+ * A back wall's face from tile column `x0` up to (not including) `x1`, its cap on `row`.
+ * `ends` shades the corner pieces where side walls meet it; `worn` and `outlet` pick variants.
+ */
+export function backWall(
+  prop: string,
+  x0: number,
+  x1: number,
+  row: number,
+  opt: {
+    readonly ends?: "both" | "left" | "right" | "none";
+    readonly worn?: readonly number[];
+    readonly outlet?: readonly number[];
+  } = {},
+): Prop[] {
+  const ends = opt.ends ?? "both";
+  const out: Prop[] = [];
+  for (let x = x0; x < x1; x++) {
+    let frame = "run";
+    if (x === x0 && (ends === "both" || ends === "left")) frame = "end-l";
+    else if (x === x1 - 1 && (ends === "both" || ends === "right")) frame = "end-r";
+    else if (opt.worn?.includes(x)) frame = "worn";
+    else if (opt.outlet?.includes(x)) frame = "outlet";
+    out.push({ prop, frame, at: [x * TILE, mountY(row) - 1] });
+  }
+  return out;
+}
+
+/** Something hung on the back wall whose cap is on `row`, centred on pixel `x`. */
+export function mount(
+  prop: string,
+  x: number,
+  row: number,
+  opt: Omit<Prop, "prop" | "at"> = {},
+): Prop {
+  return { prop, ...opt, at: [x, mountY(row)] };
+}
+
+/** The shadow band a side wall in column `x - 1` throws on the floor east of it, rows y0..y1. */
+export function sideShade(x: number, y0: number, y1: number): Prop[] {
+  const out: Prop[] = [];
+  for (let y = y0; y < y1; y++)
+    out.push({ prop: "wall-shade", frame: "v", at: [x * TILE, y * TILE + 15] });
+  return out;
+}

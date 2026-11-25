@@ -257,6 +257,12 @@ export interface MapSource extends Layers {
     readonly tile: Vec;
     readonly facing?: Spawn["facing"];
   }[];
+  /** Dueling grounds (PLAN §14): a floor of open tiles, or a stamp region name. */
+  readonly arenas?: readonly {
+    readonly id: string;
+    readonly rect: TileRect | string;
+    readonly modes: Arena["modes"];
+  }[];
 }
 
 // Built ----------------------------------------------------------------------------------------
@@ -283,6 +289,8 @@ export interface BuiltMap {
   readonly marks: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
   /** Cast stand points: speaker id, feet in world pixels, facing. */
   readonly npcs: readonly NpcSpot[];
+  /** Dueling grounds, in tiles. */
+  readonly arenas: readonly Arena[];
 }
 
 export interface NpcSpot {
@@ -290,4 +298,11 @@ export interface NpcSpot {
   readonly x: number;
   readonly y: number;
   readonly facing: Spawn["facing"];
+}
+
+/** A dueling ground: open floor, and which fights it hosts. */
+export interface Arena {
+  readonly id: string;
+  readonly rect: TileRect;
+  readonly modes: readonly ("1v1" | "3v3")[];
 }
