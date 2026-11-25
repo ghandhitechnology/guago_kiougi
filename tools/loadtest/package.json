@@ -6,7 +6,8 @@
     "start": "node src/main.ts",
     "netsim": "node src/netsim.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "page-run": "node src/page-run.ts"
+    "page-run": "node src/page-run.ts",
+    "opening-check": "node src/opening-check.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"

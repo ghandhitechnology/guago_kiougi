@@ -460,6 +460,17 @@ const map: MapSource = {
     "eco-park": { tile: [60, 53], facing: "up" },
   },
   landmark: { name: "균열", tile: [46, 10] },
+  // The opening's night on the field (PLAN §4 beats 5, 6 and 8): where its people stand and walk.
+  marks: {
+    "field-edge": [12, 22],
+    rift: [46, 9],
+    colonnade: [38, 16],
+    "tortoise-path": [32, 19],
+    "golem-rise": [27, 30],
+    lectern: [47, 14],
+    "field-center": [31, 31],
+    dorm: [6, 14],
+  },
   portals: [
     { id: "yard", rect: { x: 0, y: 20, w: 1, h: 3 }, to: "campus-yard", spawn: "field" },
     { id: "agora", rect: { x: 44, y: 6, w: 4, h: 2 }, to: "p1-agora", spawn: "campus-field" },

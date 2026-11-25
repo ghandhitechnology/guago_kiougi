@@ -15,6 +15,7 @@ export * from "./maps/index.ts";
 export * from "./modes.ts";
 export * from "./monsters.ts";
 export * as narrative from "./narrative/index.ts";
+export * from "./opening-fights.ts";
 export * from "./places.ts";
 export * from "./raid-bosses.ts";
 export * from "./sim-rules.ts";
