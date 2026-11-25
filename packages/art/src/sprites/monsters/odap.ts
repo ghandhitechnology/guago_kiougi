@@ -1,4 +1,5 @@
-import { sprite, variant } from "../../format.ts";
+import { sprite } from "../../format.ts";
+import { form } from "../../forms.ts";
 
 /**
  * 오답: a red-pen X that got up and walked off the answer sheet. Smug about being wrong. Its
@@ -40,6 +41,24 @@ const odap = sprite({
         o.o..o.o
         ........
         .oooooo.
+      `,
+    },
+    // Brows down, eyes on you: the face it wears while it comes at you.
+    grim: {
+      at: [4, 7],
+      grid: `
+        o......o
+        .oo..oo.
+        .+*..+*.
+        ..oooo..
+      `,
+    },
+    kick: {
+      at: [0, 9],
+      grid: `
+        ~..
+        ...
+        .~.
       `,
     },
     hurt: {
@@ -141,41 +160,23 @@ const odap = sprite({
       ...odo....odo...
       ...oo......oo...
     `,
-    float: `
-      oooo........oooo
-      oRRro......oRrro
-      oRrrro....oRrrdo
-      .oRrrro..oRrrdo.
-      ..oRrrrooRrrdo..
+    lean: `
+      ...oooo....oooo.
+      ...oRRo....oRro.
+      ...oRrro..oRrdo.
+      ....oRrrooRrdo..
+      .....oRrrrrdo...
+      .....oRrrrrdo...
+      ....oRrrrrrrdo..
+      ....oRrrrrrrdo..
       ...oRrrrrrrdo...
-      ...oRrrrrrrdo...
-      ...orrrrrrrro...
       ....oRrrrrdo....
       ....oRrrrrdo....
       ....oRrddrdo....
-      ...oRrdoorrdo...
+      ....oRdoordo....
       ...oRdo..oddo...
       ...odo....odo...
-      ....o......o....
-      ................
-    `,
-    land: `
-      ................
-      ................
-      ................
-      ................
-      ................
-      ................
-      ................
-      ................
-      oo............oo
-      oRoooo....oooodo
-      oRRRrroooorrrrdo
-      .ooRrrrrrrrrdoo.
-      ..oRrrrrrrrrrdo.
-      ooRrrrrddrrrrdoo
-      odddoooooooorddo
-      oooo........oooo
+      ...oo......oo...
     `,
     recoil: `
       ................
@@ -254,10 +255,9 @@ const odap = sprite({
     idle0: ["still", "smug"],
     idle1: ["sink", ["smug", 0, 1]],
     idle2: ["puff", ["pleased", 0, -1]],
-    hop0: ["crouch", ["smug", 0, 1]],
-    hop1: ["leap", ["smug", 0, -2]],
-    hop2: ["float", ["pleased", 0, -2]],
-    hop3: ["land", ["smug", 0, 3]],
+    hop0: ["crouch", ["grim", 0, 2], "kick"],
+    hop1: ["lean", ["grim", 1, -2]],
+    hop2: ["sink", ["grim", 0, 1]],
     hit: ["recoil", "hurt"],
     die0: ["pop"],
     die1: ["burst"],
@@ -268,26 +268,158 @@ const odap = sprite({
       frames: ["idle0", "idle0", "idle0", "idle1", "idle2", "idle2", "idle2", "idle0"],
       fps: 6,
     },
-    hop: { frames: ["hop0", "hop1", "hop2", "hop3"], fps: 10, jump: 0.45 },
+    // Relentless: no hang time, three beats a hop, leaning into every one.
+    move: { frames: ["hop0", "hop1", "hop2"], fps: 10, jump: 0.45 },
+    hop: { frames: ["hop0", "hop1", "hop2"], fps: 10, jump: 0.45 },
     hit: { frames: ["hit"], fps: 1, loop: false },
     die: { frames: ["die0", "die1", "die2"], fps: 12, loop: false, jump: 1 },
   },
 });
 
-/** 연필 오답: written in pencil, half asleep, one eraser away from gone. */
-const pencil = variant(odap, {
+/**
+ * 연필 오답: an X someone wrote in pencil, tiny, grey and terrified of the eraser. They come in
+ * packs and never stop moving: idle, each one trembles with its eyes darting about; on the move
+ * it scurries low and fast. Read in a swarm by a clean outline and the pale graphite sheen.
+ */
+const PENCIL = { outline: "o", dark: "d", mid: "m", light: "L" } as const;
+const at1 = (mask: string) => ({ at: [1, 0] as const, grid: form(mask, PENCIL) });
+
+const pencil = sprite({
   name: "odap-pencil",
-  recolor: { "red.*": "stone.*" },
+  size: [13, 11],
+  palette: {
+    ".": null,
+    o: "ink.deep",
+    d: "stone.dark",
+    m: "stone.mid",
+    L: "stone.light",
+    "*": "ink.deep",
+    "+": "stone.bright",
+    "~": "stone.light",
+    "'": "sea.pale",
+  },
+  lone: "*+~'",
   parts: {
-    smug: {
-      at: [4, 7],
+    x: at1(`
+      ...........
+      ###.....###
+      ####...####
+      .####.####.
+      ..#######..
+      ...#####...
+      ...#####...
+      ..#######..
+      .####.####.
+      ####...####
+      ###.....###
+    `),
+    // Scurrying: bounced up, the legs pinched in mid-stride.
+    pinch: at1(`
+      ...........
+      ###.....###
+      ####...####
+      .####.####.
+      ..#######..
+      ...#####...
+      ...#####...
+      ...#####...
+      ..###.###..
+      ..##...##..
+      ...........
+    `),
+    eyes: {
+      at: [5, 5],
       grid: `
-        ........
-        oo....oo
-        ........
-        ..oooo..
+        *.*
       `,
     },
+    left: {
+      at: [4, 5],
+      grid: `
+        *.*
+      `,
+    },
+    ahead: {
+      at: [6, 5],
+      grid: `
+        *.*
+      `,
+    },
+    shut: {
+      at: [4, 5],
+      grid: `
+        +...+
+      `,
+    },
+    sweat: { at: [10, 1], grid: "'" },
+    dash: {
+      at: [0, 4],
+      grid: `
+        ~..
+        ...
+        .~.
+        ...
+        ~..
+      `,
+    },
+    pop: at1(`
+      ...........
+      ...........
+      ...#...#...
+      ..###.###..
+      ...#####...
+      ....###....
+      ...#####...
+      ..###.###..
+      ...#...#...
+      ...........
+      ...........
+    `),
+    smudge: {
+      at: [1, 2],
+      grid: `
+        ~.........~
+        ...........
+        ....~.~....
+        ...........
+        ~.........~
+        ...........
+        ...~...~...
+      `,
+    },
+  },
+  frames: {
+    idle0: ["x", "eyes"],
+    idle1: [
+      ["x", 1, 0],
+      ["left", 1, 0],
+    ],
+    idle2: ["x", "ahead", "sweat"],
+    idle3: [
+      ["x", -1, 0],
+      ["eyes", -1, 0],
+    ],
+    move0: ["x", "dash", "ahead"],
+    move1: [
+      ["pinch", 0, -1],
+      ["ahead", 0, -1],
+    ],
+    hit: [
+      ["x", 1, 0],
+      ["shut", 1, 0],
+    ],
+    die0: ["pop"],
+    die1: ["smudge"],
+  },
+  anim: {
+    idle: {
+      frames: ["idle0", "idle1", "idle0", "idle3", "idle0", "idle2", "idle2", "idle1"],
+      fps: 10,
+    },
+    move: { frames: ["move0", "move1"], fps: 12 },
+    hop: { frames: ["move0", "move1"], fps: 12 },
+    hit: { frames: ["hit"], fps: 1, loop: false },
+    die: { frames: ["die0", "die1"], fps: 12, loop: false, jump: 1 },
   },
 });
 
