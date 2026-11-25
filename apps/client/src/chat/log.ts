@@ -1,6 +1,7 @@
 import type { ChatLine, SpeakChannel, SystemLine } from "@guago/shared";
+import type { Spoken } from "../copy/lines.ts";
 import type { WorldLink } from "../world-link.ts";
-import { systemText } from "./copy.ts";
+import { systemLine } from "./copy.ts";
 
 /** The channels a player has a tab for. 파티 and 동아리 show only while the player is in one. */
 export const TABS = ["world", "near", "whisper", "party", "club"] as const;
@@ -32,6 +33,7 @@ export class ChatLog {
   private readonly lines: LogLine[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly lineListeners = new Set<(line: LogLine) => void>();
+  private readonly announceListeners = new Set<(line: Spoken) => void>();
   readonly unread = new Set<Tab>();
   active: Tab = "near";
   private counter = 0;
@@ -48,11 +50,18 @@ export class ChatLog {
     this.unlisten();
     this.listeners.clear();
     this.lineListeners.clear();
+    this.announceListeners.clear();
   }
 
   on(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** Calls `fn` with each server announcement, which gets a banner before it settles here. */
+  onAnnounce(fn: (line: Spoken) => void): () => void {
+    this.announceListeners.add(fn);
+    return () => this.announceListeners.delete(fn);
   }
 
   /** Calls `fn` with every line as it arrives, for the feed over the world. */
@@ -95,8 +104,10 @@ export class ChatLog {
   }
 
   private system(line: SystemLine): void {
-    const text = systemText(line);
-    if (text) this.add({ id: line.id, tone: "system", mine: false, text });
+    const said = systemLine(line);
+    if (!said) return;
+    if (said.announcement) for (const l of this.announceListeners) l(said);
+    this.add({ id: line.id, tone: "system", mine: false, text: said.text });
   }
 
   private add(line: LogLine): void {

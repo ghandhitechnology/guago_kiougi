@@ -10,6 +10,7 @@ import { hud } from "../hud/store.ts";
 import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { session } from "../world/session.ts";
+import { AnnounceBanner } from "./announce.ts";
 import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
 import { setIdleKeys } from "./focus.ts";
@@ -34,6 +35,7 @@ export class UiScene extends Phaser.Scene {
     | undefined;
   private dialogue!: DialogueBox;
   private banner!: PlaceBanner;
+  private announce!: AnnounceBanner;
 
   constructor() {
     super(UI_SCENE);
@@ -46,6 +48,7 @@ export class UiScene extends Phaser.Scene {
     onSignOut(() => void this.signOut());
     this.dialogue = new DialogueBox(this);
     this.banner = new PlaceBanner(this);
+    this.announce = new AnnounceBanner(this);
     setWorldUiHost({
       say: (lines) => this.dialogue.say(lines),
       placeBanner: (name) => this.banner.show(name),
@@ -84,6 +87,7 @@ export class UiScene extends Phaser.Scene {
       touch,
     );
     if (chat && touch) chat.onShownChange = (shown) => hudView.setChatOpen(shown);
+    chat?.log.onAnnounce((line) => this.announce.show(line));
     // The left thumb walks; the right one aims, only while there is a fight to aim in. Neither
     // works under a dialogue.
     const sticks: Joystick[] = [];

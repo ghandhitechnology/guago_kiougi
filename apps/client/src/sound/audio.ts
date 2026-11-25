@@ -66,6 +66,11 @@ export function sfx(id: EffectId, o?: { pan?: number; volume?: number }): void {
   if (unlocked) audio.play(id, o);
 }
 
+/** Any sound the library knows by name (jingles, story and menu cues), once sound has started. */
+export function cue(name: string, o?: { volume?: number; pan?: number }): void {
+  if (unlocked) audio.cue(name, o);
+}
+
 /** Readies audio at start-up; sound itself begins on the first tap or key. */
 export function startAudio(): void {
   for (const [bus, v] of Object.entries(loadVolumes())) {

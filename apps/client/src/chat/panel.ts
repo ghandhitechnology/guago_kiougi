@@ -416,7 +416,8 @@ export class ChatPanel {
       return;
     }
     sound("error");
-    this.log.note(refusalText(result));
+    const said = refusalText(result);
+    if (said) this.log.note(said);
     this.field.reject();
     shake(this.inputRow, { x: 0, y: this.inputRow.y });
   }
