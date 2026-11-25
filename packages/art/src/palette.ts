@@ -91,6 +91,18 @@ export const DEEP_INDICES: ReadonlySet<number> = new Set(
   RAMP_LIST.map((r) => r.indices[0] as number),
 );
 
+/**
+ * One step darker per colour, along the ramp where the colour is not the darkest step (a shared
+ * end colour like `wood.dark` / `gold.deep` shades along wood). Deep steps stay. Ground shadows
+ * use this, so a shadow keeps the texture under it.
+ */
+export const SHADE: ReadonlyMap<number, number> = new Map(
+  COLORS.map((_, i) => {
+    const ramp = RAMP_LIST.find((r) => r.indices.indexOf(i) > 0);
+    return [i, ramp ? (ramp.indices[ramp.indices.indexOf(i) - 1] as number) : i];
+  }),
+);
+
 /** Ramps that contain a palette index. A shared end colour belongs to several. */
 export function rampsOf(index: number): readonly Ramp[] {
   return RAMP_LIST.filter((r) => r.indices.includes(index));
@@ -255,8 +267,215 @@ export function theme(name: string, remap: Remap): Theme {
   return { name, remap };
 }
 
-/** Every theme baked by the compiler. Each Page adds one. */
-export const THEMES: readonly Theme[] = [theme("campus", {})];
+/**
+ * Campus after dark. Surfaces drop about two steps and lean blue; `gold.light`, `gold.pale`,
+ * `sea.light` and `sea.pale` are left alone because lit windows, lamps and screens are drawn in
+ * them and keep glowing.
+ */
+const CAMPUS_NIGHT = theme("campus-night", {
+  "ink.light": "ink.mid",
+  "ink.mid": "ink.dark",
+  "ink.dark": "ink.deep",
+  "stone.bright": "stone.dark",
+  "stone.pale": "ink.mid",
+  "stone.light": "ink.mid",
+  "stone.mid": "ink.dark",
+  "stone.dark": "ink.deep",
+  "grass.bright": "board.light",
+  "grass.pale": "board.mid",
+  "grass.light": "board.dark",
+  "grass.mid": "board.deep",
+  "grass.dark": "board.deep",
+  "board.light": "board.mid",
+  "board.mid": "board.dark",
+  "board.dark": "board.deep",
+  "olive.light": "olive.dark",
+  "olive.mid": "olive.deep",
+  "olive.dark": "olive.deep",
+  "wood.pale": "stone.dark",
+  "wood.light": "plum.dark",
+  "wood.mid": "wood.deep",
+  "wood.dark": "wood.deep",
+  "wood.deep": "ink.deep",
+  "clay.pale": "stone.dark",
+  "clay.light": "clay.dark",
+  "clay.mid": "clay.dark",
+  "clay.dark": "clay.deep",
+  "red.pale": "rose.dark",
+  "red.light": "red.dark",
+  "red.mid": "red.dark",
+  "red.dark": "red.deep",
+  "gold.mid": "gold.dark",
+  "gold.dark": "wood.deep",
+  "navy.pale": "navy.mid",
+  "navy.light": "navy.dark",
+  "navy.mid": "navy.dark",
+  "navy.dark": "ink.dark",
+  "sea.mid": "sea.dark",
+  "sea.dark": "sea.deep",
+  "plum.pale": "plum.mid",
+  "plum.light": "plum.dark",
+  "plum.mid": "plum.dark",
+  "plum.dark": "plum.deep",
+  "rose.pale": "rose.mid",
+  "rose.light": "rose.dark",
+  "rose.mid": "rose.dark",
+  "rose.dark": "plum.dark",
+});
+
+/**
+ * Lamp light at night, in three bands from the lamp out. Stone takes the warm ramps (gold,
+ * clay, wood) so pavement glows like it is under a sodium lamp; grass steps down its own ramp
+ * and stays green; the last band meets `campus-night`.
+ */
+const CAMPUS_LAMP = theme("campus-lamp", {
+  "stone.bright": "gold.pale",
+  "stone.pale": "gold.pale",
+  "stone.light": "clay.pale",
+  "stone.mid": "wood.pale",
+  "stone.dark": "wood.light",
+  "grass.bright": "gold.pale",
+});
+
+const CAMPUS_LAMP_MID = theme("campus-lamp-mid", {
+  "stone.bright": "clay.pale",
+  "stone.pale": "clay.pale",
+  "stone.light": "wood.pale",
+  "stone.mid": "wood.light",
+  "stone.dark": "wood.mid",
+  "grass.bright": "grass.pale",
+  "grass.pale": "grass.light",
+  "grass.light": "grass.mid",
+  "grass.mid": "grass.dark",
+  "grass.dark": "grass.deep",
+  "wood.pale": "wood.light",
+  "wood.light": "wood.mid",
+  "wood.mid": "wood.dark",
+  "clay.pale": "clay.light",
+  "clay.light": "clay.mid",
+  "red.light": "red.mid",
+  "red.mid": "red.dark",
+  "navy.light": "navy.mid",
+  "navy.mid": "navy.dark",
+  "board.light": "board.mid",
+  "board.mid": "board.dark",
+});
+
+const CAMPUS_DUSK = theme("campus-dusk", {
+  "ink.light": "ink.mid",
+  "ink.mid": "ink.dark",
+  "stone.bright": "wood.pale",
+  "stone.pale": "wood.light",
+  "stone.light": "wood.mid",
+  "stone.mid": "wood.dark",
+  "stone.dark": "wood.deep",
+  "grass.bright": "grass.light",
+  "grass.pale": "grass.mid",
+  "grass.light": "grass.dark",
+  "grass.mid": "grass.deep",
+  "grass.dark": "grass.deep",
+  "board.light": "board.mid",
+  "board.mid": "board.dark",
+  "board.dark": "board.deep",
+  "wood.pale": "wood.mid",
+  "wood.light": "wood.dark",
+  "wood.mid": "wood.dark",
+  "clay.pale": "clay.mid",
+  "clay.light": "clay.dark",
+  "clay.mid": "clay.dark",
+  "red.light": "red.dark",
+  "red.mid": "red.dark",
+  "navy.light": "navy.dark",
+  "navy.mid": "navy.dark",
+});
+
+/**
+ * The field at night: the campus night, with the open field's sand keeping its grain in the
+ * dark: blue grit and deep dents on a dusk-coloured ground.
+ */
+const FIELD_NIGHT = theme("field-night", {
+  ...CAMPUS_NIGHT.remap,
+  "stone.bright": "stone.dark",
+  "stone.pale": "ink.mid",
+  "stone.light": "navy.dark",
+  "stone.mid": "ink.dark",
+  "stone.dark": "ink.deep",
+});
+
+/**
+ * Daylight pouring out of a rift across a campus at night, in three bands from the tear out:
+ * the field's pale sand falls through the warm browns of the wood ramp until it meets the night.
+ * White stays white in the first band, so the torn paper edge of the rift always reads.
+ */
+const RIFT_SUN = theme("rift-sun", {
+  "stone.pale": "wood.pale",
+  "stone.light": "wood.light",
+  "stone.mid": "wood.mid",
+  "stone.dark": "wood.dark",
+});
+
+const RIFT_WARM = theme("rift-warm", {
+  "stone.bright": "gold.pale",
+  "stone.pale": "wood.light",
+  "stone.light": "wood.mid",
+  "stone.mid": "wood.dark",
+  "stone.dark": "wood.deep",
+  "grass.bright": "grass.pale",
+  "grass.pale": "grass.light",
+  "grass.light": "grass.mid",
+  "grass.mid": "grass.dark",
+  "grass.dark": "grass.deep",
+  "wood.pale": "wood.light",
+  "wood.light": "wood.mid",
+  "wood.mid": "wood.dark",
+});
+
+const RIFT_EMBER = theme("rift-ember", {
+  "stone.bright": "clay.pale",
+  "stone.pale": "wood.mid",
+  "stone.light": "wood.dark",
+  "stone.mid": "wood.deep",
+  "stone.dark": "ink.deep",
+  "grass.bright": "grass.light",
+  "grass.pale": "grass.mid",
+  "grass.light": "grass.dark",
+  "grass.mid": "grass.deep",
+  "grass.dark": "grass.deep",
+  "wood.pale": "wood.mid",
+  "wood.light": "wood.dark",
+  "wood.mid": "wood.deep",
+  "ink.light": "ink.mid",
+  "ink.mid": "ink.dark",
+});
+
+/** Page 1, Greece: the lawn dries to olive grass and the earth to warm, sunlit dust. */
+const GREECE = theme("greece", {
+  "grass.bright": "stone.bright",
+  "grass.pale": "gold.pale",
+  "grass.light": "olive.light",
+  "grass.mid": "olive.mid",
+  "grass.dark": "olive.dark",
+  "grass.deep": "olive.deep",
+  "wood.pale": "clay.pale",
+  "wood.light": "clay.light",
+  "wood.mid": "clay.mid",
+  "wood.dark": "clay.dark",
+  "clay.pale": "gold.pale",
+});
+
+/** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
+export const THEMES: readonly Theme[] = [
+  theme("campus", {}),
+  CAMPUS_NIGHT,
+  CAMPUS_LAMP,
+  CAMPUS_LAMP_MID,
+  CAMPUS_DUSK,
+  FIELD_NIGHT,
+  RIFT_SUN,
+  RIFT_WARM,
+  RIFT_EMBER,
+  GREECE,
+];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */
 export function nameOf(index: number): string {

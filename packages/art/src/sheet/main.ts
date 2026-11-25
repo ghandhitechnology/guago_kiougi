@@ -8,10 +8,19 @@ import { stripTypeScriptTypes } from "node:module";
 import { extname, join, normalize, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ART_ROOT, compileAll } from "../build/compile.ts";
-import { writeOutput } from "../build/emit.ts";
+import { metadata, writeOutput } from "../build/emit.ts";
 import { COLORS, colorIndex } from "../palette.ts";
+import type { SceneMeta } from "../scene.ts";
 import { galmuriDir } from "./font.ts";
-import { loadFonts, paletteSheet, rigSheet, spriteSheet, terrainSheet } from "./static.ts";
+import {
+  loadFonts,
+  paletteSheet,
+  rigSheet,
+  sceneScreens,
+  sceneSheet,
+  spriteSheet,
+  terrainSheet,
+} from "./static.ts";
 import { uiSheets } from "./ui-static.ts";
 
 const { values } = parseArgs({
@@ -27,18 +36,23 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-const built = writeOutput(DIST, art);
+const { atlases, fonts: built } = writeOutput(DIST, art);
 
 if (values.png) {
   const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.png);
   mkdirSync(dir, { recursive: true });
   const fonts = loadFonts();
+  const meta = metadata(art, atlases, built) as SceneMeta;
   const sheets = {
+    scenes: sceneSheet(fonts, meta, atlases),
+    ...Object.fromEntries(
+      [...sceneScreens(meta, atlases)].map(([name, png]) => [`scene-${name}`, png]),
+    ),
     palette: paletteSheet(fonts),
     sprites: spriteSheet(fonts, art),
     rigs: rigSheet(fonts, art),
     terrain: terrainSheet(fonts, art),
-    ...uiSheets(art, built.fonts),
+    ...uiSheets(art, built),
   };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);
@@ -67,6 +81,7 @@ const HTML = `<!doctype html>
   --head: ${color("stone.bright")};
   --check-a: ${color("stone.mid")};
   --check-b: ${color("stone.light")};
+  --edge: ${color("ink.mid")};
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
@@ -82,9 +97,9 @@ figcaption { color: var(--dim); }
 .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-bottom: 8px; }
 .pair { display: flex; gap: 4px; }
 .ramps { display: grid; grid-template-columns: 72px repeat(6, 32px); gap: 4px; align-items: center; margin-bottom: 16px; }
-.swatch { display: block; width: 32px; height: 32px; }
-.swatch.none { background: transparent; }
-.strip { display: flex; }
+.swatch { display: block; width: 32px; height: 32px; border: 1px solid var(--edge); }
+.swatch.none { background: transparent; border-color: transparent; }
+.strip { display: flex; border: 1px solid var(--edge); }
 .chip { display: block; width: 10px; height: 16px; }
 .dim { color: var(--dim); }
 </style>

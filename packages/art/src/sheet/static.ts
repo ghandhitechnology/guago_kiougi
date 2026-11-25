@@ -3,6 +3,7 @@
  */
 import { join } from "node:path";
 import type { Compiled } from "../build/compile.ts";
+import type { Atlas } from "../build/emit.ts";
 import {
   COLORS,
   colorIndex,
@@ -18,12 +19,15 @@ import {
 } from "../palette.ts";
 import { type Indexed, type Lut, Rgba, remap } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
-import type { CompiledTerrain } from "../terrain.ts";
+import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
+import { SCENES } from "../scenes/index.ts";
+import type { CompiledOverlay, CompiledTerrain } from "../terrain.ts";
 import { type BitmapFont, drawText, galmuriDir, loadBdf, textWidth } from "./font.ts";
-import { renderPatch } from "./sample.ts";
+import { renderOverlayPatch, renderPatch } from "./sample.ts";
 
 export const UI = {
   bg: hexToRgb(COLORS[colorIndex("ink.deep")] as string),
+  edge: hexToRgb(COLORS[colorIndex("ink.mid")] as string),
   panel: hexToRgb(COLORS[colorIndex("ink.dark")] as string),
   dim: hexToRgb(COLORS[colorIndex("ink.light")] as string),
   text: hexToRgb(COLORS[colorIndex("stone.light")] as string),
@@ -84,6 +88,7 @@ export function themeBackdrops(theme: Theme, terrains: readonly CompiledTerrain[
   const map = resolveRemap(theme.remap);
   const out: number[] = [];
   for (const t of terrains) {
+    if (t.themes && !t.themes.includes(theme.name)) continue;
     for (const mask of [15, 0]) {
       const tile = t.tiles[t.masks[mask]?.[0] as number];
       if (!tile) continue;
@@ -110,7 +115,8 @@ export function paletteSheet(f: Fonts): Rgba {
   for (const ramp of RAMP_LIST) {
     drawText(s.c, f.label, ramp.name, 20, y + 10, UI.text);
     ramp.indices.forEach((ix, i) => {
-      s.c.rect(left + i * (sw + 4), y, sw, sw, INDEX_RGB[ix] as readonly number[]);
+      s.c.rect(left + i * (sw + 4), y, sw, sw, UI.edge);
+      s.c.rect(left + i * (sw + 4) + 1, y + 1, sw - 2, sw - 2, INDEX_RGB[ix] as readonly number[]);
     });
     y += sw + 4;
   }
@@ -127,6 +133,7 @@ export function paletteSheet(f: Fonts): Rgba {
         x = 20;
         y += 40;
       }
+      s.c.rect(x - 1, y - 1, names.length * 10 + 2, 18, UI.edge);
       names.forEach((n, i) => {
         s.c.rect(x + i * 10, y, 10, 16, INDEX_RGB[colorIndex(n)] as readonly number[]);
       });
@@ -244,9 +251,11 @@ function drawRig(s: Sheet, f: Fonts, r: CompiledRig, y0: number): number {
 export function terrainSheet(f: Fonts, art: readonly Compiled[]): Rgba {
   const s = new Sheet(1200);
   let y = 20;
+  const inThemes = (names: readonly string[] | null) =>
+    THEMES.filter((th) => !names || names.includes(th.name));
   for (const t of art) {
     if (t.kind !== "terrain") continue;
-    for (const theme of THEMES) {
+    for (const theme of inThemes(t.themes)) {
       drawText(s.c, f.head, `${t.name} · ${theme.name}`, 20, y, UI.head);
       y += 26;
       const patch = renderPatch(t, theme);
@@ -263,6 +272,18 @@ export function terrainSheet(f: Fonts, art: readonly Compiled[]): Rgba {
         });
       }
       y += 200;
+      for (const tone of t.tones) {
+        drawText(s.c, f.label, tone.name, 20, y, UI.dim);
+        let tx = 20;
+        tone.masks.forEach((list) => {
+          const ti = list[0];
+          if (ti === undefined) return;
+          checker(s.c, tx, y + 16, 32, 32, 4);
+          s.c.draw(remap(t.tiles[ti] as Indexed, map), tx, y + 16, INDEX_RGB, 2);
+          tx += 38;
+        });
+        y += 60;
+      }
       let x = 20;
       for (const d of t.decals) {
         checker(s.c, x, y, d.img.w * 4, d.img.h * 4, 4);
@@ -273,6 +294,65 @@ export function terrainSheet(f: Fonts, art: readonly Compiled[]): Rgba {
       y += 80;
     }
   }
+  const under = art.find((a): a is CompiledTerrain => a.kind === "terrain");
+  for (const o of art) {
+    if (o.kind !== "overlay" || !under) continue;
+    for (const theme of inThemes(o.themes)) {
+      drawText(s.c, f.head, `${o.name} · ${theme.name}`, 20, y, UI.head);
+      y += 26;
+      const patch = renderOverlayPatch(o as CompiledOverlay, under, theme);
+      s.c.draw(patch, 20, y, INDEX_RGB, 1);
+      s.c.draw(patch, 20 + patch.w + 24, y, INDEX_RGB, 3);
+      y += patch.h * 3 + 24;
+    }
+  }
   s.mark(y);
   return s.done();
+}
+
+/** Every scene at ×1 and ×3, drawn from the built atlases at time zero. */
+export function sceneSheet(f: Fonts, meta: SceneMeta, atlases: readonly Atlas[]): Rgba {
+  const pixels = new Map<string, SceneAtlas>(
+    atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
+  );
+  const s = new Sheet(SCREEN.w * 3 + 40);
+  let y = 20;
+  for (const def of SCENES) {
+    const img = renderScene(def, meta, pixels, 0);
+    for (const w of img.warnings) console.warn(`${def.name}: ${w}`);
+    const one = new Rgba(img.w, img.h);
+    one.data.set(img.data);
+    drawText(s.c, f.head, def.name, 20, y, UI.head);
+    y += 26;
+    s.c.copy(one, 0, 0, one.w, one.h, 20, y);
+    y += one.h + 16;
+    for (let yy = 0; yy < one.h; yy++) {
+      for (let xx = 0; xx < one.w; xx++) {
+        const o = (yy * one.w + xx) * 4;
+        s.c.rect(20 + xx * 3, y + yy * 3, 3, 3, [
+          one.data[o] as number,
+          one.data[o + 1] as number,
+          one.data[o + 2] as number,
+        ]);
+      }
+    }
+    y += one.h * 3 + 32;
+  }
+  s.mark(y);
+  return s.done();
+}
+
+/** One PNG per scene at ×1, exactly one game screen. */
+export function sceneScreens(meta: SceneMeta, atlases: readonly Atlas[]): Map<string, Rgba> {
+  const pixels = new Map<string, SceneAtlas>(
+    atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
+  );
+  const out = new Map<string, Rgba>();
+  for (const def of SCENES) {
+    const img = renderScene(def, meta, pixels, 0);
+    const one = new Rgba(img.w, img.h);
+    one.data.set(img.data);
+    out.set(def.name, one);
+  }
+  return out;
 }

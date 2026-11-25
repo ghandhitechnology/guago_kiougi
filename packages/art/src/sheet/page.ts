@@ -2,7 +2,9 @@
  * The contact sheet page. Runs in the browser and draws only from the built atlases and
  * art.json, the same files the game loads, so what shows here is what ships.
  */
-import { pickTiles, scatterDecals } from "../dualgrid.ts";
+import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
+import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
+import { SCENES } from "../scenes/index.ts";
 import { sampleGrid } from "./sample-grid.ts";
 import { uiSections } from "./ui-page.ts";
 
@@ -32,7 +34,13 @@ interface Meta {
   themes: string[];
   sprites: Record<
     string,
-    { atlas: string; size: [number, number]; frames: string[]; anims: Record<string, Anim> }
+    {
+      atlas: string;
+      size: [number, number];
+      shadow: string | null;
+      frames: string[];
+      anims: Record<string, Anim>;
+    }
   >;
   rigs: Record<
     string,
@@ -51,7 +59,9 @@ interface Meta {
   tilesets: Record<
     string,
     {
+      themes: string[] | null;
       masks: number[][];
+      tones: { name: string; on: "upper" | "lower"; band: [number, number]; masks: number[][] }[];
       decals: {
         name: string;
         on: "upper" | "lower";
@@ -67,12 +77,13 @@ interface Atlas {
   img: HTMLImageElement;
   frames: Record<string, Frame>;
 }
+type FullMeta = Meta & SceneMeta & { overlays: Record<string, { themes: string[] | null }> };
 
 const css = getComputedStyle(document.documentElement);
 const CHECK_A = css.getPropertyValue("--check-a").trim();
 const CHECK_B = css.getPropertyValue("--check-b").trim();
 
-const meta: Meta = await (await fetch("dist/art.json")).json();
+const meta: FullMeta = await (await fetch("dist/art.json")).json();
 const atlases = new Map<string, Atlas>();
 await Promise.all(
   meta.atlases.map(async (name) => {
@@ -263,6 +274,7 @@ function tileImage(theme: string, index: number): HTMLCanvasElement {
 const backdrops: { theme: string; color: string }[] = [];
 for (const theme of meta.themes) {
   for (const set of Object.values(meta.tilesets)) {
+    if (set.themes && !set.themes.includes(theme)) continue;
     for (const mask of [15, 0]) {
       const index = set.masks[mask]?.[0];
       if (index === undefined) continue;
@@ -270,6 +282,52 @@ for (const theme of meta.themes) {
       if (!backdrops.some((b) => b.color === color)) backdrops.push({ theme, color });
     }
   }
+}
+
+// Scenes ------------------------------------------------------------------------------------
+
+{
+  const s = section("scenes", "scenes");
+  const pixels = new Map<string, SceneAtlas>();
+  for (const [name, a] of atlases) {
+    const c = canvas(a.img.width, a.img.height);
+    const ctx = ctx2d(c);
+    ctx.drawImage(a.img, 0, 0);
+    const data = ctx.getImageData(0, 0, c.width, c.height).data;
+    pixels.set(name, { w: c.width, h: c.height, data, frames: a.frames as SceneAtlas["frames"] });
+  }
+  const views = SCENES.map((def) => {
+    const box = el("article");
+    box.id = def.name;
+    box.append(el("h3", "name", def.name));
+    const one = canvas(SCREEN.w, SCREEN.h);
+    const three = canvas(SCREEN.w * 3, SCREEN.h * 3);
+    const r = row(box);
+    r.append(cell(one, "×1"));
+    box.append(cell(three, "×3"));
+    s.append(box);
+    return { def, one, three };
+  });
+  let last = -1;
+  const paint = (now: number): void => {
+    // Ten steps a second: every environment animation runs at a multiple of it.
+    const step = Math.floor(now / 100);
+    if (step !== last) {
+      last = step;
+      for (const v of views) {
+        const img = renderScene(v.def, meta, pixels, step / 10);
+        if (step === 0 && img.warnings.length > 0) console.warn(v.def.name, img.warnings);
+        ctx2d(v.one).putImageData(
+          new ImageData(new Uint8ClampedArray(img.data), img.w, img.h),
+          0,
+          0,
+        );
+        ctx2d(v.three).drawImage(v.one, 0, 0, v.three.width, v.three.height);
+      }
+    }
+    requestAnimationFrame(paint);
+  };
+  paint(0);
 }
 
 // Palette -----------------------------------------------------------------------------------
@@ -410,7 +468,7 @@ function composite(
   const grid = sampleGrid();
   const { tile } = meta.tileGrid;
   for (const [name, set] of Object.entries(meta.tilesets)) {
-    for (const theme of meta.themes) {
+    for (const theme of set.themes ?? meta.themes) {
       const box = el("article");
       box.id = `${name}-${theme}`;
       box.append(el("h3", "name", `${name} · ${theme}`));
@@ -426,6 +484,15 @@ function composite(
           );
         }
       }
+      for (const tone of set.tones) {
+        const tonePicks = pickTone(grid, 1, tone, 7);
+        tonePicks.forEach((index, k) => {
+          if (index < 0) return;
+          const i = k % (grid.w + 1);
+          const j = Math.floor(k / (grid.w + 1));
+          ctx.drawImage(tileImage(theme, index), i * tile - tile / 2, j * tile - tile / 2);
+        });
+      }
       const rules = set.decals.map((d) => ({ on: d.on, density: d.density, w: d.w, h: d.h }));
       for (const p of scatterDecals(grid, 1, rules, 7)) {
         const d = set.decals[p.decal];
@@ -439,9 +506,41 @@ function composite(
         for (const index of list) strip.append(show(tileImage(theme, index), 3, "checker"));
         masks.append(cell(strip, String(m)));
       });
+      for (const tone of set.tones) {
+        const tones = row(box);
+        tone.masks.forEach((list, m) => {
+          if (list.length === 0) return;
+          const strip = el("div", "pair");
+          for (const index of list) strip.append(show(tileImage(theme, index), 3, "checker"));
+          tones.append(cell(strip, `${tone.name} ${m}`));
+        });
+      }
       const decals = row(box);
       for (const d of set.decals)
         decals.append(cell(show(frameImage(`tiles-${theme}`, d.frame), 4, "checker"), d.name));
+      s.append(box);
+    }
+  }
+  // Overlays over the first theme's lawn fill, on the sample grid.
+  for (const [name, o] of Object.entries(meta.overlays)) {
+    for (const theme of o.themes ?? meta.themes) {
+      const box = el("article");
+      box.id = `${name}-${theme}`;
+      box.append(el("h3", "name", `${name} · ${theme}`));
+      const patch = canvas(grid.w * tile, grid.h * tile);
+      const ctx = ctx2d(patch);
+      const under = Object.values(meta.tilesets)[0];
+      for (let j = 0; j <= grid.h; j++) {
+        for (let i = 0; i <= grid.w; i++) {
+          const fill = under?.masks[15]?.[0];
+          if (fill !== undefined) ctx.drawImage(tileImage(theme, fill), i * tile - 8, j * tile - 8);
+          const index = o.masks[dualMask(grid, 0, i, j)]?.[0];
+          if (index !== undefined)
+            ctx.drawImage(tileImage(theme, index), i * tile - 8, j * tile - 8);
+        }
+      }
+      const r = row(box);
+      r.append(cell(show(patch, 1, "checker"), "×1"), cell(show(patch, 3, "checker"), "×3"));
       s.append(box);
     }
   }

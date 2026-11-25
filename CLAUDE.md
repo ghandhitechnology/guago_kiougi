@@ -14,7 +14,8 @@ A browser pixel-art online RPG. `docs/PLAN.md` is the source of truth: read the 
 - `pnpm art:build` compiles and checks all art into `packages/art/dist`. `pnpm art:sheet` serves the contact sheet; `pnpm art:sheet --png <dir>` writes it as PNGs
 
 ## Art
-- Palette, swap slots and themes live in `packages/art/src/palette.ts`; the source format (`sprite`, `variant`, `rig`, `part`, `terrain`) is documented in `packages/art/src/format.ts`. Sources go in `packages/art/src/sprites/`.
+- Palette, swap slots and themes live in `packages/art/src/palette.ts`; the source format (`sprite`, `variant`, `rig`, `part`, `terrain`, `overlay`) is documented in `packages/art/src/format.ts`. Sources go in `packages/art/src/sprites/`; `packages/art/src/paint.ts` has helpers for composing grids.
+- Scenes (`packages/art/src/scenes/`, format in `packages/art/src/scene.ts`) are full 480×270 screens built from the atlases with named layers. Judge environment art in a scene, not only alone.
 - The build fails on any check problem (palette, orphan pixels, outlines, frame jumps) and names the file, frame and pixel. Fix the art, not the check.
 - `pnpm art:sheet` is the art review surface. Look at every change there at ×1 and ×4 before calling it done.
 

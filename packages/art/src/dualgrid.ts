@@ -86,6 +86,66 @@ export function valueNoise(x: number, y: number, scale: number, seed: number): n
   return top + (bottom - top) * ty;
 }
 
+/** Whether a cell and its whole 3×3 neighbourhood are on the same side of `upper`. */
+export function uniformAt(grid: TerrainGrid, upper: number, x: number, y: number): boolean {
+  const isUpper = cellAt(grid, x, y) === upper;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if ((cellAt(grid, x + dx, y + dy) === upper) !== isUpper) return false;
+    }
+  }
+  return true;
+}
+
+/** Cells across one feature of tone noise. */
+export const TONE_SCALE = 6;
+
+/** Low-frequency noise in [0, 1) that picks tone patches; two octaves to break up the lattice. */
+export function toneNoise(x: number, y: number, seed: number): number {
+  return (
+    0.7 * valueNoise(x, y, TONE_SCALE, seed + 31) +
+    0.3 * valueNoise(x + 17, y + 5, TONE_SCALE / 2, seed + 57)
+  );
+}
+
+export interface ToneRule {
+  readonly on: "upper" | "lower";
+  readonly band: readonly [number, number];
+  readonly masks: readonly (readonly number[])[];
+}
+
+/**
+ * Picks a tone's overlay tile for every display tile, like `pickTiles`, or -1 where it draws
+ * nothing. A cell joins the tone when its noise falls in the band and its 3×3 neighbourhood is
+ * all on the tone's side, so patches never reach a terrain edge.
+ */
+export function pickTone(
+  grid: TerrainGrid,
+  upper: number,
+  tone: ToneRule,
+  seed: number,
+): Int32Array {
+  const cells = new Uint8Array(grid.w * grid.h);
+  for (let y = 0; y < grid.h; y++) {
+    for (let x = 0; x < grid.w; x++) {
+      const side = cellAt(grid, x, y) === upper ? "upper" : "lower";
+      const n = toneNoise(x, y, seed);
+      if (side === tone.on && n >= tone.band[0] && n < tone.band[1] && uniformAt(grid, upper, x, y))
+        cells[y * grid.w + x] = 1;
+    }
+  }
+  const toned: TerrainGrid = { w: grid.w, h: grid.h, cells };
+  const out = new Int32Array((grid.w + 1) * (grid.h + 1)).fill(-1);
+  for (let j = 0; j <= grid.h; j++) {
+    for (let i = 0; i <= grid.w; i++) {
+      const options = tone.masks[dualMask(toned, 1, i, j)];
+      if (!options || options.length === 0) continue;
+      out[j * (grid.w + 1) + i] = options[hash2(i, j, seed + 3) % options.length] as number;
+    }
+  }
+  return out;
+}
+
 export interface DecalRule {
   readonly on: "upper" | "lower";
   readonly density: number;
@@ -115,17 +175,11 @@ export function scatterDecals(
   const out: DecalPlacement[] = [];
   for (let y = 0; y < grid.h; y++) {
     for (let x = 0; x < grid.w; x++) {
+      if (!uniformAt(grid, upper, x, y)) continue;
       const isUpper = cellAt(grid, x, y) === upper;
-      let uniform = true;
-      for (let dy = -1; dy <= 1 && uniform; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if ((cellAt(grid, x + dx, y + dy) === upper) !== isUpper) uniform = false;
-        }
-      }
-      if (!uniform) continue;
       for (let d = 0; d < rules.length; d++) {
         const rule = rules[d] as DecalRule;
-        if ((rule.on === "upper") !== isUpper) continue;
+        if ((rule.on === "upper") !== isUpper || rule.density <= 0) continue;
         const n = valueNoise(x, y, 4, seed + 101 * d);
         const roll = hash2(x, y, seed + 7919 * (d + 1)) / 2 ** 32;
         if (roll >= rule.density * 3 * n * n) continue;

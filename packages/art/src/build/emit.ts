@@ -17,12 +17,13 @@ import {
   INDEX_RGB,
   RAMP_LIST,
   resolveRemap,
+  SHADE,
   SLOT_STEPS,
   SLOTS,
   THEMES,
 } from "../palette.ts";
 import { bounds, crop, type Indexed, Rgba, remap } from "../raster.ts";
-import type { CompiledTerrain } from "../terrain.ts";
+import type { CompiledOverlay, CompiledTerrain } from "../terrain.ts";
 import type { Compiled } from "./compile.ts";
 
 export const MAX_ATLAS = 2048;
@@ -125,18 +126,25 @@ function drawExtruded(png: Rgba, img: Indexed, x: number, y: number, lut: typeof
   }
 }
 
+/** Art baked into the tile atlases: terrain pairs and overlays. */
+export type TileArt = CompiledTerrain | CompiledOverlay;
+
+export function isTileArt(a: Compiled): a is TileArt {
+  return a.kind === "terrain" || a.kind === "overlay";
+}
+
 /** Tile indices and decal frames, identical in every theme. */
 export interface TileLayout {
   readonly first: ReadonlyMap<string, number>;
   readonly count: number;
 }
 
-export function tileLayout(terrains: readonly CompiledTerrain[]): TileLayout {
+export function tileLayout(sets: readonly TileArt[]): TileLayout {
   const first = new Map<string, number>();
   let n = 0;
-  for (const t of terrains) {
+  for (const t of sets) {
     first.set(t.name, n);
-    n += t.tiles.length + t.decals.length;
+    n += t.tiles.length + (t.kind === "terrain" ? t.decals.length : 0);
   }
   return { first, count: n };
 }
@@ -149,8 +157,8 @@ export function cellOf(index: number): { x: number; y: number } {
   };
 }
 
-/** Bakes every terrain under one theme into a uniform tile-grid atlas. */
-export function bakeTiles(themeName: string, terrains: readonly CompiledTerrain[]): Atlas {
+/** Bakes every terrain and overlay under one theme into a uniform tile-grid atlas. */
+export function bakeTiles(themeName: string, terrains: readonly TileArt[]): Atlas {
   const theme = THEMES.find((t) => t.name === themeName);
   if (!theme) throw new Error(`unknown theme ${themeName}`);
   const map = resolveRemap(theme.remap);
@@ -174,6 +182,7 @@ export function bakeTiles(themeName: string, terrains: readonly CompiledTerrain[
         sourceSize: { w: tile, h: tile },
       };
     });
+    if (t.kind === "overlay") continue;
     t.decals.forEach((d, i) => {
       const at = cellOf(first + t.tiles.length + i);
       png.draw(remap(d.img, map), at.x, at.y, INDEX_RGB);
@@ -199,8 +208,12 @@ export function metadata(
   atlases: readonly Atlas[],
   fonts: readonly BuiltFont[] = [],
 ): ArtMetadata {
-  const terrains = art.filter((a): a is CompiledTerrain => a.kind === "terrain");
-  const layout = tileLayout(terrains);
+  const sets = art.filter(isTileArt);
+  const terrains = sets.filter((a): a is CompiledTerrain => a.kind === "terrain");
+  const layout = tileLayout(sets);
+  const hex = (i: number): string => COLORS[i] as string;
+  const shift = (list: readonly (readonly number[])[], first: number) =>
+    list.map((m) => m.map((i) => first + i));
   const anims = (owner: string, anim: Readonly<Record<string, Anim>>) =>
     Object.fromEntries(
       Object.entries(anim).map(([k, a]) => [
@@ -243,6 +256,15 @@ export function metadata(
     ),
     atlases: atlases.map((a) => a.name),
     themes: THEMES.map((t) => t.name),
+    /** Per theme, every colour it changes, as hex to hex. Sprites can be drawn in a theme too. */
+    recolor: Object.fromEntries(
+      THEMES.map((t) => [
+        t.name,
+        Object.fromEntries([...resolveRemap(t.remap)].map(([a, b]) => [hex(a), hex(b)])),
+      ]),
+    ),
+    /** One ramp step darker per colour: what a ground shadow does to the ground under it. */
+    shade: Object.fromEntries([...SHADE].map(([a, b]) => [hex(a), hex(b)])),
     sprites: Object.fromEntries(
       art
         .filter((a) => a.kind === "sprite")
@@ -252,6 +274,7 @@ export function metadata(
             atlas: s.group,
             size: s.size,
             origin: s.origin,
+            shadow: s.shadow ? `${s.name}/shadow` : null,
             frames: [...s.frames.keys()].map((f) => `${s.name}/${f}`),
             anims: anims(s.name, s.anim),
             ...(s.slice
@@ -300,7 +323,14 @@ export function metadata(
           {
             upper: t.upper,
             lower: t.lower,
-            masks: t.masks.map((m) => m.map((i) => first + i)),
+            themes: t.themes,
+            masks: shift(t.masks, first),
+            tones: t.tones.map((tone) => ({
+              name: tone.name,
+              on: tone.on,
+              band: tone.band,
+              masks: shift(tone.masks, first),
+            })),
             decals: t.decals.map((d) => ({
               name: d.name,
               on: d.on,
@@ -312,6 +342,33 @@ export function metadata(
           },
         ];
       }),
+    ),
+    overlays: Object.fromEntries(
+      sets
+        .filter((o): o is CompiledOverlay => o.kind === "overlay")
+        .map((o) => {
+          const first = layout.first.get(o.name) as number;
+          const shapes = o.shapes.some((sh) => sh)
+            ? Object.fromEntries(
+                o.shapes.map((sh, i) => [
+                  String(first + i),
+                  sh
+                    ? Array.from(
+                        { length: 64 },
+                        (_, q) =>
+                          (sh[q * 4] as number) * 8 +
+                          (sh[q * 4 + 1] as number) * 4 +
+                          (sh[q * 4 + 2] as number) * 2 +
+                          (sh[q * 4 + 3] as number),
+                      )
+                        .map((v) => v.toString(16))
+                        .join("")
+                    : "",
+                ]),
+              )
+            : null;
+          return [o.name, { themes: o.themes, masks: shift(o.masks, first), shapes }];
+        }),
     ),
     fonts: Object.fromEntries(fonts.map((f) => [f.name, f.meta])),
   };
@@ -342,8 +399,8 @@ export function buildAtlases(art: readonly Compiled[]): Atlas[] {
     }
   }
   const atlases = [...groups.keys()].sort().map((g) => packSprites(g, groups.get(g) ?? []));
-  const terrains = art.filter((a): a is CompiledTerrain => a.kind === "terrain");
-  for (const t of THEMES) atlases.push(bakeTiles(t.name, terrains));
+  const sets = art.filter(isTileArt);
+  for (const t of THEMES) atlases.push(bakeTiles(t.name, sets));
   return atlases;
 }
 
