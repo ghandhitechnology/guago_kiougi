@@ -1,5 +1,6 @@
 export * from "./attacks.ts";
 export * from "./auto.ts";
+export * from "./between.ts";
 export * from "./body.ts";
 export * from "./damage.ts";
 export * from "./director.ts";

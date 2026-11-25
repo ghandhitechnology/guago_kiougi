@@ -22,6 +22,8 @@ import {
 import {
   AIM_MESSAGE,
   aimMessage,
+  applyBetween,
+  type Between,
   type Caught,
   type ChangeNotice,
   type Character,
@@ -76,7 +78,6 @@ import {
   shutDoors,
   snap,
   spawnMonster,
-  startRevive,
   stepDoors,
   stepFight,
   TICK_MS,
@@ -360,6 +361,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   /** Sessions whose body walked out through a door; their socket stays open a little while. */
   private readonly moved = new Set<string>();
   private unlistenParties: (() => void) | undefined;
+  /**
+   * What clients asked of the world since the last tick (aim, mode, revive), applied in arrival
+   * order at the next tick's start, so the world only ever changes at tick boundaries.
+   */
+  private readonly between: Between[] = [];
   /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
   private readonly devActions: (() => void)[] = [];
 
@@ -413,25 +419,18 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.aim.take()) return;
-      const p = pawn.player;
-      p.aiming = aim !== null;
-      p.aimX = aim?.dx ?? 0;
-      p.aimY = aim?.dy ?? 0;
+      this.between.push({ t: "aim", player: pawn.player.id, aim });
     });
     this.onMessage(MODE_MESSAGE, modeMessage, (client, mode) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.mode.take()) return;
-      if (pawn.player.mode === mode) return;
-      pawn.player.mode = mode as Mode;
-      pawn.player.casts = 0;
-      this.tellMode(pawn);
-      background("mode save", modes.write(pawn.character.id, mode as Mode));
+      this.between.push({ t: "mode", player: pawn.player.id, mode: mode as Mode });
     });
     this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
       const pawn = this.pawns.get(client.sessionId);
       const target = this.bySlot.get(slot);
       if (!pawn?.buckets.revive.take() || !target) return;
-      startRevive(this.world, pawn.player, target.player);
+      this.between.push({ t: "revive", player: pawn.player.id, target: target.player.id });
     });
     if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
@@ -495,6 +494,22 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private kitOf(pawn: Pawn, level: number): PlayerKit {
     const kit = this.world.rules.kit(buildOf(pawn.character, pawn.loadout, level));
     return withModifiers(kit, pawn.mods);
+  }
+
+  /** Applies the queued client records; a mode that changed is told and stored. */
+  private applyQueued(): void {
+    if (this.between.length === 0) return;
+    for (const e of this.between) {
+      const pawn = this.pawns.get(e.player);
+      if (!pawn || pawn.leaving) continue;
+      const before = pawn.player.mode;
+      applyBetween(this.world, e);
+      if (e.t === "mode" && pawn.player.mode !== before) {
+        this.tellMode(pawn);
+        background("mode save", modes.write(pawn.character.id, pawn.player.mode));
+      }
+    }
+    this.between.length = 0;
   }
 
   /**
@@ -993,6 +1008,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
         pawn.fromY = pawn.player.y;
       }
       const s0 = performance.now();
+      this.applyQueued();
       stepFight(this.world, inputs);
       if (this.devActions.length > 0) for (const act of this.devActions.splice(0)) act();
       // What combat earned goes to each character's pending grant; nothing touches the database.

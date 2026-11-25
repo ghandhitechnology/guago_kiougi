@@ -1,5 +1,7 @@
 import {
+  applyBetween,
   applyStatus,
+  type Between,
   ByteReader,
   cast,
   castFlag,
@@ -103,7 +105,12 @@ function session(seed: number, ticks: number): FightInput[][][] {
   return plan;
 }
 
-function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => void) {
+function fight(
+  seed: number,
+  plan: FightInput[][][],
+  check?: (w: FightWorld) => void,
+  between?: ReadonlyMap<number, readonly Between[]>,
+) {
   const map = fightMapOf(mapById("p1-colonnade") as never);
   const w = createFight(map, rules, fieldOf("p1-colonnade"), seed);
   const majors = Object.keys(STARTER_BOOKS);
@@ -129,6 +136,7 @@ function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => 
     tick.forEach((list, i) => {
       inputs.set(`p${i}`, list);
     });
+    for (const e of between?.get(t) ?? []) applyBetween(w, e);
     stepFight(w, inputs);
     check?.(w);
     if (t % 100 === 99) digests.push(digest(w));
@@ -136,7 +144,43 @@ function fight(seed: number, plan: FightInput[][][], check?: (w: FightWorld) => 
   return { w, digests };
 }
 
+/** Aim, mode and revive records a room would queue between ticks, from a seed. */
+function asks(seed: number, ticks: number): Map<number, Between[]> {
+  let s = seed >>> 0;
+  const roll = () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 2 ** 32;
+  };
+  const out = new Map<number, Between[]>();
+  for (let t = 0; t < ticks; t++) {
+    if (roll() > 0.15) continue;
+    const player = `p${Math.floor(roll() * 10)}`;
+    const k = roll();
+    const e: Between =
+      k < 0.5
+        ? {
+            t: "aim",
+            player,
+            aim: roll() < 0.2 ? null : { dx: roll() * 400 - 200, dy: roll() * 400 - 200 },
+          }
+        : k < 0.8
+          ? { t: "mode", player, mode: Math.floor(roll() * 4) as Mode }
+          : { t: "revive", player, target: `p${Math.floor(roll() * 10)}` };
+    out.set(t, [e]);
+  }
+  return out;
+}
+
 describe("combat replay", () => {
+  it("replays the records a room applies between ticks, too", () => {
+    const plan = session(11, 900);
+    const a = fight(77, plan, undefined, asks(5, 900));
+    const b = fight(77, plan, undefined, asks(5, 900));
+    const c = fight(77, plan, undefined, asks(6, 900));
+    expect(a.digests).toEqual(b.digests);
+    expect(c.digests).not.toEqual(a.digests);
+  });
+
   // 1300 ticks: a whole 50 s surge, the start of 쉬는 시간, kills, elites, knock-outs.
   const plan = session(17, 1300);
   const first = fight(4242, plan);
