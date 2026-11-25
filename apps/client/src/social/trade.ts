@@ -17,7 +17,7 @@ import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { type CardData, ItemCard } from "../ui/item-card.ts";
 import { CELL, type CellItem, ItemCell } from "../ui/item-cell.ts";
 import { fade, shake, stamp } from "../ui/motion.ts";
-import { toast } from "../ui/overlay.ts";
+import { holdToasts, toast } from "../ui/overlay.ts";
 import { Panel } from "../ui/panel.ts";
 import { sound } from "../ui/sound.ts";
 import { Stepper } from "../ui/stepper.ts";
@@ -37,13 +37,28 @@ interface Offer {
 }
 
 const EMPTY: TradeOfferView = { items: [], stacks: {}, pinecone: "0" };
-const W = 466;
-const H = 262;
 const TRAY_COLS = 6;
 const TRAY_ROWS = 2;
-const BAG_COLS = 12;
 const BAG_ROWS = 3;
 const GAP = 2;
+const PAD = 6;
+const TRAY_W = TRAY_COLS * (CELL + GAP) - GAP;
+/** Between the two trays, where the arrows sit; the bag below spans both trays exactly. */
+const MID = 28;
+const BAG_COLS = (2 * TRAY_W + MID + GAP) / (CELL + GAP);
+/** Page rows, from the page's top: the trays, each side's 솔방울, the notice, the bag. */
+const TRAY_Y = 22;
+const COIN_Y = TRAY_Y + TRAY_ROWS * (CELL + GAP) + 2;
+/** Under each side's 솔방울: the tax and what arrives on the other side. */
+const TAX_Y = COIN_Y + 22;
+const NOTICE_Y = TAX_Y + 13;
+const RULE_Y = NOTICE_Y + 12;
+const BAG_Y = RULE_Y + 4;
+const FOOT_Y = BAG_Y + BAG_ROWS * (CELL + GAP) + 2;
+const BUTTON_H = 21;
+/** The panel around it: the page sits 7 in from the left and 19 down, 4 short on the right. */
+const W = 2 * PAD + 2 * TRAY_W + MID + 11;
+const H = FOOT_Y + BUTTON_H + 4 + 23;
 
 /** Why an item of the player's cannot go in a trade, or nothing when it can. */
 function blocked(item: ItemView, now = Date.now()): "worn" | "bound" | "cooldown" | undefined {
@@ -82,7 +97,8 @@ function itemCardData(item: ItemView): CardData {
 /**
  * The direct trade window (PLAN §13): what the player gives on the left, what they get on the
  * right, each side under its owner's name with a seal that lands when that side confirms and is
- * torn off the moment either offer changes. 솔방울 coming in show the 5% tax taken from them.
+ * torn off the moment either offer changes. Each side's 솔방울 sit under its tray with the 5%
+ * tax and what arrives on the other side; my seal lands in a dent beside 확정.
  * The bag sits underneath: a press puts a thing up or takes it down; what cannot be traded is
  * greyed with its reason as a mark (worn, bound, or the hours until it can go again).
  */
@@ -109,10 +125,13 @@ export class TradeWindow {
   private confirm!: Button;
   private coins!: TextField;
   private clockLabel!: Label;
+  /** Writes the time left and the wallet; once a second, and as the window opens. */
+  private tick: () => void = () => {};
   private notice!: Label;
   private finished = false;
   private closing = false;
   private readonly offInv: () => void;
+  private readonly unhold: () => void;
   private readonly onClosed: () => void;
 
   constructor(
@@ -147,6 +166,7 @@ export class TradeWindow {
     this.build();
     this.scope.onBack = () => void this.cancel();
     pushScope(this.scope);
+    this.unhold = holdToasts(() => this.panel.toastSpot());
     this.panel.open();
     this.apply(open);
     this.offInv = inventory.watch(() => this.drawBag());
@@ -163,6 +183,7 @@ export class TradeWindow {
         this.confirmed = u.confirmed;
         this.version = u.version;
         this.expiresAt = u.expiresAt;
+        this.tick();
         this.drawOffers(false);
         return;
       case "offer": {
@@ -233,37 +254,27 @@ export class TradeWindow {
   private build(): void {
     const { scene, ctx } = this;
     const page = this.panel.page;
-    const x0 = page.x + 6;
-    const trayW = TRAY_COLS * (CELL + GAP) - GAP;
-    const rightX = page.x + page.w - 6 - trayW;
+    const leftX = page.x + PAD;
+    const rightX = leftX + TRAY_W + MID;
     // Names over the trays, the arrows between them.
-    const me = new Label(scene, x0, page.y + 4, this.myName(), {
+    const me = new Label(scene, leftX, page.y + 6, this.myName(), {
       font: "galmuri11-bold",
       color: "ink.dark",
     });
-    const them = new Label(scene, rightX, page.y + 4, this.partner.name, {
+    const them = new Label(scene, rightX, page.y + 6, this.partner.name, {
       font: "galmuri11-bold",
       color: "ink.dark",
     });
     const arrows = scene.add
-      .image(Math.round(page.x + page.w / 2 - 6), page.y + 36, "ui", "swap/idle")
+      .image(leftX + TRAY_W + Math.floor((MID - 13) / 2), page.y + TRAY_Y + 20, "ui", "swap/idle")
       .setOrigin(0);
     this.panel.add([me.obj, them.obj, arrows]);
-    // Seal places: dashed rings until a side confirms.
-    for (const [side, x] of [
-      ["me", x0 + trayW - 21],
-      ["them", rightX + trayW - 21],
-    ] as const) {
-      this.panel.add(scene.add.image(x, page.y, "ui", "seal/off").setOrigin(0));
-      const seal = scene.add.image(x, page.y, "ui", "seal/on").setOrigin(0).setVisible(false);
-      this.panel.add(seal);
-      this.seals[side] = seal;
-    }
-    // My 솔방울, typed; theirs, written.
-    const coinY = page.y + 20 + TRAY_ROWS * (CELL + GAP) + 4;
-    this.panel.add(scene.add.image(x0, coinY + 4, "ui", "icon/pinecone").setOrigin(0));
-    this.coins = new TextField(ctx, x0 + 15, coinY, {
-      w: 90,
+    // My 솔방울, typed under my tray.
+    const coinY = page.y + COIN_Y;
+    this.panel.add(scene.add.image(leftX, coinY + 3, "ui", "icon/pinecone").setOrigin(0));
+    this.coins = new TextField(ctx, leftX + 15, coinY, {
+      w: 70,
+      h: 18,
       maxLength: 15,
       enterKeyHint: "done",
       onSubmit: () => this.setCoins(),
@@ -271,26 +282,29 @@ export class TradeWindow {
     this.coins.value = "0";
     this.coins.field.inputMode = "numeric";
     this.coins.field.addEventListener("blur", () => this.setCoins());
-    const wallet = new Label(scene, x0 + 110, coinY + 6, "", {
-      font: "galmuri9",
-      color: "stone.dark",
-    });
-    this.panel.add([this.coins, wallet.obj]);
-    const paintWallet = () => wallet.set(`/ ${inventory.moneyText("pinecone")}`);
-    paintWallet();
+    this.panel.add(this.coins);
     // The notice line across the window: a change, a confirm, a failure.
-    this.notice = new Label(scene, page.x + 8, coinY + 24, "", {
+    this.notice = new Label(scene, leftX + 2, page.y + NOTICE_Y, "", {
       font: "galmuri9",
       color: "ink.dark",
-      width: page.w - 16,
+      width: page.w - 2 * PAD - 4,
     });
     this.panel.add(this.notice.obj);
     const rule = scene.add
-      .rectangle(page.x + 6, coinY + 38, page.w - 12, 1, paint("stone.light"))
+      .rectangle(leftX, page.y + RULE_Y, page.w - 2 * PAD, 1, paint("stone.light"))
       .setOrigin(0);
     this.panel.add(rule);
-    // The confirm, with the window's time left beside it.
-    this.confirm = new Button(ctx, page.x + page.w - 6 - 74, page.y + page.h - 6 - 21, {
+    // Under the bag: what I hold in 솔방울; the confirm, my seal's place and the time left.
+    const footY = page.y + FOOT_Y;
+    this.panel.add(scene.add.image(leftX, footY + 4, "ui", "icon/pinecone").setOrigin(0));
+    const wallet = new Label(scene, leftX + 15, footY + 6, "", {
+      font: "galmuri9",
+      color: "stone.dark",
+    });
+    this.panel.add(wallet.obj);
+    const paintWallet = () => wallet.set(amount(inventory.moneyText("pinecone")));
+    paintWallet();
+    this.confirm = new Button(ctx, page.x + page.w - PAD - 74, footY, {
       label: t("trade.confirm"),
       kind: "ink",
       w: 74,
@@ -299,17 +313,24 @@ export class TradeWindow {
     });
     this.clockLabel = new Label(scene, 0, 0, "", { font: "galmuri9", color: "stone.dark" });
     this.panel.add([this.confirm, this.clockLabel.obj]);
-    this.scene.time.addEvent({
-      delay: 1000,
-      loop: true,
-      callback: () => {
-        if (this.closing) return;
-        const left = Math.max(0, Math.ceil((this.expiresAt - Date.now()) / 1000));
-        this.clockLabel.set(`${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`);
-        this.clockLabel.at(this.confirm.x - 8 - this.clockLabel.width, this.confirm.y + 6);
-        paintWallet();
-      },
-    });
+    // Seals: mine lands in the dent beside 확정, theirs on the dashed ring by their name.
+    for (const [side, x, y, empty] of [
+      ["me", this.confirm.x - 4 - 21, footY, "seal/slot"],
+      ["them", rightX + TRAY_W - 21, page.y, "seal/off"],
+    ] as const) {
+      this.panel.add(scene.add.image(x, y, "ui", empty).setOrigin(0));
+      const seal = scene.add.image(x, y, "ui", "seal/on").setOrigin(0).setVisible(false);
+      this.panel.add(seal);
+      this.seals[side] = seal;
+    }
+    this.tick = () => {
+      if (this.closing) return;
+      const left = Math.max(0, Math.ceil((this.expiresAt - Date.now()) / 1000));
+      this.clockLabel.set(`${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`);
+      this.clockLabel.at(this.seals.me.x - 6 - this.clockLabel.width, footY + 6);
+      paintWallet();
+    };
+    this.scene.time.addEvent({ delay: 1000, loop: true, callback: this.tick });
   }
 
   private myName(): string {
@@ -341,7 +362,8 @@ export class TradeWindow {
   private drawOffers(tear: boolean): void {
     for (const o of [...this.layer.list]) o.destroy();
     const page = this.panel.page;
-    const trayW = TRAY_COLS * (CELL + GAP) - GAP;
+    const leftX = page.x + PAD;
+    const rightX = leftX + TRAY_W + MID;
     const mine = this.offers[this.link.me ?? ""] ?? EMPTY;
     const theirs = this.offers[this.partner.id] ?? EMPTY;
     this.mine = {
@@ -349,30 +371,45 @@ export class TradeWindow {
       stacks: { ...mine.stacks },
       pinecone: mine.pinecone,
     };
-    this.tray(page.x + 6, page.y + 20, mine, true);
-    this.tray(page.x + page.w - 6 - trayW, page.y + 20, theirs, false);
-    // Their 솔방울, and the tax that comes off them on the way in.
-    const coinY = page.y + 20 + TRAY_ROWS * (CELL + GAP) + 4;
-    const rx = page.x + page.w - 6 - trayW;
+    this.tray(leftX, page.y + TRAY_Y, mine, true);
+    this.tray(rightX, page.y + TRAY_Y, theirs, false);
+    // Their 솔방울, written; each side's line ends in the tax and what arrives on the other side.
+    const coinY = page.y + COIN_Y;
     if (theirs.pinecone !== "0") {
-      this.layer.add(this.scene.add.image(rx, coinY + 4, "ui", "icon/pinecone").setOrigin(0));
-      const n = new Label(this.scene, rx + 15, coinY + 5, amount(theirs.pinecone), {
+      this.layer.add(this.scene.add.image(rightX, coinY + 3, "ui", "icon/pinecone").setOrigin(0));
+      const n = new Label(this.scene, rightX + 15, coinY + 5, amount(theirs.pinecone), {
         font: "galmuri11-bold",
         color: "ink.dark",
       });
-      const tax = directTax(BigInt(theirs.pinecone));
-      const after = new Label(this.scene, 0, coinY + 6, `− ${amount(tax.toString())}`, {
-        font: "galmuri9",
-        color: "red.mid",
-      });
-      after.at(rx + 19 + n.width, coinY + 6);
-      this.layer.add([n.obj, after.obj]);
+      this.layer.add(n.obj);
     }
+    this.arrival(leftX + 15, page.y + TAX_Y, mine.pinecone);
+    this.arrival(rightX + 15, page.y + TAX_Y, theirs.pinecone);
     if (document.activeElement !== this.coins.field) this.coins.value = mine.pinecone;
     if (tear) this.tearSeals();
     else for (const side of ["me", "them"] as const) this.seals[side].setVisible(this.sealed(side));
     this.paintConfirm();
     this.drawBag();
+  }
+
+  /** `−tax → what arrives` from `x`: the 5% off 솔방울 on their way across. */
+  private arrival(x: number, y: number, moved: string): void {
+    if (!AMOUNT.test(moved) || moved === "0") return;
+    const tax = directTax(BigInt(moved));
+    const net = BigInt(moved) - tax;
+    const arrive = new Label(this.scene, 0, y, amount(net.toString()), {
+      font: "galmuri9",
+      color: "ink.dark",
+    });
+    const arrow = new Label(this.scene, 0, y, "→", { font: "galmuri9", color: "stone.dark" });
+    const cut = new Label(this.scene, 0, y, `−${amount(tax.toString())}`, {
+      font: "galmuri9",
+      color: "red.mid",
+    });
+    cut.at(x, y);
+    arrow.at(x + cut.width + 3, y);
+    arrive.at(x + cut.width + arrow.width + 6, y);
+    this.layer.add([cut.obj, arrow.obj, arrive.obj]);
   }
 
   private sealed(side: "me" | "them"): boolean {
@@ -455,6 +492,7 @@ export class TradeWindow {
       const cx = x + (i % cols) * (CELL + GAP);
       const cy = y + Math.floor(i / cols) * (CELL + GAP);
       const cell = new ItemCell(this.ctx, cx, cy, {
+        smallCount: true,
         onPress: () => e?.take?.(),
         onPeek: (on) => {
           if (on && e?.card) {
@@ -474,7 +512,7 @@ export class TradeWindow {
     if (this.closing || !this.bagLayer.active) return;
     for (const o of [...this.bagLayer.list]) o.destroy();
     const page = this.panel.page;
-    const top = page.y + 20 + TRAY_ROWS * (CELL + GAP) + 4 + 42;
+    const top = page.y + BAG_Y;
     const offered = new Set(this.mine.items);
     const items = inventory.items().filter((i) => !offered.has(i.id));
     items.sort((a, b) => Number(blocked(a) !== undefined) - Number(blocked(b) !== undefined));
@@ -507,7 +545,7 @@ export class TradeWindow {
     const pages = Math.max(1, Math.ceil(entries.length / per));
     this.bagPage = Math.min(this.bagPage, pages - 1);
     this.wells(
-      page.x + 6,
+      page.x + PAD,
       top,
       BAG_COLS,
       BAG_ROWS,
@@ -515,7 +553,7 @@ export class TradeWindow {
       this.bagLayer,
     );
     if (pages > 1) {
-      const turn = new Button(this.ctx, page.x + 6 + BAG_COLS * (CELL + GAP) + 4, top, {
+      const turn = new Button(this.ctx, page.x + PAD + 72, page.y + FOOT_Y + 1, {
         label: `${this.bagPage + 1}/${pages}`,
         w: 34,
         h: 19,
@@ -652,6 +690,7 @@ export class TradeWindow {
     this.offInv();
     this.card.hide(true);
     popScope(this.scope);
+    this.unhold();
     fade(this.dim, 0, 120, () => this.dim.destroy());
     this.panel.hide(() => {
       this.panel.destroy();

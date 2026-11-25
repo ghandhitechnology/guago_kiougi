@@ -34,6 +34,8 @@ export interface ItemCellOptions {
   readonly onDragStart?: (pointer: Phaser.Input.Pointer) => void;
   /** Draws a lock instead of an empty well: a slot the player has not opened. */
   readonly locked?: boolean;
+  /** Writes the stack count in the small outlined `count` numerals, tucked in the corner. */
+  readonly smallCount?: boolean;
 }
 
 export const CELL = 24;
@@ -47,6 +49,8 @@ export class ItemCell extends Widget {
   private readonly ring: Phaser.GameObjects.Image;
   private readonly countShadow: Label;
   private readonly countText: Label;
+  /** The `count` numerals carry their own outline and colours: never tinted. */
+  private readonly countSmall: Phaser.GameObjects.BitmapText | undefined;
   private readonly badgeShadow: Label;
   private readonly badgeText: Label;
   private readonly pin: Phaser.GameObjects.Image;
@@ -76,11 +80,13 @@ export class ItemCell extends Widget {
       .setOrigin(0)
       .setVisible(false);
     this.lock = scene.add.image(8, 7, "ui", "lock/idle").setOrigin(0).setVisible(!!opts.locked);
+    if (opts.smallCount) this.countSmall = scene.add.bitmapText(0, 0, "count", "").setOrigin(0);
     this.add([
       this.back,
       this.icon,
       this.countShadow.obj,
       this.countText.obj,
+      ...(this.countSmall ? [this.countSmall] : []),
       this.badgeShadow.obj,
       this.badgeText.obj,
       this.pin,
@@ -139,11 +145,16 @@ export class ItemCell extends Widget {
         .setOrigin(0.5)
         .setAlpha(item.dim ? 0.4 : 1);
     const count = item?.count !== undefined && item.count > 1 ? String(item.count) : "";
-    this.countText.set(count);
-    this.countShadow.set(count);
-    const cw = this.countText.width;
-    this.countText.at(CELL - 2 - cw, CELL - 9);
-    this.countShadow.at(CELL - 1 - cw, CELL - 8);
+    if (this.countSmall) {
+      // Digits advance 4 and the last one is 5 wide; the shadow row sits on the well's floor.
+      this.countSmall.setText(count).setPosition(CELL - 4 * count.length - 1, CELL - 8);
+    } else {
+      this.countText.set(count);
+      this.countShadow.set(count);
+      const cw = this.countText.width;
+      this.countText.at(CELL - 2 - cw, CELL - 9);
+      this.countShadow.at(CELL - 1 - cw, CELL - 8);
+    }
     this.badgeText.set(item?.badge ?? "");
     this.badgeShadow.set(item?.badge ?? "");
     this.pin.setVisible(!!item?.worn);

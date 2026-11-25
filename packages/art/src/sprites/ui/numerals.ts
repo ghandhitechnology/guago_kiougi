@@ -479,6 +479,80 @@ const LARGE = {
   `,
 };
 
+// Stack counts in an item's corner: 3×5 digits, 5×8 with the outline and shadow.
+const COUNT = {
+  "0": `
+    ###
+    #.#
+    #.#
+    #.#
+    ###
+  `,
+  "1": `
+    .#.
+    ##.
+    .#.
+    .#.
+    ###
+  `,
+  "2": `
+    ###
+    ..#
+    ###
+    #..
+    ###
+  `,
+  "3": `
+    ###
+    ..#
+    .##
+    ..#
+    ###
+  `,
+  "4": `
+    #.#
+    #.#
+    ###
+    ..#
+    ..#
+  `,
+  "5": `
+    ###
+    #..
+    ###
+    ..#
+    ###
+  `,
+  "6": `
+    ###
+    #..
+    ###
+    #.#
+    ###
+  `,
+  "7": `
+    ###
+    ..#
+    ..#
+    .#.
+    .#.
+  `,
+  "8": `
+    ###
+    #.#
+    ###
+    #.#
+    ###
+  `,
+  "9": `
+    ###
+    #.#
+    ###
+    ..#
+    ###
+  `,
+};
+
 const small = font("dmg-small", 4, SMALL);
 const large = font("dmg", 6, LARGE);
 
@@ -487,4 +561,5 @@ export default [
   { ...small, name: "dmg-small-crit", recolor: crit },
   large,
   { ...large, name: "dmg-crit", recolor: crit },
+  font("count", 3, COUNT),
 ];
