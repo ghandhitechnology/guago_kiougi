@@ -475,6 +475,38 @@ describe("the other behaviours hit what their shape covers", () => {
   });
 });
 
+describe("a body leaving", () => {
+  it("leaves nothing that names its slot, and the next body in it starts fresh", () => {
+    const w = arena();
+    const a = w.addPlayer("a", 0, 200, 200, kitFor("chemistry", ["zoomin-chem"], 10), 10);
+    a.mode = Mode.Auto;
+    a.attackSpeed = 0.5;
+    a.buffUntil = w.tick + 1000;
+    a.aiming = true;
+    const m = post(w, 260, 200);
+    applyStatus(w, m, status("acid"), 1, 100, a, null);
+    m.proofBy[0] = a.index;
+    m.proofStacks[0] = 5;
+    m.launchBy = a.index;
+    // Until one of its shots is in the air.
+    for (let t = 0; t < 200 && !w.effects.some((e) => e.alive && e.owner === a.index); t++)
+      stepFight(w, new Map());
+    const inFlight = w.effects.filter((e) => e.alive && e.owner === a.index).map((e) => e.fx);
+    expect(inFlight.length).toBeGreaterThan(0);
+    w.removePlayer("a");
+    const b = w.addPlayer("b", 2, 200, 200, kitFor("math", ["wangdo"], 10), 10);
+    expect(b.index).toBe(a.index);
+    expect(b.mode).toBe(Mode.Semi);
+    expect([b.attackSpeed, b.buffUntil, b.aiming]).toEqual([0, 0, false]);
+    expect([...m.statusBy].includes(b.index)).toBe(false);
+    expect([m.proofBy[0], m.proofStacks[0], m.launchBy]).toEqual([-1, 0, -1]);
+    // What the leaver had in the air ends in the next tick's records, which the wire reads.
+    stepFight(w, new Map());
+    const ended = new Set(w.ended.slice(0, w.endedCount).map((e) => e.fx));
+    for (const fx of inFlight) expect(ended.has(fx)).toBe(true);
+  });
+});
+
 describe("aim", () => {
   it("never carries a book past its reach or through a wall", () => {
     const w = arena();

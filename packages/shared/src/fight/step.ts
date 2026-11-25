@@ -83,6 +83,7 @@ export function stepFight(w: FightWorld, inputs?: FightInputs): void {
   w.eventCount = 0;
   w.endedCount = 0;
   w.removedCount = 0;
+  w.endDeparted();
   for (const m of w.monsters) {
     if (!m.alive) continue;
     m.flash = false;
