@@ -522,7 +522,7 @@ const map: MapSource = {
     main: { tile: [17, 21] },
     "gaseol-1f": { tile: [18, 20] },
     "gaseol-side": { tile: [30, 20] },
-    "gaseol-2f": { tile: [10, 22] },
+    "gaseol-2f": { tile: [10, 23] },
     "gaseol-4f": { tile: [2, 20] },
     jeungmyeong: { tile: [47, 20] },
     silheom: { tile: [7, 45] },

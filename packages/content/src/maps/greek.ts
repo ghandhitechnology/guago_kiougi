@@ -1,5 +1,5 @@
 import type { Layers, MapSource } from "./format.ts";
-import type { Prop, ShadowShape, Vec } from "./layers.ts";
+import type { Actor, Prop, ShadowShape, Vec } from "./layers.ts";
 import { unit } from "./noise.ts";
 import type { PlanGrid } from "./plan.ts";
 import { place } from "./props.ts";
@@ -353,4 +353,48 @@ export function edgeLine(
 /** Tile to the world pixel at its centre. */
 export function px(tx: number, ty: number): Vec {
   return [tx * T + T / 2, ty * T + T / 2];
+}
+
+/** A row of seats or standing room in pixels, drawn in front of what it stands on by `sort`. */
+export interface Seats {
+  readonly x0: number;
+  readonly x1: number;
+  readonly y: number;
+  readonly sort: number;
+  /** Standing room instead of seats. */
+  readonly stand?: boolean;
+  /** Gaps in the row: aisles, a pillar. */
+  readonly skip?: (x: number) => boolean;
+}
+
+const SITTERS = ["spectator-sit-a", "spectator-sit-b", "spectator-sit-c"] as const;
+const STANDERS = ["spectator-stand-a", "spectator-stand-b"] as const;
+
+/**
+ * An audience: people along rows of seats, never evenly, thicker where `density` says the view is
+ * best, some cheering, some not, facing either way. Deterministic by `seed`.
+ */
+export function audience(
+  rows: readonly Seats[],
+  density: (x: number) => number,
+  seed: number,
+): Actor[] {
+  const out: Actor[] = [];
+  rows.forEach((r, ri) => {
+    for (let x = r.x0; x < r.x1; x += 13 + Math.floor(unit(x, ri, seed) * 12)) {
+      if (r.skip?.(x) || unit(x, ri, seed + 1) > density(x)) continue;
+      const kinds = r.stand ? STANDERS : SITTERS;
+      const actor = kinds[Math.floor(unit(x, ri, seed + 2) * kinds.length)] as string;
+      out.push({
+        actor,
+        anim: unit(x, ri, seed + 3) > 0.72 ? "cheer" : "idle",
+        play: true,
+        index: Math.floor(unit(x, ri, seed + 4) * 2),
+        at: [Math.round(x), r.y],
+        sort: r.sort,
+        flip: unit(x, ri, seed + 5) > 0.5,
+      });
+    }
+  });
+  return out;
 }

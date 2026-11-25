@@ -66,6 +66,7 @@ const MARKS = {
   mark: "gold.pale",
   npc: "rose.pale",
   patrol: "clay.dust",
+  walk: "sea.pale",
   arena: "clay.pale",
   elite: "red.pale",
 } as const;
@@ -245,6 +246,30 @@ export function overlay(
         x: first.x * scale + 4 * scale,
         y: first.y * scale,
         color: pc,
+      });
+  }
+  // Townspeople's walks: dotted routes, no cones.
+  const wc = rgb(ramps, MARKS.walk);
+  for (const w of map.walks ?? []) {
+    const legs = w.loop === "cycle" ? [...w.route, w.route[0]] : w.route;
+    for (let i = 0; i + 1 < legs.length; i++) {
+      const a = legs[i] as { x: number; y: number };
+      const b = legs[i + 1] as { x: number; y: number };
+      const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * scale);
+      for (let k = 0; k <= n; k += 3)
+        put(
+          Math.round((a.x + ((b.x - a.x) * k) / n) * scale),
+          Math.round((a.y + ((b.y - a.y) * k) / n) * scale),
+          wc,
+        );
+    }
+    const first = w.route[0];
+    if (first)
+      labels.push({
+        text: `↻ ${w.walker}`,
+        x: first.x * scale + 4 * scale,
+        y: first.y * scale,
+        color: wc,
       });
   }
   const sc = rgb(ramps, MARKS.spawn);
