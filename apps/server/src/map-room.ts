@@ -1,15 +1,16 @@
 import { type AuthContext, type Client, Room } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { collisionOf, LAWN, type MapDef } from "@guago/content";
+import { LAWN, type MapDef } from "@guago/content";
 import {
   addPlayer,
-  type CollisionMap,
+  type Collidable,
   createWorld,
   dressPlayer,
   INPUT_MESSAGE,
   InputQueue,
   inputMessage,
   MAP_SEATS,
+  MAX_MAP_PX,
   MapState,
   MonsterState,
   type MoveInput,
@@ -23,9 +24,11 @@ import {
   type SimWorld,
   step,
   TICK_MS,
+  TILE_SIZE,
 } from "@guago/shared";
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
+import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 
 /** Messages a second past which a client is dropped; inputs are 20 a second. */
@@ -63,7 +66,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   override maxClients = MAP_SEATS;
 
   private def: MapDef = LAWN;
-  private map!: CollisionMap;
+  private map!: Collidable;
   private world!: SimWorld;
   private grid!: InterestGrid;
   private metrics!: RoomMetrics;
@@ -87,7 +90,11 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override onCreate(): void {
     this.def = this.mapDef();
-    this.map = collisionOf(this.def);
+    this.map = this.def;
+    const { w, h } = this.def.collision;
+    if (w * TILE_SIZE > MAX_MAP_PX || h * TILE_SIZE > MAX_MAP_PX) {
+      throw new Error(`map ${this.def.id} is larger than positions can address (${MAX_MAP_PX} px)`);
+    }
     const seed = (Math.random() * 2 ** 32) >>> 0;
     this.world = createWorld(this.map, this.def.monsters, seed);
     this.grid = new InterestGrid(this.world.width, this.world.height);
@@ -166,6 +173,12 @@ export class MapRoom extends Room<{ state: MapState }> {
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
+    places.enter(character.id, {
+      mapId: this.def.id,
+      roomId: this.roomId,
+      sessionId: id,
+      at: () => this.placeOf(id),
+    });
   }
 
   override onDrop(client: Client): void {
@@ -181,6 +194,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override async onLeave(client: Client): Promise<void> {
+    places.leave(client.sessionId);
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
     const id = client.sessionId;

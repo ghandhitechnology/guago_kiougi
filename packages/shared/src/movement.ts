@@ -1,4 +1,4 @@
-import { type CollisionMap, overlapsSolid, pushOut } from "./collision.ts";
+import { type Collidable, overlapsSolid, pushOut } from "./collision.ts";
 import { POS_SCALE, TICK_MS } from "./constants.ts";
 
 /** Which way an entity looks. Side frames are drawn facing right and flip for `Left`. */
@@ -60,7 +60,7 @@ export function faceToward(facing: Facing, mx: number, my: number): Facing {
 
 /** Moves a circle by (dx, dy), sliding along whatever it meets. Steps short enough never to tunnel. */
 export function slide(
-  map: CollisionMap,
+  map: Collidable,
   x: number,
   y: number,
   dx: number,
@@ -81,7 +81,7 @@ export function slide(
  * corner blocking the move, or 0 when nothing within reach clears it.
  */
 function cornerSlip(
-  map: CollisionMap,
+  map: Collidable,
   x: number,
   y: number,
   fx: number,
@@ -107,7 +107,7 @@ function cornerSlip(
  * prediction land on the same 1/POS_SCALE grid point from the same input.
  */
 export function moveBody(
-  map: CollisionMap,
+  map: Collidable,
   body: Body,
   mx: number,
   my: number,

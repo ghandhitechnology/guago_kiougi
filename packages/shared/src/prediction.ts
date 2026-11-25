@@ -1,4 +1,4 @@
-import type { CollisionMap } from "./collision.ts";
+import type { Collidable } from "./collision.ts";
 import { type Body, type MoveInput, moveBody, moveDirection } from "./movement.ts";
 
 /** A correction longer than this is snapped to instead of eased in. */
@@ -24,11 +24,11 @@ export class Predictor {
   private prev: Body;
   private ox = 0;
   private oy = 0;
-  private readonly map: CollisionMap;
+  private readonly map: Collidable;
   /** Walking speed in pixels per second; the server's value for this player. */
   speed: number;
 
-  constructor(map: CollisionMap, start: Body, speed: number) {
+  constructor(map: Collidable, start: Body, speed: number) {
     this.map = map;
     this.speed = speed;
     this.body = start;

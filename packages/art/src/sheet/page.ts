@@ -2,9 +2,12 @@
  * The contact sheet page. Runs in the browser and draws only from the built atlases and
  * art.json, the same files the game loads, so what shows here is what ships.
  */
+
+import type { BuiltMap } from "@guago/content";
 import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
+import { mapViews, overlay } from "./map-view.ts";
 import { sampleGrid } from "./sample-grid.ts";
 import { uiSections } from "./ui-page.ts";
 
@@ -292,18 +295,90 @@ for (const theme of meta.themes) {
   }
 }
 
+// Atlas pixels for scenes and maps ------------------------------------------------------------
+
+const pixels = new Map<string, SceneAtlas>();
+for (const [name, a] of atlases) {
+  const c = canvas(a.img.width, a.img.height);
+  const ctx = ctx2d(c);
+  ctx.drawImage(a.img, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+  pixels.set(name, { w: c.width, h: c.height, data, frames: a.frames as SceneAtlas["frames"] });
+}
+
+function put(target: HTMLCanvasElement, img: { w: number; h: number; data: ArrayLike<number> }) {
+  ctx2d(target).putImageData(new ImageData(new Uint8ClampedArray(img.data), img.w, img.h), 0, 0);
+}
+
+// Maps --------------------------------------------------------------------------------------
+
+/**
+ * Each built map whole at ×1, a screen at ×3 around every spawn and the landmark (playing), and
+ * the overlay of what the server sees: collision, portals, spawns, interactables and zones.
+ */
+{
+  const s = section("maps", "maps");
+  const ids: string[] = await (await fetch("dist/maps/index.json")).json();
+  const maps: BuiltMap[] = await Promise.all(
+    ids.map(async (id) => (await fetch(`dist/maps/${id}.json`)).json()),
+  );
+  const views = maps.map((map) => {
+    const box = el("article");
+    box.id = `map-${map.id}`;
+    box.append(el("h3", "name", `${map.name} · ${map.id} · ${map.time.clock}`));
+    const whole = renderScene(map.scene, meta, pixels, 0);
+    if (whole.warnings.length > 0) console.warn(map.id, whole.warnings);
+    const one = canvas(whole.w, whole.h);
+    put(one, whole);
+    box.append(cell(one, "×1"));
+    const o = overlay(map, whole, 2, meta.palette.ramps);
+    const over = canvas(o.w, o.h);
+    put(over, o);
+    const octx = ctx2d(over);
+    octx.font = "12px Galmuri9";
+    octx.textBaseline = "top";
+    for (const l of o.labels) {
+      octx.fillStyle = css.getPropertyValue("--bg").trim();
+      for (const [dx, dy] of [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+      ] as const)
+        octx.fillText(l.text, l.x + dx, l.y + dy);
+      octx.fillStyle = `rgb(${l.color.join(",")})`;
+      octx.fillText(l.text, l.x, l.y);
+    }
+    const crops = mapViews(map).map((v) => {
+      const c = canvas(v.rect.w * 3, v.rect.h * 3);
+      box.append(cell(c, `${v.name} ×3`));
+      return { v, c, small: canvas(v.rect.w, v.rect.h) };
+    });
+    box.append(cell(over, "collision, portals, spawns, places ×2"));
+    s.append(box);
+    return { map, crops };
+  });
+  let last = -1;
+  const paint = (now: number): void => {
+    const step = Math.floor(now / 100);
+    if (step !== last) {
+      last = step;
+      for (const { map, crops } of views) {
+        for (const { v, c, small } of crops) {
+          put(small, renderScene(map.scene, meta, pixels, step / 10, v.rect));
+          ctx2d(c).drawImage(small, 0, 0, c.width, c.height);
+        }
+      }
+    }
+    requestAnimationFrame(paint);
+  };
+  paint(0);
+}
+
 // Scenes ------------------------------------------------------------------------------------
 
 {
   const s = section("scenes", "scenes");
-  const pixels = new Map<string, SceneAtlas>();
-  for (const [name, a] of atlases) {
-    const c = canvas(a.img.width, a.img.height);
-    const ctx = ctx2d(c);
-    ctx.drawImage(a.img, 0, 0);
-    const data = ctx.getImageData(0, 0, c.width, c.height).data;
-    pixels.set(name, { w: c.width, h: c.height, data, frames: a.frames as SceneAtlas["frames"] });
-  }
   const views = SCENES.map((def) => {
     const box = el("article");
     box.id = def.name;
@@ -325,11 +400,7 @@ for (const theme of meta.themes) {
       for (const v of views) {
         const img = renderScene(v.def, meta, pixels, step / 10);
         if (step === 0 && img.warnings.length > 0) console.warn(v.def.name, img.warnings);
-        ctx2d(v.one).putImageData(
-          new ImageData(new Uint8ClampedArray(img.data), img.w, img.h),
-          0,
-          0,
-        );
+        put(v.one, img);
         ctx2d(v.three).drawImage(v.one, 0, 0, v.three.width, v.three.height);
       }
     }

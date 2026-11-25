@@ -1,4 +1,4 @@
-import { type CollisionMap, isSolidTile, pushOut } from "./collision.ts";
+import { type Collidable, isSolidTile, pushOut } from "./collision.ts";
 import { TICK_MS, TILE_SIZE } from "./constants.ts";
 import {
   type Body,
@@ -71,7 +71,7 @@ function roller(seed: number): { roll: () => number; state: () => number } {
   };
 }
 
-function solidAt(map: CollisionMap, x: number, y: number, r: number): boolean {
+function solidAt(map: Collidable, x: number, y: number, r: number): boolean {
   const T = TILE_SIZE;
   for (const [dx, dy] of [
     [0, 0],
@@ -86,12 +86,12 @@ function solidAt(map: CollisionMap, x: number, y: number, r: number): boolean {
 }
 
 export function createWorld(
-  map: CollisionMap,
+  map: Collidable,
   spawns: readonly SpawnGroup[],
   seed: number,
 ): SimWorld {
-  const width = map.width * TILE_SIZE;
-  const height = map.height * TILE_SIZE;
+  const width = map.collision.w * TILE_SIZE;
+  const height = map.collision.h * TILE_SIZE;
   const { roll, state } = roller(seed);
   const monsters: SimMonster[] = [];
   for (const group of spawns) {
@@ -137,7 +137,7 @@ export function removePlayer(world: SimWorld, id: string): SimWorld {
 
 /** Applies one player's inputs for this tick, one movement step per input. */
 export function stepPlayer(
-  map: CollisionMap,
+  map: Collidable,
   player: SimPlayer,
   inputs: readonly MoveInput[],
 ): SimPlayer {
@@ -151,7 +151,7 @@ export function stepPlayer(
   return { ...player, x: body.x, y: body.y, facing: body.facing, seq };
 }
 
-function stepMonsters(map: CollisionMap, world: SimWorld, roll: () => number): SimMonster[] {
+function stepMonsters(map: Collidable, world: SimWorld, roll: () => number): SimMonster[] {
   const dist = (WANDER_SPEED * TICK_MS) / 1000;
   const moved = world.monsters.map((m) => {
     let { x, y, facing, moving, heading, timer } = m;
@@ -211,7 +211,7 @@ function stepMonsters(map: CollisionMap, world: SimWorld, roll: () => number): S
  * Advances the world one fixed tick: every player spends this tick's inputs in join order, then
  * the monsters wander. Pure: the world given is left untouched.
  */
-export function step(world: SimWorld, map: CollisionMap, inputs?: TickInputs): SimWorld {
+export function step(world: SimWorld, map: Collidable, inputs?: TickInputs): SimWorld {
   const { roll, state } = roller(world.rng);
   const players = world.players.map((p) => stepPlayer(map, p, inputs?.get(p.id) ?? []));
   const monsters = stepMonsters(map, world, roll);

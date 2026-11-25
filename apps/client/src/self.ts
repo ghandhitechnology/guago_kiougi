@@ -1,6 +1,6 @@
 import {
   type Body,
-  type CollisionMap,
+  type Collidable,
   type Facing,
   type MoveInput,
   PLAYER_SPEED,
@@ -28,13 +28,13 @@ export class SelfMover {
   private predictor: Predictor | undefined;
   private seen: ServerSelf | undefined;
   private acc = 0;
-  private readonly map: CollisionMap;
+  private readonly map: Collidable;
   private readonly send: (input: MoveInput) => void;
   /** Largest correction seen, for development checks. */
   worstError = 0;
   corrections = 0;
 
-  constructor(map: CollisionMap, send: (input: MoveInput) => void) {
+  constructor(map: Collidable, send: (input: MoveInput) => void) {
     this.map = map;
     this.send = send;
   }

@@ -1,26 +1,52 @@
 import { TILE_SIZE } from "./constants.ts";
 
 /**
- * A map's tile collision grid, row major. The map format fills it; the simulation reads it only
- * through {@link isSolidTile}, so a richer grid (water, ledges) changes that one function.
+ * Tile collision (PLAN §6 "Physics": a tile collision grid per map). One character per tile,
+ * row major, so a built map's grid stays readable in its JSON:
+ *
+ * - `.` walkable
+ * - `#` solid: walls, building footprints, prop footprints
+ * - `~` water or void: blocks walking, not what flies over it
  */
-export interface CollisionMap {
+export const TILE_WALK = ".";
+export const TILE_SOLID = "#";
+export const TILE_WATER = "~";
+
+export interface TileCollision {
   /** Size in tiles. */
-  readonly width: number;
-  readonly height: number;
-  /** One byte per tile; non-zero blocks movement. */
-  readonly solid: Uint8Array;
+  readonly w: number;
+  readonly h: number;
+  /** `h` rows of `w` characters. */
+  readonly rows: readonly string[];
 }
 
-/** Whether a tile blocks movement. Everything outside the map is solid. */
-export function isSolidTile(map: CollisionMap, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return true;
-  return map.solid[ty * map.width + tx] !== 0;
+/** Anything that carries a collision grid: a built map, or a hand-written one like the lawn. */
+export interface Collidable {
+  readonly collision: TileCollision;
 }
 
-/** A map with nothing in it but its border. */
-export function openMap(width: number, height: number): CollisionMap {
-  return { width, height, solid: new Uint8Array(width * height) };
+/**
+ * Whether a tile stops a walker. Tiles outside the map are solid. The simulation reads collision
+ * through this one function and nothing else.
+ */
+export function isSolidTile(map: Collidable, tx: number, ty: number): boolean {
+  const { w, h, rows } = map.collision;
+  if (tx < 0 || ty < 0 || tx >= w || ty >= h) return true;
+  return rows[ty]?.charCodeAt(tx) !== 46; // "."
+}
+
+/** A map of `w`×`h` tiles with the `solid` ones blocked, for tests and tools. */
+export function gridOf(
+  w: number,
+  h: number,
+  solid: readonly (readonly [number, number])[] = [],
+): Collidable {
+  const rows = Array.from({ length: h }, () => Array<string>(w).fill(TILE_WALK));
+  for (const [tx, ty] of solid) {
+    const row = rows[ty];
+    if (row && tx >= 0 && tx < w) row[tx] = TILE_SOLID;
+  }
+  return { collision: { w, h, rows: rows.map((r) => r.join("")) } };
 }
 
 const T = TILE_SIZE;
@@ -34,7 +60,7 @@ const T = TILE_SIZE;
  * corner the circle rolls around.
  */
 export function pushOut(
-  map: CollisionMap,
+  map: Collidable,
   x: number,
   y: number,
   r: number,
@@ -103,7 +129,7 @@ export function pushOut(
 }
 
 /** Whether a circle overlaps any solid tile, with slack for positions snapped to the 1/8 px grid. */
-export function overlapsSolid(map: CollisionMap, x: number, y: number, r: number): boolean {
+export function overlapsSolid(map: Collidable, x: number, y: number, r: number): boolean {
   const rr = r - 1 / 8;
   const tx0 = Math.floor((x - rr) / T);
   const tx1 = Math.floor((x + rr) / T);

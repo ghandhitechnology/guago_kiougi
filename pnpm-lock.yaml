@@ -88,6 +88,9 @@ importers:
 
   packages/art:
     dependencies:
+      '@guago/content':
+        specifier: workspace:*
+        version: link:../content
       galmuri:
         specifier: ^2.40.3
         version: 2.40.3
@@ -101,6 +104,18 @@ importers:
       '@types/pngjs':
         specifier: ^6.0.5
         version: 6.0.5
+
+  packages/audio:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      galmuri:
+        specifier: ^2.40.3
+        version: 2.40.3
+      vite:
+        specifier: 8.3.8
+        version: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)
 
   packages/content:
     dependencies:
