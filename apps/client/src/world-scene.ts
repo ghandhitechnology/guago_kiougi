@@ -3,6 +3,7 @@ import type { ArtMetadata } from "@guago/art";
 import { type BuiltMap, narrative } from "@guago/content";
 import {
   type DoorRattle,
+  distanceToArea,
   encodeInput,
   type Facing,
   INPUT_MESSAGE,
@@ -24,28 +25,22 @@ import {
 } from "@guago/shared";
 import * as Phaser from "phaser";
 import { MonsterActor, PlayerActor } from "./actors.ts";
-import {
-  artMeta,
-  composeLook,
-  createSpriteAnims,
-  defaultLook,
-  loadArt,
-  lookTexture,
-} from "./art.ts";
+import { artMeta, composeLook, createSpriteAnims, defaultLook, loadArt } from "./art.ts";
 import { Bubbles } from "./bubbles.ts";
 import { CameraRig } from "./camera.ts";
-import { composeDoll, dollLook, normalizeLook, releaseDoll } from "./doll.ts";
+import { MARK_DEPTH } from "./depths.ts";
+import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
 import { Curtain } from "./fade.ts";
 import { Footsteps } from "./footsteps.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
-import { fetchMap, neighbours, roomCollision } from "./map-data.ts";
-import { type MapView, OVERHEAD_DEPTH, showMap, warmMap } from "./map-draw.ts";
+import { ensureMap, enteredMap, mapReady, roomCollision } from "./map-data.ts";
 import { type MapSeat, stayConnected } from "./net.ts";
 import { NpcActor, npcArt } from "./npc.ts";
 import { PlaceCard } from "./place-card.ts";
 import { Prompt } from "./prompt.ts";
+import { MapView, onQualityTier } from "./render/index.ts";
 import { SelfMover } from "./self.ts";
 import { emitWorld } from "./world-events.ts";
 import { playWorld } from "./world-sound.ts";
@@ -60,13 +55,13 @@ const PUSH_MS = 90;
 const RATTLE_COOLDOWN_MS = 1200;
 /** Remote rattles are heard within this many pixels. */
 const HEAR_PX = 220;
+/** A door this close starts loading the map behind it. */
+const NEAR_DOOR_PX = 56;
 const KO = narrative.NARRATIVE.ko;
 
 interface Remote<A> {
   readonly track: Track;
   readonly actor: A;
-  /** The look texture the actor holds, handed back when it goes. */
-  readonly doll?: string;
 }
 
 /** The map the player stands on, and everything drawn for it. */
@@ -77,6 +72,7 @@ interface Here {
   readonly view: MapView;
   readonly footsteps: Footsteps;
   readonly npcs: Map<string, NpcActor>;
+  readonly untier: () => void;
   /** What the prompt can point at: the server's own list, by the same rule. */
   readonly usable: (Usable & { readonly top: number; readonly cx: number })[];
 }
@@ -124,6 +120,8 @@ export class WorldScene extends Phaser.Scene {
   private lastRattle = 0;
   private interactN = 0;
   private roomZone: string | undefined;
+  /** The zones the server last said the player stands in. */
+  private zones: readonly string[] = [];
   private stop: (() => void) | undefined;
   /** Transition timings for development checks: door to fade lifting, in ms. */
   readonly transitions: { from: string; to: string; ms: number; warm: boolean }[] = [];
@@ -137,8 +135,9 @@ export class WorldScene extends Phaser.Scene {
     this.entry = data.account && data.character ? (data as WorldEntry) : undefined;
   }
 
+  /** The art every map shares; each map's own art loads when the server seats us there. */
   preload(): void {
-    loadArt(this);
+    loadArt(this, { atlases: ["core", "effects"] });
   }
 
   create(): void {
@@ -222,25 +221,32 @@ export class WorldScene extends Phaser.Scene {
   private async enterMap(seat: MapSeat): Promise<void> {
     const { room, seating } = seat;
     this.holding = true;
-    const map = await fetchMap(seating.map);
-    await warmMap(this, this.meta, map);
-    await this.curtain.close();
+    const [map] = await Promise.all([ensureMap(this, seating.map), this.curtain.close()]);
     const me = await this.ownBody(room);
     if (this.room !== room || !me) return;
 
     const before = this.here?.map.id;
     this.clearMap();
-    const view = showMap(this, map);
+    const view = MapView.create(this, map.id);
+    const untier = onQualityTier((t) => view.setTier(t));
+    enteredMap(this, map.id);
     const footsteps = new Footsteps(this, this.meta, map);
     this.footsteps = footsteps;
     const npcs = new Map<string, NpcActor>();
     for (const [key, n] of room.state.npcs) {
       const art = npcArt(this.meta, n.speaker);
       if (!art) continue;
-      npcs.set(
-        key,
-        new NpcActor(this, this.meta, art, n.speaker, n.x / POS_SCALE, n.y / POS_SCALE, n.facing),
+      const npc = new NpcActor(
+        this,
+        this.meta,
+        art,
+        n.speaker,
+        n.x / POS_SCALE,
+        n.y / POS_SCALE,
+        n.facing,
       );
+      view.addEntity(npc.body);
+      npcs.set(key, npc);
     }
     const T = TILE_SIZE;
     const usable: Here["usable"] = [
@@ -262,7 +268,7 @@ export class WorldScene extends Phaser.Scene {
         top: t.rect.y * T - 2,
       })),
     ];
-    this.here = { room, map, channel: seating.channel, view, footsteps, npcs, usable };
+    this.here = { room, map, channel: seating.channel, view, footsteps, npcs, usable, untier };
     this.selfId = room.sessionId;
     this.camera = new CameraRig(this.cameras.main, map.w * T, map.h * T);
     const x = me.x / POS_SCALE;
@@ -274,7 +280,7 @@ export class WorldScene extends Phaser.Scene {
     this.self.onServer(me);
     this.selfInside = portalAt(map.portals, x, y);
     this.doorAt = undefined;
-    this.roomZone = undefined;
+    this.roomZone = map.zones.find((z) => z.kind === "room" && this.zones.includes(z.id))?.id;
     this.clock.reset();
     this.onPatch(room.state);
 
@@ -283,11 +289,6 @@ export class WorldScene extends Phaser.Scene {
       emitWorld({ t: "place", map: map.id, name: map.name, channel: seating.channel });
     }
     if (seat.via) playWorld("door.close", { volume: 0.5 });
-    for (const id of neighbours(map)) {
-      void fetchMap(id)
-        .then((m) => warmMap(this, this.meta, m))
-        .catch(() => {});
-    }
     this.holding = false;
     await this.curtain.open();
     const started = this.transitionStart;
@@ -335,10 +336,8 @@ export class WorldScene extends Phaser.Scene {
   private clearMap(): void {
     const here = this.here;
     this.here = undefined;
-    here?.view.destroy();
-    here?.footsteps.destroy();
     for (const n of here?.npcs.values() ?? []) n.destroy();
-    for (const r of [...this.monsters.values(), ...this.players.values()]) this.dropRemote(r);
+    for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
     this.monsters.clear();
     this.players.clear();
     this.selfActor?.destroy();
@@ -346,6 +345,9 @@ export class WorldScene extends Phaser.Scene {
     this.self = undefined;
     this.bubbles.clearAll();
     this.prompt.show(undefined);
+    here?.untier();
+    here?.footsteps.destroy();
+    here?.view.destroy();
   }
 
   /** The server is sending the player through a door. */
@@ -357,7 +359,7 @@ export class WorldScene extends Phaser.Scene {
     }
     this.doorAt = undefined;
     void this.curtain.close();
-    void fetchMap(transfer.map).then((m) => warmMap(this, this.meta, m));
+    void ensureMap(this, transfer.map).catch(() => {});
   }
 
   /** The predicted body walked into a door: start the curtain now, the server follows. */
@@ -367,10 +369,8 @@ export class WorldScene extends Phaser.Scene {
     this.holding = true;
     this.doorAt = performance.now();
     const target = map.portals[this.selfInside];
-    this.transitionStart = {
-      at: this.doorAt,
-      warm: target ? this.textures.exists(`map-under:${target.to}`) : false,
-    };
+    this.transitionStart = { at: this.doorAt, warm: target ? mapReady(this, target.to) : false };
+    if (target) void ensureMap(this, target.to).catch(() => {});
     playWorld("door.open", { volume: 0.6 });
     void this.curtain.close();
     const at = this.doorAt;
@@ -392,10 +392,8 @@ export class WorldScene extends Phaser.Scene {
     for (const [id, m] of state.monsters) {
       let r = this.monsters.get(id);
       if (!r) {
-        r = {
-          track: new Track(),
-          actor: new MonsterActor(this, this.meta, m.kind, this.lookKey()),
-        };
+        r = { track: new Track(), actor: new MonsterActor(this, this.meta, m.kind) };
+        this.here.view.addEntity(r.actor.body);
         this.monsters.set(id, r);
       }
       r.track.push(state.tick, m.x / POS_SCALE, m.y / POS_SCALE, m.facing);
@@ -411,7 +409,8 @@ export class WorldScene extends Phaser.Scene {
       seated.add(p.sid);
       let r = this.players.get(p.sid);
       if (!r) {
-        r = this.remotePlayer(p);
+        r = { track: new Track(), actor: this.playerActor() };
+        this.here.view.addEntity(r.actor.body);
         this.players.set(p.sid, r);
       }
       r.track.push(state.tick, p.x / POS_SCALE, p.y / POS_SCALE, p.facing);
@@ -421,49 +420,28 @@ export class WorldScene extends Phaser.Scene {
     for (const [key, n] of state.npcs) this.here.npcs.get(key)?.face(n.facing);
   }
 
-  /** Another student, in the look they chose. */
-  private remotePlayer(p: PlayerState): Remote<PlayerActor> {
-    const l = p.look;
-    const look = normalizeLook(this.meta, {
-      body: l?.body,
-      hair: l?.hair,
-      hairColor: l?.hairColor,
-      face: l?.face,
-      uniform: l?.uniform,
-      accessories: l ? [...l.accessories] : [],
-    });
-    const doll = composeDoll(this, this.meta, look);
-    const actor = this.playerActor(dollLook(look));
-    return { track: new Track(), actor, doll };
-  }
-
-  private dropRemote(r: Remote<{ destroy(): void }>): void {
-    r.actor.destroy();
-    if (r.doll) releaseDoll(this, r.doll);
-  }
-
-  private prune<A extends { destroy(): void }>(
+  private prune<A extends { readonly body: Phaser.GameObjects.Sprite; destroy(): void }>(
     views: Map<string, Remote<A>>,
     live: { has(id: string): boolean },
   ): void {
     for (const [id, r] of views) {
       if (live.has(id)) continue;
-      this.dropRemote(r);
+      this.here?.view.removeEntity(r.actor.body);
+      r.actor.destroy();
       views.delete(id);
     }
   }
 
   private onZones(zones: readonly string[]): void {
+    this.zones = zones;
+    emitWorld({ t: "zones", zones });
     const map = this.here?.map;
     if (!map) return;
-    emitWorld({ t: "zones", zones });
     const room = map.zones.find((z) => z.kind === "room" && zones.includes(z.id));
-    const id = room?.id;
-    if (id === this.roomZone) return;
-    const first = this.roomZone === undefined;
-    this.roomZone = id;
-    // Arriving in a map shows the map's name; walking into a room inside it shows the room's.
-    if (!first && room && room.kind === "room" && room.name !== map.name) this.card.show(room.name);
+    if (room?.id === this.roomZone) return;
+    this.roomZone = room?.id;
+    // Arriving shows the map's name; walking into a room inside it shows the room's.
+    if (room && room.kind === "room" && room.name !== map.name) this.card.show(room.name);
   }
 
   private onNpcLine(m: NpcLine): void {
@@ -522,7 +500,7 @@ export class WorldScene extends Phaser.Scene {
     const lock = this.add
       .image(cx, top - 4, "ui", "lock/idle")
       .setOrigin(0.5, 1)
-      .setDepth(OVERHEAD_DEPTH + 5);
+      .setDepth(MARK_DEPTH);
     this.tweens.chain({
       targets: lock,
       tweens: [
@@ -544,10 +522,6 @@ export class WorldScene extends Phaser.Scene {
     return actor;
   }
 
-  private lookKey(): string {
-    return lookTexture(PLAYER_RIG, this.look);
-  }
-
   override update(time: number): void {
     const dt = this.lastTime === undefined ? 0 : Math.min(250, time - this.lastTime);
     this.lastTime = time;
@@ -561,6 +535,7 @@ export class WorldScene extends Phaser.Scene {
     if (drawn && here && this.camera) {
       if (!this.selfActor) {
         this.selfActor = this.playerActor(this.selfLook);
+        here.view.addEntity(this.selfActor.body, { focus: true });
         this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
       }
       const moved = Math.hypot(drawn.x - this.selfActor.body.x, drawn.y - this.selfActor.body.y);
@@ -596,6 +571,11 @@ export class WorldScene extends Phaser.Scene {
     moved: number,
     dt: number,
   ) {
+    // Loading starts a few steps before the door, so the far side is in by the time of the fade.
+    for (const p of map.portals) {
+      if (!p.built || mapReady(this, p.to)) continue;
+      if (distanceToArea(p.rect, x, y) < NEAR_DOOR_PX) void ensureMap(this, p.to).catch(() => {});
+    }
     const at = portalAt(map.portals, x, y);
     const was = this.selfInside;
     this.selfInside = at;

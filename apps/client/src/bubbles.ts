@@ -4,11 +4,10 @@
  * scene only calls `say`, `clear` and `update`, so swapping this module touches nothing else.
  */
 import type * as Phaser from "phaser";
-import { OVERHEAD_DEPTH } from "./map-draw.ts";
+import { BUBBLE_DEPTH } from "./depths.ts";
 import { Label } from "./ui/text.ts";
 import { INK, INK_SOFT, sliceOf } from "./ui/theme.ts";
 
-export const BUBBLE_DEPTH = OVERHEAD_DEPTH + 10;
 /** Text wraps at this width, in pixels. */
 const WRAP = 118;
 const PAD_X = 4;

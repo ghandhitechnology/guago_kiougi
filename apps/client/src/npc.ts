@@ -7,14 +7,18 @@ import type { ArtMetadata } from "@guago/art";
 import { CAST_ART, narrative } from "@guago/content";
 import { Facing } from "@guago/shared";
 import type * as Phaser from "phaser";
-import { ENTITY_DEPTH, SHADOW_ALPHA, SHADOW_DEPTH } from "./actors.ts";
-import { composeLook, lookAnim, lookTexture, SHADOW_FRAME, spriteAnim } from "./art.ts";
-import { OVERHEAD_DEPTH } from "./map-draw.ts";
+import { composeLook, lookAnim, lookTexture, spriteAnim } from "./art.ts";
+import { NAME_DEPTH } from "./depths.ts";
 import { Label } from "./ui/text.ts";
 import { sliceOf } from "./ui/theme.ts";
 
 export type NpcArt =
-  | { readonly kind: "rig"; readonly rig: string; readonly look: string; readonly signature?: string }
+  | {
+      readonly kind: "rig";
+      readonly rig: string;
+      readonly look: string;
+      readonly signature?: string;
+    }
   | { readonly kind: "sprite"; readonly sprite: string; readonly signature?: string };
 
 const SPEAKERS = new Map(narrative.NARRATIVE.speakers.map((s) => [s.id, s]));
@@ -59,9 +63,9 @@ const SIGNATURE_SPREAD_MS = 9000;
 /** A looping signature (the cat's nap) runs this long. */
 const LOOP_SIGNATURE_MS = 6000;
 
+/** A cast member's body; the map view it is added to sorts, lights and shadows it. */
 export class NpcActor {
   readonly body: Phaser.GameObjects.Sprite;
-  private readonly shadow: Phaser.GameObjects.Image | undefined;
   private readonly plate: Phaser.GameObjects.Container | undefined;
   private readonly art: NpcArt;
   private facing: number;
@@ -87,17 +91,9 @@ export class NpcActor {
       const key = lookTexture(art.rig, art.look);
       if (!scene.textures.exists(key)) composeLook(scene, meta, art.rig, art.look);
       this.body = scene.add.sprite(this.x, this.y, key);
-      this.shadow = scene.add.image(this.x, this.y, key, SHADOW_FRAME);
     } else {
-      const sprite = meta.sprites[art.sprite];
-      this.body = scene.add.sprite(this.x, this.y, sprite?.atlas ?? "core");
-      const own = `${art.sprite}/${SHADOW_FRAME}`;
-      this.shadow = sprite?.frames.includes(own)
-        ? scene.add.image(this.x, this.y, sprite.atlas, own)
-        : undefined;
+      this.body = scene.add.sprite(this.x, this.y, meta.sprites[art.sprite]?.atlas ?? "core");
     }
-    this.shadow?.setAlpha(SHADOW_ALPHA).setDepth(SHADOW_DEPTH);
-    this.body.setDepth(ENTITY_DEPTH + this.y);
     this.body.on("animationcomplete", () => {
       if (this.busy) this.idle();
     });
@@ -159,7 +155,6 @@ export class NpcActor {
 
   destroy(): void {
     this.body.destroy();
-    this.shadow?.destroy();
     this.plate?.destroy();
   }
 }
@@ -172,6 +167,6 @@ function nameplate(scene: Phaser.Scene, text: string, x: number, y: number) {
   const plate = scene.add.nineslice(0, 0, "ui", "nameplate/idle", w, 13, l, r, t, b).setOrigin(0);
   label.at(3, 2);
   const box = scene.add.container(Math.round(x - w / 2), Math.round(y), [plate, label.obj]);
-  box.setDepth(OVERHEAD_DEPTH - 1);
+  box.setDepth(NAME_DEPTH);
   return box;
 }

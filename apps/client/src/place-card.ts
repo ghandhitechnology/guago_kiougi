@@ -5,7 +5,7 @@
 
 import { INTERNAL_WIDTH as W } from "@guago/shared";
 import type * as Phaser from "phaser";
-import { FADE_DEPTH } from "./fade.ts";
+import { CARD_DEPTH } from "./depths.ts";
 import { t } from "./i18n/index.ts";
 import { layDown, pickUp, type Rest } from "./ui/motion.ts";
 import { Label } from "./ui/text.ts";
@@ -51,10 +51,7 @@ export class PlaceCard {
       parts.push(tag.obj);
     }
     const rest: Rest = { x: Math.round((W - w) / 2), y: TOP };
-    const box = s.add
-      .container(rest.x, rest.y, parts)
-      .setScrollFactor(0)
-      .setDepth(FADE_DEPTH - 1);
+    const box = s.add.container(rest.x, rest.y, parts).setScrollFactor(0).setDepth(CARD_DEPTH);
     box.setVisible(false);
     this.box = box;
     layDown(box, rest);

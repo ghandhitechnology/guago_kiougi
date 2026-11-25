@@ -2,7 +2,7 @@ import type { ArtMetadata } from "@guago/art";
 import type { BuiltMap } from "@guago/content";
 import { TILE_SIZE } from "@guago/shared";
 import type * as Phaser from "phaser";
-import { SHADOW_DEPTH } from "./actors.ts";
+import { DUST_DEPTH } from "./depths.ts";
 
 const PIXEL = "fx-pixel";
 
@@ -55,7 +55,7 @@ export class Footsteps {
           tint: tints.map((n) => color(meta, n)),
           maxAliveParticles: 120,
         })
-        .setDepth(SHADOW_DEPTH + 1);
+        .setDepth(DUST_DEPTH);
     this.dust = make(KICKS.path, 22);
     this.blades = make(KICKS.grass, 30);
     this.w = map.w;

@@ -1,11 +1,7 @@
 import type { ArtMetadata, RigMeta } from "@guago/art";
 import { Facing } from "@guago/shared";
 import type * as Phaser from "phaser";
-import { lookAnim, lookTexture, SHADOW_FRAME, spriteAnim } from "./art.ts";
-
-export const SHADOW_DEPTH = 5;
-export const ENTITY_DEPTH = 10;
-export const SHADOW_ALPHA = 0.35;
+import { lookAnim, lookTexture, spriteAnim } from "./art.ts";
 
 /** Movement under this many pixels in a frame is standing still. */
 const STILL_PX = 0.02;
@@ -25,27 +21,24 @@ const DIRS: Record<Facing, string> = {
 
 const fidgetDelay = () => FIDGET_MIN_MS + Math.random() * FIDGET_SPREAD_MS;
 
-/** Something drawn in the world: a body, a soft shadow at its feet, sorted by its feet. */
+/**
+ * Something drawn in the world: a body with its feet at its position. The map view it is added
+ * to (`MapView.addEntity`) sorts it by those feet, lights it and draws its shadow.
+ */
 abstract class Actor {
   readonly body: Phaser.GameObjects.Sprite;
-  readonly shadow: Phaser.GameObjects.Image;
 
-  constructor(body: Phaser.GameObjects.Sprite, shadow: Phaser.GameObjects.Image) {
+  constructor(body: Phaser.GameObjects.Sprite) {
     this.body = body;
-    this.shadow = shadow.setAlpha(SHADOW_ALPHA).setDepth(SHADOW_DEPTH);
   }
 
-  /** Puts the feet on a whole pixel and sorts by them. */
+  /** Puts the feet on a whole pixel. */
   protected place(x: number, y: number): void {
-    const px = Math.round(x);
-    const py = Math.round(y);
-    this.body.setPosition(px, py).setDepth(ENTITY_DEPTH + py);
-    this.shadow.setPosition(px, py);
+    this.body.setPosition(Math.round(x), Math.round(y));
   }
 
   destroy(): void {
     this.body.destroy();
-    this.shadow.destroy();
   }
 }
 
@@ -73,8 +66,7 @@ export class PlayerActor extends Actor {
   onStep: ((x: number, y: number) => void) | undefined;
 
   constructor(scene: Phaser.Scene, meta: ArtMetadata, rig: string, look: string, speed: number) {
-    const key = lookTexture(rig, look);
-    super(scene.add.sprite(-100, -100, key), scene.add.image(-100, -100, key, SHADOW_FRAME));
+    super(scene.add.sprite(-100, -100, lookTexture(rig, look)));
     this.rig = rig;
     this.look = look;
     const walk = (meta.rigs[rig] as RigMeta).anims.walk;
@@ -154,14 +146,10 @@ export class MonsterActor extends Actor {
   private lastX: number | undefined;
   private lastY: number | undefined;
 
-  constructor(scene: Phaser.Scene, meta: ArtMetadata, kind: string, fallbackShadow: string) {
+  constructor(scene: Phaser.Scene, meta: ArtMetadata, kind: string) {
     const sprite = meta.sprites[kind];
     if (!sprite) throw new Error(`art has no sprite ${kind}`);
-    const own = `${kind}/${SHADOW_FRAME}`;
-    const shadow = sprite.frames.includes(own)
-      ? scene.add.image(-100, -100, sprite.atlas, own)
-      : scene.add.image(-100, -100, fallbackShadow, SHADOW_FRAME);
-    super(scene.add.sprite(-100, -100, sprite.atlas).play(spriteAnim(kind, "idle")), shadow);
+    super(scene.add.sprite(-100, -100, sprite.atlas).play(spriteAnim(kind, "idle")));
     this.kind = kind;
     // Start each loop at a different point so a crowd does not bob in step.
     this.body.anims.setProgress(Math.random());

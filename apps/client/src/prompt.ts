@@ -4,12 +4,10 @@
  * on it is the context button.
  */
 import * as Phaser from "phaser";
-import { OVERHEAD_DEPTH } from "./map-draw.ts";
+import { PROMPT_DEPTH } from "./depths.ts";
 import { sound } from "./ui/sound.ts";
 import { Label } from "./ui/text.ts";
 import { INK, sliceOf } from "./ui/theme.ts";
-
-export const PROMPT_DEPTH = OVERHEAD_DEPTH + 20;
 
 const touch = () => window.matchMedia?.("(pointer: coarse)").matches ?? false;
 

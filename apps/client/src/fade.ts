@@ -4,9 +4,8 @@
  */
 import { INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
 import type * as Phaser from "phaser";
+import { FADE_DEPTH } from "./depths.ts";
 import { paint } from "./ui/theme.ts";
-
-export const FADE_DEPTH = 1_000_000;
 
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 const STEPS = 16;
