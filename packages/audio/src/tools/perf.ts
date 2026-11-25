@@ -20,6 +20,8 @@ import { SONGS } from "../content/index.ts";
 import { compileSong } from "../tracker/compile.ts";
 import { SongPlayer } from "../tracker/player.ts";
 import { fingerprint } from "./fingerprint.ts";
+import { measure } from "./measure.ts";
+import { wav } from "./wav.ts";
 
 const { values } = parseArgs({ options: { out: { type: "string" } } });
 const URL_BASE = "http://localhost:4312";
@@ -165,6 +167,25 @@ try {
   rows.push(await run("audio, 4x throttle", "simple", 15));
   rows.push(await run("horde, 4x throttle", "horde", 20));
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  if (values.out) {
+    // The horde as the browser plays it: music, ambient and hits through the mixer and limiter.
+    await page.evaluate(() => window.perf.start("horde", true));
+    await page.waitForTimeout(3000);
+    const b64 = await page.evaluate((s) => window.perf.record(s), 30);
+    await page.evaluate(() => window.perf.stop());
+    const chans = b64.map(
+      (x) => new Float32Array(Uint8Array.from(Buffer.from(x, "base64")).buffer),
+    );
+    const sr = (await page.evaluate(() => window.perf.stats())).sampleRate;
+    const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.out);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "horde-mix.wav"), wav(chans, sr));
+    const m = measure(chans, sr);
+    results.hordeMix = { seconds: m.seconds, peak: m.peak, lufs: m.lufs, clipped: m.clipped };
+    console.log(
+      `horde-mix.wav: ${m.seconds.toFixed(1)} s, peak ${m.peak.toFixed(1)} dBFS, ${m.lufs.toFixed(1)} LUFS, clipped ${m.clipped}`,
+    );
+  }
   results.runs = rows;
   results.errors = errors;
   console.log(JSON.stringify(results.parity));

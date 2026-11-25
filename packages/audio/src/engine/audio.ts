@@ -308,6 +308,30 @@ export class GameAudio {
       return { id: deck.id, info: deck.info, frame: at.frame, row: at.row };
     },
     analyser: (): AnalyserNode => this.graph().analyser,
+    /** Records the master output, after the limiter, for `seconds`. Tools only. */
+    record: (seconds: number): Promise<[Float32Array, Float32Array]> => {
+      const g = this.graph();
+      const tap = g.ctx.createScriptProcessor(4096, 2, 2);
+      const total = Math.round(seconds * g.ctx.sampleRate);
+      const left = new Float32Array(total);
+      const right = new Float32Array(total);
+      let at = 0;
+      return new Promise((resolve) => {
+        tap.onaudioprocess = (e) => {
+          const n = Math.min(e.inputBuffer.length, total - at);
+          left.set(e.inputBuffer.getChannelData(0).subarray(0, n), at);
+          right.set(e.inputBuffer.getChannelData(1).subarray(0, n), at);
+          at += n;
+          if (at >= total) {
+            g.analyser.disconnect(tap);
+            tap.disconnect();
+            resolve([left, right]);
+          }
+        };
+        g.analyser.connect(tap);
+        tap.connect(g.ctx.destination);
+      });
+    },
     catalog: (): ReadonlyMap<string, CueMeta> => this.catalog,
     stats: () => {
       const g = this.g;
