@@ -1,10 +1,11 @@
-import { type Client, Room } from "@colyseus/core";
+import { type AuthContext, type Client, Room } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import { collisionOf, LAWN, type MapDef } from "@guago/content";
 import {
   addPlayer,
   type CollisionMap,
   createWorld,
+  dressPlayer,
   INPUT_MESSAGE,
   InputQueue,
   inputMessage,
@@ -12,6 +13,8 @@ import {
   MonsterState,
   type MoveInput,
   OWNER_TAG,
+  overlapsSolid,
+  PLAYER_RADIUS,
   PlayerState,
   POS_SCALE,
   RECONNECT_SECONDS,
@@ -22,6 +25,7 @@ import {
 } from "@guago/shared";
 import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
+import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 
 /** Messages a second past which a client is dropped; inputs are 20 a second. */
 const MAX_MESSAGES_PER_SECOND = 120;
@@ -37,7 +41,8 @@ const MAX_CATCH_UP = 3;
  */
 const POLL_MS = 5;
 
-interface Seat {
+/** A player's body in this room: what is synced, what its client sees, what it asked to do. */
+interface Pawn {
   readonly state: InstanceType<typeof PlayerState>;
   readonly viewer: Viewer;
   readonly queue: InputQueue;
@@ -59,10 +64,16 @@ export class MapRoom extends Room<{ state: MapState }> {
   private world!: SimWorld;
   private grid!: InterestGrid;
   private metrics!: RoomMetrics;
-  private readonly seats = new Map<string, Seat>();
+  private readonly pawns = new Map<string, Pawn>();
+  private seats!: RoomSeats;
   private readonly monsters = new Map<number, InstanceType<typeof MonsterState>>();
   private acc = 0;
   private lastLoop = 0;
+
+  /** Only a browser with a live session and a character gets a seat. */
+  static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
+    return authenticateJoin(ctx);
+  }
 
   /** The map this room runs. */
   protected mapDef(): MapDef {
@@ -76,11 +87,12 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.world = createWorld(this.map, this.def.monsters, seed);
     this.grid = new InterestGrid(this.world.width, this.world.height);
     this.metrics = new RoomMetrics(this.roomId, this.def.id);
+    this.seats = new RoomSeats(this.def.id, (id) => this.placeOf(id));
     this.sync();
 
     this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: MoveInput) => {
-      const seat = this.seats.get(client.sessionId);
-      if (seat && !seat.queue.push(input)) this.metrics.inputsDropped++;
+      const pawn = this.pawns.get(client.sessionId);
+      if (pawn && !pawn.queue.push(input)) this.metrics.inputsDropped++;
     });
 
     // Patches go out right after each step, so every patch is exactly one tick of the world.
@@ -91,11 +103,32 @@ export class MapRoom extends Room<{ state: MapState }> {
       if (this.clients.length > 0)
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
+    this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
   }
 
-  override onJoin(client: Client): void {
+  /** Where a session's character stands, in whole pixels, for saving. */
+  private placeOf(id: string): { x: number; y: number } | undefined {
+    const p = this.world.players.find((q) => q.id === id);
+    return p && { x: Math.round(p.x), y: Math.round(p.y) };
+  }
+
+  /** The saved place when it is on this map and clear of walls, else the map's spawn. */
+  private startOf(mapId: string, x: number, y: number): { x: number; y: number } {
+    const fits =
+      mapId === this.def.id &&
+      x > 0 &&
+      y > 0 &&
+      x < this.world.width &&
+      y < this.world.height &&
+      !overlapsSolid(this.map, x, y, PLAYER_RADIUS);
+    return fits ? { x, y } : this.def.spawn;
+  }
+
+  override async onJoin(client: Client): Promise<void> {
+    const character = await this.seats.join(client);
     const id = client.sessionId;
-    this.world = addPlayer(this.world, id, this.def.spawn.x, this.def.spawn.y);
+    const start = this.startOf(character.mapId, character.x, character.y);
+    this.world = addPlayer(this.world, id, start.x, start.y);
     const state = new PlayerState();
     const player = this.world.players.at(-1);
     if (!player) throw new Error("player was not added");
@@ -103,13 +136,14 @@ export class MapRoom extends Room<{ state: MapState }> {
     state.y = wire(player.y);
     state.facing = player.facing;
     state.seq = 0;
+    dressPlayer(state, character);
     this.state.players.set(id, state);
 
     const view = new StateView();
     client.view = view;
     view.add(state, OWNER_TAG);
     const viewer: Viewer = { view, cell: undefined };
-    this.seats.set(id, { state, viewer, queue: new InputQueue() });
+    this.pawns.set(id, { state, viewer, queue: new InputQueue() });
     const cell = this.grid.place(state, player.x, player.y);
     this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
     this.countBytes(client);
@@ -117,21 +151,25 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   override onDrop(client: Client): void {
     // The character stays where it stood; queued inputs from before the drop are stale.
-    this.seats.get(client.sessionId)?.queue.clear();
-    this.allowReconnection(client, RECONNECT_SECONDS).catch(() => {});
+    this.pawns.get(client.sessionId)?.queue.clear();
+    if (!this.seats.mayReconnect(client)) return;
+    this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
 
   override onReconnect(client: Client): void {
+    this.seats.reconnected(client);
     this.countBytes(client);
   }
 
-  override onLeave(client: Client): void {
+  override async onLeave(client: Client): Promise<void> {
+    // Saves the place, so the body stays in the world until the write is done.
+    await this.seats.leave(client);
     const id = client.sessionId;
-    const seat = this.seats.get(id);
-    if (seat) {
-      this.grid.watch(seat.viewer, undefined);
-      this.grid.remove(seat.state);
-      this.seats.delete(id);
+    const pawn = this.pawns.get(id);
+    if (pawn) {
+      this.grid.watch(pawn.viewer, undefined);
+      this.grid.remove(pawn.state);
+      this.pawns.delete(id);
     }
     this.world = removePlayer(this.world, id);
     this.state.players.delete(id);
@@ -165,7 +203,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     while (this.acc >= TICK_MS) {
       this.acc -= TICK_MS;
       const inputs = new Map<string, MoveInput[]>();
-      for (const [id, seat] of this.seats) inputs.set(id, seat.queue.take());
+      for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take());
       this.world = step(this.world, this.map, inputs);
       ticks++;
     }
@@ -176,7 +214,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     const end = performance.now();
     const used = process.threadCpuUsage(cpu);
     this.metrics.recordTick(end - start, (used.user + used.system) / 1000, end - patchStart);
-    this.metrics.players = this.seats.size;
+    this.metrics.players = this.pawns.size;
     this.metrics.clients = this.clients.length;
     this.metrics.monsters = this.world.monsters.length;
   }
@@ -199,14 +237,14 @@ export class MapRoom extends Room<{ state: MapState }> {
       grid.place(synced, m.x, m.y);
     }
     for (const p of world.players) {
-      const seat = this.seats.get(p.id);
-      if (!seat) continue;
-      seat.state.x = wire(p.x);
-      seat.state.y = wire(p.y);
-      seat.state.facing = p.facing;
-      seat.state.seq = p.seq;
-      const cell = grid.place(seat.state, p.x, p.y);
-      if (cell !== undefined) grid.watch(seat.viewer, cell);
+      const pawn = this.pawns.get(p.id);
+      if (!pawn) continue;
+      pawn.state.x = wire(p.x);
+      pawn.state.y = wire(p.y);
+      pawn.state.facing = p.facing;
+      pawn.state.seq = p.seq;
+      const cell = grid.place(pawn.state, p.x, p.y);
+      if (cell !== undefined) grid.watch(pawn.viewer, cell);
     }
   }
 }

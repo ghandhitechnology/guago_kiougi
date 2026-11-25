@@ -1,22 +1,21 @@
-import { createEndpoint, createRouter, defineRoom, defineServer } from "@colyseus/core";
-import { Encoder } from "@colyseus/schema";
-import { WebSocketTransport } from "@colyseus/ws-transport";
-import { MAP_ROOM, SERVER_PORT } from "@guago/shared";
-import { MapRoom } from "./map-room.ts";
-import { allRooms } from "./metrics.ts";
+import { createGameServer } from "./app.ts";
+import { createAuthService } from "./auth/service.ts";
+import { assertServable, config } from "./config.ts";
+import { createDb } from "./db/index.ts";
+import { studentLooks } from "./looks.ts";
+import { evictAccount } from "./seats.ts";
 
-// A full patch of a busy map overflows the default 16 kB encode buffer (engine-notes §15).
-Encoder.BUFFER_SIZE = 128 * 1024;
+assertServable(config);
+studentLooks();
 
-const server = defineServer({
-  transport: new WebSocketTransport(),
-  rooms: { [MAP_ROOM]: defineRoom(MapRoom) },
-  routes: createRouter({
-    metrics: createEndpoint("/metrics", { method: "GET" }, async () => ({ rooms: allRooms() })),
-  }),
-  greet: false,
+const db = createDb(config.databaseUrl);
+const auth = createAuthService({
+  db,
+  onSessionsRevoked: evictAccount,
+  limits: { signupsPerIpPerDay: config.signupsPerIpPerDay },
 });
+const server = createGameServer(auth, config, studentLooks);
 
-const port = Number(process.env.PORT ?? SERVER_PORT);
-await server.listen(port);
-console.log(`game server on :${port}`);
+await server.listen(config.port);
+setInterval(() => auth.sweep().catch(() => {}), 10 * 60 * 1000).unref();
+console.log(`game server on :${config.port}`);
