@@ -298,7 +298,8 @@ export interface Bark {
 
 export interface Description {
   readonly id: string;
-  readonly kind: "place" | "station" | "item" | "prop" | "monster" | "npc";
+  /** `meal` ids are `meal:<menu id>` (lifecycle.ts MEALS); the description is the buff line. */
+  readonly kind: "place" | "station" | "item" | "prop" | "monster" | "npc" | "meal";
   readonly name: TextKey;
   readonly desc: TextKey;
 }
@@ -315,7 +316,24 @@ export interface Term {
     | "class"
     | "tier"
     | "monster"
-    | "label";
+    | "label"
+    /** Emote wheel names, by `EMOTES` id. */
+    | "emote"
+    /** 대자보 sections, by `BOARD_CATEGORIES` id and `notice`. */
+    | "board"
+    /** Report categories, by `REPORT_CATEGORIES` id. */
+    | "report"
+    /** 도감 set names, by `CODEX_SETS` id. */
+    | "set"
+    /** Badges worn on a nameplate: 층장. */
+    | "badge"
+    /** Club ranks (`CLUB_RANKS`) and join rules (`JOIN_RULES`). */
+    | "rank"
+    | "join"
+    /** 상벌점 ledger reasons, as the ledger stores them (`knockout`, `merit.cancel`, `expel`). */
+    | "conduct"
+    /** 매점 게시판 browse categories, by `LISTING_CATEGORIES` id. */
+    | "listing";
   readonly name: TextKey;
 }
 
@@ -330,6 +348,19 @@ export const SLOTS = [
   "quest",
   "thesis",
   "award",
+  /** A club's name. */
+  "club",
+  /** A moment the client formats: "18:30", "12월 3일 18시". */
+  "time",
+  /** The target of a count, beside `count`. */
+  "total",
+  /** An amount of 솔방울, already formatted. */
+  "price",
+  /** A moderation reason written by an operator. */
+  "reason",
+  "level",
+  /** Several player names, joined by the client. */
+  "names",
 ] as const;
 export type Slot = (typeof SLOTS)[number];
 
@@ -357,6 +388,19 @@ export interface SystemMessage {
   readonly slots: readonly Slot[];
 }
 
+/**
+ * A notice no board draw picks: the 청소 당번 daily, posted by its own system. Same text rules as a
+ * quest template.
+ */
+export interface ChoreNotice {
+  readonly id: string;
+  readonly poster: TextKey;
+  readonly voice?: string;
+  readonly title: TextKey;
+  readonly body: TextKey;
+  readonly slots: readonly Slot[];
+}
+
 /** A joke award (PLAN §11), printed as a 상장 from the principal. */
 export interface Award {
   readonly id: string;
@@ -375,6 +419,16 @@ export interface EasterEgg {
   readonly nod: string;
 }
 
+/** One module's share of the live-world copy, merged into the bundle by `index.ts`. */
+export interface CopyPart {
+  readonly system?: readonly SystemMessage[];
+  readonly announcements?: readonly SystemMessage[];
+  readonly descriptions?: readonly Description[];
+  readonly terms?: readonly Term[];
+  readonly chores?: readonly ChoreNotice[];
+  readonly ko: Strings;
+}
+
 /** Everything the narrative lane ships, with its locale. */
 export interface Narrative {
   readonly speakers: readonly Speaker[];
@@ -388,6 +442,7 @@ export interface Narrative {
   /** Names the combat and progression data shows. Optional so older bundles stay valid. */
   readonly terms?: readonly Term[];
   readonly quests: readonly QuestTemplate[];
+  readonly chores?: readonly ChoreNotice[];
   readonly system: readonly SystemMessage[];
   readonly announcements: readonly SystemMessage[];
   readonly awards: readonly Award[];
