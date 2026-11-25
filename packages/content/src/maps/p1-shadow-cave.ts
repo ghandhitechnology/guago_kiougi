@@ -163,9 +163,18 @@ const lights: LightSource[] = [
   // The fire: everything in the chamber that can be seen is seen by it.
   {
     at: px(FIRE[0], FIRE[1] - 1),
-    radius: 280,
+    radius: 260,
     color: "gold.light",
     intensity: 1.5,
+    flicker: { amount: 0.16, period: 0.6 },
+  },
+  // The fire thrown on the back wall: the brightest thing anyone in here has seen, the
+  // procession cutting it.
+  {
+    at: [30 * T, WALL_Y * T + 6],
+    radius: 170,
+    color: "gold.light",
+    intensity: 1.2,
     flicker: { amount: 0.16, period: 0.6 },
   },
   // Noon at the end of the tunnel.
@@ -178,7 +187,7 @@ const lights: LightSource[] = [
   ...TORCHES.map(
     ([x, y]): LightSource => ({
       at: [x * T + 8, y * T],
-      radius: 64,
+      radius: 56,
       color: "gold.light",
       intensity: 1,
       flicker: { amount: 0.22, period: 0.5 },

@@ -64,13 +64,14 @@ void main () {
     shade = clamp((255.0 - code) / 127.0, 0.0, 1.0);
   }
   vec2 luv = vec2((screen.x + uMargin + 0.5) / uLightRes.x, 1.0 - (feet + uMargin + 0.5) / uLightRes.y);
-  vec3 extra = max(texture2D(uLight, clamp(luv, 0.0, 1.0)).rgb * 2.0 - uAmbient, 0.0);
-  float peak = max(max(extra.r, extra.g), max(extra.b, 0.0001));
+  vec3 delta = texture2D(uLight, clamp(luv, 0.0, 1.0)).rgb * 2.0 - uAmbient;
+  vec3 mag = abs(delta);
+  float peak = max(max(mag.r, mag.g), max(mag.b, 0.0001));
   float q = peak * uSteps;
   float lower = floor(q);
   float t = clamp((q - lower - 0.5) * uSharp + 0.5, 0.0, 1.0);
   float d = mix(0.5, bayer4(screen + uScroll) + 0.03125, uDither);
-  vec3 light = uAmbient + extra * (((lower + step(d, t)) / uSteps) / peak);
+  vec3 light = uAmbient + delta * (((lower + step(d, t)) / uSteps) / peak);
   light *= mix(vec3(1.0), uShade, shade);
   vec3 base = c.rgb / c.a;
   vec3 lit = base * light;

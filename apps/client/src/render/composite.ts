@@ -75,15 +75,17 @@ void main () {
     return;
   }
   vec2 luv = vec2((screen.x + uMargin + 0.5) / uLightRes.x, 1.0 - (screen.y + uMargin + 0.5) / uLightRes.y);
-  // Bands count the light added above the ambient, so open ground at ambient stays flat.
-  vec3 extra = max(texture2D(uLight, luv).rgb * 2.0 - uAmbient, 0.0);
-  float peak = max(max(extra.r, extra.g), max(extra.b, 0.0001));
+  // Bands count how far the light strays from the ambient, so open ground at ambient stays flat;
+  // light below it (a cold rift cooling warm ground) is banded the same way.
+  vec3 delta = texture2D(uLight, luv).rgb * 2.0 - uAmbient;
+  vec3 mag = abs(delta);
+  float peak = max(max(mag.r, mag.g), max(mag.b, 0.0001));
   float q = peak * uSteps;
   float lower = floor(q);
   float t = clamp((q - lower - 0.5) * uSharp + 0.5, 0.0, 1.0);
   float d = mix(0.5, bayer4(world) + 0.03125, uDither);
   float stepped = (lower + step(d, t)) / uSteps;
-  vec3 light = uAmbient + extra * (stepped / peak);
+  vec3 light = uAmbient + delta * (stepped / peak);
   gl_FragColor = vec4(albedo.rgb * light, albedo.a);
 }
 `;
@@ -261,8 +263,8 @@ export function bandLight(
   steps: number,
   sharp: number,
 ): [number, number, number] {
-  const extra = light.map((v, i) => Math.max(0, v - (ambient[i] as number)));
-  const peak = Math.max(extra[0] as number, extra[1] as number, extra[2] as number, 0.0001);
+  const extra = light.map((v, i) => v - (ambient[i] as number));
+  const peak = Math.max(...extra.map(Math.abs), 0.0001);
   const q = peak * steps;
   const lower = Math.floor(q);
   const t = Math.max(0, Math.min(1, (q - lower - 0.5) * sharp + 0.5));

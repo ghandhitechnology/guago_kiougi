@@ -366,7 +366,7 @@ const lights: LightSource[] = [
     at: [FIRE[0] * T + 8, FIRE[1] * T],
     radius: 190,
     color: "gold.light",
-    intensity: 1.45,
+    intensity: 1.25,
     flicker: { amount: 0.16, period: 0.6 },
   },
   ...[CAVE[0] - 3, CAVE[0] + 2].map(

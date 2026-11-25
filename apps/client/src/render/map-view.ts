@@ -1224,7 +1224,10 @@ export class MapView {
       this.map.scene.seed,
     );
     if (!region) return null;
-    this.field.setRegion(region, paletteColor(this.meta, source.color));
+    // A cold rift in a bright map cools the ground round it; anywhere else it lights it.
+    const rgb = rgbOf(paletteColor(this.meta, source.color));
+    const cold = rgb[2] > rgb[0] && this.map.ambient.intensity >= 0.7;
+    this.field.setRegion(region, paletteColor(this.meta, source.color), cold ? "mix" : "add");
     // The lip glows on the ground, under whatever stands on it.
     this.regionGlow = new Phaser.GameObjects.Image(
       this.scene,

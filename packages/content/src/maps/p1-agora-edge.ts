@@ -596,7 +596,8 @@ const details: (Decal | Prop)[] = [
   ),
 ];
 
-const lights: LightSource[] = FURNACES.map(([tx, ty]) => ({
+// Every furnace burns, the third one west of the pair too.
+const lights: LightSource[] = [...FURNACES, [60, 41] as Vec].map(([tx, ty]) => ({
   at: [tx * T + 16, ty * T + 4] as Vec,
   radius: 80,
   color: "clay.light",

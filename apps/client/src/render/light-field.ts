@@ -23,6 +23,9 @@ import { TEX } from "./textures.ts";
 /** Pixels the light map reaches past each edge of the screen. */
 export const LIGHT_MARGIN = 128;
 
+/** How bright a mixing rift spill turns the ground it reaches, in its own colour: 1 is as drawn. */
+const MIX_LEVEL = 1.3;
+
 type Rgb = [number, number, number];
 
 export interface LightSpec {
@@ -172,6 +175,7 @@ export class LightField {
     readonly light: RegionLight;
     readonly spill: readonly [Phaser.GameObjects.Image, Phaser.GameObjects.Image];
     readonly color: Rgb;
+    readonly mode: "add" | "mix";
   } | null = null;
   ambient: Rgb;
 
@@ -234,22 +238,30 @@ export class LightField {
     this.rt.setVisible(on);
   }
 
-  /** The rift's light: its spills first, then its daylight written over them. */
-  setRegion(region: RegionLight, color: number): void {
+  /**
+   * The rift's light: its spills first, then its daylight written over them. A spill adds its
+   * light in the dark; in a bright map (`mix`) it turns the ground toward its colour instead, so
+   * a cold rift cools warm daylight rather than brightening it.
+   */
+  setRegion(region: RegionLight, color: number, mode: "add" | "mix" = "add"): void {
+    const rgb = rgbOf(color);
     const at = (key: string, r: Rect) =>
       new Phaser.GameObjects.Image(this.scene, r.x, r.y, key).setOrigin(0);
     const spill = region.spillKeys.map((key) =>
-      at(key, region.rect).setBlendMode(Phaser.BlendModes.ADD).setTint(color),
+      mode === "add"
+        ? at(key, region.rect).setBlendMode(Phaser.BlendModes.ADD).setTint(color)
+        : at(key, region.rect).setTint(colorOf(rgb.map((v) => (v * MIX_LEVEL) / 2) as Rgb)),
     ) as [Phaser.GameObjects.Image, Phaser.GameObjects.Image];
     const inside = at(region.insideKey, region.insideRect).setTint(0x808080);
     this.layer.addAt([...spill, inside], 1);
-    this.region = { light: region, spill, color: [...rgbOf(color)] };
+    this.region = { light: region, spill, color: [...rgb], mode };
   }
 
   /** Sets the rift spill's two ray patterns' strength this frame. */
   setRegionLevels(a: number, b: number): void {
-    this.region?.spill[0].setAlpha(Math.max(0, Math.min(1, a / 2)));
-    this.region?.spill[1].setAlpha(Math.max(0, Math.min(1, b / 2)));
+    const k = this.region?.mode === "mix" ? 1 : 0.5;
+    this.region?.spill[0].setAlpha(Math.max(0, Math.min(1, a * k)));
+    this.region?.spill[1].setAlpha(Math.max(0, Math.min(1, b * k)));
   }
 
   /**
@@ -450,7 +462,11 @@ export class LightField {
           ((r.light.spill[0][i] ?? 0) * r.spill[0].alpha +
             (r.light.spill[1][i] ?? 0) * r.spill[1].alpha) /
           127.5;
-        for (let c = 0; c < 3; c++) out[c] = (out[c] as number) + (r.color[c] as number) * a;
+        for (let c = 0; c < 3; c++) {
+          const v = out[c] as number;
+          const col = r.color[c] as number;
+          out[c] = r.mode === "add" ? v + col * a : v + (col * MIX_LEVEL - v) * Math.min(1, a / 2);
+        }
       }
     }
     for (const l of this.lights) {
