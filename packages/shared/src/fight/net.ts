@@ -657,6 +657,7 @@ export class FightNet {
     f.kind = e.kind;
     f.owner = this.ownerEntity(e);
     f.def = e.weapon ? e.weapon.book : e.count;
+    f.evolved = e.weapon?.evolved ?? false;
     f.cast = e.cast;
     f.start = e.born - w.tick;
     f.x = e.x;
@@ -1005,7 +1006,7 @@ export class FightNet {
       if (!v) continue;
       switch (ev.type) {
         case Ev.Hit:
-          this.mergeHit(v, ev.c, ev.d, ev.e, ev.f, ev.x, ev.y);
+          this.mergeHit(v, ev.c, ev.d, ev.e, ev.f, ev.x, ev.y, this.hpAfter(ev.b));
           break;
         case Ev.Hurt:
           v.priv.u8(Priv.Hurt);
@@ -1074,6 +1075,13 @@ export class FightNet {
     v.privCount++;
   }
 
+  /** A monster's health at the end of the tick as a 0–255 share, 0 once dead. */
+  private hpAfter(index: number): number {
+    const m = this.w.monsters[index];
+    if (!m?.alive || m.hp <= 0) return 0;
+    return Math.max(1, Math.min(255, Math.round((m.hp / m.maxHp) * 255)));
+  }
+
   /** Rapid hits on one target in a tick become one record with their sum (PLAN §6 merges). */
   private mergeHit(
     v: NetViewer,
@@ -1083,10 +1091,12 @@ export class FightNet {
     cast: number,
     kx: number,
     ky: number,
+    hp: number,
   ): void {
     for (let i = 0; i < v.hitCount; i++) {
       const h = v.hits[i] as WireHit;
       if (h.target !== target) continue;
+      h.hp = hp;
       if (amount > h.amount / h.count) h.cast = cast;
       h.amount += amount;
       h.flags |= flags & 0xff;
@@ -1099,7 +1109,18 @@ export class FightNet {
     if (v.hitCount >= MAX_HITS) return;
     let h = v.hits[v.hitCount];
     if (!h) {
-      h = { target: 0, amount: 0, flags: 0, slot: 0, proof: 0, cast: 0, kx: 0, ky: 0, count: 0 };
+      h = {
+        target: 0,
+        amount: 0,
+        flags: 0,
+        slot: 0,
+        proof: 0,
+        cast: 0,
+        kx: 0,
+        ky: 0,
+        count: 0,
+        hp: 0,
+      };
       v.hits.push(h);
     }
     v.hitCount++;
@@ -1112,6 +1133,7 @@ export class FightNet {
     h.kx = kx;
     h.ky = ky;
     h.count = 1;
+    h.hp = hp;
   }
 
   /**
@@ -1214,10 +1236,11 @@ export class FightNet {
         m.i8(Math.max(-128, Math.min(127, Math.round(h.kx * Q))));
         m.i8(Math.max(-128, Math.min(127, Math.round(h.ky * Q))));
         m.u8(Math.min(255, h.count));
+        m.u8(h.hp);
       }
       m.bytes(v.priv.buf.subarray(0, v.priv.n));
       this.totals.hits += v.hitCount;
-      this.add(v, 6, v.hitCount * 14 + v.priv.n + 1);
+      this.add(v, 6, v.hitCount * 15 + v.priv.n + 1);
     }
     v.fresh = false;
     v.lastBytes = m.n;

@@ -59,6 +59,10 @@ export const PlayerState = schema(
     dodgeReady: t.uint32().view(OWNER_TAG),
     /** Equipped book ids by slot, for casting by hand. */
     books: t.array("string").view(OWNER_TAG),
+    /** Tick each book slot is ready again (at or before now: ready). */
+    ready: t.array("uint32").view(OWNER_TAG),
+    /** Each book slot's whole cooldown in ticks at the current attack speed. */
+    cooldown: t.array("uint16").view(OWNER_TAG),
   },
   "Player",
 );
