@@ -20,6 +20,7 @@ const palette: Legend = {
   ".": null,
   // lawn
   g: "grass.light",
+  q: "grass.soft",
   G: "grass.mid",
   h: "grass.pale",
   H: "grass.bright",
@@ -69,16 +70,21 @@ const tuft = {
   /** A clump lit on its tip. */
   clump: P(`
     .h..
-    hGh.
-    .GG.
+    hqh.
+    .qq.
   `),
   /** Two blades leaning apart. */
   fork: P(`
-    G..G
-    .GG.
+    q..q
+    .qq.
   `),
-  /** A small dark V. */
+  /** A small soft V. */
   vee: P(`
+    q.q
+    .q.
+  `),
+  /** A darker V, used sparingly. */
+  dark: P(`
     G.G
     .G.
   `),
@@ -91,12 +97,6 @@ const tuft = {
   sprig: P(`
     h.h
     .h.
-  `),
-  /** A dense dark clump for shaded patches. */
-  thick: P(`
-    .GG.
-    GDDG
-    .GG.
   `),
   /** A sunny tuft for bright patches. */
   sun: P(`
@@ -121,7 +121,7 @@ const LAWN_MARKS: readonly (readonly Mark[])[] = [
   [[12, 2, tuft.glint]],
   [
     [3, 11, tuft.sprig],
-    [11, 5, tuft.vee],
+    [11, 5, tuft.dark],
   ],
 ];
 
@@ -239,71 +239,67 @@ const TONE_SHAPE: Shape = {
 };
 
 /**
- * A tone overlay: marks only, dense in the core and sparse in a three-pixel fringe, clear
- * everywhere else so the lawn fill and its own tufts show through.
+ * A tone overlay, clear outside the patch so the lawn fill shows through. With `solid`, the core
+ * is filled with that colour and its edge frays into tufts of it; otherwise the patch is marks
+ * only, dense in the core and sparse in a three-pixel fringe.
  */
-function tonePictures(core: readonly (readonly Mark[])[], fringe: readonly (readonly Mark[])[]) {
+function tonePictures(
+  core: readonly (readonly Mark[])[],
+  fringe: readonly (readonly Mark[])[],
+  solid?: string,
+) {
+  const fill = solid ?? "X";
   const make = (pic: Pic, v: number): string => {
-    texture(pic, core, "X", (cx, cy) => cx + cy * 2 + v);
+    texture(pic, core, fill, (cx, cy) => cx + cy * 2 + v);
     texture(pic, fringe, "x", (cx, cy) => cx * 3 + cy + v);
     return pic.swap("xX", "..").toString();
   };
   const picture = (kind: "outer" | "inner", size: number, v: number) =>
-    make(paint(size, size, inside(kind, TONE_SHAPE), { fill: "X", band: ["x", "x", "x"] }), v);
+    make(paint(size, size, inside(kind, TONE_SHAPE), { fill, band: ["x", "x", "x"] }), v);
   return {
     outer: [picture("outer", 48, 0), picture("outer", 48, 2)],
     inner: [picture("inner", 32, 1), picture("inner", 32, 3)],
-    fill: [1, 2].map((v) => make(Pic.blank(16, 16, "X"), v + 4)),
+    fill: [1, 2].map((v) => make(Pic.blank(16, 16, fill), v + 4)),
   };
 }
 
-/** Shaded patches: thick dark clumps close together, with the lawn showing between them. */
-const LUSH_DENSE: readonly (readonly Mark[])[] = [
+/** Inside a soft patch: a few lit blades and the odd darker tuft. */
+const SOFT_CORE: readonly (readonly Mark[])[] = [
   [
-    [1, 1, tuft.thick],
-    [7, 0, tuft.fork],
-    [11, 3, tuft.thick],
-    [4, 6, tuft.thick],
-    [1, 11, tuft.vee],
-    [9, 9, tuft.thick],
-    [5, 13, tuft.fork],
-    [12, 13, tuft.vee],
+    [2, 2, P("g.g\n.g.")],
+    [10, 9, tuft.dark],
+    [5, 12, P(".g\ng.")],
   ],
   [
-    [2, 0, tuft.fork],
-    [9, 1, tuft.thick],
-    [0, 5, tuft.thick],
-    [6, 5, tuft.vee],
-    [11, 7, tuft.thick],
-    [3, 10, tuft.thick],
-    [9, 13, tuft.thick],
+    [9, 3, P("g..g\n.gg.")],
+    [2, 8, tuft.glint],
   ],
   [
-    [4, 1, tuft.thick],
-    [11, 0, tuft.vee],
-    [0, 6, tuft.fork],
-    [7, 6, tuft.thick],
-    [12, 9, tuft.fork],
-    [2, 12, tuft.thick],
-    [8, 13, tuft.vee],
+    [4, 5, P(".g\ng.")],
+    [12, 11, P("g.g\n.g.")],
   ],
 ];
-const LUSH_FRINGE: readonly (readonly Mark[])[] = [
+/** Soft tufts just outside the patch, so its edge frays instead of ending. */
+const SOFT_FRINGE: readonly (readonly Mark[])[] = [
   [
-    [3, 3, tuft.vee],
-    [10, 11, tuft.fork],
-    [12, 2, tuft.vee],
-  ],
-  [
-    [9, 4, tuft.fork],
-    [2, 11, tuft.vee],
+    [2, 2, tuft.vee],
+    [9, 5, tuft.fork],
+    [4, 11, tuft.vee],
     [12, 12, tuft.vee],
   ],
   [
-    [6, 7, tuft.vee],
-    [1, 1, tuft.vee],
+    [6, 1, tuft.fork],
+    [1, 7, tuft.vee],
+    [11, 8, tuft.vee],
+    [7, 13, tuft.fork],
+  ],
+  [
+    [11, 2, tuft.vee],
+    [3, 5, tuft.vee],
+    [8, 10, tuft.fork],
   ],
 ];
+
 const SUNNY_CORE: readonly (readonly Mark[])[] = [
   [
     [2, 1, tuft.sprig],
@@ -331,7 +327,7 @@ const SUNNY_FRINGE: readonly (readonly Mark[])[] = [
 ];
 
 const LAWN_TONES: readonly Tone[] = [
-  { name: "lush", on: "upper", band: [0, 0.38], ...tonePictures(LUSH_DENSE, LUSH_FRINGE) },
+  { name: "lush", on: "upper", band: [0, 0.38], ...tonePictures(SOFT_CORE, SOFT_FRINGE, "q") },
   { name: "sunny", on: "upper", band: [0.64, 1], ...tonePictures(SUNNY_CORE, SUNNY_FRINGE) },
 ];
 

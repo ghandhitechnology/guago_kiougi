@@ -316,8 +316,10 @@ function bandAt(
     : 1;
   const wobble = ragged(x, y, light.ragged ?? 3, seed);
   if (field && light.reach) {
-    const d = (field[y * SCREEN.w + x] as number) + wobble;
-    const k = light.reach.findIndex((r) => d < r * swell);
+    // Each band's edge has its own noise, so the bands interleave instead of nesting as contours.
+    const d = field[y * SCREEN.w + x] as number;
+    const amount = light.ragged ?? 3;
+    const k = light.reach.findIndex((r, i) => d + ragged(x, y, amount, seed + i * 31) < r * swell);
     return k < 0 ? n : k;
   }
   let f: number;

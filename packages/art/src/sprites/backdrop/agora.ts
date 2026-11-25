@@ -193,31 +193,44 @@ const TERRACE = `
 // Things being pulled in ------------------------------------------------------------------------
 
 /**
- * A page torn out of the 0조 notebook: ruled in blue, a red margin, the ragged edge where it
- * left the spiral. Frames turn it over as it flies: face, foreshortened, edge on, back.
+ * A page torn out of the 0조 notebook as it flies: sheared by the wind, one corner curling
+ * over, ruled in blue with a red margin and the ragged edge where it left the spiral. Facing
+ * away it shows its blank back.
  */
-function page(width: number, face: boolean): string {
-  const W = 26;
-  const H = 16;
+function page(w: number, h: number, shear: number, curl: number, face: boolean): string {
+  const W = w + Math.ceil(Math.abs(shear) * h) + 2;
+  const H = h + 2;
   const pic = Pic.blank(W, H);
-  const x0 = Math.round((W - width) / 2);
-  for (let y = 1; y < H - 1; y++) {
-    for (let x = x0; x < x0 + width; x++) {
-      const left = x === x0;
-      // The torn spiral edge: notches every third row.
-      if (left && y % 3 === 0) continue;
-      let ch = "P";
-      if (y === H - 2) ch = "e";
-      else if (x >= x0 + width - 1) ch = "p";
-      else if (face && width > 6 && x === x0 + 2) ch = "r";
-      else if (face && width > 6 && y % 2 === 0 && x > x0 + 2 && x < x0 + width - 2) ch = "n";
-      pic.set(x, y, ch);
+  const left = shear < 0 ? Math.ceil(-shear * h) + 1 : 1;
+  for (let y = 0; y < h; y++) {
+    const off = left + Math.round(shear * y);
+    for (let x = 0; x < w; x++) {
+      // The curl: the top right corner folds back along a diagonal.
+      if (y < curl && x > w - 1 - curl + y) continue;
+      if (x === 0 && y % 3 === 1 && h > 7) continue;
+      let ch = face ? "P" : "p";
+      if (y === h - 1 || x === w - 1) ch = "e";
+      else if (face && x === 2 && w > 9) ch = "r";
+      else if (face && y % 2 === 1 && y > 1 && x > 3 && x < w - 2) ch = "n";
+      pic.set(off + x, y + 1, ch);
     }
   }
-  return pic.toString();
+  // The folded flap, its back showing, shaded along the crease.
+  for (let y = 0; y < curl; y++) {
+    const off = left + Math.round(shear * y);
+    for (let x = w - curl + y; x < w; x++)
+      pic.set(off + x - (curl - y), y + 1, x === w - curl + y ? "e" : "p");
+  }
+  return smooth(tidy(pic, "P", "rne"), "rne").toString();
 }
 
-const PAGES = [page(24, true), page(15, true), page(3, false), page(18, false)];
+/** Four turning frames per size: tilted one way, flat, tilted the other with a curl, the back. */
+const pageFrames = (w: number, h: number, curl: number) => [
+  page(w, h, -0.35, 0, true),
+  page(w, h, 0, curl, true),
+  page(w, h, 0.4, curl + 1, true),
+  page(w - 2, h - 2, 0.2, 0, false),
+];
 
 /** A scrap of the field coming loose at the tear: sand on top, pale page underneath. */
 const SCRAPS = [
@@ -301,13 +314,29 @@ export default [
     frames: { run: TERRACE },
     anim: { idle: { frames: ["run"], fps: 1 } },
   }),
-  sprite({
-    name: "page-big",
-    size: [26, 16],
-    palette,
-    outline: false,
-    frames: four(PAGES, "turn"),
-    anim: { turn: { frames: ["turn0", "turn1", "turn2", "turn3"], fps: 5, jump: 1 } },
+  ...(
+    [
+      ["page-s", 8, 6, 2],
+      ["page-m", 12, 9, 3],
+      ["page-l", 16, 12, 4],
+    ] as const
+  ).map(([name, w, h, curl]) => {
+    const frames = pageFrames(w, h, curl);
+    const W = w + Math.ceil(0.4 * h) + 2;
+    const pad = (g: string) =>
+      Pic.blank(W, h + 2)
+        .put(g, 0, 0)
+        .toString();
+    return sprite({
+      name,
+      size: [W, h + 2],
+      palette,
+      // The crease of a curled corner is a broken line of single shaded pixels.
+      lone: "e",
+      outline: false,
+      frames: Object.fromEntries(frames.map((g, i) => [`turn${i}`, pad(g)])),
+      anim: { turn: { frames: ["turn0", "turn1", "turn2", "turn3"], fps: 4, jump: 1 } },
+    });
   }),
   sprite({
     name: "scrap",

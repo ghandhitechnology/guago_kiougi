@@ -396,123 +396,118 @@ const CAMPUS_NIGHT = theme("campus-night", {
   "rose.light": "rose.dark",
   "rose.mid": "rose.dark",
   "rose.dark": "plum.dark",
+  "grass.soft": "board.dark",
+  "stone.lamp": "ink.mid",
+  "stone.vein": "ink.dark",
+  "clay.dust": "stone.dark",
 });
 
 /**
- * Lamp light at night, in three bands from the lamp out. Stone takes the warm ramps (gold,
- * clay, wood) so pavement glows like it is under a sodium lamp; grass steps down its own ramp
- * and stays green; the last band meets `campus-night`.
+ * Lamp light at night, in two bands from the lamp out. Pavement under the lamp is the lamp-lit
+ * grey with warm joints, so it reads as light on stone; the outer band falls to a warm dusk
+ * grey, which window spills use too. Grass softens to the lawn's middle green.
  */
 const CAMPUS_LAMP = theme("campus-lamp", {
   "stone.bright": "gold.pale",
-  "stone.pale": "gold.pale",
-  "stone.light": "clay.pale",
-  "stone.mid": "wood.pale",
-  "stone.dark": "wood.light",
-  "grass.bright": "gold.pale",
-});
-
-const CAMPUS_LAMP_MID = theme("campus-lamp-mid", {
-  "stone.bright": "clay.pale",
-  "stone.pale": "clay.pale",
-  "stone.light": "wood.pale",
-  "stone.mid": "wood.light",
-  "stone.dark": "wood.mid",
+  "stone.pale": "stone.pale",
+  "stone.light": "stone.lamp",
+  "stone.mid": "stone.vein",
+  "stone.dark": "stone.mid",
   "grass.bright": "grass.pale",
   "grass.pale": "grass.light",
-  "grass.light": "grass.mid",
-  "grass.mid": "grass.dark",
-  "wood.pale": "wood.light",
-  "wood.light": "wood.mid",
-  "wood.mid": "wood.dark",
-  "clay.pale": "clay.light",
-  "clay.light": "clay.mid",
-  "red.light": "red.mid",
-  "red.mid": "red.dark",
-  "navy.light": "navy.mid",
-  "navy.mid": "navy.dark",
-  "board.light": "board.mid",
-  "board.mid": "board.dark",
+  "grass.light": "grass.soft",
+  "grass.soft": "grass.mid",
 });
 
 const CAMPUS_DUSK = theme("campus-dusk", {
   "ink.mid": "ink.dark",
-  "stone.bright": "wood.pale",
-  "stone.pale": "wood.light",
-  "stone.light": "wood.mid",
-  "stone.mid": "wood.dark",
-  "stone.dark": "wood.deep",
-  "grass.bright": "grass.light",
-  "grass.pale": "grass.mid",
-  "grass.light": "grass.dark",
-  "grass.mid": "grass.deep",
+  "stone.bright": "stone.light",
+  "stone.pale": "stone.light",
+  "stone.light": "stone.vein",
+  "stone.lamp": "stone.vein",
+  "stone.mid": "stone.dark",
+  "stone.vein": "stone.dark",
+  "stone.dark": "ink.mid",
+  "grass.bright": "grass.soft",
+  "grass.pale": "grass.soft",
+  "grass.light": "grass.mid",
+  "grass.soft": "grass.mid",
+  "grass.mid": "board.mid",
   "board.light": "board.mid",
   "board.mid": "board.dark",
   "board.dark": "board.deep",
-  "wood.pale": "wood.mid",
-  "wood.light": "wood.dark",
+  "wood.pale": "wood.light",
+  "wood.light": "wood.mid",
   "wood.mid": "wood.dark",
-  "clay.pale": "clay.mid",
-  "clay.light": "clay.dark",
+  "clay.pale": "clay.dust",
+  "clay.dust": "clay.light",
+  "clay.light": "clay.mid",
   "clay.mid": "clay.dark",
-  "red.light": "red.dark",
+  "red.light": "red.mid",
   "red.mid": "red.dark",
-  "navy.light": "navy.dark",
+  "navy.light": "navy.mid",
   "navy.mid": "navy.dark",
 });
 
 /**
- * The field at night: the campus night, with the open field's sand keeping its grain in the
- * dark: blue grit and deep dents on a dusk-coloured ground.
+ * The field at night: the campus night, with the open field's sand carried by its grain. Specks
+ * sit a step lighter than the ground and dents a step darker; nothing reads as a streak.
  */
 const FIELD_NIGHT = theme("field-night", {
   ...CAMPUS_NIGHT.remap,
   "stone.bright": "stone.dark",
   "stone.pale": "ink.mid",
-  "stone.light": "navy.dark",
+  "stone.light": "stone.dark",
   "stone.mid": "ink.dark",
+  "stone.vein": "ink.dark",
   "stone.dark": "ink.deep",
 });
 
 /**
  * Daylight pouring out of a rift across a campus at night, in three bands from the tear out:
- * the field's pale sand falls through the warm browns of the wood ramp until it meets the night.
- * White stays white in the first band, so the torn paper edge of the rift always reads.
+ * the field's pale sand takes the sunlit dust tone, then falls through the wood ramp to the
+ * night. White stays white in the first band, so the torn paper edge always reads.
  */
 const RIFT_SUN = theme("rift-sun", {
-  "stone.pale": "wood.pale",
-  "stone.light": "wood.light",
-  "stone.mid": "wood.mid",
-  "stone.dark": "wood.dark",
+  "stone.pale": "clay.dust",
+  "stone.lamp": "clay.dust",
+  "stone.light": "wood.pale",
+  "stone.mid": "wood.light",
+  "stone.vein": "wood.light",
+  "stone.dark": "wood.mid",
 });
 
 const RIFT_WARM = theme("rift-warm", {
-  "stone.bright": "gold.pale",
-  "stone.pale": "wood.light",
-  "stone.light": "wood.mid",
-  "stone.mid": "wood.dark",
-  "stone.dark": "wood.deep",
+  "stone.bright": "clay.dust",
+  "stone.pale": "wood.pale",
+  "stone.lamp": "wood.pale",
+  "stone.light": "wood.light",
+  "stone.mid": "wood.mid",
+  "stone.vein": "wood.mid",
+  "stone.dark": "wood.dark",
   "grass.bright": "grass.pale",
   "grass.pale": "grass.light",
-  "grass.light": "grass.mid",
-  "grass.mid": "grass.dark",
-  "grass.dark": "grass.deep",
+  "grass.light": "grass.soft",
+  "grass.soft": "grass.mid",
+  "grass.mid": "board.mid",
   "wood.pale": "wood.light",
   "wood.light": "wood.mid",
   "wood.mid": "wood.dark",
 });
 
 const RIFT_EMBER = theme("rift-ember", {
-  "stone.bright": "clay.pale",
-  "stone.pale": "wood.mid",
-  "stone.light": "wood.dark",
-  "stone.mid": "wood.deep",
-  "stone.dark": "ink.deep",
-  "grass.bright": "grass.light",
-  "grass.pale": "grass.mid",
-  "grass.light": "grass.dark",
+  "stone.bright": "wood.pale",
+  "stone.pale": "wood.light",
+  "stone.lamp": "wood.light",
+  "stone.light": "wood.mid",
+  "stone.mid": "wood.dark",
+  "stone.vein": "wood.dark",
+  "stone.dark": "wood.deep",
+  "grass.bright": "grass.soft",
+  "grass.pale": "grass.soft",
+  "grass.light": "grass.mid",
+  "grass.soft": "board.mid",
   "grass.mid": "grass.deep",
-  "grass.dark": "grass.deep",
   "wood.pale": "wood.mid",
   "wood.light": "wood.dark",
   "wood.mid": "wood.deep",
@@ -527,10 +522,11 @@ const GREECE = theme("greece", {
   "grass.mid": "olive.mid",
   "grass.dark": "olive.dark",
   "grass.deep": "olive.deep",
+  "grass.soft": "olive.mid",
   "wood.pale": "clay.pale",
-  "wood.light": "clay.light",
-  "wood.mid": "clay.mid",
-  "wood.dark": "clay.dark",
+  "wood.light": "clay.dust",
+  "wood.mid": "clay.light",
+  "wood.dark": "clay.mid",
   "clay.pale": "gold.pale",
 });
 
@@ -539,7 +535,6 @@ export const THEMES: readonly Theme[] = [
   theme("campus", {}),
   CAMPUS_NIGHT,
   CAMPUS_LAMP,
-  CAMPUS_LAMP_MID,
   CAMPUS_DUSK,
   FIELD_NIGHT,
   RIFT_SUN,

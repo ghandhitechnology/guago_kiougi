@@ -22,7 +22,7 @@ const UW = "up-window";
 const UD = "up-window-dark";
 const UC = "up-curtain";
 
-const LAMP = ["campus-lamp", "campus-lamp-mid", "campus-dusk"];
+const LAMP = ["campus-lamp", "campus-dusk"];
 
 /** Light falling from a lit ground-floor window onto the walkway, widening as it falls. */
 const spill = (col: number): Light => ({
@@ -133,28 +133,25 @@ export default scene({
     { prop: "shrub", at: [22, 214] },
     { prop: "shrub", at: [226, 266], flip: true },
     { prop: "shrub", at: [456, 252] },
-    // Students.
-    { rig: "student", look: "blazer", dir: "up", anim: "idle", play: true, at: [218, 174] },
+    // Who is still up: one at the vending machine, one yawning out of the doors, one reading
+    // under the lamp, 도현우 at the corkboard with the notebook, 권 사감 coming up the path.
+    { rig: "student", look: "summer", dir: "up", anim: "idle", play: true, at: [218, 174] },
+    { rig: "student", look: "bedhead", dir: "down", anim: "yawn", play: true, at: [126, 170] },
+    { rig: "student", look: "reader", dir: "down", anim: "page", play: true, at: [338, 190] },
+    { rig: "hyunwoo", look: "tired", dir: "up", anim: "remember", play: true, at: [268, 180] },
     {
-      rig: "student",
-      look: "varsity",
-      dir: "up",
-      anim: "idle",
-      index: 1,
-      play: true,
-      at: [266, 178],
-    },
-    {
-      rig: "student",
-      look: "blazer",
+      rig: "sagam",
+      look: "duty",
       dir: "side",
-      anim: "walk",
+      anim: "whistle",
       play: true,
-      at: [150, 167],
+      at: [298, 232],
       flip: true,
     },
   ],
   overhead: [
+    // 엔트로피 asleep on the warm top of the vending machine.
+    { prop: "entropy", anim: "sleep", play: true, at: [216, 127], raw: true },
     // Fixed to the wall above everyone's heads: the clock and the name plate.
     { prop: "clock", at: [96, 36] },
     { prop: "sign", at: [96, 91] },

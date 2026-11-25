@@ -1,5 +1,5 @@
 import { type Legend, sprite } from "../../format.ts";
-import { type Lobe, lobes, type Mark, Pic, seal, shade, texture, tidy } from "../../paint.ts";
+import { type Lobe, lobes, Pic, seal, shade, tidy } from "../../paint.ts";
 
 /**
  * Page 1 props: what grows out of the 운동장 when the agora comes through. Marble is lit from
@@ -8,7 +8,8 @@ import { type Lobe, lobes, type Mark, Pic, seal, shade, texture, tidy } from "..
  */
 const palette: Legend = {
   ".": null,
-  // marble
+  // marble, with its warm shadow
+  v: "stone.vein",
   d: "stone.deep",
   S: "stone.dark",
   M: "stone.mid",
@@ -28,6 +29,11 @@ const palette: Legend = {
   O: "olive.dark",
   l: "olive.mid",
   L: "olive.light",
+  // olive leaves: grey-green, silver where the light catches them
+  f: "board.deep",
+  z: "board.dark",
+  N: "board.mid",
+  n: "board.light",
   B: "wood.deep",
   b: "wood.dark",
   U: "wood.mid",
@@ -42,7 +48,6 @@ const palette: Legend = {
   x: null,
 };
 
-const P = (src: string): Pic => Pic.of(src);
 const one = (
   name: string,
   size: [number, number],
@@ -79,7 +84,7 @@ function oval(w: number, h: number, cx: number, cy: number, rx: number, ry: numb
 const COL_W = 20;
 const COL_H = 66;
 /** Fluted shaft row, 14 wide: lit west edge, flutes as soft grooves, shade to the east. */
-const FLUTED = "dwwkKkkKkkKMMd";
+const FLUTED = "dwwkKkkKkkKvvd";
 const SHAFT_X = 3;
 
 /** Shaft rows from `top` to `bottom` inclusive, tapering one pixel near the top. */
@@ -207,36 +212,44 @@ const OLIVE_CLUMPS: readonly (readonly Lobe[])[] = [
   puff(24, 30, 7),
 ];
 
-const leaves: readonly (readonly Mark[])[] = [
-  [
-    [2, 2, P("K.\n.K")],
-    [9, 5, P("OO")],
-    [5, 9, P(".L\nL.")],
-    [12, 11, P("KK")],
-  ],
-  [
-    [6, 1, P("LL")],
-    [1, 6, P("O.\n.O")],
-    [11, 8, P("K.\n.K")],
-    [4, 12, P("OO")],
-  ],
-];
-
-function oliveCrown(shift: number): string {
-  const pic = Pic.blank(OL_W, OL_H);
-  OLIVE_CLUMPS.forEach((clump, i) => {
-    const moved = clump.map((l) => ({ ...l, x: l.x + (i % 2 ? shift : 0) }));
-    const p = shade(
-      OL_W,
-      OL_H,
-      lobes(moved),
-      { outline: "o", dark: "O", mid: "l", light: "L", glint: "K" },
-      { light: 2, dark: 2 },
-    );
-    texture(p, leaves, "l", (cx, cy) => cx + cy + i);
-    pic.put(tidy(p, "l", "o"), 0, 0);
-  });
-  return tidy(tidy(pic, "l", "o"), "l", "o").toString();
+/**
+ * The crown as olive leaves: narrow blades laid over the whole crown, silver where the light
+ * falls on its upper left, grey-green through the middle, dark in the shade below, with leaf
+ * tips breaking the silhouette.
+ */
+function oliveCrown(stir: number): string {
+  const moved = OLIVE_CLUMPS.flatMap((c, i) =>
+    c.map((l) => ({ ...l, x: l.x + (i % 2 ? stir : 0) })),
+  );
+  const isIn = lobes(moved);
+  // Light zones of the crown as a whole: K lit, n middle, z shade, f outline.
+  const zones = shade(
+    OL_W,
+    OL_H,
+    isIn,
+    { outline: "f", dark: "z", mid: "n", light: "K" },
+    { light: 3, dark: 4 },
+  );
+  const pic = zones.clone();
+  const blades = [Pic.of("x.\n.x"), Pic.of(".x\nx."), Pic.of("xx"), Pic.of("x.\n.x\n..")];
+  for (let y = 1; y < OL_H - 1; y += 2) {
+    for (let x = (y % 4) + 1; x < OL_W - 2; x += 3) {
+      const zone = zones.at(x, y);
+      if (zone === "." || zone === "f" || zone === undefined) continue;
+      const leaf = zone === "K" ? "n" : zone === "n" ? ((x + y) % 3 === 0 ? "K" : "N") : "N";
+      const blade = blades[(x * 7 + y * 3) % blades.length] as Pic;
+      pic.put(blade.swap("x", leaf), x, y, { onto: "Kzn", whole: true });
+    }
+  }
+  // Leaf tips through the top and sides of the outline.
+  const tips = pic.clone();
+  for (let y = 1; y < OL_H - 1; y++) {
+    for (let x = 1; x < OL_W - 1; x++) {
+      if (pic.at(x, y) !== "f") continue;
+      if (pic.at(x, y - 1) === "." && (x * 5 + y) % 4 === 0) tips.set(x, y - 1, "f").set(x, y, "n");
+    }
+  }
+  return tidy(tidy(seal(tips, "f"), "n", "f"), "n", "f").toString();
 }
 
 // Amphorae -----------------------------------------------------------------------------------

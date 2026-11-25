@@ -21,7 +21,8 @@ import {
  */
 const palette: Legend = {
   ".": null,
-  // marble
+  // marble, with its warm shadow
+  v: "stone.vein",
   w: "stone.bright",
   k: "stone.pale",
   K: "stone.light",
@@ -56,12 +57,12 @@ const P = (src: string): Pic => Pic.of(src);
  */
 function slab(marks: readonly Mark[], chip: "none" | "tl" | "br"): string {
   const pic = Pic.blank(16, 16, "w");
-  for (let i = 0; i < 16; i++) pic.set(15, i, "K").set(i, 15, "K").set(14, i, "k").set(i, 14, "k");
-  pic.set(15, 14, "K").set(14, 15, "K");
-  if (chip === "tl") pic.put(P("KK\nK."), 0, 0);
-  if (chip === "br") pic.put(P(".kK\nkKK\nKKK"), 13, 13);
+  for (let i = 0; i < 16; i++) pic.set(15, i, "v").set(i, 15, "v").set(14, i, "k").set(i, 14, "k");
+  pic.set(15, 14, "v").set(14, 15, "v");
+  if (chip === "tl") pic.put(P("vv\nv."), 0, 0);
+  if (chip === "br") pic.put(P(".kv\nkvv\nvvv"), 13, 13);
   texture(pic, [marks], "w");
-  return tidy(pic, "w", "kKM").toString();
+  return tidy(pic, "w", "kKMv").toString();
 }
 
 const vein = P(`
@@ -70,9 +71,9 @@ const vein = P(`
   ...k
 `);
 const crackSlab = P(`
-  K..
-  .K.
-  .KK
+  v..
+  .v.
+  .vv
 `);
 const stain = P(`
   .kk
@@ -114,8 +115,8 @@ function marblePicture(kind: "outer" | "inner", shape: Shape, v: number): string
   const pic = paint(size, size, isIn, {
     fill: "x",
     right: "k",
-    bottom: ["K"],
-    lip: ["k", "M"],
+    bottom: ["v"],
+    lip: ["k", "v"],
     under: "m",
     beside: "m",
   });
@@ -128,7 +129,7 @@ function marblePicture(kind: "outer" | "inner", shape: Shape, v: number): string
       pic.set(x, y, which.at(x % 16, y % 16) as string);
     }
   }
-  return tidy(pic, "w", "kKMSm").toString();
+  return tidy(pic, "w", "kKMSmv").toString();
 }
 
 const pebble = P(`
