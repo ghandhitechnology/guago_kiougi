@@ -209,7 +209,11 @@ export class DamageNumbers {
     n.x = x;
     n.y = this.clear(n, x, y);
     n.total = 0;
-    n.vx = side * SIDE * (0.6 + Math.random() * 0.8) * (big(n.style) ? 0.5 : 1);
+    // What the player takes rises straight up over their head; what they deal flies off.
+    n.vx =
+      n.style === NumberStyle.Hurt
+        ? 0
+        : side * SIDE * (0.6 + Math.random() * 0.8) * (big(n.style) ? 0.5 : 1);
     n.vy = -RISE * (0.9 + Math.random() * 0.2) * (big(n.style) ? 1.1 : 1);
   }
 
