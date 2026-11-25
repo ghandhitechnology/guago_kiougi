@@ -179,7 +179,7 @@ export const LAB_REPORT = book<ConeAttack>({
     { at: 50, add: { range: 12 } },
     { at: 75, add: { damage: 0.2 } },
   ],
-  cues: { body: "", hit: "fx-label", area: "fx-combust" },
+  cues: { body: "atk-fuel-spray", hit: "fx-label", area: "fx-combust" },
   evolution: {
     id: "thermite",
     attack: {

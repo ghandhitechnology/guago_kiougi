@@ -7,6 +7,7 @@
 import type { ArtMetadata } from "@guago/art";
 import type { HitClass } from "@guago/audio";
 import {
+  type Attack,
   BOOKS,
   type ClassId,
   MONSTERS,
@@ -99,6 +100,8 @@ export interface BookArt {
    * bob and dial, 고분자's rings, 아보가드로's clusters.
    */
   readonly extra: string | null;
+  /** Seconds the trail its attack leaves lies (판 구조론's plates grind that long), or 0. */
+  readonly trail: number;
 }
 
 /**
@@ -263,7 +266,8 @@ export class Catalog {
     }
     const hit = real(cues?.hit);
     const area = real(cues?.area);
-    const kind = (evolved ? def?.evolution.attack?.kind : undefined) ?? def?.attack?.kind ?? "none";
+    const attack = (evolved ? def?.evolution.attack : undefined) ?? def?.attack;
+    const kind = attack?.kind ?? "none";
     return {
       id,
       cls,
@@ -281,6 +285,7 @@ export class Catalog {
       turns: body === "fx-graph-beam" || body === "evo-fourier",
       bare: cues?.body === "",
       extra,
+      trail: trailOf(attack),
     };
   }
 
@@ -360,6 +365,12 @@ function shapeOf(def: (typeof BOOKS)[number] | undefined): BookShape {
     default:
       return NO_SHAPE;
   }
+}
+
+/** Seconds the trail an attack's specials leave lies, or 0. */
+function trailOf(attack: Attack | null | undefined): number {
+  for (const sp of attack?.specials ?? []) if (sp.kind === "trail") return sp.trail.duration;
+  return 0;
 }
 
 function real(meta: ArtMetadata, name: string): string | null {

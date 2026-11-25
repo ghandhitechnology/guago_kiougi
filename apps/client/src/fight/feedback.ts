@@ -363,7 +363,7 @@ export class Feedback {
     this.ctx.sound.cue("combat.telegraph.fire", a.x, a.y, true);
     const cat = this.ctx.cat;
     if (a.def === 5) {
-      this.effects.oneShot("fx-burst", "fx-burst/blast", a.x, a.y, 1, Layer.Ground, 1, true);
+      this.effects.oneShot("fx-burst", "fx-burst/blast", a.x, a.y, 1, Layer.Ground);
       this.ctx.particles.burst(Bit.Debris, a.x, a.y, 6, cat.color("clay.light"), 80, 2);
     } else if (a.def === 9) {
       // The slam's ring is drawn per radius: it runs out through the drawn sizes and stops at
@@ -377,14 +377,13 @@ export class Feedback {
         1,
         Layer.Ground,
         1,
-        true,
         0,
         null,
         stop,
       );
     } else if (a.def === 1) {
       // Dust kicked up behind the charger: drawn for a charge to the right, flipped for left.
-      const dust = this.effects.oneShot("fx-dust", null, a.x, a.y, 1, Layer.Ground, 1, true);
+      const dust = this.effects.oneShot("fx-dust", null, a.x, a.y, 1, Layer.Ground);
       dust?.setFlipX(Math.cos(a.angle) < 0);
     }
     const d = Math.hypot(a.x - this.ctx.selfX, a.y - this.ctx.selfY);
@@ -407,8 +406,8 @@ export class Feedback {
         const first = Object.keys(anims)[0] ?? "";
         const out = anims.out ? `${vfx}/out` : null;
         if (anims[first]?.loop)
-          this.effects.oneShot(vfx, null, x, y, alpha, Layer.Ground, 1, true, 600, out);
-        else this.effects.oneShot(vfx, null, x, y, alpha, Layer.Ground, 1, true);
+          this.effects.oneShot(vfx, null, x, y, alpha, Layer.Ground, 1, 600, out);
+        else this.effects.oneShot(vfx, null, x, y, alpha, Layer.Ground);
       } else this.effects.oneShot("fx-tome-impact", "fx-tome-impact/land", x, y, alpha);
       this.ctx.particles.burst(Bit.Spark, x, y - 6, mine ? 8 : 3, cat.color("sea.light"), 120, 0);
       if (mine || near) this.ctx.sound.cue(r?.sfx ?? "sfx.reaction.combustion", x, y, mine);
@@ -438,7 +437,7 @@ export class Feedback {
         // A 치유형 healed its neighbours: a rose glow that says "this one first". Green is
         // 생명's, never a monster's.
         this.ctx.particles.burst(Bit.Mote, x, y - 8, 8, cat.color("rose.light"), 30, 0);
-        this.effects.oneShot("fx-heal", "fx-heal/heal", x, y, 1, Layer.Glow, 1, false, 800);
+        this.effects.oneShot("fx-heal", "fx-heal/heal", x, y, 1, Layer.Glow, 1, 800);
         if (near) this.ctx.sound.cue("sfx.monster.element-water.attack", x, y, false);
         return;
       }
@@ -464,7 +463,7 @@ export class Feedback {
         return;
       }
       case 20: {
-        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, false, 1000);
+        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, 1000);
         this.ctx.particles.burst(Bit.Mote, x, y - 10, 10, cat.color("gold.pale"), 40, 0);
         if (near) this.ctx.sound.cue("combat.revive", x, y, mine);
         return;
