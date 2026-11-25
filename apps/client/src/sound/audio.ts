@@ -1,4 +1,11 @@
-import { type AmbientId, audio, type Bus, type EffectId, type SongId, type Surface } from "@guago/audio";
+import {
+  type AmbientId,
+  audio,
+  type Bus,
+  type EffectId,
+  type SongId,
+  type Surface,
+} from "@guago/audio";
 import { setUiSoundPlayer } from "../ui/sound.ts";
 
 /**
@@ -57,33 +64,66 @@ export interface Soundscape {
 }
 
 /**
- * Music and air by map. Maps not listed take theirs from the time their clock stopped at:
- * the night field's theme after dark, the hub theme by day, and the school's indoor hum inside.
+ * Music and air by map, the one table to change them in. Maps not listed take theirs from the
+ * time their clock stopped at and whether they are indoors; story scenes override all of it with
+ * `overrideSoundscape`.
  */
-const BY_MAP: Readonly<Record<string, Soundscape>> = {
+export const SOUNDSCAPES: Readonly<Record<string, Soundscape>> = {
   lawn: { music: "hub", ambient: "campus-afternoon" },
   "campus-yard": { music: "hub", ambient: "campus-afternoon" },
   "campus-field": { music: "field-night", ambient: "field-night" },
+  // The 자습실 floor, where the 졸방대 keep the lights on.
+  "gaseol-4f": { music: "night-study", ambient: "school-interior" },
+  home: { music: "home", ambient: "school-interior" },
+  agora: { music: "agora", ambient: "campus-afternoon" },
 };
 
-export function soundscapeFor(
-  mapId: string,
-  time?: { readonly phase: string },
-  indoors = false,
-): Soundscape {
-  const listed = BY_MAP[mapId];
+/** Maps with a roof over them. */
+const INDOORS = new Set([
+  "gaseol-1f",
+  "gaseol-2f",
+  "gaseol-4f",
+  "gaseolgwan-stairs",
+  "jeungmyeong",
+  "cafeteria",
+  "lounge",
+  "saebyeok",
+  "silheom",
+  "home",
+]);
+
+export function soundscapeFor(mapId: string, time?: { readonly phase: string }): Soundscape {
+  const listed = SOUNDSCAPES[mapId];
   if (listed) return listed;
   const night = time?.phase === "night" || time?.phase === "dusk";
+  if (INDOORS.has(mapId))
+    return { music: night ? "night-study" : "hub", ambient: "school-interior" };
   return {
     music: night ? "field-night" : "hub",
-    ambient: indoors ? "school-interior" : night ? "field-night" : "campus-afternoon",
+    ambient: night ? "field-night" : "campus-afternoon",
   };
+}
+
+let current: Soundscape | undefined;
+let override: Soundscape | undefined;
+
+function apply(): void {
+  const s = override ?? current;
+  if (!s) return;
+  audio.music(s.music, { fade: 2 });
+  audio.ambient(s.ambient, { fade: 2.5 });
 }
 
 /** Crossfades to a place's music and air; asking for the playing ones changes nothing. */
 export function enterSoundscape(s: Soundscape): void {
-  audio.music(s.music, { fade: 2 });
-  audio.ambient(s.ambient, { fade: 2.5 });
+  current = s;
+  apply();
+}
+
+/** A story scene's own music and air, until it hands back with `null`. */
+export function overrideSoundscape(s: Soundscape | null): void {
+  override = s ?? undefined;
+  apply();
 }
 
 /** A foot landing. Other players' steps are quieter and placed left or right of the listener. */

@@ -1,0 +1,103 @@
+import type { ChatLine, SpeakChannel, SystemLine } from "@guago/shared";
+import type { WorldLink } from "../world-link.ts";
+import { systemText } from "./copy.ts";
+
+/** The channels a player has a tab for. 파티 and 동아리 get theirs when those exist. */
+export const TABS = ["world", "near", "whisper"] as const;
+export type Tab = (typeof TABS)[number];
+
+export type Tone = Tab | "system" | "refusal";
+
+export interface LogLine {
+  readonly id: number;
+  readonly tone: Tone;
+  /** Who spoke, for chat lines. */
+  readonly from?: { readonly id: string; readonly name: string };
+  /** For whispers the player sent: who to. */
+  readonly to?: string;
+  readonly mine: boolean;
+  /** Plain text. Masked words arrive as runs of `*`. */
+  readonly text: string;
+}
+
+const KEEP = 300;
+
+const isTab = (ch: SpeakChannel): ch is Tab => (TABS as readonly string[]).includes(ch);
+
+/**
+ * Everything said to this player since joining, by tab. System lines and refusals show on every
+ * tab; a chat line on a tab not being read marks that tab unread.
+ */
+export class ChatLog {
+  private readonly lines: LogLine[] = [];
+  private readonly listeners = new Set<() => void>();
+  readonly unread = new Set<Tab>();
+  active: Tab = "near";
+  private counter = 0;
+  private readonly unlisten: () => void;
+
+  constructor(link: WorldLink) {
+    this.unlisten = link.on((e) => {
+      if (e.type === "chat") this.chat(e.line, e.mine);
+      else if (e.type === "system") this.system(e.line);
+    });
+  }
+
+  dispose(): void {
+    this.unlisten();
+    this.listeners.clear();
+  }
+
+  on(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  /** The lines a tab shows, oldest first. */
+  linesFor(tab: Tab): LogLine[] {
+    return this.lines.filter((l) => l.tone === tab || l.tone === "system" || l.tone === "refusal");
+  }
+
+  setActive(tab: Tab): void {
+    this.active = tab;
+    this.unread.delete(tab);
+    this.emit();
+  }
+
+  /** A refusal or status, in the school's voice, on every tab. */
+  note(text: string, tone: "refusal" | "system" = "refusal"): void {
+    this.add({ id: --this.counter, tone, mine: false, text });
+  }
+
+  private chat(line: ChatLine, mine: boolean): void {
+    if (!isTab(line.ch)) return;
+    const tab = line.ch;
+    this.add({
+      id: line.id,
+      tone: tab,
+      from: { id: line.from.id, name: line.from.name },
+      ...(mine && line.to ? { to: line.to.name } : {}),
+      mine,
+      text: line.text,
+    });
+    if (tab !== this.active) {
+      this.unread.add(tab);
+      this.emit();
+    }
+  }
+
+  private system(line: SystemLine): void {
+    const text = systemText(line);
+    if (text) this.add({ id: line.id, tone: "system", mine: false, text });
+  }
+
+  private add(line: LogLine): void {
+    this.lines.push(line);
+    if (this.lines.length > KEEP) this.lines.splice(0, this.lines.length - KEEP);
+    this.emit();
+  }
+
+  private emit(): void {
+    for (const l of this.listeners) l();
+  }
+}

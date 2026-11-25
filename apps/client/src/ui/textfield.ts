@@ -16,7 +16,7 @@ export interface TextFieldOptions {
   readonly maxLength?: number;
   /** `username`, `current-password`, `new-password`, or `off`. */
   readonly autocomplete?: string;
-  readonly enterKeyHint?: "next" | "go" | "done";
+  readonly enterKeyHint?: "next" | "go" | "done" | "send";
   readonly onChange?: (value: string) => void;
   /** Enter in the box. */
   readonly onSubmit?: () => void;
