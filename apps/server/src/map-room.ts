@@ -160,6 +160,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.lastLoop = now;
     if (this.acc < TICK_MS) return;
     const start = now;
+    const cpu = process.threadCpuUsage();
     let ticks = 0;
     while (this.acc >= TICK_MS) {
       this.acc -= TICK_MS;
@@ -173,7 +174,8 @@ export class MapRoom extends Room<{ state: MapState }> {
     const patchStart = performance.now();
     this.broadcastPatch();
     const end = performance.now();
-    this.metrics.recordTick(end - start, end - patchStart);
+    const used = process.threadCpuUsage(cpu);
+    this.metrics.recordTick(end - start, (used.user + used.system) / 1000, end - patchStart);
     this.metrics.players = this.seats.size;
     this.metrics.clients = this.clients.length;
     this.metrics.monsters = this.world.monsters.length;

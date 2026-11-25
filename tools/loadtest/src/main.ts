@@ -183,6 +183,8 @@ interface Window {
   tickP50: number;
   tickP95: number;
   tickMax: number;
+  cpuP50: number;
+  cpuP95: number;
   patchP95: number;
   bytesMean: number;
   bytesMax: number;
@@ -197,6 +199,7 @@ const poll = async () => {
       players: number;
       monsters: number;
       tickMs: { p50: number; p95: number; max: number };
+      tickCpuMs: { p50: number; p95: number; max: number };
       patchMs: { p95: number };
       bytesPerClient: { mean: number; max: number };
     }[];
@@ -207,6 +210,8 @@ const poll = async () => {
     tickP50: room.tickMs.p50,
     tickP95: room.tickMs.p95,
     tickMax: room.tickMs.max,
+    cpuP50: room.tickCpuMs.p50,
+    cpuP95: room.tickCpuMs.p95,
     patchP95: room.patchMs.p95,
     bytesMean: room.bytesPerClient.mean,
     bytesMax: room.bytesPerClient.max,
@@ -241,41 +246,57 @@ const moving =
     1,
     bots.reduce((a, b) => a + b.ticks, 0),
   );
-const worst = windows.reduce((w, x) => (x.tickP95 > w.tickP95 ? x : w), windows[0] as Window);
-const p95s = windows.map((w) => w.tickP95);
+const worst = windows.at(-1);
+const median = (pick: (w: Window) => number) => quantile(windows.map(pick), 0.5);
+const worstOf = (pick: (w: Window) => number) => Math.max(0, ...windows.map(pick));
+const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 
 const link =
   values.latency === undefined
     ? "loopback"
     : `round trip ${values.latency} ms + up to ${Number(values.jitter) * 2} ms jitter, loss ${values.loss}`;
-console.log(`
-${BOTS} bots, ${fixed(elapsed, 0)} s measured after ${WARMUP} s warm-up, ${link}
-moving ${fixed(moving * 100, 0)}% of ticks, ${worst?.players ?? 0} players and ${worst?.monsters ?? 0} monsters in the room
-
-server tick ms        p50 ${fixed(
-  quantile(
-    windows.map((w) => w.tickP50),
-    0.5,
-  ),
-  2,
-)}  p95 ${fixed(quantile(p95s, 0.5), 2)} (worst 10 s window ${fixed(worst?.tickP95 ?? 0, 2)})  max ${fixed(Math.max(0, ...windows.map((w) => w.tickMax)), 2)}   budget p95 < 10
-patch ms              p95 ${fixed(
-  quantile(
-    windows.map((w) => w.patchP95),
-    0.5,
-  ),
-  2,
-)}
-downstream B/s/client server ${fixed(
-  quantile(
-    windows.map((w) => w.bytesMean),
-    0.5,
-  ),
-  0,
-)} mean, ${fixed(Math.max(0, ...windows.map((w) => w.bytesMax)), 0)} max   bots ${fixed(perBot.reduce((a, b) => a + b, 0) / Math.max(1, perBot.length), 0)} mean, ${fixed(Math.max(0, ...perBot), 0)} max   budget < 8000
-input ack ms          p50 ${fixed(quantile(acks, 0.5), 0)}  p95 ${fixed(quantile(acks, 0.95), 0)}  max ${fixed(Math.max(0, ...acks), 0)}
-reconciliation        ${reconciles} reconciles, ${corrections} corrected (${fixed((corrections / Math.max(1, reconciles)) * 100, 2)}%), error px mean ${fixed(errors.reduce((a, b) => a + b, 0) / Math.max(1, errors.length), 2)} p95 ${fixed(quantile(errors, 0.95), 2)} max ${fixed(Math.max(0, ...errors), 2)}
-`);
+const lines = [
+  `${BOTS} bots, ${fixed(elapsed, 0)} s measured after ${WARMUP} s warm-up, ${link}`,
+  `moving ${fixed(moving * 100, 0)}% of ticks, ${worst?.players ?? 0} players and ${worst?.monsters ?? 0} monsters in the room`,
+  "",
+  `server tick ms        p50 ${fixed(
+    median((w) => w.tickP50),
+    2,
+  )}  p95 ${fixed(
+    median((w) => w.tickP95),
+    2,
+  )} (worst 10 s window ${fixed(
+    worstOf((w) => w.tickP95),
+    2,
+  )})  max ${fixed(
+    worstOf((w) => w.tickMax),
+    2,
+  )}   budget p95 < 10`,
+  `  of it on the CPU    p50 ${fixed(
+    median((w) => w.cpuP50),
+    2,
+  )}  p95 ${fixed(
+    median((w) => w.cpuP95),
+    2,
+  )} (worst 10 s window ${fixed(
+    worstOf((w) => w.cpuP95),
+    2,
+  )})`,
+  `patch ms              p95 ${fixed(
+    median((w) => w.patchP95),
+    2,
+  )}`,
+  `downstream B/s/client server ${fixed(
+    median((w) => w.bytesMean),
+    0,
+  )} mean, ${fixed(
+    worstOf((w) => w.bytesMax),
+    0,
+  )} max   bots ${fixed(mean(perBot), 0)} mean, ${fixed(Math.max(0, ...perBot), 0)} max   budget < 8000`,
+  `input ack ms          p50 ${fixed(quantile(acks, 0.5), 0)}  p95 ${fixed(quantile(acks, 0.95), 0)}  max ${fixed(Math.max(0, ...acks), 0)}`,
+  `reconciliation        ${reconciles} reconciles, ${corrections} corrected (${fixed((corrections / Math.max(1, reconciles)) * 100, 2)}%), error px mean ${fixed(mean(errors), 2)} p95 ${fixed(quantile(errors, 0.95), 2)} max ${fixed(Math.max(0, ...errors), 2)}`,
+];
+console.log(`\n${lines.join("\n")}\n`);
 
 await Promise.all(bots.map((b) => b.room.leave().catch(() => {})));
 process.exit(0);

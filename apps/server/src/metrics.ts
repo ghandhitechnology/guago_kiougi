@@ -32,6 +32,8 @@ export interface RoomSnapshot {
   readonly monsters: number;
   /** Whole server tick: inputs, simulation, interest, sync and the patch, in ms over the last ten seconds. */
   readonly tickMs: { p50: number; p95: number; max: number };
+  /** CPU the main thread spent on the tick, in ms: the tick's real cost, without time the OS took away. */
+  readonly tickCpuMs: { p50: number; p95: number; max: number };
   /** The patch alone (encode and send), in ms. */
   readonly patchMs: { p50: number; p95: number; max: number };
   /** Bytes sent per connected client per second, over the last window. */
@@ -48,6 +50,7 @@ export class RoomMetrics {
   static readonly rooms = new Set<RoomMetrics>();
 
   private readonly tick = new Ring();
+  private readonly tickCpu = new Ring();
   private readonly patch = new Ring();
   private bytes = new Map<string, number>();
   private windowStart = performance.now();
@@ -69,8 +72,9 @@ export class RoomMetrics {
     RoomMetrics.rooms.delete(this);
   }
 
-  recordTick(ms: number, patchMs: number): void {
+  recordTick(ms: number, cpuMs: number, patchMs: number): void {
     this.tick.push(ms);
+    this.tickCpu.push(cpuMs);
     this.patch.push(patchMs);
   }
 
@@ -105,6 +109,7 @@ export class RoomMetrics {
       clients: this.clients,
       monsters: this.monsters,
       tickMs: this.tick.summary(),
+      tickCpuMs: this.tickCpu.summary(),
       patchMs: this.patch.summary(),
       bytesPerClient: this.lastRate,
       inputsDropped: this.inputsDropped,
