@@ -93,6 +93,7 @@ import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } fro
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
+import { carryIn, carryOut, DEFAULT_MODE, type ModeStore, memoryModes } from "./fight/carry.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
 import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
@@ -226,6 +227,8 @@ interface Pawn {
   readonly queue: InputQueue;
   readonly player: Player;
   readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
+  /** Counts loadout reads, so an older read that lands late is dropped. */
+  loadGen: number;
   /** What it fights with; replaced when an operation changes it. */
   loadout: Loadout;
   /** The living world's multipliers its kit was built with. */
@@ -280,8 +283,11 @@ function facingToward(x: number, y: number, tx: number, ty: number): Facing {
 let loadouts: Loadouts = starterLoadouts;
 
 /** Called once at server start to read loadouts from the inventory. */
-export function provideFightServices(s: { loadouts?: Loadouts }): void {
+let modes: ModeStore = memoryModes;
+
+export function provideFightServices(s: { loadouts?: Loadouts; modes?: ModeStore }): void {
   if (s.loadouts) loadouts = s.loadouts;
+  if (s.modes) modes = s.modes;
 }
 
 /** Characters fighting in this process, by id, for loadout changes. */
@@ -294,8 +300,10 @@ const fighting = new Map<string, { room: MapRoom; pawn: Pawn }>();
 export function fightLoadoutChanged(characterId: string, change: ChangeNotice): void {
   const at = fighting.get(characterId);
   if (!at) return;
+  // Any item change may be an equip or an unequip (an unequip can report only the item it took
+  // off), so any of them rebuilds the kit.
   const touched =
-    (change.items?.some((i) => i.slot !== null) ?? false) ||
+    (change.items?.length ?? 0) > 0 ||
     (change.removed?.length ?? 0) > 0 ||
     change.progression !== undefined;
   if (!touched) return;
@@ -413,6 +421,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       pawn.player.mode = mode as Mode;
       pawn.player.casts = 0;
       this.tellMode(pawn);
+      background("mode save", modes.write(pawn.character.id, mode as Mode));
     });
     this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
       const pawn = this.pawns.get(client.sessionId);
@@ -544,12 +553,18 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
   async reload(pawn: Pawn): Promise<void> {
+    const gen = ++pawn.loadGen;
     const loadout = await loadouts.read(pawn.character);
-    if (this.pawns.get(pawn.player.id) !== pawn) return;
+    // A newer read started meanwhile, or the body left: this one is stale.
+    if (gen !== pawn.loadGen || this.pawns.get(pawn.player.id) !== pawn) return;
     pawn.loadout = loadout;
     const p = pawn.player;
-    // The inventory's level is the record; the fight may run ahead of grants not yet landed.
-    if (loadout.level > p.level) p.level = loadout.level;
+    // The inventory's level is the record. When it moved the level, its EXP is the record too:
+    // the fight's own count would count the granted EXP a second time toward the next level.
+    if (loadout.level > p.level) {
+      p.level = loadout.level;
+      p.exp = loadout.exp;
+    }
     this.world.setKit(p, this.kitOf(pawn, p.level));
   }
 
@@ -656,7 +671,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   /** Where a session's character stands, in whole pixels, for saving. */
   private placeOf(id: string): { x: number; y: number } | undefined {
     const p = this.world.playerById(id);
-    return p && { x: Math.round(p.x), y: Math.round(p.y) };
+    if (!p) return undefined;
+    // Knocked out, the character is where it will wake.
+    const at = p.down ? this.map.spawn : p;
+    return { x: Math.round(at.x), y: Math.round(at.y) };
   }
 
   override async onJoin(client: Client, options: SeatOptions = {}): Promise<void> {
@@ -704,9 +722,14 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)
         : start.facing;
-    const loadout = await loadouts.read(character);
+    // EXP still in the grant buffer lands first, so the loadout read is the whole record.
+    await grants()?.flush(character.id);
+    const [loadout, mode] = await Promise.all([
+      loadouts.read(character),
+      modes.read(character.id).catch(() => undefined),
+    ]);
     client.view = new StateView();
-    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing);
+    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing, mode);
     this.countBytes(client);
     const p = pawn.player;
     client.send(MAP_MESSAGES.zones, { zones: pawn.zones } satisfies ZoneUpdate);
@@ -733,6 +756,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     x: number,
     y: number,
     facing: Facing,
+    mode: Mode = DEFAULT_MODE,
   ): Pawn {
     const id = client.sessionId;
     const view = client.view;
@@ -753,7 +777,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       throw error;
     }
     player.facing = facing;
+    player.mode = mode;
     player.exp = loadout.exp;
+    // Back within a quarter of an hour: as hurt and as busy as it left (fight/carry.ts).
+    carryIn(character.id, player, this.world.tick);
     player.expMult = mods.exp;
     player.party = partyOf(parties.of(character.id)?.id);
     const net = newViewer();
@@ -767,6 +794,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       net,
       queue: new InputQueue(),
       player,
+      loadGen: 0,
       loadout,
       mods,
       expCarry: 0,
@@ -873,6 +901,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const pawn = this.pawns.get(id);
     if (pawn) {
       this.handOverExp(pawn);
+      const p = pawn.player;
+      if (p.joined && p.id === id) {
+        // Leaving knocked out is waking at the 보건실: the 기절 counts.
+        if (p.down) background("knockout", live()?.events.knockout(pawn.character.id));
+        carryOut(pawn.character.id, p, this.world.tick);
+      }
       if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
       for (const other of this.pawns.values()) {
         const theirs = other.client.view;
