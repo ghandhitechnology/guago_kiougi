@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sanity": "node src/sanity.ts",
+    "balance": "node src/main.ts",
+    "cues": "node src/cues.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

@@ -76,7 +76,7 @@ async function seated(): Promise<number> {
   const rooms = await matchMaker.query({ name: MAP_ROOM });
   return rooms.reduce(
     (n, r) =>
-      n + ((matchMaker.getLocalRoomById(r.roomId) as MapRoom | undefined)?.state.players.size ?? 0),
+      n + ((matchMaker.getLocalRoomById(r.roomId) as MapRoom | undefined)?.playerCount ?? 0),
     0,
   );
 }
