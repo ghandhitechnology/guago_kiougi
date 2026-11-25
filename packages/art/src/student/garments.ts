@@ -1,3 +1,4 @@
+import type { PartDef } from "../format.ts";
 import { garment } from "./base.ts";
 
 /** 동복: navy blazer, white collar, red tie, gold buttons. */
@@ -84,47 +85,57 @@ export const shirt = garment(
   true,
 );
 
-/** 과잠: the club jacket. Worn open, cream sleeves, a cream panel on the back for the emblem. */
-export const varsity = garment(
-  {
-    "1": "jacket.deep",
-    "2": "stone.bright",
-    "3": "stone.light",
-    "4": "jacket.deep",
-    "5": "stone.pale",
-    "6": "stone.light",
-  },
-  {
-    down: `
-      JCj..jcJ
-      JCj..jcJ
-      JCj..jcJ
-      Jwj..jcJ
-      Jwj..jcJ
-      JJJ..JJJ
-      JJJ..JJJ
-    `,
-    up: `
-      JjjjjjjJ
-      JCccccjJ
-      JCwwwwjJ
-      JCwppwjJ
-      JCwwwwjJ
-      JjjjjjjJ
-      JJJJJJJJ
-    `,
-    side: `
-      JJJJJ.
-      JcccJ.
-      JcccJ.
-      JcccJ.
-      JcccJ.
-      JJJJJ.
-      JJJJJ.
-    `,
-  },
-  false,
-);
+/**
+ * 과잠: the club jacket, in the club's colour with cream sleeves, a cream rib at the collar and
+ * hem, snaps down the front and a cream letter on the chest. The back is left plain for the club's
+ * emblem, drawn at the `emblem` anchor.
+ */
+export const varsity: PartDef = {
+  ...garment(
+    {
+      "1": "jacket.deep",
+      "2": "stone.bright",
+      "3": "stone.light",
+      "4": "jacket.deep",
+      "5": "stone.pale",
+      "6": "stone.light",
+    },
+    {
+      down: `
+        JCw..wcJ
+        JCCwwccJ
+        JCCcJwcJ
+        JCCcJwcJ
+        JCCcJccJ
+        JcccJjjJ
+        JwwwwwwJ
+        JJJJJJJJ
+      `,
+      up: `
+        JjjjjjjJ
+        JCccccjJ
+        JCccccjJ
+        JCccccjJ
+        JCccccjJ
+        JCccccjJ
+        JccccjjJ
+        JJJJJJJJ
+      `,
+      side: `
+        JJJJJ.
+        JCccJ.
+        JCccJ.
+        JcccJ.
+        JcccJ.
+        JcccJ.
+        JcccJ.
+        .JJJJ.
+      `,
+    },
+    false,
+  ),
+  anchors: { emblem: { bone: "torso", at: { up: [9, 14] } } },
+};
 
 /**
  * 체육복: the teal track kit nobody changes out of after PE, zipped to the collar, a stripe across
