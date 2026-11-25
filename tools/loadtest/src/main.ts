@@ -166,6 +166,11 @@ class Bot {
     this.predictor.speed = me.speed || this.predictor.speed;
     if (me.x === this.seen.x && me.y === this.seen.y && me.seq === this.seen.seq) return;
     this.seen = { x: me.x, y: me.y, seq: me.seq };
+    // In full auto the server walks the body; the browser follows it instead of predicting.
+    if (this.auto) {
+      this.predictor.reset(body);
+      return;
+    }
     const error = this.predictor.reconcile(body, me.seq);
     if (!this.measuring) return;
     this.stats.reconciles++;
