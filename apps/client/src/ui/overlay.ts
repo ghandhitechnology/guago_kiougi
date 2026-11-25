@@ -3,12 +3,10 @@ import { Button, type ButtonKind } from "./button.ts";
 import { FocusScope, popScope, pushScope, type Rect } from "./focus.ts";
 import { fade, slide } from "./motion.ts";
 import { Panel } from "./panel.ts";
+import { screen } from "./screen.ts";
 import { sound } from "./sound.ts";
 import { Label } from "./text.ts";
 import { paint, sliceOf } from "./theme.ts";
-
-const W = 480;
-const H = 270;
 
 /** A sticky note with one line, stuck by its top edge. */
 function note(scene: Phaser.Scene, text: string, maxW = 200) {
@@ -36,7 +34,7 @@ export class Tooltip {
     this.hide();
     this.timer = this.scene.time.delayedCall(delay, () => {
       const n = note(this.scene, text);
-      const x = Phaser.Math.Clamp(Math.round(at.x + at.w / 2 - n.w / 2), 2, W - n.w - 2);
+      const x = Phaser.Math.Clamp(Math.round(at.x + at.w / 2 - n.w / 2), 2, screen.w - n.w - 2);
       const above = at.y - n.h - 3;
       const y = above >= 2 ? above : at.y + at.h + 3;
       n.box
@@ -81,10 +79,10 @@ export class Toaster {
     }
     this.busy = true;
     const n = note(this.scene, text, 300);
-    const x = Math.round((W - n.w) / 2);
+    const x = Math.round((screen.w - n.w) / 2);
     n.box.setPosition(x, -n.h - 2).setDepth(2000);
     sound("toast");
-    slide(n.box, { x, y: 4 }, 160, () => {
+    slide(n.box, { x, y: 4 + screen.safe.top }, 160, () => {
       this.scene.time.delayedCall(2200, () => {
         slide(n.box, { x, y: -n.h - 2 }, 140, () => {
           n.box.destroy();
@@ -138,7 +136,7 @@ export class Modal {
     const ctx = { scene, scope: this.scope };
     this.onClosed = opts.onClosed;
     this.dim = scene.add
-      .rectangle(0, 0, W, H, paint("ink.deep"))
+      .rectangle(0, 0, screen.w, screen.h, paint("ink.deep"))
       .setOrigin(0)
       .setAlpha(0)
       .setDepth(900)
@@ -149,10 +147,17 @@ export class Modal {
     const probe = new Label(scene, 0, 0, opts.body, { font: "galmuri11", width: w - 30 });
     const h = 19 + 12 + probe.height + 14 + 21 + 12;
     probe.obj.destroy();
-    this.panel = new Panel(ctx, Math.round((W - w) / 2), Math.round((H - h) / 2), w, h, {
-      title: opts.title,
-      onClose: back,
-    }).setDepth(901);
+    this.panel = new Panel(
+      ctx,
+      Math.round((screen.w - w) / 2),
+      Math.round((screen.h - h) / 2),
+      w,
+      h,
+      {
+        title: opts.title,
+        onClose: back,
+      },
+    ).setDepth(901);
     const { page } = this.panel;
     const body = new Label(scene, page.x + 8, page.y + 10, opts.body, {
       font: "galmuri11",
@@ -170,7 +175,7 @@ export class Modal {
         onPress: a.onPress,
         sound: a.kind === "ink" ? "confirm" : "select",
       });
-      bx -= b.bounds().w;
+      bx -= b.size().w;
       b.setX(bx);
       bx -= 6;
       this.panel.add(b);

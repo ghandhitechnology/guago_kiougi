@@ -8,7 +8,7 @@ import { drawOrder, outlineColors, packRgba, stackLayers } from "../layer-order.
 import { renderScene, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import { type BmFont, measure, parseBmFont, place } from "./bmfont.ts";
-import { FONT_SAMPLES, KIT, NUMERAL_SAMPLES, SHEET } from "./ui-content.ts";
+import { FONT_SAMPLES, KIT, NUMERAL_FONTS, SHEET } from "./ui-content.ts";
 import { type Kit, type Op, type Screen, shadePixels, sliceRects, swept } from "./ui-ops.ts";
 import { screens } from "./ui-screens.ts";
 
@@ -392,18 +392,18 @@ function fontsSection(kit: PageKit): void {
   }
   const box = el("article");
   box.id = "font-numerals";
-  box.append(el("h3", "name", "damage numerals"));
+  box.append(el("h3", "name", "numerals"));
   const ones = row(box);
   const threes = row(box);
-  for (const font of ["dmg-small", "dmg-small-crit", "dmg", "dmg-crit"]) {
+  for (const [font, samples] of NUMERAL_FONTS) {
     const bm = kit.fonts.get(font);
     if (!bm) continue;
-    const w = Math.max(...NUMERAL_SAMPLES.map((t) => measure(bm, t))) + 8;
-    const h = NUMERAL_SAMPLES.length * (bm.lineHeight + 2) + 8;
+    const w = Math.max(...samples.map((t) => measure(bm, t))) + 8;
+    const h = samples.length * (bm.lineHeight + 2) + 8;
     const c = kit.render(
       w,
       h,
-      NUMERAL_SAMPLES.map(
+      samples.map(
         (text, i) => ({ op: "text", font, text, x: 4, y: 4 + i * (bm.lineHeight + 2) }) as const,
       ),
       SHEET.ground,

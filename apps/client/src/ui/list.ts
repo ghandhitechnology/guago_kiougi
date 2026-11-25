@@ -196,16 +196,20 @@ export class List extends Widget {
       focused: lit,
       zone: (x, y, w, h, onTap) => {
         const z = scene.add.zone(x, y, w, h).setOrigin(0).setInteractive({ useHandCursor: true });
-        z.on("pointerover", () => {
+        z.on("pointerover", (p: Phaser.Input.Pointer) => {
           if (!this.enabled()) return;
           this.ctx.scope.focus(this, "pointer");
           if (this.cursor !== index) {
             this.cursor = index;
-            this.redraw();
+            // A finger lands and lifts at once: redrawing now would replace this zone before the
+            // lift reaches it, so a touch redraws after the tap instead.
+            if (!p.wasTouch) this.redraw();
           }
         });
-        z.on("pointerup", () => {
-          if (this.enabled()) onTap();
+        z.on("pointerup", (p: Phaser.Input.Pointer) => {
+          if (!this.enabled()) return;
+          onTap();
+          if (p.wasTouch && this.active) this.redraw();
         });
         into.add(z);
       },

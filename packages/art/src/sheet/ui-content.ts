@@ -50,6 +50,19 @@ export const NUMERAL_SAMPLES = [
   "100%",
 ];
 
+/** A well's corner badge and stack count. */
+export const BADGE_SAMPLES = ["+9", "+21", "5", "0123456789", "14258", "12만"];
+
+/** Every glyph font on the sheet, with what it is shown writing. */
+export const NUMERAL_FONTS: readonly (readonly [string, readonly string[]])[] = [
+  ["dmg-small", NUMERAL_SAMPLES],
+  ["dmg-small-crit", NUMERAL_SAMPLES],
+  ["dmg", NUMERAL_SAMPLES],
+  ["dmg-crit", NUMERAL_SAMPLES],
+  ["badge", BADGE_SAMPLES],
+  ["count", BADGE_SAMPLES],
+];
+
 export interface KitGroup {
   readonly title: string;
   /** Shown on paper instead of the field colour. */

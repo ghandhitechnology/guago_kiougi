@@ -221,10 +221,12 @@ export class TextField extends Widget {
     // The input covers the label too, so a tap anywhere on the field lands on it natively;
     // a tap on the canvas would hand the browser's focus straight back to the page.
     const m = this.getWorldTransformMatrix();
+    // A scene whose camera is scrolled (the title, centred on a wide screen) moves its fields.
+    const cam = this.scene.cameras.main;
     Object.assign(el.style, {
       display: "block",
-      left: `${r.left + m.tx * k}px`,
-      top: `${r.top + m.ty * k}px`,
+      left: `${r.left + (m.tx - cam.scrollX) * k}px`,
+      top: `${r.top + (m.ty - cam.scrollY) * k}px`,
       width: `${this.boxW * k * m.scaleX}px`,
       height: `${this.boxH * k * m.scaleY}px`,
     });
