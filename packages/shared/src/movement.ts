@@ -7,8 +7,12 @@ export type Facing = (typeof Facing)[keyof typeof Facing];
 
 /** A move axis is sent as a whole number in [-MOVE_MAX, MOVE_MAX]. */
 export const MOVE_MAX = 127;
-/** Stick input shorter than this (of MOVE_MAX) is no input. */
-export const MOVE_DEADZONE = 24;
+/**
+ * Input shorter than this (of MOVE_MAX) is no input. Small, because the client sends the exact
+ * share of a step its drawn player covered, often a fraction at the end of a walk; a stick
+ * applies its own deadzone before its input gets here.
+ */
+export const MOVE_DEADZONE = 2;
 /** Collider radius of a player's feet, in pixels. */
 export const PLAYER_RADIUS = 5;
 /** Base walking speed in pixels per second: 3 px a tick, 1 px a frame at 60 fps. */
