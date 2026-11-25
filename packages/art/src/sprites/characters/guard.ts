@@ -1,14 +1,17 @@
 import { swapPart } from "../../figure.ts";
-import { type Legend, part, rig, sprite } from "../../format.ts";
+import { bake } from "../../folk.ts";
+import { type Dir, type Legend, part, rig, sprite } from "../../format.ts";
 import { Pic } from "../../paint.ts";
 import { frame, garment, ink, lone, shadow, skin, walkArms } from "./student.ts";
 
 /**
  * 아테네 경비병, who patrols the 그림자 동굴 in Page 1 and reports students to 권 사감 by letter.
- * Stiff, by the book, suspicious of every face not on his list: a bronze crested helmet, a
- * black beard, a red cloak over a white tunic, bronze greaves and a spear. He glances left and
- * right; his signature is the halt, spear planted and a palm up. `guard-cone` is the cone of
- * what he can see, drawn in front of him per direction.
+ * Stiff, by the book, suspicious of every face not on his list, and its threat and its comedy:
+ * a bronze crested helmet, a black beard, a red cloak over a white tunic, bronze greaves and the
+ * torch he walks the passages with. `idle` glances left and right; `walk` carries the torch out
+ * in front, so it turns with his route; `alert` is the start when he sees someone, torch up;
+ * `catch` is the lunge that puts them out of the cave; `halt` is the palm up at the mouth.
+ * `guard-cone` is the cone of what he can see, drawn in front of him per direction.
  */
 const palette: Legend = { ...ink, B: "wood.mid" };
 
@@ -162,71 +165,154 @@ const kit = swapPart(
   ["legL", "legR"],
 );
 
-/** The spear: a bronze leaf blade on a long ash shaft. */
-const SPEAR =
-  ".T.\nTUT\nTUT\nTuT\nTuT\n.T.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.\n.W.";
-const spear = part({
-  palette,
+/**
+ * The torch he carries through the cave: ash handle, the flame flickering between two shapes.
+ * Held out in front whichever way he walks, so the cone the lighting draws from it turns with
+ * him; raised high when he sees someone.
+ */
+const FLAME = [
+  `
+    ..M.
+    .MA.
+    .AYa
+    aYYa
+    .aa.
+    ..W.
+    ..W.
+    ..W.
+    ..W.
+    ..W.
+    ..W.
+  `,
+  `
+    .M..
+    .AM.
+    aAYa
+    aYYa
+    .aa.
+    ..W.
+    ..W.
+    ..W.
+    ..W.
+    ..W.
+    ..W.
+  `,
+];
+const torch = part({
+  palette: { ...palette, M: "red.light", A: "gold.light", Y: "gold.pale", a: "gold.mid" },
+  lone: "M",
   pieces: {
     hand: {
-      at: { down: [1, 3], up: [20, 3], side: [1, 8] },
-      down: { rest: SPEAR, plant: { at: [1, 4], grid: SPEAR } },
-      up: { rest: SPEAR, plant: { at: [20, 4], grid: SPEAR } },
-      side: { rest: SPEAR, plant: { at: [1, 9], grid: SPEAR } },
+      at: { down: [2, 9], up: [19, 9], side: [18, 7] },
+      down: {
+        rest: FLAME[0] as string,
+        lit: FLAME[1] as string,
+        high: { at: [0, 0], grid: FLAME[0] as string },
+        reach: { at: [1, 6], grid: FLAME[1] as string },
+      },
+      up: {
+        rest: FLAME[0] as string,
+        lit: FLAME[1] as string,
+        high: { at: [19, 0], grid: FLAME[0] as string },
+        reach: { at: [19, 6], grid: FLAME[1] as string },
+      },
+      side: {
+        rest: FLAME[0] as string,
+        lit: FLAME[1] as string,
+        high: { at: [17, 1], grid: FLAME[0] as string },
+        reach: { at: [20, 4], grid: FLAME[1] as string },
+      },
     },
   },
 });
 
-const guard = rig({
-  name: "guard",
-  ...frame,
-  group: "cast",
-  parts: {
-    shadow: { blob: shadow },
-    body: { base: skin },
-    uniform: { kit },
-    face: { stern },
-    hair: { helmet },
-    book: { spear },
-  },
-  frames: {
-    idle0: {},
-    left: { head: "look" },
-    idle1: { torso: [0, -1] },
-    walk0: (d) => ({ ...walkArms(d, "R"), hand: [0, 0] }) as never,
-    walk1: { torso: [0, -1] },
-    walk2: (d) => ({ ...walkArms(d, "L"), hand: [0, 0] }) as never,
-    walk3: { torso: [0, -1] },
-    halt0: { hand: "plant", head: "shout" },
-    halt1: (d) =>
-      ({
-        hand: "plant",
-        head: "shout",
-        ...(d === "side" ? { armR: "fwd" } : { armL: "raise" }),
-      }) as never,
-  },
-  anim: {
-    idle: {
-      frames: ["idle0", "idle0", "left", "left", "idle0", "idle1", "idle0", "idle0"],
-      fps: 3,
-    },
-    walk: { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 5 },
-    halt: { frames: ["halt0", "halt1", "halt1", "halt1", "halt1", "idle0"], fps: 4, loop: false },
-  },
-  looks: {
-    patrol: {
-      parts: {
-        shadow: "blob",
-        body: "base",
-        uniform: "kit",
-        face: "stern",
-        hair: "helmet",
-        book: "spear",
-      },
-      slots: { skin: "warm", hair: "black" },
+/** The start he gives when he sees someone where nobody should be. */
+const spotted = part({
+  palette: { ...ink, D: "gold.deep", a: "gold.light" },
+  pieces: {
+    head: {
+      at: { down: [17, 0], up: [17, 0], side: [15, 0] },
+      down: { rest: ".", alert: ".DD.\nDaaD\nDaaD\n.DD.\n....\n.DD.\n.DD." },
+      up: { rest: ".", alert: ".DD.\nDaaD\nDaaD\n.DD.\n....\n.DD.\n.DD." },
+      side: { rest: ".", alert: ".DD.\nDaaD\nDaaD\n.DD.\n....\n.DD.\n.DD." },
     },
   },
 });
+
+const hold = (d: Dir) => (d === "up" ? {} : d === "side" ? { armR: "fwd" } : {});
+
+const guard = bake(
+  rig({
+    name: "guard",
+    ...frame,
+    group: "page1-cast",
+    parts: {
+      shadow: { blob: shadow },
+      body: { base: skin },
+      uniform: { kit },
+      face: { stern },
+      hair: { helmet },
+      accessory: { spotted },
+      book: { torch },
+    },
+    frames: {
+      idle0: (d: Dir) => hold(d) as never,
+      idle1: (d: Dir) => ({ ...hold(d), hand: "lit", torso: [0, -1] }) as never,
+      left: (d: Dir) => ({ ...hold(d), head: "look", hand: "lit" }) as never,
+      walk0: (d: Dir) => ({ ...walkArms(d, "R"), ...hold(d), hand: "rest" }) as never,
+      walk1: (d: Dir) => ({ ...hold(d), torso: [0, -1], hand: ["lit", 0, -1] }) as never,
+      walk2: (d: Dir) => ({ ...walkArms(d, "L"), ...hold(d), hand: "rest" }) as never,
+      walk3: (d: Dir) => ({ ...hold(d), torso: [0, -1], hand: ["lit", 0, -1] }) as never,
+      talk0: (d: Dir) => ({ ...hold(d), head: "shout" }) as never,
+      alert0: (d: Dir) =>
+        ({ armR: d === "side" ? "mouth" : "raise", hand: "high", head: "alert" }) as never,
+      alert1: (d: Dir) =>
+        ({
+          armR: [d === "side" ? "mouth" : "raise", 0, -1],
+          hand: ["high", 0, -1],
+          head: "alert",
+        }) as never,
+      catch0: (d: Dir) =>
+        ({
+          hand: "reach",
+          head: "shout",
+          ...(d === "side" ? { armR: "strike", torso: [2, 0] } : { armL: "fling", torso: [0, 1] }),
+        }) as never,
+      halt0: (d: Dir) => ({ ...hold(d), head: "shout" }) as never,
+      halt1: (d: Dir) =>
+        ({ head: "shout", ...(d === "side" ? { armR: "fwd" } : { armL: "raise" }) }) as never,
+    },
+    anim: {
+      idle: {
+        frames: ["idle0", "idle1", "left", "left", "idle0", "idle1", "idle0", "idle1"],
+        fps: 3,
+      },
+      walk: { frames: ["walk0", "walk1", "walk2", "walk3"], fps: 5 },
+      talk: { frames: ["talk0", "idle0", "talk0", "idle1"], fps: 4 },
+      alert: { frames: ["alert0", "alert1", "alert0", "alert1", "alert0"], fps: 6, loop: false },
+      catch: {
+        frames: ["alert0", "catch0", "catch0", "catch0", "catch0", "idle0"],
+        fps: 6,
+        loop: false,
+      },
+      halt: { frames: ["halt0", "halt1", "halt1", "halt1", "halt1", "idle0"], fps: 4, loop: false },
+    },
+    looks: {
+      patrol: {
+        parts: {
+          shadow: "blob",
+          body: "base",
+          uniform: "kit",
+          face: "stern",
+          hair: "helmet",
+          accessory: "spotted",
+          book: "torch",
+        },
+        slots: { skin: "warm", hair: "black" },
+      },
+    },
+  }),
+);
 
 // Vision cone ---------------------------------------------------------------------------------
 
