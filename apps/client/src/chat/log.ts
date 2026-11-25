@@ -33,6 +33,7 @@ export class ChatLog {
   private readonly lines: LogLine[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly lineListeners = new Set<(line: LogLine) => void>();
+  private readonly blockListeners = new Set<() => void>();
   private readonly announceListeners = new Set<(line: Spoken) => void>();
   readonly unread = new Set<Tab>();
   active: Tab = "near";
@@ -46,6 +47,9 @@ export class ChatLog {
     this.unlisten = link.on((e) => {
       if (e.type === "chat") this.chat(e.line, e.mine);
       else if (e.type === "system") this.system(e.line);
+      else if (e.type === "social" && (e.event.t === "blocks" || e.event.t === "all")) {
+        for (const l of this.blockListeners) l();
+      }
     });
   }
 
@@ -53,6 +57,7 @@ export class ChatLog {
     this.unlisten();
     this.listeners.clear();
     this.lineListeners.clear();
+    this.blockListeners.clear();
     this.announceListeners.clear();
   }
 
@@ -71,6 +76,17 @@ export class ChatLog {
   onLine(fn: (line: LogLine) => void): () => void {
     this.lineListeners.add(fn);
     return () => this.lineListeners.delete(fn);
+  }
+
+  /** Calls `fn` when the block list changes, so lines already shown can be taken down. */
+  onBlocks(fn: () => void): () => void {
+    this.blockListeners.add(fn);
+    return () => this.blockListeners.delete(fn);
+  }
+
+  /** True for a line from a player blocked since it arrived. */
+  hidden(line: LogLine): boolean {
+    return line.from !== undefined && !line.mine && this.link.isBlocked(line.from.id);
   }
 
   /** The lines a tab shows, oldest first; lines from players blocked since are left out. */

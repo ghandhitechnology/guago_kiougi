@@ -18,6 +18,7 @@ const FIGHT = { lines: 2, ms: 3500, perChar: 20, maxMs: 5000, alpha: 0.85 } as c
 const PHONE_LINES = 3;
 
 interface Entry {
+  readonly line: LogLine;
   readonly root: Phaser.GameObjects.Container;
   readonly h: number;
   readonly chars: number;
@@ -31,6 +32,7 @@ export class ChatFeed {
   private readonly phone: boolean;
   private readonly entries: Entry[] = [];
   private readonly unlisten: () => void;
+  private readonly unblock: () => void;
   private clock = 0;
   private fight = false;
   private hidden = false;
@@ -40,12 +42,17 @@ export class ChatFeed {
     this.phone = phone;
     this.root = scene.add.container(0, 0).setDepth(190);
     this.unlisten = log.onLine((line) => this.push(line));
+    // A player blocked since: their lines already up go at once.
+    this.unblock = log.onBlocks(() => {
+      for (const e of this.entries) if (log.hidden(e.line)) this.leave(e, 120);
+    });
     scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
     this.layout();
   }
 
   destroy(): void {
     this.unlisten();
+    this.unblock();
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
     this.root.destroy();
   }
@@ -92,6 +99,7 @@ export class ChatFeed {
     });
     const chars = [...line.text].length;
     const entry: Entry = {
+      line,
       root,
       h: rows.length * ROW,
       chars,
