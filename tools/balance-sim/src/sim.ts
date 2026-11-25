@@ -19,6 +19,7 @@ import {
   monsterById,
   PAGE1_FIELDS,
   refillCap,
+  STARTER_BOOKS,
   surgeShare,
   TOOLS,
   VENDING,
@@ -148,14 +149,8 @@ export interface RunResult {
 const DAY = 86_400;
 const CHUNK_MINUTES = 10;
 const SHEETS_ANY: Currency = "sheet:any";
-/** M2's two books per class, given in the opening. */
-const STARTERS: Readonly<Record<ClassId, readonly string[]>> = {
-  math: ["wangdo", "graph-note"],
-  physics: ["holiday-physics", "em-lab"],
-  chemistry: ["zoomin-chem", "lab-report"],
-  biology: ["camping-bio", "dissection"],
-  earth: ["round-earth", "rock-box"],
-};
+/** M2's two books per class, given at character creation. */
+const STARTERS: Readonly<Record<ClassId, readonly string[]>> = STARTER_BOOKS;
 
 interface FieldMix {
   readonly field: FieldDef;
@@ -562,7 +557,7 @@ function addTool(s: State, def: string) {
     return;
   }
   const merged = mergeTools(have, { id: `t${s.nextId++}`, def, level: 1 });
-  if (merged.ok) s.tools.set(def, merged.state);
+  if (merged.ok) s.tools.set(def, merged.state.into);
 }
 
 function board(

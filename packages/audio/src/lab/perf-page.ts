@@ -8,6 +8,9 @@ import { audio, EFFECT_IDS, type EffectId } from "../index.ts";
 import { fingerprint } from "../tools/fingerprint.ts";
 import { compileSong } from "../tracker/compile.ts";
 import { SongPlayer } from "../tracker/player.ts";
+import { Horde } from "./horde.ts";
+
+let horde: Horde | null = null;
 
 declare global {
   interface Window {
@@ -19,13 +22,39 @@ const api = {
   unlock(): void {
     audio.unlock();
   },
-  start(): void {
+  /** `short` runs a 16 s surge and an 8 s 쉬는 시간, so a short recording hears both. */
+  start(mode: "simple" | "horde" = "simple", short = false): void {
+    if (mode === "horde") {
+      audio.music("agora", { fade: 0.05 });
+      audio.ambient("campus-afternoon", { fade: 0.05 });
+      horde = new Horde(audio, {
+        players: 5,
+        ownClass: "math",
+        surge: short ? 16 : 50,
+        lull: short ? 8 : 12,
+      });
+      horde.start();
+      return;
+    }
     audio.music("hub", { fade: 0.05 });
     audio.ambient("campus-afternoon", { fade: 0.05 });
   },
   stop(): void {
+    horde?.stop();
     audio.music(null, { fade: 0.05 });
     audio.ambient(null, { fade: 0.05 });
+  },
+  horde: () => (horde ? { ...horde.stats } : null),
+  /** Records the output for `seconds` and returns it as base64 Float32, left then right. */
+  async record(seconds: number): Promise<string[]> {
+    const chans = await audio.debug.record(seconds);
+    return chans.map((c) => {
+      const bytes = new Uint8Array(c.buffer);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000)
+        bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    });
   },
   stats: () => audio.debug.stats(),
   /** Records frame intervals for `ms`, firing an effect every `every` ms if given. */

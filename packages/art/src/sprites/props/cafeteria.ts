@@ -93,8 +93,43 @@ function linePiece(kind: "trays" | [Pan, Pan] | "cap-l" | "cap-r"): Pic {
   hline(p, 0, TOP, LINE_W, "d");
   hline(p, 0, TOP + 1, LINE_W, "K");
   if (kind === "trays") {
-    trayStack(p, 2, TOP + 2, 3);
-    trayStack(p, 16, TOP + 3, 2);
+    // A tall stack of clean 식판, its top one's wells catching the light, and the steel bins of
+    // spoons and chopsticks everyone grabs from.
+    for (let i = 0; i < 5; i++) {
+      hline(p, 2, TOP + 6 + i, 14, i % 2 ? "M" : "w");
+      p.set(15, TOP + 6 + i, "S");
+    }
+    rect(p, 2, TOP - 3, 14, 9, "w");
+    vline(p, 15, TOP - 3, 9, "K");
+    for (const [wx, wy, w, h] of [
+      [3, -2, 3, 2],
+      [7, -2, 3, 2],
+      [11, -2, 3, 2],
+      [3, 1, 6, 3],
+      [10, 1, 5, 3],
+    ] as const) {
+      rect(p, 2 + wx, TOP + wy, w, h, "K");
+      hline(p, 2 + wx, TOP + wy, w, "M");
+    }
+    // Spoon bin and chopstick bin.
+    for (const [x, kind2] of [
+      [19, "spoon"],
+      [25, "chop"],
+    ] as const) {
+      rect(p, x, TOP + 4, 5, 8, "M");
+      vline(p, x, TOP + 4, 8, "K");
+      vline(p, x + 4, TOP + 4, 8, "S");
+      hline(p, x, TOP + 4, 5, "k");
+      if (kind2 === "spoon") {
+        for (const sx of [x, x + 2, x + 4]) {
+          vline(p, sx, TOP, 4, "K");
+          rect(p, sx, TOP - 2, 1, 2, "w");
+        }
+      } else {
+        for (const sx of [x + 1, x + 3]) vline(p, sx, TOP - 4, 8, "w");
+        vline(p, x + 2, TOP - 2, 6, "k");
+      }
+    }
   } else {
     kind.forEach((pan, i) => {
       const x = 2 + i * 15;

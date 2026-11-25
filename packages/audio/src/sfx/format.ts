@@ -78,7 +78,17 @@ export interface Layer {
   readonly delay?: number;
 }
 
-export type EffectCategory = "ui" | "world" | "step";
+/**
+ * `hit` is an impact: at most three layers (PLAN §6: body, material, sweetener). `combat` is any
+ * other fight event (a reaction, a roar, the field bell) and may stack up to six.
+ */
+export type EffectCategory = "ui" | "world" | "step" | "hit" | "combat";
+
+/**
+ * When an effect is rendered: `core` at start-up, `combat` right after, `page1` only when the game
+ * asks for it (entering a Page 1 rift) or plays it for the first time.
+ */
+export type Bank = "core" | "combat" | "page1";
 
 export interface EffectSource {
   readonly category: EffectCategory;
@@ -101,6 +111,13 @@ export interface EffectSource {
   readonly loop?: number;
   /** Room reverb amount 0..1. */
   readonly room?: number;
+  /** Defaults to `core` for ui, world and step sounds, `combat` for hit and combat sounds. */
+  readonly bank?: Bank;
+  /**
+   * Plays in quick succession climb a scale: each play inside `window` seconds of the last moves
+   * one step along `steps` (semitones), and a pause starts again from the bottom.
+   */
+  readonly streak?: { readonly steps: readonly number[]; readonly window: number };
 }
 
 /** Loudness each category is normalised to: the loudest 50 ms, K-weighted, in dB. */
@@ -108,7 +125,15 @@ export const CATEGORY_TARGET: Record<EffectCategory, number> = {
   ui: -21,
   world: -18,
   step: -26,
+  hit: -20,
+  combat: -19,
 };
+
+export function bankOf(source: EffectSource): Bank {
+  return (
+    source.bank ?? (source.category === "hit" || source.category === "combat" ? "combat" : "core")
+  );
+}
 
 export class EffectError extends Error {}
 
@@ -123,7 +148,11 @@ export function parseEffect(
   const fail = (msg: string) => {
     throw new EffectError(`${id}: ${msg}`);
   };
-  if (source.layers.length < 1 || source.layers.length > 3) fail("needs one to three layers");
+  const most = source.category === "hit" ? 3 : 6;
+  if (source.layers.length < 1 || source.layers.length > most)
+    fail(
+      source.category === "hit" ? "an impact needs one to three layers" : "needs one to six layers",
+    );
   source.layers.forEach((l, i) => {
     const at = `layer ${i}`;
     if (!(l.freq >= 0)) fail(`${at} freq must be 0 or more`);

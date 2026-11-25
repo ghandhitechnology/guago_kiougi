@@ -63,6 +63,10 @@ const MARKS = {
   monsters: "red.light",
   gather: "rose.light",
   elite: "gold.pale",
+  room: "navy.pale",
+  mark: "gold.pale",
+  npc: "rose.pale",
+  arena: "clay.pale",
 } as const;
 
 function rgb(ramps: Ramps, name: string): Rgb {
@@ -147,7 +151,8 @@ export function overlay(
   for (const z of map.zones) {
     const c = rgb(ramps, MARKS[z.kind]);
     box(z.rect, c, false, 0);
-    const what = z.kind === "monsters" ? `${z.monster} ${z.density}` : z.kind;
+    const what =
+      z.kind === "monsters" ? `${z.monster} ${z.density}` : z.kind === "room" ? z.name : z.kind;
     labels.push({
       text: `${z.id} · ${what}`,
       x: z.rect.x * T + 3 * scale,
@@ -177,6 +182,28 @@ export function overlay(
       color: c,
     });
   }
+  // Scene marks as small diamonds, cast spots as rings.
+  const mc = rgb(ramps, MARKS.mark);
+  for (const [name, m] of Object.entries(map.marks ?? {})) {
+    const cx = m.x * scale;
+    const cy = m.y * scale;
+    for (let k = -3 * scale; k <= 3 * scale; k++) {
+      const r = 3 * scale - Math.abs(k);
+      put(cx + k, cy - r, mc);
+      put(cx + k, cy + r, mc);
+    }
+    labels.push({ text: `◇ ${name}`, x: cx + 5 * scale, y: cy - 4 * scale, color: mc });
+  }
+  const nc = rgb(ramps, MARKS.npc);
+  for (const n of map.npcs ?? []) {
+    const cx = n.x * scale;
+    const cy = n.y * scale;
+    for (let a = 0; a < 24; a++) {
+      const t = (a / 24) * Math.PI * 2;
+      put(Math.round(cx + Math.cos(t) * 4 * scale), Math.round(cy + Math.sin(t) * 4 * scale), nc);
+    }
+    labels.push({ text: n.speaker, x: cx + 6 * scale, y: cy + 2 * scale, color: nc });
+  }
   const sc = rgb(ramps, MARKS.spawn);
   for (const [name, s] of Object.entries(map.spawns)) {
     const cx = s.x * scale;
@@ -188,6 +215,17 @@ export function overlay(
       }
     }
     labels.push({ text: name, x: cx + 8 * scale, y: cy - 6 * scale, color: sc });
+  }
+  // Arenas: a dashed floor outline with the fights it hosts.
+  for (const a of map.arenas ?? []) {
+    const c = rgb(ramps, MARKS.arena);
+    box(a.rect, c, true, 2 * scale);
+    labels.push({
+      text: `${a.id} · arena ${a.modes.join(" ")}`,
+      x: a.rect.x * T + 4 * scale,
+      y: a.rect.y * T + 4 * scale,
+      color: c,
+    });
   }
   return { w, h, data, labels };
 }

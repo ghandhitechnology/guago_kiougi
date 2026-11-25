@@ -1,14 +1,15 @@
 /**
- * The audio worker: renders songs and ambient beds block by block, and every effect once at
- * start-up. Nothing here touches the main thread, so a phone's frame rate does not pay for synthesis.
+ * The audio worker: renders songs and ambient beds block by block, and effects and jingles bank by
+ * bank. Nothing here touches the main thread, so a phone's frame rate does not pay for synthesis.
  */
 
 import { BedPlayer } from "../ambient/bed.ts";
-import { BEDS, EFFECTS, SONGS } from "../content/index.ts";
+import { BEDS, EFFECTS, JINGLES, SONGS } from "../content/index.ts";
+import { type Bank, bankOf, type EffectSource, parseEffect } from "../sfx/format.ts";
 import { renderEffect } from "../sfx/render.ts";
 import { compileSong } from "../tracker/compile.ts";
 import { SongPlayer } from "../tracker/player.ts";
-import type { FromWorker, ToWorker } from "./protocol.ts";
+import type { CueMeta, FromWorker, ToWorker } from "./protocol.ts";
 
 interface Scope {
   onmessage: ((e: MessageEvent<ToWorker>) => void) | null;
@@ -19,6 +20,40 @@ const scope = self as unknown as Scope;
 let sampleRate = 48000;
 const decks = new Map<number, { gen: number; player: SongPlayer | BedPlayer; stems: number }>();
 const pool: Float32Array[] = [];
+const done = new Set<string>();
+const queue: string[] = [];
+
+function catalog(): Record<string, CueMeta> {
+  const cues: Record<string, CueMeta> = {};
+  for (const [id, source] of Object.entries(EFFECTS)) {
+    const fx = parseEffect(id, source);
+    cues[id] = {
+      bank: bankOf(source),
+      vary: fx.vary,
+      priority: fx.priority,
+      max: fx.max,
+      loop: fx.loop !== undefined,
+      jingle: false,
+      ...(fx.duck ? { duck: fx.duck } : {}),
+      ...(fx.streak ? { streak: fx.streak } : {}),
+    };
+  }
+  for (const [id, j] of Object.entries(JINGLES)) {
+    const song = compileSong(id, j.song);
+    const rows = song.frames.reduce((n, f) => n + f.rows, 0);
+    cues[id] = {
+      bank: j.bank,
+      vary: 0,
+      priority: 3,
+      max: 1,
+      loop: false,
+      jingle: true,
+      seconds: (rows * 60) / (j.song.bpm * j.song.rowsPerBeat),
+      duck: { depth: j.duck, release: 1.5 },
+    };
+  }
+  return cues;
+}
 
 function take(frames: number): Float32Array {
   for (let i = 0; i < pool.length; i++) {
@@ -36,16 +71,28 @@ function send(message: FromWorker, transfer: Transferable[] = []): void {
   scope.postMessage(message, transfer);
 }
 
-const queue: string[] = [];
-function nextEffect(): void {
-  const id = queue.shift();
-  if (!id) return;
-  const r = renderEffect(id, EFFECTS[id as keyof typeof EFFECTS], sampleRate);
+function render(id: string): void {
+  if (done.has(id)) return;
+  done.add(id);
+  const variants = renderEffect(id, EFFECTS[id] as EffectSource, sampleRate).variants;
   send(
-    { type: "effect", id, variants: r.variants, loop: r.loop },
-    r.variants.map((v) => v.buffer),
+    { type: "sound", id, variants },
+    variants.map((v) => v.buffer),
   );
-  setTimeout(nextEffect, 0);
+}
+
+/** One sound per task, so song blocks asked for meanwhile are not held up. */
+function next(): void {
+  const id = queue.shift();
+  if (id === undefined) return;
+  render(id);
+  setTimeout(next, 0);
+}
+
+function enqueue(bank: Bank): void {
+  const idle = queue.length === 0;
+  for (const [id, source] of Object.entries(EFFECTS)) if (bankOf(source) === bank) queue.push(id);
+  if (idle) setTimeout(next, 0);
 }
 
 scope.onmessage = (e) => {
@@ -57,21 +104,26 @@ scope.onmessage = (e) => {
         decks.clear();
         pool.length = 0;
         queue.length = 0;
+        done.clear();
+        send({ type: "catalog", cues: catalog() });
+        enqueue("core");
+        enqueue("combat");
         break;
-      case "effects":
-        // One effect per task, so song blocks asked for meanwhile are not held up.
-        queue.push(...Object.keys(EFFECTS));
-        setTimeout(nextEffect, 0);
+      case "bank":
+        enqueue(m.bank);
+        break;
+      case "render":
+        if (m.id in EFFECTS) render(m.id);
         break;
       case "start": {
-        const seed = m.seed;
-        if (m.kind === "song") {
-          const source = SONGS[m.id as keyof typeof SONGS];
+        if (m.kind === "song" || m.kind === "jingle") {
+          const source =
+            m.kind === "jingle" ? JINGLES[m.id]?.song : SONGS[m.id as keyof typeof SONGS];
           if (!source) throw new Error(`unknown song ${m.id}`);
           const song = compileSong(m.id, source);
           decks.set(m.deck, {
             gen: m.gen,
-            player: new SongPlayer(song, sampleRate, seed),
+            player: new SongPlayer(song, sampleRate, m.seed, m.part),
             stems: song.stems.length,
           });
           send({
@@ -84,6 +136,7 @@ scope.onmessage = (e) => {
               bpm: source.bpm,
               rowsPerBar: song.rowsPerBar,
               loop: source.loop,
+              parts: Object.keys(source.parts ?? {}),
             },
           });
         } else {
@@ -91,16 +144,29 @@ scope.onmessage = (e) => {
           if (!source) throw new Error(`unknown ambient bed ${m.id}`);
           decks.set(m.deck, {
             gen: m.gen,
-            player: new BedPlayer(source, sampleRate, seed),
+            player: new BedPlayer(source, sampleRate, m.seed),
             stems: 1,
           });
           send({
             type: "started",
             deck: m.deck,
             gen: m.gen,
-            info: { title: source.title, stems: ["bed"], bpm: 0, rowsPerBar: 0, loop: 0 },
+            info: {
+              title: source.title,
+              stems: ["bed"],
+              bpm: 0,
+              rowsPerBar: 0,
+              loop: 0,
+              parts: [],
+            },
           });
         }
+        break;
+      }
+      case "part": {
+        const deck = decks.get(m.deck);
+        if (deck && deck.gen === m.gen && deck.player instanceof SongPlayer)
+          deck.player.setPart(m.part);
         break;
       }
       case "stop":
