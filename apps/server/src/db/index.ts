@@ -8,6 +8,9 @@ export { schema };
 
 export function createDb(url: string) {
   const pool = new pg.Pool({ connectionString: url, max: 10 });
+  // An idle connection dropped by the server (restart, forced disconnect) must not crash the
+  // process; the pool reconnects on the next query.
+  pool.on("error", (error) => console.error("database connection lost:", error.message));
   const db = drizzle(pool, { schema });
   return Object.assign(db, { pool });
 }
