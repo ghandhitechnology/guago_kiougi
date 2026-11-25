@@ -458,7 +458,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       this.between.push({ t: "revive", player: pawn.player.id, target: target.player.id });
     });
     // 복습: a boss the server freed, again, alone, in a private copy of its arena (raid/replay.ts).
-    this.onMessage(REPLAY_MESSAGE, replayMessage, (client, boss) => {
+    this.onMessage(REPLAY_MESSAGE, replayMessage, (client, { boss }) => {
       const pawn = this.pawns.get(client.sessionId);
       const def = raidBoss(boss);
       const target = def && builtMap(def.map);
