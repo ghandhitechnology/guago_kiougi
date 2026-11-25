@@ -18,6 +18,8 @@ export interface TextFieldOptions {
   readonly autocomplete?: string;
   readonly enterKeyHint?: "next" | "go" | "done" | "send";
   readonly onChange?: (value: string) => void;
+  /** Rows of text the box shows, wrapping long writing (1 scrolls sideways). Size `h` to fit. */
+  readonly lines?: number;
   /** Enter in the box. */
   readonly onSubmit?: () => void;
 }
@@ -27,6 +29,8 @@ const LABEL_FONT: FontKey = "galmuri9";
 /** Space the label takes above the box. */
 export const FIELD_LABEL_H = 13;
 const PAD_X = 5;
+/** Row pitch of a box that wraps. */
+const LINE_GAP = 3;
 
 /**
  * An answer box. The real typing happens in a transparent DOM input laid exactly over it, so
@@ -38,6 +42,9 @@ export class TextField extends Widget {
   private readonly opts: TextFieldOptions;
   private readonly box: Phaser.GameObjects.NineSlice;
   private readonly text: Label;
+  /** The rows under the first, in a box that wraps. */
+  private readonly more: Label[] = [];
+  private readonly textY: number;
   private readonly caret: Phaser.GameObjects.Rectangle;
   private readonly under: Phaser.GameObjects.Rectangle;
   private readonly title: Label | undefined;
@@ -63,8 +70,17 @@ export class TextField extends Widget {
     const [l, r, t, b] = sliceOf("inset");
     this.box = scene.add.nineslice(0, top, "ui", "inset/idle", opts.w, h, l, r, t, b).setOrigin(0);
     const m = ink(FONT);
-    const textY = top + Math.floor((h - m.height) / 2) + 1;
+    const lines = opts.lines ?? 1;
+    const textY = lines > 1 ? top + 4 : top + Math.floor((h - m.height) / 2) + 1;
+    this.textY = textY;
     this.text = new Label(scene, PAD_X, textY, "", { font: FONT, color: "ink.dark" });
+    for (let i = 1; i < lines; i++) {
+      const row = new Label(scene, PAD_X, textY + i * (m.height + LINE_GAP), "", {
+        font: FONT,
+        color: "ink.dark",
+      });
+      this.more.push(row);
+    }
     this.caret = scene.add
       .rectangle(PAD_X, textY - 1, 1, m.height + 2, paint("ink.dark"))
       .setOrigin(0)
@@ -73,7 +89,7 @@ export class TextField extends Widget {
       .rectangle(PAD_X, textY + m.height + 1, 0, 1, paint("navy.mid"))
       .setOrigin(0)
       .setVisible(false);
-    this.add([this.box, this.text.obj, this.under, this.caret]);
+    this.add([this.box, this.text.obj, ...this.more.map((l) => l.obj), this.under, this.caret]);
 
     this.field = this.makeInput();
     scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.track, this);
@@ -238,6 +254,10 @@ export class TextField extends Widget {
 
   /** Draws the value, scrolled so the caret stays inside the box. */
   private draw(): void {
+    if (this.more.length > 0) {
+      this.drawRows();
+      return;
+    }
     const el = this.field;
     const shownText = this.opts.password ? "●".repeat(el.value.length) : el.value;
     const chars = [...shownText];
@@ -260,6 +280,57 @@ export class TextField extends Widget {
       this.under
         .setVisible(end > a)
         .setX(x0)
+        .setSize(Math.max(0, cx - x0 - 1), 1);
+    } else this.under.setVisible(false);
+  }
+
+  /** A box that wraps: the value broken into rows, scrolled a row at a time to keep the caret. */
+  private drawRows(): void {
+    const el = this.field;
+    const chars = [...el.value];
+    const caretAt = Math.min(el.selectionStart ?? chars.length, chars.length);
+    const room = this.boxW - PAD_X * 2;
+    const width = (a: number, b: number) => measure(this.scene, FONT, chars.slice(a, b).join(""));
+    // Row starts, breaking after the last space that fits, or mid-word when none does.
+    const starts = [0];
+    let at = 0;
+    while (at < chars.length) {
+      let end = at + 1;
+      while (end < chars.length && width(at, end + 1) <= room) end++;
+      if (end < chars.length) {
+        const space = chars.lastIndexOf(" ", end - 1);
+        if (space > at) end = space + 1;
+        starts.push(end);
+      }
+      at = end;
+    }
+    let row = 0;
+    while (row + 1 < starts.length && (starts[row + 1] ?? 0) <= caretAt) row++;
+    const rows = [this.text, ...this.more];
+    const first = Math.max(0, row - rows.length + 1);
+    rows.forEach((label, i) => {
+      const a = starts[first + i];
+      label.set(
+        a === undefined
+          ? ""
+          : chars
+              .slice(a, starts[first + i + 1])
+              .join("")
+              .trimEnd(),
+      );
+    });
+    const pitch = ink(FONT).height + LINE_GAP;
+    const rowAt = starts[row] ?? 0;
+    const y = this.textY + (row - first) * pitch;
+    const cx = PAD_X + (caretAt > rowAt ? width(rowAt, caretAt) + 1 : 0);
+    this.caret.setPosition(cx, y - 1);
+    this.blink = 0;
+    if (this.composing && document.activeElement === el) {
+      const a = Math.max(this.composing.from, rowAt);
+      const x0 = PAD_X + (a > rowAt ? width(rowAt, a) + 1 : 0);
+      this.under
+        .setVisible(caretAt > a)
+        .setPosition(x0, y + ink(FONT).height + 1)
         .setSize(Math.max(0, cx - x0 - 1), 1);
     } else this.under.setVisible(false);
   }

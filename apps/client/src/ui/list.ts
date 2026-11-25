@@ -34,6 +34,13 @@ export interface ListOptions {
 
 const BAR_W = 5;
 
+/** A row's hit zone, kept across redraws so a hover that redraws the row keeps the tap. */
+interface Hit {
+  readonly zone: Phaser.GameObjects.Zone;
+  index: number;
+  tap: () => void;
+}
+
 /**
  * Rows ruled on the page. The row under the cursor gets a highlighter pass, a chosen row a
  * red-pen loop. Longer lists scroll a whole row at a time, with an eraser for a scroll thumb.
@@ -43,6 +50,8 @@ export class List extends Widget {
   private readonly rowH: number;
   private readonly slots: Phaser.GameObjects.Container[] = [];
   private readonly backs: Phaser.GameObjects.NineSlice[] = [];
+  /** Each slot's hit zones, reused in the order its row marks them. */
+  private readonly hits: Hit[][] = [];
   private readonly pen: RedPen;
   private readonly thumb: Phaser.GameObjects.NineSlice | undefined;
   private rows: readonly ListRow[];
@@ -68,6 +77,7 @@ export class List extends Widget {
       const slot = scene.add.container(0, i * rowH);
       this.backs.push(back);
       this.slots.push(slot);
+      this.hits.push([]);
       this.add([back, slot]);
     }
     this.pen = new RedPen(scene);
@@ -186,30 +196,51 @@ export class List extends Widget {
     const row = this.rows[index];
     const into = this.slots[slot] as Phaser.GameObjects.Container;
     const back = this.backs[slot] as Phaser.GameObjects.NineSlice;
+    const pool = this.hits[slot] as Hit[];
+    // The zones step out before the row is emptied, so the one under a finger outlives the redraw.
+    for (const hit of pool) into.remove(hit.zone);
     into.removeAll(true);
     const lit = this.focused && index === this.cursor;
     back.setFrame(lit ? "row/hover" : "row/idle").setVisible(row !== undefined);
-    if (!row) return;
+    let used = 0;
+    // Zones this row did not mark wait in the slot, switched off, for a later row.
+    const rest = () => {
+      for (const hit of pool.slice(used)) into.add(hit.zone.disableInteractive());
+    };
+    if (!row) {
+      rest();
+      return;
+    }
     const scene = this.scene;
     row.draw(into, back.width, this.rowH, {
       scene,
       focused: lit,
       zone: (x, y, w, h, onTap) => {
-        const z = scene.add.zone(x, y, w, h).setOrigin(0).setInteractive({ useHandCursor: true });
-        z.on("pointerover", () => {
-          if (!this.enabled()) return;
-          this.ctx.scope.focus(this, "pointer");
-          if (this.cursor !== index) {
-            this.cursor = index;
-            this.redraw();
-          }
-        });
-        z.on("pointerup", () => {
-          if (this.enabled()) onTap();
-        });
-        into.add(z);
+        let hit = pool[used];
+        if (!hit) {
+          const made: Hit = { zone: scene.add.zone(0, 0, 1, 1).setOrigin(0), index, tap: onTap };
+          made.zone.on("pointerover", () => {
+            if (!this.enabled()) return;
+            this.ctx.scope.focus(this, "pointer");
+            if (this.cursor !== made.index) {
+              this.cursor = made.index;
+              this.redraw();
+            }
+          });
+          made.zone.on("pointerup", () => {
+            if (this.enabled()) made.tap();
+          });
+          pool.push(made);
+          hit = made;
+        }
+        used++;
+        hit.index = index;
+        hit.tap = onTap;
+        hit.zone.setPosition(x, y).setSize(w, h).setInteractive({ useHandCursor: true });
+        into.add(hit.zone);
       },
     });
+    rest();
   }
 
   private placePen(draw: boolean): void {

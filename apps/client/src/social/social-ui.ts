@@ -1,7 +1,6 @@
 import { PARTY_MAX, type SocialEvent } from "@guago/shared";
 import type * as Phaser from "phaser";
 import type { ChatPanel } from "../chat/panel.ts";
-import { watchFight } from "../hud/fight.ts";
 import type { Hud } from "../hud/hud.ts";
 import { t } from "../i18n/index.ts";
 import { registerMenuTab } from "../menu/notebook.ts";
@@ -83,13 +82,10 @@ export function startSocialUi(
   current = { link, card, whisper, openBoard, duels };
   registerSocialTabs();
 
-  let fighting = false;
-  const unfight = watchFight((live) => {
-    fighting = live;
-  });
-  // A body tapped mid-fight belongs to the fight; nameplates always open the card.
+  // A body tapped in a hunting field belongs to the fight; nameplates always open the card. The
+  // fight view runs on every map, so whether a fight is live says nothing about the place.
   worldView.onNameTap = (sid, name, kind, part) => {
-    if (kind !== "player" || (part === "body" && fighting)) return;
+    if (kind !== "player" || (part === "body" && worldView.map?.field)) return;
     card.open({ name, sid });
   };
   if (opts.chat) {
@@ -133,7 +129,6 @@ export function startSocialUi(
     toggleWheel: () => wheel.toggle(),
     openBoard,
     destroy() {
-      unfight();
       offSlips();
       offNews();
       offModeration();

@@ -128,6 +128,9 @@ export class TradeWindow {
   /** Writes the time left and the wallet; once a second, and as the window opens. */
   private tick: () => void = () => {};
   private notice!: Label;
+  /** The notice's fade and the once-a-second clock, taken down with the window. */
+  private noticeFade: Phaser.Time.TimerEvent | undefined;
+  private clockTimer: Phaser.Time.TimerEvent | undefined;
   private finished = false;
   private closing = false;
   private readonly offInv: () => void;
@@ -330,7 +333,7 @@ export class TradeWindow {
       this.clockLabel.at(this.seals.me.x - 6 - this.clockLabel.width, footY + 6);
       paintWallet();
     };
-    this.scene.time.addEvent({ delay: 1000, loop: true, callback: this.tick });
+    this.clockTimer = this.scene.time.addEvent({ delay: 1000, loop: true, callback: this.tick });
   }
 
   private myName(): string {
@@ -351,11 +354,9 @@ export class TradeWindow {
   private say(text: string, color: string, ms = 3200): void {
     this.notice.set(text).color(color);
     this.notice.obj.setAlpha(1);
-    if (ms > 0) {
-      this.scene.time.delayedCall(ms, () => {
-        if (this.notice.obj.text === text) fade(this.notice.obj, 0, 300);
-      });
-    }
+    this.noticeFade?.remove();
+    this.noticeFade =
+      ms > 0 ? this.scene.time.delayedCall(ms, () => fade(this.notice.obj, 0, 300)) : undefined;
   }
 
   /** Both trays, the seals as they stand, and the bag. */
@@ -687,6 +688,8 @@ export class TradeWindow {
   close(): void {
     if (this.closing) return;
     this.closing = true;
+    this.noticeFade?.remove();
+    this.clockTimer?.remove();
     this.offInv();
     this.card.hide(true);
     popScope(this.scope);

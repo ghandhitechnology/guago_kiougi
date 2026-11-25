@@ -116,7 +116,7 @@ class MarketPage {
         turnPage(this.body, () => void this.show());
       },
     });
-    const wallet = new Label(ctx.scene, 0, 6, inventory.moneyText("pinecone"), {
+    const wallet = new Label(ctx.scene, 0, 6, amount(inventory.moneyText("pinecone")), {
       font: "galmuri9",
       color: "stone.dark",
     });
@@ -126,7 +126,7 @@ class MarketPage {
     this.body = ctx.scene.add.container(0, 24);
     this.root.add([seg, coin, wallet.obj, rule, this.body]);
     const off = inventory.watch(() => {
-      wallet.set(inventory.moneyText("pinecone"));
+      wallet.set(amount(inventory.moneyText("pinecone")));
       wallet.at(size.w - 8 - wallet.width, 6);
       coin.setX(wallet.obj.x - 14);
       if (this.section === "sell" && !this.selling) void this.show();
@@ -262,7 +262,7 @@ class MarketPage {
         turnPage(this.body, () => this.drawBrowse());
       },
     });
-    const cell = new ItemCell(ctx, 8, 16);
+    const cell = new ItemCell(ctx, 8, 16, { smallCount: true });
     cell.set({ icon: good.icon, grade: l.grade, ...(l.qty > 1 ? { count: l.qty } : {}) });
     const name = new Label(scene, 38, 18, good.name, {
       font: "galmuri11-bold",
@@ -419,18 +419,19 @@ class MarketPage {
       });
     }
     const cols = Math.floor((this.size.w - 16 + 2) / (CELL + 2));
-    entries.slice(0, cols * 5).forEach((e, i) => {
+    // Whole rows of wells, so the empty ones close the grid round the bag.
+    const rows = Math.min(5, Math.max(1, Math.ceil(entries.length / cols)));
+    for (let i = 0; i < rows * cols; i++) {
+      const e = entries[i];
       const cell = new ItemCell(
         ctx,
         8 + (i % cols) * (CELL + 2),
         Math.floor(i / cols) * (CELL + 2),
-        {
-          onPress: () => e.pick?.(),
-        },
+        { smallCount: true, ...(e ? { onPress: () => e.pick?.() } : {}) },
       );
-      cell.set(e.cell);
+      cell.set(e?.cell);
       this.body.add(cell);
-    });
+    }
   }
 
   private startSell(what: { item?: ItemView; stack?: string }): void {
@@ -453,7 +454,7 @@ class MarketPage {
         turnPage(this.body, () => this.bag());
       },
     });
-    const cell = new ItemCell(ctx, 8, 16);
+    const cell = new ItemCell(ctx, 8, 16, { smallCount: true });
     cell.set({
       icon: good.icon,
       ...(what.item ? { grade: what.item.grade } : {}),

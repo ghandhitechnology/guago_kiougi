@@ -100,7 +100,15 @@ export class Toaster {
   private readonly queue: string[] = [];
   private busy = false;
   private shown:
-    | { box: Phaser.GameObjects.Container; w: number; h: number; landed: boolean; leaving: boolean }
+    | {
+        box: Phaser.GameObjects.Container;
+        text: string;
+        w: number;
+        h: number;
+        landed: boolean;
+        leaving: boolean;
+        stay?: Phaser.Time.TimerEvent;
+      }
     | undefined;
 
   constructor(scene: Phaser.Scene) {
@@ -113,6 +121,14 @@ export class Toaster {
     this.busy = true;
     // A tick later, so a sheet that toasts and then closes leaves the spot to what is under it.
     this.scene.time.delayedCall(0, () => this.next());
+  }
+
+  /** A notice no longer true: out of the queue, or up and away now if it is showing. */
+  drop(text: string): void {
+    for (let i = this.queue.indexOf(text); i >= 0; i = this.queue.indexOf(text)) {
+      this.queue.splice(i, 1);
+    }
+    if (this.shown?.text === text) this.leave(this.shown);
   }
 
   /** The spot changed: a toast on screen slides to the new one. */
@@ -139,7 +155,7 @@ export class Toaster {
       return;
     }
     const n = note(this.scene, text, Math.min(300, spot().w - 13));
-    const s = { box: n.box, w: n.w, h: n.h, landed: false, leaving: false };
+    const s = { box: n.box, text, w: n.w, h: n.h, landed: false, leaving: false };
     this.shown = s;
     const at = this.rest(n.w, n.h);
     n.box.setPosition(at.x, -n.h - 2).setDepth(2000);
@@ -149,13 +165,17 @@ export class Toaster {
 
   private landed(s: NonNullable<Toaster["shown"]>): void {
     s.landed = true;
-    this.scene.time.delayedCall(2200, () => {
-      s.leaving = true;
-      slide(s.box, { x: s.box.x, y: -s.h - 2 }, 140, () => {
-        s.box.destroy();
-        if (this.shown === s) this.shown = undefined;
-        this.next();
-      });
+    if (!s.leaving) s.stay = this.scene.time.delayedCall(2200, () => this.leave(s));
+  }
+
+  private leave(s: NonNullable<Toaster["shown"]>): void {
+    if (s.leaving) return;
+    s.leaving = true;
+    s.stay?.remove();
+    slide(s.box, { x: s.box.x, y: -s.h - 2 }, 140, () => {
+      s.box.destroy();
+      if (this.shown === s) this.shown = undefined;
+      this.next();
     });
   }
 }
@@ -169,6 +189,11 @@ export function setToaster(t: Toaster | undefined): void {
 /** Shows a short notice, above every scene, where the open screen keeps it off its controls. */
 export function toast(text: string): void {
   toaster?.push(text);
+}
+
+/** Takes back a notice that is no longer true, queued or on screen. */
+export function untoast(text: string): void {
+  toaster?.drop(text);
 }
 
 export interface ModalAction {

@@ -14,9 +14,9 @@ import { t } from "../../i18n/index.ts";
 import type { MenuTab } from "../../menu/notebook.ts";
 import { cue } from "../../sound/audio.ts";
 import { Button } from "../../ui/button.ts";
-import { toast } from "../../ui/overlay.ts";
+import { toast, untoast } from "../../ui/overlay.ts";
 import { Label } from "../../ui/text.ts";
-import { paint } from "../../ui/theme.ts";
+import { paint, sliceOf } from "../../ui/theme.ts";
 import type { Ctx } from "../../ui/widget.ts";
 import { worldUi } from "../../ui/world-ui.ts";
 import { type FightFeed, onWorld } from "../../world-events.ts";
@@ -282,6 +282,11 @@ export class Duels {
     const watching = side === 0;
     if (!watching && now.phase !== same?.phase) {
       if (now.phase === "arriving") say("duel.floor.arriving");
+      // Everyone is in: the call to come in goes, whether it showed yet or still waited its turn.
+      else {
+        const arriving = line("duel.floor.arriving");
+        if (arriving) untoast(arriving);
+      }
       if (now.phase === "fight") say("duel.floor.start", { count: now.round });
     }
     if (!same || (watching && !this.atRing())) return;
@@ -631,19 +636,25 @@ class DuelPage {
       });
     }
 
-    // 권 사감's rules, ruled off under the buttons.
-    let ry = by + 46;
-    this.body.add(scene.add.rectangle(16, ry - 8, w - 32, 1, paint("stone.light")).setOrigin(0));
-    for (const rule of RULES) {
+    // 권 사감's notice, pinned to the page under the buttons: her rules in red pen, small.
+    const rules = RULES.flatMap((rule) => {
       const text = line(`duel.rules.${rule}`);
-      if (!text) continue;
-      const l = new Label(scene, 24, ry, text, {
-        font: "galmuri9",
-        color: "ink.dark",
-        width: w - 48,
-      });
-      this.body.add(l.obj);
-      ry += l.height + 4;
-    }
+      return text ? [new Label(scene, 0, 0, text, { font: "galmuri9", color: "red.dark" })] : [];
+    });
+    if (rules.length === 0) return;
+    const sw = Math.min(w - 32, Math.max(...rules.map((l) => l.width)) + 18);
+    const sh = rules.length * 11 + 14;
+    const sx = cx - Math.round(sw / 2);
+    const sy = by + 42;
+    const [l, r, tt, bt] = sliceOf("notice-paper");
+    this.body.add([
+      scene.add.rectangle(sx + 2, sy + 2, sw, sh, paint("stone.light")).setOrigin(0),
+      scene.add.nineslice(sx, sy, "ui", "notice-paper/idle", sw, sh, l, r, tt, bt).setOrigin(0),
+      scene.add.image(sx + Math.floor(sw / 2) - 3, sy - 2, "ui", "tack-red/idle").setOrigin(0),
+    ]);
+    rules.forEach((label, i) => {
+      label.at(sx + 9, sy + 8 + i * 11);
+      this.body.add(label.obj);
+    });
   }
 }

@@ -125,14 +125,15 @@ export class EmoteWheel {
       .setInteractive();
     catcher.on("pointerdown", () => this.close());
     this.catcher = catcher;
-    const hub = scene.add.image(0, 0, "ui", "wheel-hub/idle");
+    // The UI atlas pins frames at their top left; the wheel turns about centres.
+    const hub = scene.add.image(0, 0, "ui", "wheel-hub/idle").setOrigin(0.5);
     root.add(hub);
     const wheel = EMOTES.filter((e) => e.wheel).slice(0, 8);
     this.slots = wheel.map((e, i) => {
       const a = -Math.PI / 2 + (i * 2 * Math.PI) / wheel.length;
       const at = { x: Math.round(Math.cos(a) * RADIUS), y: Math.round(Math.sin(a) * RADIUS) };
-      const back = scene.add.image(0, 0, "ui", "wheel-slot/idle");
-      const icon = scene.add.image(0, 0, "ui", `emote-bubble/${e.id}0`);
+      const back = scene.add.image(0, 0, "ui", "wheel-slot/idle").setOrigin(0.5);
+      const icon = scene.add.image(0, 0, "ui", `emote-bubble/${e.id}0`).setOrigin(0.5);
       const slot = scene.add.container(0, 0, [back, icon]).setScale(0.3).setAlpha(0);
       const zone = scene.add
         .zone(-SLOT / 2, -SLOT / 2, SLOT, SLOT)
@@ -164,6 +165,8 @@ export class EmoteWheel {
     this.name = new Label(scene, 0, 0, "", { font: "galmuri11-bold", color: "stone.bright" });
     root.add([this.shadow.obj, this.name.obj]);
     this.hot = -1;
+    // The world's plates and bubbles step back under the wheel.
+    worldView.overlays?.hush(true);
     sound("open");
   }
 
@@ -175,6 +178,7 @@ export class EmoteWheel {
     this.catcher = undefined;
     this.slots = [];
     this.hot = -1;
+    worldView.overlays?.hush(false);
     if (now) {
       root.destroy();
       return;

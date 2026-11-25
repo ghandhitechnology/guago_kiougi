@@ -172,7 +172,8 @@ export class PlayerCard {
 
     const scope = new FocusScope();
     const ctx = { scene, scope };
-    const root = scene.add.container(0, 0).setDepth(760);
+    // Over the notebook and the 대자보 it can be opened from; under trades and modals.
+    const root = scene.add.container(0, 0).setDepth(860);
     this.root = root;
 
     // The band: name and level on navy.
@@ -302,7 +303,7 @@ export class PlayerCard {
     const z = this.scene.add
       .zone(0, 0, this.scene.scale.width, this.scene.scale.height)
       .setOrigin(0)
-      .setDepth(759)
+      .setDepth(859)
       .setInteractive();
     z.on("pointerdown", () => this.close());
     this.catcher = z;

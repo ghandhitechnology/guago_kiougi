@@ -32,6 +32,7 @@ export function builtView(map: BuiltMap): MapView {
     id: map.id,
     name: map.name,
     collision: map.collision,
+    field: map.zones.some((z) => z.kind === "monsters"),
     surfaceAt: (tx, ty) => surfaceOf(legend[rows[ty]?.[tx] ?? ""]?.terrain),
     portals: map.portals
       .filter((p) => p.built)

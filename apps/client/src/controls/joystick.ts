@@ -1,5 +1,6 @@
 import * as Phaser from "phaser";
 import { screen } from "../ui/screen.ts";
+import { worldView } from "../world/view.ts";
 import { stick } from "./move.ts";
 
 /** How far the knob travels from the base's centre, in game pixels. */
@@ -47,6 +48,13 @@ export class Joystick {
     const a = area();
     this.zone = scene.add.zone(a.x, a.y, a.w, a.h).setOrigin(0).setDepth(0);
     this.zone.setInteractive();
+    // A thumb landing on someone's nameplate or body is a tap on them: the world below takes it.
+    const input = this.zone.input;
+    if (input) {
+      const inside = input.hitAreaCallback;
+      input.hitAreaCallback = (hit, x, y, obj) =>
+        inside(hit, x, y, obj) && !worldView.overlays?.tappableAt(this.zone.x + x, this.zone.y + y);
+    }
     this.zone.on("pointerdown", (p: Phaser.Input.Pointer) => this.start(p));
     scene.input.on(Phaser.Input.Events.POINTER_MOVE, this.move, this);
     scene.input.on(Phaser.Input.Events.POINTER_UP, this.end, this);

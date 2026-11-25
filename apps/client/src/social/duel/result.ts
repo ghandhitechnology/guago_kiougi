@@ -58,21 +58,31 @@ export class ResultCard {
     const at = (px: number, py: number) => ({ x: 7 + px, y: page.top + py });
 
     // The rounds: who took each (an empty socket for a draw), how it ended, how long it ran.
+    // However many were played fit the page: the gaps close up first, then the times go.
+    const room = W - 11 - 12;
+    const times = result.rounds.map((r) => minutes(r.seconds));
+    const timed = times.reduce((sum, m) => sum + 20 + measure(scene, "galmuri9", m), 0);
+    const n = result.rounds.length;
+    const withTimes = timed + 6 * (n - 1) <= room;
+    const gap =
+      n > 1 ? Math.min(10, Math.floor((room - (withTimes ? timed : 18 * n)) / (n - 1))) : 0;
     let rx = 6;
     const ry = roundsY;
-    for (const r of result.rounds) {
+    result.rounds.forEach((r, i) => {
       const p = at(rx, ry);
       const side = r.winner > 0 ? SIDE_CHIP[(r.winner - 1) as 0 | 1] : "duel-pip/off";
       panel.add(scene.add.image(p.x, p.y + 1, "ui", side).setOrigin(0));
       const end = r.end === "ko" ? "burst" : r.end === "time" ? "clock" : "flag";
       panel.add(scene.add.image(p.x + 8, p.y, "ui", `duel-icon/${end}`).setOrigin(0));
-      const secs = new Label(scene, p.x + 20, p.y + 1, minutes(r.seconds), {
+      rx += 18 + gap;
+      if (!withTimes) return;
+      const secs = new Label(scene, p.x + 20, p.y + 1, times[i] ?? "", {
         font: "galmuri9",
         color: "stone.dark",
       });
       panel.add(secs.obj);
-      rx += 20 + secs.width + 10;
-    }
+      rx += 2 + secs.width;
+    });
 
     const rule = at(4, ruleY);
     panel.add(

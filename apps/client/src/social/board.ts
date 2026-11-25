@@ -11,7 +11,7 @@ import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { fade, slide } from "../ui/motion.ts";
 import { holdToasts, toast } from "../ui/overlay.ts";
 import { sound } from "../ui/sound.ts";
-import { Label, wrap } from "../ui/text.ts";
+import { Label, measure, wrap } from "../ui/text.ts";
 import { TextField } from "../ui/textfield.ts";
 import { paint, sliceOf } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
@@ -33,6 +33,8 @@ const PENS = ["ink.dark", "navy.dark", "stone.deep"] as const;
 
 const NOTE_W = 100;
 const NOTE_H = 74;
+/** Rows of writing a note holds above its foot. */
+const NOTE_LINES = 4;
 const ROWS = 2;
 /** The 층장's notice frame, a notice and its lip; the column it hangs in down the left. */
 const FRAME_W = 112;
@@ -45,6 +47,16 @@ function hash(n: number, salt: number): number {
   h ^= h >>> 13;
   h = Math.imul(h, 0xc2b2ae35);
   return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** `text` cut to `width` in galmuri9, ending in an ellipsis when anything was cut. */
+function fit(scene: Phaser.Scene, text: string, width: number): string {
+  if (measure(scene, "galmuri9", text) <= width) return text;
+  const chars = [...text.replace(/…$/, "")];
+  while (chars.length > 0 && measure(scene, "galmuri9", `${chars.join("").trimEnd()}…`) > width) {
+    chars.pop();
+  }
+  return `${chars.join("").trimEnd()}…`;
 }
 
 let lastCat: BoardCategory = "party";
@@ -298,17 +310,6 @@ export class Board {
         ease: "Back.Out",
       });
     });
-    if (shown.length === 0) {
-      const said = line(`social.board.empty-${this.cat}`);
-      if (said) {
-        const label = new Label(this.scene, area.x + gx, area.y + gy, said, {
-          font: "galmuri11",
-          color: "wood.deep",
-          width: area.w - gx * 2,
-        });
-        this.notes.add(label.obj);
-      }
-    }
     this.pager.next.setEnabled(start + this.perView < this.posts.length || this.more);
     this.pager.first.setEnabled(this.view > 0);
   }
@@ -417,7 +418,11 @@ export class Board {
     }
     const pen = pinned ? "red.dark" : (PENS[hash(post.id, 4) % PENS.length] ?? "ink.dark");
     const pad = pinned ? 8 : 6;
-    const lines = wrap(scene, "galmuri9", post.text, NOTE_W - pad * 2).slice(0, 4);
+    const room = NOTE_W - pad * 2 - (post.section === "chat" && !pinned ? 6 : 0);
+    const all = wrap(scene, "galmuri9", post.text, room);
+    const lines = all.slice(0, NOTE_LINES);
+    // A note longer than the paper ends its last row in an ellipsis, in the same pen.
+    if (all.length > NOTE_LINES) lines[NOTE_LINES - 1] = fit(scene, `${lines.at(-1)}…`, room);
     lines.forEach((text, i) => {
       parts.push(
         new Label(scene, pad + (post.section === "chat" && !pinned ? 6 : 0), 8 + i * 11, text, {
@@ -426,13 +431,19 @@ export class Board {
         }).obj,
       );
     });
-    const who = new Label(scene, 0, 0, post.author.name, { font: "galmuri9", color: "stone.dark" });
-    who.at(NOTE_W - pad - who.width, NOTE_H - 13);
+    // The foot: time left on the left; on the right who wrote it, or 떼기 on the player's own.
     const left = new Label(scene, pad, NOTE_H - 13, timeLeft(post.expiresAt), {
       font: "galmuri9",
       color: "stone.dark",
     });
-    parts.push(who.obj, left.obj);
+    parts.push(left.obj);
+    const mine = post.author.id === this.link.me;
+    if (!mine) {
+      const name = fit(scene, post.author.name, NOTE_W - pad * 2 - left.width - 6);
+      const who = new Label(scene, 0, 0, name, { font: "galmuri9", color: "stone.dark" });
+      who.at(NOTE_W - pad - who.width, NOTE_H - 13);
+      parts.push(who.obj);
+    }
     // Held up by a thumbtack, or by tape across the top.
     if (pinned) {
       parts.push(scene.add.image(4, -2, "ui", "tack-red/idle").setOrigin(0));
@@ -446,12 +457,12 @@ export class Board {
       );
     }
     const root = scene.add.container(0, 0, parts);
-    if (post.author.id === this.link.me) {
+    if (mine) {
       const take = new Label(scene, 0, 0, t("board.remove"), {
         font: "galmuri9",
         color: "red.mid",
       });
-      take.at(Math.floor((NOTE_W - take.width) / 2), NOTE_H - 13);
+      take.at(NOTE_W - pad - take.width, NOTE_H - 13);
       const zone = scene.add
         .zone(take.obj.x - 4, NOTE_H - 16, take.width + 8, 16)
         .setOrigin(0)
@@ -475,8 +486,8 @@ export class Board {
     const cat = this.cat;
     openSheet(this.scene, {
       title: term("board", cat),
-      w: 300,
-      h: 96,
+      w: 360,
+      h: 198,
       depth: 920,
       build: (sheet) => {
         const { ctx, panel, page } = sheet;
@@ -489,6 +500,8 @@ export class Board {
         place();
         const field = new TextField(ctx, page.x + 8, page.y + 20, {
           w: page.w - 16,
+          h: 118,
+          lines: 8,
           maxLength: BOARD_POST_LENGTH,
           enterKeyHint: "send",
           onChange: (v) => {

@@ -16,6 +16,8 @@ export interface MapView {
   readonly collision: TileCollision;
   /** What the ground is made of at a tile. */
   surfaceAt(tx: number, ty: number): Surface;
+  /** A hunting field: monsters roam it, so a tap on a body there belongs to the fight. */
+  readonly field?: boolean;
   /** Doorways out, in tiles. */
   readonly portals: readonly {
     readonly x: number;

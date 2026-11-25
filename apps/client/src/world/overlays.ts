@@ -28,12 +28,19 @@ const PLATE_Y = 2;
 const PLATE_H = 13;
 /** The club line's height: a strip round 9 px letters and the 6×6 crest. */
 const TAG_H = 11;
+/** Plates and bubbles while a wheel or the like is open over them. */
+const HUSHED = 0.25;
 /** Rows between two plates stacked in a crowd. */
 const PLATE_GAP = 1;
 /** Feet this close keep the stacking order they had, so a crowd's plates do not swap back and forth. */
 const ORDER_SLACK = 3;
 /** How far a plate may slide sideways to clear another instead of stepping down below it. */
 const PLATE_SLIDE = 28;
+/** Rows a plate may step down below its owner's feet; past them it slides this far instead. */
+const PLATE_ROWS = 2;
+const PLATE_SLIDE_FAR = 64;
+/** A plate in a crowd too thick to clear, faded under the rest rather than stacked in a tower. */
+const CROWDED = 0.35;
 /**
  * A plate keeps last frame's spot while it is free and at most this much farther than the best,
  * so feet that jitter a pixel at rest never flip it between two spots.
@@ -67,6 +74,10 @@ interface Plate {
   to: { x: number; y: number };
   /** The offset drawn now, eased toward `to`. */
   shown: { x: number; y: number };
+  /** No free spot within reach: faded, under the others. */
+  crowded: boolean;
+  /** Its alpha, eased toward `CROWDED` or 1. */
+  fade: number;
 }
 
 interface Bubble {
@@ -90,6 +101,9 @@ export class WorldOverlays {
   private prompt: Phaser.GameObjects.Image | undefined;
   private promptAt = { x: 0, y: 0 };
   private clock = 0;
+  private hushed = false;
+  /** The plates' share of their alpha under a hush, eased. */
+  private hushK = 1;
   private readonly unpeople: () => void;
 
   constructor(scene: Phaser.Scene) {
@@ -120,6 +134,8 @@ export class WorldOverlays {
         y: 0,
         to: { x: 0, y: 0 },
         shown: { x: 0, y: 0 },
+        crowded: false,
+        fade: 1,
       };
       if (kind !== "self") {
         back.setInteractive({ useHandCursor: true });
@@ -226,7 +242,8 @@ export class WorldOverlays {
     });
     this.bubbles.push(bubble);
     root.setScale(0.6).setAlpha(0);
-    this.scene.tweens.add({ targets: root, scale: 1, alpha: 1, duration: 120, ease: "Back.Out" });
+    const alpha = this.hushed ? HUSHED : 1;
+    this.scene.tweens.add({ targets: root, scale: 1, alpha, duration: 120, ease: "Back.Out" });
     this.layoutBubble(bubble, p);
   }
 
@@ -249,6 +266,31 @@ export class WorldOverlays {
     const anim = spriteAnim("emote-bubble", emoteId);
     if (this.scene.anims.exists(anim)) icon.play(anim);
     this.pushBubble(id, p, [back, tail, icon], w, h, 2400);
+  }
+
+  /**
+   * Whether a point on screen, in game pixels, lands on something that takes a tap here: another
+   * player's nameplate, or their body outside a hunting field. The thumb sticks let those through.
+   */
+  tappableAt(sx: number, sy: number): boolean {
+    const at = this.scene.cameras.main.getWorldPoint(sx, sy);
+    const inside = (o: Phaser.GameObjects.Components.GetBounds) =>
+      o.getBounds().contains(at.x, at.y);
+    for (const p of this.plates.values()) {
+      if (p.back.input?.enabled && inside(p.back)) return true;
+      if (p.body?.input?.enabled && !worldView.map?.field && inside(p.body)) return true;
+    }
+    return false;
+  }
+
+  /** Fades every plate and bubble back while something is opened over them, and up again. */
+  hush(on: boolean): void {
+    if (on === this.hushed) return;
+    this.hushed = on;
+    // Plates ease there in the frame's placing; bubbles fade here.
+    const roots = this.bubbles.filter((b) => !b.leaving).map((b) => b.root);
+    if (roots.length)
+      this.scene.tweens.add({ targets: roots, alpha: on ? HUSHED : 1, duration: 100 });
   }
 
   /** Taps and long presses on a nameplate or a body ask the world view's listener. */
@@ -380,57 +422,67 @@ export class WorldOverlays {
     }
     const placed: Box[] = [];
     const glide = Math.min(1, delta / 80);
+    const ease = (from: number, to: number, k = glide) =>
+      Math.abs(to - from) < 0.01 ? to : from + (to - from) * k;
+    this.hushK = ease(this.hushK, this.hushed ? HUSHED : 1, Math.min(1, delta / 60));
     for (const id of order) {
       const p = this.plates.get(id);
       if (!p) continue;
       const home: Box = { x: p.x - p.half, y: p.y + PLATE_Y, w: p.half * 2, h: p.h + PLATE_GAP };
       const at = (dx: number, dy: number): Box => ({ ...home, x: home.x + dx, y: home.y + dy });
       const free = (dx: number, dy: number) => !placed.some((r) => overlaps(at(dx, dy), r));
-      const cost = (dx: number, dy: number) => Math.abs(dx) + dy;
-      let best = { x: 0, y: 0 };
-      if (!free(0, 0)) {
-        // Edges of the plates in reach: sliding to one side of one, or stepping below one.
+      const cost = (o: { x: number; y: number }) => Math.abs(o.x) + o.y;
+      /** Two rows below the feet at most; past that a plate only slides. */
+      const drop = home.h * PLATE_ROWS;
+      /** The cheapest free spot beside or below the plates within `slide` sideways. */
+      const spot = (slide: number): { x: number; y: number } | undefined => {
         const near = placed.filter(
-          (r) =>
-            r.x < home.x + home.w + PLATE_SLIDE &&
-            home.x - PLATE_SLIDE < r.x + r.w &&
-            r.y + r.h > home.y,
+          (r) => r.x < home.x + home.w + slide && home.x - slide < r.x + r.w && r.y + r.h > home.y,
         );
         const xs = [0];
         for (const r of near) {
           const left = r.x - home.w - home.x;
           const right = r.x + r.w - home.x;
-          if (Math.abs(left) <= PLATE_SLIDE) xs.push(left);
-          if (Math.abs(right) <= PLATE_SLIDE) xs.push(right);
+          if (Math.abs(left) <= slide) xs.push(left);
+          if (Math.abs(right) <= slide) xs.push(right);
         }
-        const ys = [0, ...near.map((r) => r.y + r.h - home.y)];
-        let bestCost = Number.POSITIVE_INFINITY;
+        const ys = [0, ...near.map((r) => r.y + r.h - home.y)].filter((dy) => dy <= drop);
+        let found: { x: number; y: number } | undefined;
         for (const dy of ys) {
           for (const dx of xs) {
-            const c = cost(dx, dy);
+            const o = { x: dx, y: dy };
+            const c = cost(o);
+            const bc = found ? cost(found) : Number.POSITIVE_INFINITY;
             // Ties go down rather than sideways, then right rather than left.
             const better =
-              c < bestCost || (c === bestCost && (dy < best.y || (dy === best.y && dx > best.x)));
-            if (better && free(dx, dy)) {
-              best = { x: dx, y: dy };
-              bestCost = c;
-            }
+              c < bc || (found && c === bc && (dy < found.y || (dy === found.y && dx > found.x)));
+            if (better && free(dx, dy)) found = o;
           }
         }
-        // Below everything in reach, should no spot among those be free.
-        if (bestCost === Number.POSITIVE_INFINITY) {
-          best = { x: 0, y: Math.max(0, ...near.map((r) => r.y + r.h - home.y)) };
-        }
+        return found;
+      };
+      let best = { x: 0, y: 0 };
+      let crowded = false;
+      if (!free(0, 0)) {
+        const found = spot(PLATE_SLIDE) ?? spot(PLATE_SLIDE_FAR);
         const was = p.to;
-        if (free(was.x, was.y) && cost(was.x, was.y) <= cost(best.x, best.y) + PLATE_STAY) {
-          best = was;
-        }
+        const keep = !p.crowded && was.y <= drop && free(was.x, was.y);
+        if (found && !(keep && cost(was) <= cost(found) + PLATE_STAY)) best = found;
+        else if (keep) best = was;
+        else crowded = true;
       }
-      placed.push(at(best.x, best.y));
+      // A plate with no room left stays by its owner's feet, faded and under the others.
+      if (crowded !== p.crowded) {
+        p.crowded = crowded;
+        p.root.setDepth(crowded ? DEPTH - 1 : DEPTH);
+      }
+      if (!crowded) placed.push(at(best.x, best.y));
       p.to = best;
-      const ease = (from: number, to: number) =>
+      p.fade = ease(p.fade, crowded ? CROWDED : 1, Math.min(1, delta / 120));
+      p.root.setAlpha(p.fade * this.hushK);
+      const slideTo = (from: number, to: number) =>
         Math.abs(to - from) < 0.5 ? to : from + (to - from) * glide;
-      p.shown = { x: ease(p.shown.x, best.x), y: ease(p.shown.y, best.y) };
+      p.shown = { x: slideTo(p.shown.x, best.x), y: slideTo(p.shown.y, best.y) };
       p.root.setPosition(p.x + Math.round(p.shown.x), home.y + Math.round(p.shown.y));
     }
   }
