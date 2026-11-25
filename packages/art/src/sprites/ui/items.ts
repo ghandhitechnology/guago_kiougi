@@ -198,10 +198,12 @@ const books = sprite({
   },
 });
 
-/** Every colour one step down its ramp: the book under a running cooldown. */
+/** Every colour two steps down its ramp: the book under a running cooldown. */
 const DIM = Object.fromEntries(
   RAMP_LIST.flatMap((r) =>
-    r.steps.slice(1).map((step, i) => [`${r.name}.${step}`, `${r.name}.${r.steps[i]}`]),
+    r.steps
+      .slice(1)
+      .map((step, i) => [`${r.name}.${step}`, `${r.name}.${r.steps[Math.max(0, i - 1)]}`]),
   ),
 );
 const booksDim = variant(books, { name: "book-dim", recolor: DIM });

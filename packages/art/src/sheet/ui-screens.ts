@@ -110,13 +110,12 @@ function sceneDef(name: string): SceneDef | undefined {
   return SCENES.find((d) => d.name === name);
 }
 
-/** The scene's monsters, and its students whose look the build has. */
-function cast(kit: Kit, def: SceneDef | undefined) {
+/** The scene's monsters and students. A student whose look is missing still stands there in
+ * the default look, so every one gets a nameplate. */
+function cast(def: SceneDef | undefined) {
   const objects = def?.objects ?? [];
   const monsters = objects.filter((o): o is Actor => "actor" in o);
-  const students = objects.filter(
-    (o): o is Doll => "rig" in o && (o.look === undefined || kit.hasLook(o.rig, o.look)),
-  );
+  const students = objects.filter((o): o is Doll => "rig" in o);
   return { monsters, students };
 }
 
@@ -143,7 +142,7 @@ function hud(kit: Kit): Screen {
   d.scene("agora-rift");
 
   // The scene's own fight: names under the students, numbers over the 오답 being hit.
-  const { monsters, students } = cast(kit, def);
+  const { monsters, students } = cast(def);
   const you = students.find((s) => s.anim === "attack") ?? students[0];
   const others = ["밤샘연구생", "새벽세시"];
   for (const s of students)
@@ -156,17 +155,26 @@ function hud(kit: Kit): Screen {
       "dmg-crit",
       crit,
       struck.at[0] - Math.floor(d.width("dmg-crit", crit) / 2),
-      top(struck) - 16,
+      top(struck) - 26,
     );
   }
-  const next = monsters.find((m) => m !== struck);
-  if (next) {
+  // A second number on the 오답 farthest from the first, so the two never stack.
+  const far = struck
+    ? monsters.reduce<Actor | undefined>(
+        (best, m) =>
+          !best || Math.abs(m.at[0] - struck.at[0]) > Math.abs(best.at[0] - struck.at[0])
+            ? m
+            : best,
+        undefined,
+      )
+    : undefined;
+  if (far && far !== struck) {
     const hit = "1,181";
     d.numerals(
       "dmg-small",
       hit,
-      next.at[0] - Math.floor(d.width("dmg-small", hit) / 2),
-      top(next) - 11,
+      far.at[0] - Math.floor(d.width("dmg-small", hit) / 2),
+      top(far) - 12,
     );
   }
 
@@ -241,34 +249,35 @@ function hud(kit: Kit): Screen {
   d.slice("hud-plate", "idle", 416, 63, 58, 15);
   d.text("galmuri9", map, 445 - Math.ceil(d.width("galmuri9", map) / 2), 66, "stone.bright");
 
-  // The right thumb's cluster: dodge in the corner, three books close around it, the fourth
-  // and the two locked slots on the outer arc, interact at the arc's lower end.
+  // The right thumb's cluster, a honeycomb around the dodge in the corner: the first three
+  // books on the inner ring, the fourth and the two locked slots on the outer ring, and
+  // interact at its lower end.
   d.frame("stick-base", "idle", 14, 210);
   d.frame("stick-knob", "idle", 34, 220);
-  const cx = 446;
-  const cy = 236;
+  const cx = 440;
+  const cy = 230;
   d.frame("touch-main", "idle", cx - 17, cy - 17);
   d.frame("touch-icon", "dodge", cx - 7, cy - 7);
-  const at = (r: number, deg: number) =>
+  const at = (r: number, deg: number, half: number) =>
     [
-      Math.round(cx + r * Math.cos((deg * Math.PI) / 180)) - 12,
-      Math.round(cy + r * Math.sin((deg * Math.PI) / 180)) - 12,
+      Math.round(cx + r * Math.cos((deg * Math.PI) / 180)) - half,
+      Math.round(cy + r * Math.sin((deg * Math.PI) / 180)) - half,
     ] as const;
   const slots: readonly (readonly [string | null, number, number, string, number?])[] = [
     ["probability", 38, 180, "idle"],
     ["sequence", 38, 225, "idle", 5],
     ["graph", 38, 270, "ready"],
-    ["proof", 66, 195, "idle", 11],
-    [null, 66, 228, "locked"],
-    [null, 66, 261, "locked"],
+    ["proof", 64, 202.5, "idle", 11],
+    [null, 64, 247.5, "locked"],
+    [null, 64, 292.5, "locked"],
   ];
   for (const [book, r, deg, state, cd] of slots) {
-    const [x, y] = at(r, deg);
+    const [x, y] = at(r, deg, 12);
     bookSlot(d, book, x, y, state, cd);
   }
-  const [ix, iy] = at(72, 165);
-  d.frame("touch-btn", "idle", ix - 2, iy - 2);
-  d.frame("touch-icon", "interact", ix + 5, iy + 5);
+  const [ix, iy] = at(64, 157.5, 14);
+  d.frame("touch-btn", "idle", ix, iy);
+  d.frame("touch-icon", "interact", ix + 7, iy + 7);
 
   return { name: "hud", w: SCREEN_W, h: SCREEN_H, ops: d.ops };
 }
@@ -279,7 +288,7 @@ function dialogue(kit: Kit): Screen {
   const d = new Draw(kit);
   d.scene("campus-night");
   // 엔트로피 sits at the student's feet, looking unimpressed.
-  const { students } = cast(kit, sceneDef("campus-night"));
+  const { students } = cast(sceneDef("campus-night"));
   const near = students.find((s) => s.dir === "up") ?? students[0];
   const cat = kit.origin("entropy");
   if (near && cat) d.frame("entropy", "sit0", near.at[0] + 14 - cat[0], near.at[1] - cat[1]);

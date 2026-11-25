@@ -219,7 +219,7 @@ const bookSlot = sprite({
 });
 
 /**
- * Cooldown, 16 steps. Under it the book is drawn one palette step darker (`book-dim`), and the
+ * Cooldown, 16 steps. Under it the book is drawn two palette steps darker (`book-dim`), and the
  * bright book is revealed clockwise from 12 o'clock as the cooldown runs out. This overlay is the
  * hand of that clock: a gold line from the centre to the rim at the revealed edge. Frame `cd00`
  * is a fresh cooldown.
