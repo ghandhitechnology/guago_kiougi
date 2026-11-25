@@ -113,32 +113,25 @@ function ruts(dir: "h" | "v", v: number): string {
   return smooth(pic).toString();
 }
 
-/** A trodden footpath: dust scuffed pale where people cut across, one tile long. */
-const PATH = {
-  h: `
-    ..cc....cc..cc..
-    cccccccccccccccc
-    .cc..cc...cc..cc
-  `,
-  v: `
-    .cc
-    ccc
-    cc.
-    ccc
-    .cc
-    ccc
-    cc.
-    ccc
-    .cc
-    ccc
-    cc.
-    ccc
-    .cc
-    ccc
-    cc.
-    ccc
-  `,
-};
+/**
+ * A trodden footpath, one tile long: a band of packed earth that widens and narrows, its edges
+ * ragged, a few scuffed pale flecks in it. Never a line.
+ */
+function footpath(dir: "h" | "v", v: number): string {
+  const pic = Pic.blank(16, 16);
+  for (let t = 0; t < 16; t++) {
+    const half = 2 + Math.round(Math.sin((t + v * 5) * 0.7) * 0.9 + Math.sin(t * 1.9 + v) * 0.6);
+    const mid = 8 + Math.round(Math.sin((t + v * 3) * 0.4) * 1.2);
+    for (let a = mid - half; a <= mid + half; a++) {
+      const edge = a === mid - half || a === mid + half;
+      if (edge && (t * 3 + a + v) % 3 === 0) continue;
+      const ch = !edge && (t * 5 + a * 3 + v) % 11 === 0 ? "c" : "m";
+      if (dir === "h") pic.set(t, a, ch);
+      else pic.set(a, t, ch);
+    }
+  }
+  return smooth(pic).toString();
+}
 
 /** Broken masonry lying in the dust: a squared block, a split drum, a heap of chips. */
 const RUBBLE = {
@@ -224,7 +217,7 @@ export default [
     origin: [0, 0],
     palette,
     outline: false,
-    frames: { h: pad(PATH.h, 16, 16), v: pad(PATH.v, 16, 16) },
+    frames: { h: footpath("h", 0), v: footpath("v", 1) },
     anim: { idle: { frames: ["h"], fps: 1 } },
   }),
   sprite({
