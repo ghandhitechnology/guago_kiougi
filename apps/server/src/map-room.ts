@@ -88,6 +88,7 @@ import {
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
+import { background } from "./background.ts";
 import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
@@ -298,7 +299,7 @@ export function fightLoadoutChanged(characterId: string, change: ChangeNotice): 
     (change.removed?.length ?? 0) > 0 ||
     change.progression !== undefined;
   if (!touched) return;
-  void at.room.reload(at.pawn);
+  background("fight reload", at.room.reload(at.pawn));
 }
 
 /** The fight map a room runs on: the built map's, with walls a closed door swaps. */
@@ -380,7 +381,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     this.seats = new RoomSeats(def.id, (id) => this.placeOf(id));
     this.state.map = def.id;
     this.state.channel = options.channel;
-    void this.setMetadata({ map: def.id, channel: options.channel });
+    background("room metadata", this.setMetadata({ map: def.id, channel: options.channel }));
     // Bodies before anything else, so their ref ids are the smallest the room will ever hand out.
     for (let i = 0; i < MAP_SEATS; i++) {
       const slot = String(i);
@@ -429,7 +430,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       if (this.clients.length > 0)
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
-    this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    this.clock.setInterval(() => background("place save", this.seats.saveAll()), SAVE_INTERVAL_MS);
     this.clock.setInterval(() => this.refreshDoors(), DOORS_EVERY_MS);
     if (def.id === HOME_MAP) this.clock.setInterval(() => this.letGoHome(), HOME_EVERY_MS);
     // A club joined, left or restyled shows under the name at once.
@@ -639,7 +640,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
    */
   private emptied(): void {
     this.retireTimer?.clear();
-    this.retireTimer = this.clock.setTimeout(() => void this.retire(), this.graceMs);
+    this.retireTimer = this.clock.setTimeout(
+      () => background("channel retire", this.retire()),
+      this.graceMs,
+    );
   }
 
   private async retire(): Promise<void> {
@@ -1026,7 +1030,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
         this.inside.set(id, -1);
         continue;
       }
-      void this.walkThrough(pawn, p.id, p.to, p.spawn);
+      background("door", this.walkThrough(pawn, p.id, p.to, p.spawn));
     }
     for (const pawn of this.pawns.values()) {
       if (pawn.leaving) continue;
@@ -1152,7 +1156,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   relocate(characterId: string, to: string, spawn: string, via: string): boolean {
     const pawn = [...this.pawns.values()].find((p) => p.character.id === characterId);
     if (!pawn || pawn.leaving) return false;
-    void this.walkThrough(pawn, via, to, spawn);
+    background("relocate", this.walkThrough(pawn, via, to, spawn));
     return true;
   }
 
@@ -1162,9 +1166,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     if (!l) return;
     for (const pawn of this.pawns.values()) {
       if (pawn.leaving) continue;
-      void l.homeUntil(pawn.character.id).then((until) => {
-        if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
-      });
+      background(
+        "home check",
+        l.homeUntil(pawn.character.id).then((until) => {
+          if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
+        }),
+      );
     }
   }
 
@@ -1293,9 +1300,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     pawn.lastInteract = now;
     const at = this.world.playerById(client.sessionId);
     const target = at && nearestUsable(this.usable, at.x, at.y);
-    void this.answer(pawn, target, n, at).then((answer) => {
-      if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
-    });
+    background(
+      "interaction",
+      this.answer(pawn, target, n, at).then((answer) => {
+        if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
+      }),
+    );
   }
 
   private async answer(

@@ -3,6 +3,7 @@ import { WORLD_ROOM } from "@guago/shared";
 import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
+import { background } from "./background.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
@@ -121,7 +122,7 @@ setInterval(
   () => {
     auth.sweep().catch(() => {});
     economy.prune(live.progress.inflightIds()).catch(() => {});
-    void social.sweep();
+    background("social sweep", social.sweep());
   },
   10 * 60 * 1000,
 ).unref();

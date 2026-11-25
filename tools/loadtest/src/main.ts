@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { mapById } from "@guago/content";
+import { mapById, snapshotReaderForMap } from "@guago/content";
 import {
   type Collidable,
   type Doorway,
@@ -19,9 +19,8 @@ import {
   portalAt,
   Q,
   type Seating,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   shutDoors,
   TICK_MS,
   TILE_SIZE,
@@ -121,7 +120,8 @@ class Bot {
     downs: 0,
   };
   private predictor: Predictor | undefined;
-  private readonly reader = new SnapshotReader();
+  /** Made from the room's map on the first snapshot, as the browser does. */
+  private reader: SnapshotReader | undefined;
   private seen = { x: -1, y: -1, seq: -1 };
   private slot: string | undefined;
   private dir: readonly [number, number] = [0, 0];
@@ -144,6 +144,7 @@ class Bot {
     const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
       if (this.measuring) this.stats.snapshots++;
+      this.reader ??= snapshotReaderForMap(room.state.map);
       this.reader.read(bytes, sink);
     });
     const events = room.connection.events;
@@ -157,7 +158,7 @@ class Bot {
   }
 
   get broken(): number {
-    return this.reader.broken;
+    return this.reader?.broken ?? 0;
   }
 
   /** The room's walls as the server has them (doors to unbuilt maps shut), and its doors. */
@@ -166,15 +167,12 @@ class Bot {
   private speed = 60;
 
   private onPatch(state: MapState): void {
-    if (this.reader.cols === 1 && state.map) {
+    if (!this.map && state.map) {
       const def = mapById(state.map);
       if (def) {
         const portals = "portals" in def ? def.portals : [];
         this.doors = portals;
         this.map = { collision: shutDoors(def.collision, portals) };
-        const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((def.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((def.collision.h * TILE_SIZE) / cell);
       }
     }
     let me = this.slot === undefined ? undefined : state.players.get(this.slot);
@@ -228,7 +226,7 @@ class Bot {
     let best = Number.POSITIVE_INFINITY;
     let mx = 0;
     let my = 0;
-    for (const m of this.reader.members.values()) {
+    for (const m of this.reader?.members.values() ?? []) {
       if (m.kind >= WirePlayer) continue;
       const dx = m.qx / Q - px;
       const dy = m.qy / Q - py;

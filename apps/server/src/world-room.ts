@@ -3,6 +3,7 @@
  * beside its map room. Presence, chat and the social systems (social/hub.ts); trades join it
  * later. Presence goes out as small events, never as synced state, so an idle room sends nothing.
  */
+
 import { type AuthContext, type Client, CloseCode, Room, ServerError } from "@colyseus/core";
 import {
   CHAT_BURST,
@@ -32,6 +33,7 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
+import { background } from "./background.ts";
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
@@ -160,13 +162,15 @@ export class WorldRoom extends Room {
     const ops = use().ops;
     if (ops) {
       for (const op of OPS) {
-        this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
+        this.handle(op, opSchema(op), (client, message) =>
+          background(`operation ${op}`, this.operate(ops, client, message)),
+        );
       }
     }
     for (const h of use().handlers ?? []) {
       this.handle(h.type, h.schema, (client, message) => {
         const me = this.members.get(client.sessionId);
-        if (me) void h.run(me.characterId, message);
+        if (me) background(`world ${h.type}`, h.run(me.characterId, message));
       });
     }
     const social = use().social;
@@ -188,7 +192,7 @@ export class WorldRoom extends Room {
       for (const type of SOCIAL_TYPES) {
         this.handle(type, socialSchema(type), (client, message) => {
           const me = this.members.get(client.sessionId);
-          if (me) void hub.handle(me, type, message);
+          if (me) background(`social ${type}`, hub.handle(me, type, message));
         });
       }
     }
@@ -196,7 +200,11 @@ export class WorldRoom extends Room {
       on: (type, schema, run) =>
         this.handle(type, schema, (client, message) => {
           const me = this.members.get(client.sessionId);
-          if (me) void run(me.characterId, message).then((a) => this.answer(me, a.type, a.body));
+          if (me)
+            background(
+              `trade ${type}`,
+              run(me.characterId, message).then((a) => this.answer(me, a.type, a.body)),
+            );
         }),
       member: (id) => this.byCharacter.get(id)?.entry,
       send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
@@ -269,7 +277,7 @@ export class WorldRoom extends Room {
     if (!member) return;
     member.client = client;
     this.sendAll(member);
-    void this.social?.resend(member);
+    background("social resend", this.social?.resend(member));
     for (const { type, body } of member.answers) client.send(type, body);
   }
 
