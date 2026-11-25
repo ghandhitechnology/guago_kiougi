@@ -4,7 +4,7 @@
  * them seemed to know what they would think next (PLAN §4 "Shape of Theme 1").
  * Also the 명령퇴사 home scene (PLAN §11), which is a system scene, not a story one.
  */
-import { anim, camera, fx, move, music, sound, Writer, wait } from "./author.ts";
+import { anim, camera, fx, move, music, play, sound, Writer, wait } from "./author.ts";
 import type { Cutscene } from "./schema.ts";
 
 const w = new Writer("cutscene");
@@ -155,7 +155,7 @@ const home: Cutscene = {
   id: "expel-home",
   map: "home",
   cast: ["player", "parent"],
-  marks: ["door", "table", "fridge"],
+  marks: ["door", "table", "fridge", "desk", "sink"],
   steps: [
     music("home"),
     fx("fade-in"),
@@ -168,6 +168,33 @@ const home: Cutscene = {
     h.say("parent", "냉장고에 장조림 있어. 다 먹고 가."),
     h.say("parent", "벌점은… 밥 먹고 얘기하자."),
     camera("fridge", 900),
+    // The ten minutes at home: one line a minute while the player can walk the room.
+    play("home-minute:1"),
+    h.bubble("parent", "밥 데울게. 앉아 있어."),
+    play("home-minute:2"),
+    h.say("parent", "선생님이 그러시더라. 애는 착한데 밤에 자꾸 밖에 있다고."),
+    play("home-minute:3"),
+    h.say("parent", "엄마 화 안 났어. 진짜로."),
+    play("home-minute:4"),
+    h.bubble("parent", "네 방 그대로 뒀어. 책상에 먼지만 좀 앉았어."),
+    h.bubble("parent", "물 마셔. 학교 물은 맛없다며."),
+    play("home-minute:5"),
+    h.ask("parent", "학교 밥은 어때?", undefined, [
+      ["수요일엔 짜장면 나와요.", [h.line("parent", "그래? 그럼 수요일엔 벌점 받지 마.")]],
+      ["…그냥 그래요.", [h.line("parent", "그래. 다행이네.")]],
+    ]),
+    play("home-minute:6"),
+    h.say("parent", "스무 번이면… 그래도 뭘 스무 번은 열심히 했다는 거네."),
+    play("home-minute:7"),
+    h.say("parent", "아빠한테는 말 안 했어. 오늘은."),
+    play("home-minute:8"),
+    h.bubble("parent", "장조림 남은 거 통에 담았어. 가방에 넣어 놨다."),
+    play("home-minute:9"),
+    h.say("parent", "이제 가야지. 버스 놓친다."),
+    play("home-minute:10"),
+    move("player", "door", 1200),
+    h.say("parent", "다음엔 그냥 놀러 와. 벌점 말고."),
+    fx("fade-out"),
   ],
 };
 
