@@ -36,8 +36,9 @@ const joinOnPage: JoinMap = (() => {
 export function stayConnected(
   attach: (room: Room<unknown, MapState>) => () => void,
   join: JoinMap = joinOnPage,
+  first: MapChoice = {},
 ): MapLink {
-  let choice: MapChoice = {};
+  let choice: MapChoice = first;
   let current: Room<unknown, MapState> | undefined;
   let moving = false;
 

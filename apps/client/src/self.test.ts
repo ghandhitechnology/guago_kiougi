@@ -26,7 +26,12 @@ function session() {
   let server: Body = { x: 6 * TILE_SIZE, y: 6 * TILE_SIZE, facing: 0 };
   let seq = 0;
   const answer = () =>
-    mover.onServer({ x: server.x * POS_SCALE, y: server.y * POS_SCALE, facing: server.facing, seq });
+    mover.onServer({
+      x: server.x * POS_SCALE,
+      y: server.y * POS_SCALE,
+      facing: server.facing,
+      seq,
+    });
   answer();
   const serve = () => {
     for (const input of sent.splice(0)) {
