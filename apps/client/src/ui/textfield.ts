@@ -16,7 +16,7 @@ export interface TextFieldOptions {
   readonly maxLength?: number;
   /** `username`, `current-password`, `new-password`, or `off`. */
   readonly autocomplete?: string;
-  readonly enterKeyHint?: "next" | "go" | "done";
+  readonly enterKeyHint?: "next" | "go" | "done" | "send";
   readonly onChange?: (value: string) => void;
   /** Enter in the box. */
   readonly onSubmit?: () => void;
@@ -90,6 +90,16 @@ export class TextField extends Widget {
 
   set value(v: string) {
     this.field.value = v;
+    this.draw();
+  }
+
+  /** Narrows or widens the box, as when a label beside it changes length. */
+  setBoxWidth(w: number): void {
+    if (w === this.boxW) return;
+    const pad = this.zone.width - this.boxW;
+    this.boxW = w;
+    this.box.setSize(w, this.box.height);
+    this.zone.setSize(w + pad, this.zone.height);
     this.draw();
   }
 

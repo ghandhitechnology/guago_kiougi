@@ -13,6 +13,7 @@ import type { Live } from "./live/index.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
 import type { Social } from "./social/index.ts";
+import type { Trading } from "./trade/room.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
@@ -31,6 +32,7 @@ export function createGameServer(
     routes?: readonly ApiRoute[];
     grants?: GrantBuffer;
     live?: Live;
+    trading?: Trading;
   } = {},
 ) {
   const { grants, live } = economy;
@@ -50,6 +52,12 @@ export function createGameServer(
     ...chat,
     ...(economy.ops ? { ops: economy.ops } : {}),
     ...(live ? { handlers: live.handlers } : {}),
+  });
+  provideWorldServices({
+    ...chat,
+    ...(economy.ops ? { ops: economy.ops } : {}),
+    ...(live ? { handlers: live.handlers } : {}),
+    ...(economy.trading ? { trading: economy.trading } : {}),
   });
   const api = createApiHandler(auth, settings, looks, economy.routes);
 

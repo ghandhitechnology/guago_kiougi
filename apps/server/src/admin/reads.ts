@@ -4,10 +4,12 @@
  */
 import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
-import { dailyTotals } from "../economy/audit.ts";
+import { type AuditReport, checkInvariants, dailyTotals } from "../economy/audit.ts";
 import { livePage } from "../economy/executor.ts";
+import { LEDGER_RAW_DAYS } from "../economy/ledger.ts";
 import { readInventory } from "../economy/reads.ts";
 import { adminMutes } from "../moderation/mutes.ts";
+import { searchTrades, type TradeSearch, tradePartners } from "../trade/log.ts";
 
 const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
 
@@ -66,23 +68,20 @@ export interface ChatQuery {
   limit?: number;
 }
 
-/** What the trading lane provides once its trade log lands on `main` (PLAN §13). */
-export interface TradeLogSource {
-  search(q: { character?: string; from?: Date; to?: Date; limit: number }): Promise<TradeRow[]>;
-}
+/** The invariant check reads whole tables; one run serves every page view for this long. */
+const CHECK_TTL_MS = 60_000;
 
-export interface TradeRow {
-  id: number;
-  at: string;
-  kind: "board" | "direct";
-  from: string;
-  to: string;
-  /** What moved, as the trade log records it. */
-  payload: unknown;
-  tax: string;
-}
+export function createReads(db: Db) {
+  let checked: { at: number; report: Promise<AuditReport> } | undefined;
 
-export function createReads(db: Db, trades: TradeLogSource | null = null) {
+  async function namesOf(ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const { rows } = await db.execute(
+      sql`select id, name from characters where id = any(${sql.param(ids)}::uuid[])`,
+    );
+    return new Map(rows.map((r) => [r.id as string, r.name as string]));
+  }
+
   async function chat(q: ChatQuery): Promise<ChatRow[]> {
     const limit = Math.min(Math.max(q.limit ?? 200, 1), 1000);
     const who = q.character ?? null;
@@ -387,9 +386,45 @@ export function createReads(db: Db, trades: TradeLogSource | null = null) {
       return { from, to, rows: await dailyTotals(db, { from, to }) };
     },
 
-    async trades(q: { character?: string; from?: Date; to?: Date }) {
-      if (!trades) return { available: false as const, rows: [] as TradeRow[] };
-      return { available: true as const, rows: await trades.search({ ...q, limit: 200 }) };
+    /**
+     * The game-wide audit (wallets equal their ledgers, every item made once, nothing created
+     * outside the ledger): has anything been duplicated. Cached for a minute.
+     */
+    async invariants(fresh = false) {
+      const now = Date.now();
+      if (fresh || !checked || now - checked.at > CHECK_TTL_MS) {
+        checked = { at: now, report: checkInvariants(db) };
+        checked.report.catch(() => (checked = undefined));
+      }
+      const report = await checked.report;
+      return {
+        at: new Date(checked?.at ?? now).toISOString(),
+        ok: report.ok,
+        failed: [...new Set(report.violations.map((v) => v.check))],
+        violations: report.violations.slice(0, 50),
+        counts: report.counts,
+      };
+    },
+
+    /** The trade log (PLAN §13 "Trade logs are kept and searchable"), with names on both sides. */
+    async trades(s: TradeSearch) {
+      const rows = await searchTrades(db, { ...s, limit: 200 });
+      const ids = [...new Set(rows.flatMap((r) => [r.fromId, r.toId]))];
+      const names = await namesOf(ids);
+      return rows.map((r) => ({
+        ...r,
+        from: names.get(r.fromId) ?? null,
+        to: names.get(r.toId) ?? null,
+      }));
+    },
+
+    /** Who this character trades with over the ledger's 90 days: mules and real-money patterns. */
+    async partners(characterId: string) {
+      const to = new Date();
+      const from = new Date(to.getTime() - LEDGER_RAW_DAYS * 86_400_000);
+      const rows = await tradePartners(db, characterId, from, to);
+      const names = await namesOf(rows.map((r) => r.partner));
+      return rows.map((r) => ({ ...r, name: names.get(r.partner) ?? null }));
     },
   };
 }

@@ -41,6 +41,7 @@ import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
 import type { Social } from "./social/index.ts";
+import type { Trading } from "./trade/room.ts";
 
 /** Past this many handled messages a second, a client is flooding and is dropped for good. */
 const FLOOD_PER_SECOND = 20;
@@ -86,6 +87,8 @@ interface Services {
   social: Social | undefined;
   /** More request handlers (the living world, live/index.ts). */
   handlers?: readonly WorldHandler[];
+  /** Direct trades and the 매점 게시판's reads (trade/room.ts). */
+  trading?: Trading | undefined;
 }
 
 let services: Services | undefined;
@@ -98,6 +101,7 @@ export function provideWorldServices(s: {
   ops?: OpHandler;
   social?: Social;
   handlers?: readonly WorldHandler[];
+  trading?: Trading;
 }): void {
   services = {
     filter: s.filter ?? ChatFilter.fromFile(),
@@ -105,6 +109,7 @@ export function provideWorldServices(s: {
     ops: s.ops,
     social: s.social,
     ...(s.handlers ? { handlers: s.handlers } : {}),
+    trading: s.trading,
   };
 }
 
@@ -187,6 +192,16 @@ export class WorldRoom extends Room {
         });
       }
     }
+    use().trading?.attach({
+      on: (type, schema, run) =>
+        this.handle(type, schema, (client, message) => {
+          const me = this.members.get(client.sessionId);
+          if (me) void run(me.characterId, message).then((a) => this.answer(me, a.type, a.body));
+        }),
+      member: (id) => this.byCharacter.get(id)?.entry,
+      send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
+      blocked: (owner, other) => this.social?.hasBlocked(owner, other) ?? false,
+    });
     this.unlisten = places.listen((characterId, mapId) => {
       this.social?.moved(characterId);
       const member = this.byCharacter.get(characterId);
@@ -217,6 +232,7 @@ export class WorldRoom extends Room {
       level: character.level,
       map: places.get(character.id)?.mapId ?? "",
     };
+    use().trading?.joined(character.id);
     const member: Member = { client, characterId: character.id, entry, answers: [] };
     this.members.set(client.sessionId, member);
     this.byCharacter.set(character.id, member);
@@ -231,6 +247,8 @@ export class WorldRoom extends Room {
   // The close code cannot tell a kick from an ordinary drop: Colyseus closes a stale socket with
   // the same error code when its owner reconnects first. So kicks are remembered by session.
   override onDrop(client: Client): void {
+    const dropped = this.members.get(client.sessionId);
+    if (dropped) use().trading?.left(dropped.characterId);
     if (this.kicked.has(client.sessionId) || !this.seats.mayReconnect(client)) return;
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
@@ -257,6 +275,7 @@ export class WorldRoom extends Room {
   override async onLeave(client: Client): Promise<void> {
     const member = this.members.get(client.sessionId);
     if (member) {
+      use().trading?.left(member.characterId);
       this.members.delete(client.sessionId);
       // A newer seat of the same character may already be in (after the eviction wait ran out).
       if (this.byCharacter.get(member.characterId) === member) {
@@ -278,6 +297,7 @@ export class WorldRoom extends Room {
     if (current === this) current = undefined;
     this.unlisten?.();
     this.social?.dispose();
+    use().trading?.detach();
     await use().log?.flush();
   }
 

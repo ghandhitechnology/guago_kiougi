@@ -48,6 +48,14 @@ interface Player extends PlayerRow {
   }[];
 }
 
+interface Partner {
+  partner: string;
+  name: string | null;
+  trades: number;
+  sent: string;
+  received: string;
+}
+
 interface Item {
   id: string;
   def: string;
@@ -364,19 +372,25 @@ function inventoryView(ctx: Ctx, p: Player, inv: Inventory): Node {
     wallet,
     h("h2", null, "Items"),
     take,
-    h("h2", null, "Ledger"),
+    h(
+      "h2",
+      null,
+      "Ledger",
+      h("span", { class: "muted" }, "  per operation for 90 days, then one row per day, same sums"),
+    ),
     ledger,
   );
 }
 
 export async function playerScreen(ctx: Ctx, accountId: string): Promise<Node> {
   const { player: p } = await get<{ player: Player }>(`/players/${accountId}`);
-  const [chat, inv] = p.characterId
+  const [chat, inv, partners] = p.characterId
     ? await Promise.all([
         get<{ lines: ChatLine[] }>(`/players/${accountId}/chat`),
         get<{ inventory: Inventory }>(`/players/${accountId}/inventory`),
+        get<{ partners: Partner[] }>(`/players/${accountId}/partners`),
       ])
-    : [null, null];
+    : [null, null, null];
   const facts = h(
     "div",
     { class: "facts" },
@@ -475,6 +489,31 @@ export async function playerScreen(ctx: Ctx, accountId: string): Promise<Node> {
           null,
           h("h2", null, h("a", { href: `#/chat?character=${p.characterId}` }, "Recent chat")),
           chatTable(chat.lines, { reload: ctx.reload, mark: p.characterId ?? "" }),
+        )
+      : null,
+    partners
+      ? h(
+          "div",
+          null,
+          h(
+            "h2",
+            null,
+            h("a", { href: `#/trades?character=${p.characterId}` }, "Trade partners"),
+            h("span", { class: "muted" }, "  last 90 days"),
+          ),
+          table(
+            ["Partner", ["Trades", "num"], ["솔방울 sent", "num"], ["솔방울 received", "num"], ""],
+            partners.partners.map((t) => [
+              td(h("a", { href: `#/character/${t.partner}` }, t.name ?? t.partner.slice(0, 8))),
+              td(t.trades, "num"),
+              td(amount(t.sent), "num"),
+              td(amount(t.received), "num"),
+              td(
+                h("a", { href: `#/trades?character=${p.characterId}&with=${t.partner}` }, "trades"),
+              ),
+            ]),
+            "No trades",
+          ),
         )
       : null,
     inv ? inventoryView(ctx, p, inv.inventory) : null,

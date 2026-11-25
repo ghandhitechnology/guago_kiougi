@@ -10,6 +10,13 @@ interface DailyTotal {
   entries: number;
 }
 
+interface Check {
+  at: string;
+  ok: boolean;
+  failed: string[];
+  violations: { check: string; characterId: string | null; detail: string }[];
+}
+
 const WALLET: [string, string][] = [
   ["pinecone", "솔방울"],
   ["merit", "상점"],
@@ -74,10 +81,43 @@ export async function economyScreen(ctx: Ctx): Promise<Node> {
     ]);
   const currencies = [...new Set(rows.map((r) => r.currency))].sort();
 
+  const { check } = await get<{ check: Check }>("/economy/check");
+  const audit = h(
+    "div",
+    { class: "row" },
+    check.ok
+      ? h("span", { class: "good strong" }, "Invariants hold")
+      : h("span", { class: "bad strong" }, `Invariants broken: ${check.failed.join(", ")}`),
+    h("span", { class: "muted" }, `checked ${when(check.at)}`),
+    h(
+      "button",
+      {
+        type: "button",
+        class: "link",
+        onclick: () => void get("/economy/check?fresh=1").then(() => ctx.reload()),
+      },
+      "Check now",
+    ),
+  );
   return h(
     "div",
     null,
     h("h1", null, "Economy"),
+    audit,
+    check.ok
+      ? null
+      : table(
+          ["Check", "Character", "Detail"],
+          check.violations.map((v) => [
+            td(v.check),
+            td(
+              v.characterId
+                ? h("a", { href: `#/character/${v.characterId}` }, v.characterId.slice(0, 8))
+                : "",
+            ),
+            td(v.detail),
+          ]),
+        ),
     form(
       { class: "row" },
       [
@@ -115,16 +155,33 @@ interface TradeRow {
   id: number;
   at: string;
   kind: "board" | "direct";
-  from: string;
-  to: string;
-  payload: unknown;
+  fromId: string;
+  toId: string;
+  from: string | null;
+  to: string | null;
+  itemIds: string[];
+  defs: string[];
   tax: string;
+  payload: unknown;
 }
+
+/** What moved, from the defs the log indexes: `wangdo ×1, pinecone`. */
+const moved = (t: TradeRow) => t.defs.join(", ");
 
 export async function tradesScreen(ctx: Ctx): Promise<Node> {
   const p = ctx.params;
-  const params = { character: p.get("character"), from: p.get("from"), to: p.get("to") };
-  const out = await get<{ available: boolean; rows: TradeRow[] }>(`/trades${q(params)}`);
+  const params = {
+    character: p.get("character"),
+    with: p.get("with"),
+    def: p.get("def"),
+    kind: p.get("kind"),
+    from: p.get("from"),
+    to: p.get("to"),
+    before: p.get("before"),
+  };
+  const { trades } = await get<{ trades: TradeRow[] }>(`/trades${q(params)}`);
+  const who = (id: string, name: string | null) =>
+    h("a", { href: `#/character/${id}` }, name ?? id.slice(0, 8));
   return h(
     "div",
     null,
@@ -134,31 +191,70 @@ export async function tradesScreen(ctx: Ctx): Promise<Node> {
       [
         h("input", {
           name: "character",
-          placeholder: "character name or id",
+          placeholder: "player",
           value: params.character ?? "",
+          size: 14,
+          "aria-label": "Player",
           "data-search": true,
           autofocus: true,
         }),
-        h("button", { type: "submit", disabled: !out.available }, "Search"),
+        h("input", {
+          name: "with",
+          placeholder: "with player",
+          value: params.with ?? "",
+          size: 14,
+          "aria-label": "With player",
+        }),
+        h("input", {
+          name: "def",
+          placeholder: "item or pinecone",
+          value: params.def ?? "",
+          size: 16,
+          "aria-label": "Item",
+        }),
+        select(
+          "kind",
+          [
+            ["", "board and direct"],
+            ["board", "board"],
+            ["direct", "direct"],
+          ],
+          params.kind ?? "",
+        ),
+        h("button", { type: "submit" }, "Search"),
       ],
       async (d) => {
-        const c = String(d.get("character") ?? "").trim();
-        go("trades", c ? { character: c } : {});
+        const next: Record<string, string> = {};
+        for (const k of ["character", "with", "def", "kind"]) {
+          const v = String(d.get(k) ?? "").trim();
+          if (v) next[k] = v;
+        }
+        go("trades", next);
       },
     ),
-    out.available
-      ? table(
-          ["Time", "Kind", "From", "To", "What", ["Tax", "num"]],
-          out.rows.map((t) => [
-            td(when(t.at), "when"),
-            td(t.kind),
-            td(h("a", { href: `#/character/${t.from}` }, t.from.slice(0, 8))),
-            td(h("a", { href: `#/character/${t.to}` }, t.to.slice(0, 8))),
-            td(h("pre", null, JSON.stringify(t.payload))),
-            td(amount(t.tax), "num"),
-          ]),
-          "No trades",
+    table(
+      ["Time", "Kind", "From", "To", "What", ["Tax", "num"], ""],
+      trades.map((t) => [
+        td(when(t.at), "when"),
+        td(t.kind === "board" ? "게시판" : "직거래"),
+        td(who(t.fromId, t.from)),
+        td(who(t.toId, t.to)),
+        td(moved(t)),
+        td(amount(t.tax), "num"),
+        td(h("pre", { class: "muted" }, JSON.stringify(t.payload))),
+      ]),
+      "No trades",
+    ),
+    trades.length >= 200
+      ? h(
+          "p",
+          null,
+          h(
+            "a",
+            { href: link("trades", { ...params, before: String(trades.at(-1)?.id) }) },
+            "Older",
+          ),
         )
-      : h("div", { class: "empty" }, "No trade log yet."),
+      : null,
   );
 }

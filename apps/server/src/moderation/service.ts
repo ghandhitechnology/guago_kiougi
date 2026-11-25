@@ -402,7 +402,13 @@ export function createModeration(deps: ModerationDeps) {
           detail: { amounts: input.amounts, add: input.add, remove: input.remove, items },
           opId: key,
         });
-        return { ok: true as const, replayed: !first, items, change: result.change };
+        // A replay (another send of this id) changed nothing, so it tells the player nothing.
+        return {
+          ok: true as const,
+          replayed: !first,
+          items,
+          ...(first ? { change: result.change } : {}),
+        };
       });
       if (!out.ok) return out;
       if ("change" in out && out.change) deps.notify(characterId, out.change);

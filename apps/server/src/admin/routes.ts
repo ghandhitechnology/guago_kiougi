@@ -313,15 +313,43 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     return await reads.economy(days);
   });
 
+  route("GET", "/economy/check", async (req) => ({
+    check: await reads.invariants(req.query.get("fresh") === "1"),
+  }));
+
   route("GET", "/trades", async (req) => {
-    const who = req.query.get("character");
-    const from = date(req.query.get("from"));
-    const to = date(req.query.get("to"));
-    return await reads.trades({
-      ...(who ? { character: await findCharacter(who) } : {}),
-      ...(from ? { from } : {}),
-      ...(to ? { to } : {}),
-    });
+    const q = req.query;
+    const who = q.get("character");
+    const other = q.get("with");
+    const item = q.get("item");
+    const def = q.get("def");
+    const kind = q.get("kind");
+    const from = date(q.get("from"));
+    const to = date(q.get("to"));
+    const before = Number(q.get("before") ?? Number.NaN);
+    if (item && !isUuid(item)) throw bad();
+    if (def && !/^[a-z0-9:-]{1,48}$/.test(def)) throw bad();
+    if (kind && kind !== "board" && kind !== "direct") throw bad();
+    const player = who ? await findCharacter(who) : undefined;
+    const counterpart = other ? await findCharacter(other) : undefined;
+    if (counterpart && !player) throw bad();
+    return {
+      trades: await reads.trades({
+        ...(player ? { player } : {}),
+        ...(counterpart ? { counterpart } : {}),
+        ...(item ? { item } : {}),
+        ...(def ? { def } : {}),
+        ...(kind ? { kind: kind as "board" | "direct" } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(Number.isSafeInteger(before) ? { before } : {}),
+      }),
+    };
+  });
+
+  route("GET", "/players/:id/partners", async (_req, [id]) => {
+    if (!isUuid(id)) throw bad();
+    return { partners: await reads.partners(await characterOf(id)) };
   });
 
   route("GET", "/audit", async (req) => {

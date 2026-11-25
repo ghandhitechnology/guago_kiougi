@@ -37,7 +37,12 @@ for (const [login, role, password] of [
   ["jiwoo", "moderator", "jiwoo moderator pass"],
   ["minseo", "moderator", "minseo moderator pass"],
 ] as const) {
-  await run("node", ["apps/server/src/admin/cli.ts", "create", login, role], { DATABASE_URL: url }, `${password}\n`);
+  await run(
+    "node",
+    ["apps/server/src/admin/cli.ts", "create", login, role],
+    { DATABASE_URL: url },
+    `${password}\n`,
+  );
 }
 
 const PLAYERS: [string, string, string][] = [
@@ -62,7 +67,14 @@ say(`${bots.length} players`);
 for (const [i, b] of bots.entries()) {
   await run(
     "node",
-    ["apps/server/src/economy/cli.ts", "grant", b.name, `exp=${200_000 + i * 90_000}`, `coin=${3_000 + i * 750}`, "ink=4"],
+    [
+      "apps/server/src/economy/cli.ts",
+      "grant",
+      b.name,
+      `exp=${200_000 + i * 90_000}`,
+      `coin=${3_000 + i * 750}`,
+      "ink=4",
+    ],
     { DATABASE_URL: url },
   );
 }
@@ -72,7 +84,16 @@ const byName = new Map(bots.map((b) => [b.name, b]));
 const rooms = new Map<string, Room>();
 for (const b of bots) {
   const world = await b.sdk().joinOrCreate(WORLD_ROOM);
-  for (const t of [WORLD_MESSAGES.presence, WORLD_MESSAGES.chat, WORLD_MESSAGES.system, WORLD_MESSAGES.refused, "social", "live", "change", "result"]) {
+  for (const t of [
+    WORLD_MESSAGES.presence,
+    WORLD_MESSAGES.chat,
+    WORLD_MESSAGES.system,
+    WORLD_MESSAGES.refused,
+    "social",
+    "live",
+    "change",
+    "result",
+  ]) {
     world.onMessage(t, () => {});
   }
   rooms.set(b.name, world);
@@ -124,8 +145,17 @@ await sleep(1500);
 
 // The 자판기: sinks, through the player's own operation endpoint.
 for (const [i, b] of bots.entries()) {
-  await api(BASE, API.op, b.jar, { id: randomUUID(), op: "shop.buy", req: { item: "banana-milk", qty: 1 + (i % 3) } });
-  if (i % 2 === 0) await api(BASE, API.op, b.jar, { id: randomUUID(), op: "shop.buy", req: { item: "water", qty: 3 } });
+  await api(BASE, API.op, b.jar, {
+    id: randomUUID(),
+    op: "shop.buy",
+    req: { item: "banana-milk", qty: 1 + (i % 3) },
+  });
+  if (i % 2 === 0)
+    await api(BASE, API.op, b.jar, {
+      id: randomUUID(),
+      op: "shop.buy",
+      req: { item: "water", qty: 3 },
+    });
 }
 say("자판기 purchases");
 
@@ -134,7 +164,8 @@ const andy = await adminLogin(`http://127.0.0.1:${PORTS.admin}`, "andy", "correc
 const jiwoo = await adminLogin(`http://127.0.0.1:${PORTS.admin}`, "jiwoo", "jiwoo moderator pass");
 const account = async (name: string) => {
   const out = await andy(`/players?q=${encodeURIComponent(name)}`);
-  return (out.body.players as { accountId: string; name: string }[]).find((p) => p.name === name)?.accountId as string;
+  return (out.body.players as { accountId: string; name: string }[]).find((p) => p.name === name)
+    ?.accountId as string;
 };
 const spam = await account("도배왕");
 await jiwoo(`/players/${spam}/chat`);
@@ -147,7 +178,10 @@ for (const l of lines.filter((l) => l.masked).slice(0, 2)) {
   await jiwoo("/chat/strike", { id: l.id, at: l.at, reason: "전체 채팅 욕설" });
 }
 await jiwoo(`/players/${spam}/mute`, { reason: "골드 판매 도배", minutes: 1440 });
-const reports = (await jiwoo("/reports?state=open")).body.reports as { id: number; target: string }[];
+const reports = (await jiwoo("/reports?state=open")).body.reports as {
+  id: number;
+  target: string;
+}[];
 const onSpam = reports.filter((r) => r.target === "도배왕");
 if (onSpam[0]) {
   await jiwoo(`/reports/${onSpam[0].id}`);
@@ -159,7 +193,13 @@ if (onSpam[0]) {
   });
 }
 const name = reports.find((r) => r.target === "시험망함");
-if (name) await andy(`/reports/${name.id}/resolve`, { state: "dismissed", action: "none", minutes: null, note: "닉네임 문제 없음" });
+if (name)
+  await andy(`/reports/${name.id}/resolve`, {
+    state: "dismissed",
+    action: "none",
+    minutes: null,
+    note: "닉네임 문제 없음",
+  });
 const kgs = await account("과고짱");
 await andy(`/players/${kgs}/grant`, {
   opId: randomUUID(),
@@ -183,9 +223,9 @@ const nerd = await account("물리덕후");
 await andy(`/players/${nerd}/ban`, { reason: "이동 속도 조작 확인", minutes: 10_080, ip: false });
 await andy(`/players/${nerd}/inventory`);
 await andy(`/admins`);
-const minseo = (
-  (await andy("/admins")).body.admins as { id: string; loginId: string }[]
-).find((a) => a.loginId === "minseo");
+const minseo = ((await andy("/admins")).body.admins as { id: string; loginId: string }[]).find(
+  (a) => a.loginId === "minseo",
+);
 if (minseo) await andy(`/admins/${minseo.id}`, { status: "disabled", reason: "인턴 기간 종료" });
 say("admin actions done");
 

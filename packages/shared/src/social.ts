@@ -504,6 +504,16 @@ export const SOCIAL_RATE: Readonly<Record<SocialType, Rate>> = {
   emote: r(3, 2 / 3),
 };
 
+/**
+ * Trade requests per character (PLAN §12 moderation, §13): asking someone to trade is the
+ * spammable one; messages inside an open window and 매점 게시판 reads have their own budgets.
+ */
+export const TRADE_RATE: Readonly<Record<"request" | "window" | "board", Rate>> = {
+  request: r(3, 1 / 10),
+  window: r(12, 4),
+  board: r(6, 1),
+};
+
 // Validators ---------------------------------------------------------------------------------
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

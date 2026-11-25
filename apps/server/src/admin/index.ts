@@ -14,7 +14,7 @@ import { createModeration, type ModerationDeps } from "../moderation/service.ts"
 import { evictAccount, isSeated } from "../seats.ts";
 import { worldRoom } from "../world-room.ts";
 import { createAdminAuth } from "./auth.ts";
-import { createReads, type TradeLogSource } from "./reads.ts";
+import { createReads } from "./reads.ts";
 import { adminRoutes } from "./routes.ts";
 import { serveAdmin } from "./server.ts";
 
@@ -24,8 +24,6 @@ export interface StackOptions {
   db: Db;
   executor: Executor;
   secret: string;
-  /** The trading lane's trade log, once it lands (PLAN §13 "Trade logs are kept and searchable"). */
-  trades?: TradeLogSource;
   /** Seams for tests; the defaults reach the live rooms. */
   evict?: ModerationDeps["evict"];
   system?: ModerationDeps["system"];
@@ -50,7 +48,7 @@ export async function createModerationStack(o: StackOptions) {
     notify: (id, change) => worldRoom()?.notify(id, change),
   });
   const auth = createAdminAuth(o.db, o.secret);
-  const reads = createReads(o.db, o.trades ?? null);
+  const reads = createReads(o.db);
   const routes = adminRoutes({
     db: o.db,
     auth,
