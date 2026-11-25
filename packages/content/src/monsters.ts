@@ -1,4 +1,6 @@
 import { Rank } from "@guago/shared";
+import type { TextKey } from "./narrative/schema.ts";
+import { termKey } from "./narrative/study.ts";
 import type { StatusId } from "./statuses.ts";
 
 /**
@@ -105,7 +107,7 @@ export interface MonsterCues {
 
 export interface MonsterDef {
   readonly id: string;
-  readonly name: string;
+  readonly name: TextKey;
   readonly sprite: string;
   readonly behavior: Behavior;
   readonly mass: number;
@@ -124,8 +126,6 @@ export interface MonsterDef {
   readonly immune: readonly StatusId[];
   /** Page 1 unique 그림자: auto-aim ignores it beyond this; manual aim can still hit. */
   readonly autoAimRange?: number;
-  /** What it says when it shows up in a cutscene or the 도감. One register per speaker. */
-  readonly line: string;
   readonly cues: MonsterCues;
 }
 
@@ -147,7 +147,7 @@ const PLAIN = { armor: 0, innate: [], immune: [] } as const;
 export const MONSTERS: readonly MonsterDef[] = [
   {
     id: "odap",
-    name: "오답",
+    name: termKey("monster", "odap"),
     sprite: "odap",
     behavior: { kind: "chaser" },
     mass: 1,
@@ -158,12 +158,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 1,
     coin: 1,
     ...PLAIN,
-    line: "내가 틀렸다고? 채점이 틀렸겠지.",
     cues: cues("odap"),
   },
   {
     id: "odap-pencil",
-    name: "연필 오답",
+    name: termKey("monster", "odap-pencil"),
     sprite: "odap-pencil",
     behavior: { kind: "swarm", packMin: 6, packMax: 9 },
     mass: 0.4,
@@ -174,12 +173,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 0.3,
     coin: 0.3,
     ...PLAIN,
-    line: "지우개만… 지우개만 안 오면 돼…",
     cues: cues("odap-pencil"),
   },
   {
     id: "rational",
-    name: "유리수 병사",
+    name: termKey("monster", "rational"),
     sprite: "rational",
     behavior: { kind: "shielded", arc: 120, reduction: 0.8, turnRate: 120 },
     mass: 2.5,
@@ -192,12 +190,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     armor: 0,
     innate: ["metal"],
     immune: [],
-    line: "만물은 정수의 비입니다! 루트 2 같은 건 존재하지 않습니다!",
     cues: cues("rational", "fx-shield-block"),
   },
   {
     id: "element-fire",
-    name: "불의 정령",
+    name: termKey("monster", "element-fire"),
     sprite: "element-fire",
     behavior: {
       kind: "bomber",
@@ -219,12 +216,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     armor: 0,
     innate: [],
     immune: ["burn", "flammable"],
-    line: "불이야말로 가장 순수한 원소다. 위로 올라가는 게 그 증거지.",
     cues: cues("element-fire", "fx-burst", true),
   },
   {
     id: "element-water",
-    name: "물의 정령",
+    name: termKey("monster", "element-water"),
     sprite: "element-water",
     behavior: { kind: "healer", range: 64, interval: 3, heal: 0.08, keepMin: 96, aimPriority: 2 },
     mass: 1,
@@ -237,12 +233,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     armor: 0,
     innate: ["wet"],
     immune: [],
-    line: "모든 것은 물에서 왔다. 너도 좀 축여 주지.",
     cues: cues("element-water", "fx-heal", true),
   },
   {
     id: "element-air",
-    name: "공기의 정령",
+    name: termKey("monster", "element-air"),
     sprite: "element-air",
     behavior: {
       kind: "charger",
@@ -262,12 +257,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 1,
     coin: 1,
     ...PLAIN,
-    line: "공기가 가볍다고? 맞아 보면 생각이 바뀔걸.",
     cues: cues("element-air", "fx-dust", true),
   },
   {
     id: "element-earth",
-    name: "흙의 정령",
+    name: termKey("monster", "element-earth"),
     sprite: "element-earth",
     behavior: { kind: "splitter", into: "element-earth-pebble", count: 2 },
     mass: 3,
@@ -278,12 +272,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 1.2,
     coin: 1.2,
     ...PLAIN,
-    line: "흙은 제자리로 돌아간다. 너도 네 자리로 돌아가라.",
-    cues: cues("element-earth", "fx-rubble"),
+    cues: cues("element-earth", "fx-shard"),
   },
   {
     id: "element-earth-pebble",
-    name: "흙의 정령 조각",
+    name: termKey("monster", "element-earth-pebble"),
     sprite: "element-earth-pebble",
     behavior: { kind: "chaser" },
     mass: 1,
@@ -294,12 +287,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 0.3,
     coin: 0.3,
     ...PLAIN,
-    line: "아직 제자리가 아니다.",
     cues: cues("element-earth-pebble"),
   },
   {
     id: "cave-shadow",
-    name: "동굴의 그림자",
+    name: termKey("monster", "cave-shadow"),
     sprite: "cave-shadow",
     behavior: {
       kind: "ranged",
@@ -322,12 +314,11 @@ export const MONSTERS: readonly MonsterDef[] = [
     coin: 1,
     ...PLAIN,
     autoAimRange: 80,
-    line: "우리가 진짜다. 뒤를 돌아보지 마라.",
     cues: cues("cave-shadow", "proj-shadow", true),
   },
   {
     id: "tortoise",
-    name: "제논의 거북이",
+    name: termKey("monster", "tortoise"),
     sprite: "tortoise",
     behavior: { kind: "zeno", fleeSpeed: 40, halvings: 10, escapeAfter: 30 },
     mass: 4,
@@ -338,7 +329,6 @@ export const MONSTERS: readonly MonsterDef[] = [
     exp: 4,
     coin: 6,
     ...PLAIN,
-    line: "서두를 것 없네. 자네는 결코 나를 따라잡지 못할 걸세.",
     cues: cues("tortoise"),
   },
 ];
@@ -362,11 +352,11 @@ export function zenoDamage(remaining: number, maxHp: number, damage: number, hal
 export const ELITE = {
   everyKills: 200,
   rank: Rank.Elite,
-  prefix: "심화",
+  prefix: termKey("label", "elite"),
   massMult: 3,
   speedMult: 1.15,
   armor: 0.2,
-  aura: "fx-elite",
+  aura: "fx-elite-aura",
   spawnCue: "sfx.monster.elite.spawn",
   /** Never promoted. */
   exclude: ["tortoise", "element-earth-pebble"],
@@ -374,7 +364,7 @@ export const ELITE = {
 
 export interface BossDef {
   readonly id: string;
-  readonly name: string;
+  readonly name: TextKey;
   readonly sprite: string;
   readonly rank: number;
   readonly level: number;
@@ -404,7 +394,6 @@ export interface BossDef {
     readonly count: number;
     readonly cap: number;
   };
-  readonly lines: { readonly intro: string; readonly enrage: string; readonly defeat: string };
   readonly cues: {
     readonly telegraph: string;
     readonly shockwave: string;
@@ -420,7 +409,7 @@ export interface BossDef {
  */
 export const ODAP_GOLEM: BossDef = {
   id: "odap-golem",
-  name: "오답노트 골렘",
+  name: termKey("monster", "odap-golem"),
   sprite: "golem",
   rank: Rank.TutorialBoss,
   level: 5,
@@ -432,13 +421,8 @@ export const ODAP_GOLEM: BossDef = {
   slam: { every: 5, windup: 1, radius: 56, damage: 1, knock: 220 },
   enrage: { below: 0.5, delay: 0.6, radiusMult: 1.4 },
   summon: { every: 10, monster: "odap", count: 3, cap: 9 },
-  lines: {
-    intro: "잠깐, 이것도 적어 둬야지. 틀렸으니까.",
-    enrage: "틀린 건 전부 적어 뒀어. 다시 틀리려고!",
-    defeat: "오답노트는… 원래… 다시 보라고 있는 건데…",
-  },
   cues: {
-    telegraph: "fx-telegraph-circle",
+    telegraph: "tele-circle",
     shockwave: "fx-shockwave",
     slam: "sfx.boss.odap-golem.slam",
     roar: "sfx.boss.odap-golem.roar",

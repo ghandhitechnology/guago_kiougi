@@ -6,6 +6,9 @@ import {
   expFalloff,
   expToNext,
   hitDamage,
+  K_BASE,
+  K_CAP,
+  K_SLOPE,
   killsPerLevel,
   levelFactor,
   monsterCoin,
@@ -34,15 +37,17 @@ describe("monster numbers", () => {
 });
 
 describe("level curve", () => {
-  it("K rises 60 per level and caps at 3000", () => {
-    expect(killsPerLevel(1)).toBe(160);
-    expect(killsPerLevel(48)).toBe(2980);
-    expect(killsPerLevel(49)).toBe(3000);
-    expect(killsPerLevel(1200)).toBe(3000);
+  it("K rises by its slope and holds at its cap", () => {
+    expect(killsPerLevel(1)).toBe(K_BASE + K_SLOPE);
+    expect(killsPerLevel(2) - killsPerLevel(1)).toBe(K_SLOPE);
+    expect(killsPerLevel(1200)).toBe(K_CAP);
+    const capAt = Math.ceil((K_CAP - K_BASE) / K_SLOPE);
+    expect(killsPerLevel(capAt - 1)).toBeLessThan(K_CAP);
+    expect(killsPerLevel(capAt)).toBe(K_CAP);
   });
 
   it("expToNext is K same-level kills", () => {
-    expect(expToNext(30)).toBeCloseTo(monsterEXP(30, 1) * 1900, 6);
+    expect(expToNext(30)).toBeCloseTo(monsterEXP(30, 1) * killsPerLevel(30), 6);
   });
 
   it("a book's curve is a tenth of its owner's", () => {

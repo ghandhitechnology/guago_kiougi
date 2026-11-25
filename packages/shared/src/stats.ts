@@ -10,15 +10,6 @@ export const STAT_IDS = [
 export type StatId = (typeof STAT_IDS)[number];
 export type Stats = Readonly<Record<StatId, number>>;
 
-export const STAT_NAMES: Readonly<Record<StatId, string>> = {
-  understanding: "이해력",
-  memory: "암기력",
-  focus: "집중력",
-  vitality: "체력",
-  agility: "순발력",
-  luck: "운",
-};
-
 export const STAT_POINTS_PER_LEVEL = 3;
 
 // Coefficients the PLAN leaves open. 이해력 (damage) and 체력 (HP) are fixed in `numbers.ts`.

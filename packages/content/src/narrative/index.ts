@@ -11,6 +11,7 @@ import { BOSSES, PAGE1_KO, STORY } from "./page1.ts";
 import { QUESTS, QUESTS_KO } from "./quests.ts";
 import type { Narrative, Strings } from "./schema.ts";
 import { SPEAKERS, SPEAKERS_KO } from "./speakers.ts";
+import { STUDY_DESCRIPTIONS, STUDY_KO, STUDY_TERMS } from "./study.ts";
 import { ANNOUNCEMENTS, AWARD_FRAME, AWARDS, SYSTEM, SYSTEM_KO } from "./system.ts";
 
 function merge(...tables: Strings[]): Strings {
@@ -32,7 +33,8 @@ export const NARRATIVE: Narrative = {
   bosses: BOSSES,
   codex: CODEX,
   barks: [...BARKS, ...EGG_BARKS],
-  descriptions: [...DESCRIPTIONS, ...EGG_DESCRIPTIONS],
+  descriptions: [...DESCRIPTIONS, ...EGG_DESCRIPTIONS, ...STUDY_DESCRIPTIONS],
+  terms: STUDY_TERMS,
   quests: QUESTS,
   system: SYSTEM,
   announcements: ANNOUNCEMENTS,
@@ -49,10 +51,12 @@ export const NARRATIVE: Narrative = {
     QUESTS_KO,
     SYSTEM_KO,
     EGGS_KO,
+    STUDY_KO,
   ),
 };
 
 export type * from "./schema.ts";
 export { EFFECTS, FIGHT_CUES, MILESTONES, MUSIC, PROMPTS, SLOTS, SOUND_CUES } from "./schema.ts";
+export { studyText, termKey } from "./study.ts";
 export { DIALOGUE_BOX, dialogueRows, fill, registerSlips, wrap } from "./text.ts";
 export { type Problem, validateNarrative } from "./validate.ts";

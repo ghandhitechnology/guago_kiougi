@@ -265,6 +265,10 @@ export function validateNarrative(n: Narrative): Problem[] {
     text(where, d.name, { limit: "row" });
     text(where, d.desc, { limit: "dialogue" });
   }
+  for (const t of n.terms ?? []) {
+    unique(`term-${t.kind}`, t.id);
+    text(`term ${t.kind} ${t.id}`, t.name, { limit: "row" });
+  }
   for (const q of n.quests) {
     const where = `quest ${q.id}`;
     unique("quest", q.id);
