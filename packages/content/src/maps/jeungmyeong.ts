@@ -165,7 +165,7 @@ const map: MapSource = {
   time: { clock: "08:40", phase: "morning", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "stone.bright", intensity: 0.85 },
+  ambient: { color: "stone.bright", intensity: 0.85, unlit: "campus" },
   plan: PLAN,
   legend: {
     "#": { terrain: "terrazzo", solid: "#" },

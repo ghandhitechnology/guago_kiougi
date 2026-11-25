@@ -1,10 +1,43 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type BuiltMap, buildAllMaps } from "@guago/content";
+import { type BuiltMap, buildAllMaps, FACE_ROWS, groundRows } from "@guago/content";
 import { Rgba } from "../raster.ts";
 import { edgeInside, renderGround, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import type { Atlas } from "./emit.ts";
 import { MAP_DIR } from "./maps.ts";
+
+/**
+ * The tiles that stop light. Inside, the walls: cells under a `wall-top` cap and the faces that
+ * hang below them, but not desks, counters or carrels. Outside, every solid tile that is not a
+ * prop's footprint: buildings, the stands, walls.
+ */
+function wallTiles(map: BuiltMap, footprints: ReadonlySet<number>): Uint8Array {
+  const out = new Uint8Array(map.w * map.h);
+  const caps = (map.scene.edges ?? []).filter((e) =>
+    (typeof e.overlay === "string" ? [e.overlay] : e.overlay).includes("wall-top"),
+  );
+  if (caps.length === 0) {
+    map.collision.rows.forEach((row, ty) => {
+      for (let tx = 0; tx < map.w; tx++) {
+        if (row[tx] === "#" && !footprints.has(ty * map.w + tx)) out[ty * map.w + tx] = 1;
+      }
+    });
+    return out;
+  }
+  const rows = groundRows(map.scene.ground);
+  const isWall = (x: number, y: number) => caps.some((e) => e.inside.includes(rows[y]?.[x] ?? " "));
+  for (let y = 0; y < map.h; y++) {
+    for (let x = 0; x < map.w; x++) {
+      if (!isWall(x, y)) continue;
+      out[y * map.w + x] = 1;
+      if (y + 1 < map.h && !isWall(x, y + 1)) {
+        for (let k = 1; k <= FACE_ROWS && y + k < map.h && !isWall(x, y + k); k++)
+          out[(y + k) * map.w + x] = 1;
+      }
+    }
+  }
+  return out;
+}
 
 /** File names of a map's baked images inside the maps directory. */
 export function bakedFiles(id: string) {
@@ -44,12 +77,9 @@ export function bakeMaps(
       const m = edgeInside(map.scene, meta, edge);
       for (let i = 0; i < m.length; i++) inside[i] = Math.max(inside[i] as number, m[i] as number);
     }
-    const feet = footprints.get(map.id) ?? new Set<number>();
-    const wall = (px: number, py: number) => {
-      const tx = Math.floor(px / 16);
-      const ty = Math.floor(py / 16);
-      return map.collision.rows[ty]?.[tx] === "#" && !feet.has(ty * map.w + tx);
-    };
+    const walls = wallTiles(map, footprints.get(map.id) ?? new Set<number>());
+    const wall = (px: number, py: number) =>
+      walls[Math.floor(py / 16) * map.w + Math.floor(px / 16)] === 1;
     const masks = new Rgba(img.w, img.h);
     for (let i = 0; i < img.w * img.h; i++) {
       masks.data[i * 4] = img.shadow[i] as number;

@@ -122,7 +122,7 @@ const map: MapSource = {
   time: { clock: "12:40", phase: "noon", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "stone.pale", intensity: 0.86 },
+  ambient: { color: "stone.pale", intensity: 0.86, unlit: "campus" },
   plan: `
     ##########################################
     #||||||||||||||||||||||||||||||||||||||||#

@@ -257,7 +257,7 @@ const map: MapSource = {
   theme: "campus-golden",
   shade: "golden-shade",
   sky: "gold.pale",
-  ambient: { color: "gold.pale", intensity: 0.92 },
+  ambient: { color: "gold.pale", intensity: 0.92, sun: { dir: SUN, color: "gold.pale" } },
   plan: `
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

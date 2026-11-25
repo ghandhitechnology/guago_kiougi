@@ -59,7 +59,7 @@ const map: MapSource = {
   time: { clock: "09:40", phase: "morning", weather: "haze" },
   theme: "campus",
   sky: "ink.deep",
-  ambient: { color: "stone.bright", intensity: 0.9 },
+  ambient: { color: "stone.bright", intensity: 0.9, unlit: "campus" },
   plan: `
     ##################################
     #vvvv#|||||||||||||||||||||||||||#

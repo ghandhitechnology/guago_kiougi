@@ -190,7 +190,7 @@ const map: MapSource = {
   time: { clock: "23:38", phase: "night", weather: "clear" },
   theme: "campus-night",
   sky: "ink.deep",
-  ambient: { color: "navy.light", intensity: 0.3 },
+  ambient: { color: "navy.light", intensity: 0.3, unlit: "campus" },
   plan: PLAN,
   legend: {
     "#": { terrain: "lino", solid: "#" },
