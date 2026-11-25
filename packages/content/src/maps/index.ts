@@ -4,6 +4,7 @@ import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
+import home from "./home.ts";
 import { checkCutsceneMarks, checkIndoor } from "./indoor.ts";
 import lounge from "./lounge.ts";
 import saebyeok from "./saebyeok.ts";
@@ -20,7 +21,7 @@ export * from "./props.ts";
 export * from "./stamp.ts";
 
 // Campus life: the 급식실, the lounge, 실험동, 새벽관 and home.
-const CAMPUS_LIFE: readonly MapSource[] = [cafeteria, lounge, silheom, saebyeok];
+const CAMPUS_LIFE: readonly MapSource[] = [cafeteria, lounge, silheom, saebyeok, home];
 
 /** Every map written in the map format, in contact-sheet order. */
 export const MAP_SOURCES: readonly MapSource[] = [campusYard, campusField, ...CAMPUS_LIFE];
@@ -34,10 +35,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "gaseol-2f",
   "gaseol-4f",
   "jeungmyeong",
-  "silheom",
-  "cafeteria",
-  "lounge",
-  "saebyeok",
   "agora",
   "eco-park",
 ]);
