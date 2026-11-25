@@ -35,13 +35,19 @@ export const DUEL_NORMS: DuelNorms = {
   mass: 1,
 };
 
-/** Best of three, at most five rounds counting draws; 75 s a round, decided on health at time. */
+/**
+ * Best of three, at most five rounds counting draws; 75 s a round, decided on health at time. A
+ * round with no hit landed for 20 s is decided on health at once (a draw when nobody is hurt),
+ * and five minutes of fighting ends the match, so two players standing still cannot hold a floor.
+ */
 export const DUEL_TIMING: DuelTiming = {
   countdown: ticks(3),
   round: ticks(75),
   pause: ticks(4),
   wins: 2,
   maxRounds: 5,
+  idle: ticks(20),
+  matchCap: ticks(300),
 };
 
 /** Seconds a queued match waits for everyone to accept, and a challenge for its answer. */
@@ -63,6 +69,13 @@ export const DUEL_FLOORS_MAX = 8;
  * was fought out first: conceding at once never hands a friend a win for the player card.
  */
 export const DUEL_FORFEIT_WIN_SECONDS = 15;
+/**
+ * Wins counted toward the record per lineup (the same winners over the same losers) a Korean day:
+ * past it a match is still played and recorded as played, the win is not counted.
+ */
+export const DUEL_PAIR_WINS_DAILY = 3;
+/** A character that landed or took a hit this recently is in a fight and may not start a duel. */
+export const DUEL_COMBAT_SECONDS = 10;
 /** Challenges waiting on one player at once. */
 export const DUEL_CHALLENGES_IN_CAP = 5;
 

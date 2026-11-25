@@ -149,6 +149,8 @@ export class Player {
   aiGoalUntil = 0;
   /** Damage the player took in the last ticks, for the AI's caution. */
   lastHurt = -1000;
+  /** Tick it last landed a hit on anything: with `lastHurt`, whether it is in a fight. */
+  lastHit = -1000;
   /** Connection dropped: the server plays it until it comes back. */
   away = false;
   /** Multiplies every EXP this player earns: the server's modifiers (숙면, 졸음, 급식 …). */
@@ -162,6 +164,8 @@ export class Player {
   slow = 0;
   /** Hit this tick, for the wire's flash; only a duel sets it. */
   flash = false;
+  /** Held still with its books shut: a duel's countdown and pause (duel.ts). */
+  frozen = false;
 
   constructor(index: number) {
     this.index = index;
@@ -988,6 +992,7 @@ export function resetPlayer(p: Player): void {
   p.aiGoalY = 0;
   p.aiGoalUntil = 0;
   p.lastHurt = -1000;
+  p.lastHit = -1000;
   p.away = false;
   p.expMult = 1;
   p.rebuild = null;
@@ -995,4 +1000,5 @@ export function resetPlayer(p: Player): void {
   p.statusMask = 0;
   p.slow = 0;
   p.flash = false;
+  p.frozen = false;
 }
