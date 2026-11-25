@@ -14,7 +14,8 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { BedPlayer } from "../ambient/bed.ts";
 import { BEDS, EFFECTS, SONGS } from "../content/index.ts";
-import { renderEffect } from "../sfx/render.ts";
+import { CATEGORY_TARGET } from "../sfx/format.ts";
+import { renderEffect, shortLoudness } from "../sfx/render.ts";
 import { compileSong } from "../tracker/compile.ts";
 import { SongPlayer } from "../tracker/player.ts";
 import { rowStart, songShape, timing } from "../tracker/schedule.ts";
@@ -131,11 +132,13 @@ for (const [id, source] of Object.entries(EFFECTS)) {
     o += v.length + gap;
   }
   const loops = r.loop ? `, loops ${(r.variants[0]?.length ?? 0) / sr} s` : "";
+  const target = CATEGORY_TARGET[source.category] + ((source as { level?: number }).level ?? 0);
+  const loud = r.variants.map((v) => shortLoudness(v, sr).toFixed(1)).join("/");
   save(
     `fx-${id}`,
     [x],
     "effect",
-    `${r.variants.length} variant${r.variants.length > 1 ? "s" : ""}${loops}`,
+    `${source.category}, target ${target} dB, loudest 50 ms ${loud} dB; ${r.variants.length} variant${r.variants.length > 1 ? "s" : ""}${loops}`,
   );
 }
 

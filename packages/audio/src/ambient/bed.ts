@@ -287,22 +287,25 @@ const VOWELS: [number, number][] = [
   [650, 1650],
 ];
 
+interface Syllable {
+  start: number;
+  len: number;
+  f0: number;
+  f1: number;
+  vowel: [number, number];
+  breath: number;
+}
+
 /** Syllable-based call used by gulls, voices and laughs. */
 class Syllables implements Call {
   private readonly sr: number;
   private readonly rng: Rng;
-  private readonly plan: {
-    start: number;
-    len: number;
-    f0: number;
-    f1: number;
-    vowel: [number, number];
-    breath: number;
-  }[];
+  private readonly plan: Syllable[];
   private readonly f1 = new Svf();
   private readonly f2 = new Svf();
   private readonly kind: CallKind;
   private t = 0;
+  private cursor = 0;
   private phase = 0;
   private readonly end: number;
   constructor(kind: CallKind, sr: number, rng: Rng) {
@@ -366,8 +369,14 @@ class Syllables implements Call {
   render(out: Float32Array, n: number): boolean {
     for (let k = 0; k < n; k++, this.t++) {
       if (this.t >= this.end) return false;
-      const s = this.plan.find((p) => this.t >= p.start && this.t < p.start + p.len);
-      if (!s) continue;
+      while (
+        this.cursor < this.plan.length &&
+        this.t >=
+          (this.plan[this.cursor] as Syllable).start + (this.plan[this.cursor] as Syllable).len
+      )
+        this.cursor++;
+      const s = this.plan[this.cursor];
+      if (!s || this.t < s.start) continue;
       const u = (this.t - s.start) / s.len;
       let f: number;
       if (this.kind === "gull")
