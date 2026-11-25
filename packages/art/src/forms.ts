@@ -7,6 +7,8 @@ import { cells, grid } from "./draw.ts";
 import type { Legend, PartGrid, Placement, SpriteDef, Vec } from "./format.ts";
 import { type Lobe, lobes } from "./paint.ts";
 import { colorIndex, isColorName, nameOf, type Remap, resolveRemap } from "./palette.ts";
+import { CLEAR, type Indexed } from "./raster.ts";
+import { compileSprite } from "./sprite.ts";
 
 export interface FormRamp {
   /** Silhouette edge: the ramp's deep step. */
@@ -150,45 +152,96 @@ export function remapLegend(legend: Legend, remap: Remap): Legend {
   return out as Legend;
 }
 
+/** Rows of headroom an elite gets for its crown. */
+const HEADROOM = 6;
+
 /**
  * The elite form of a monster (PLAN §6: every 200 kills, rank 12). The client draws it at twice
- * the size; on top of that every frame carries a gold crown with a red-pen gem, and the body takes
- * a heavier palette. `crown` gives the crown's top-left per frame; frames left out (the end of a
- * death) drop it. Recolours go into the legend, so the crown keeps its gold on every body.
+ * the size; on top of that every frame wears a gold crown with a red-pen gem, seated one pixel
+ * above the top of the head (the topmost non-lone pixels of the frame), and the eyes can be
+ * swapped for lit ones. Death frames after the first drop the crown. Recolours go into the
+ * legend, so the crown keeps its gold on every body.
  */
 export function elite(
   base: SpriteDef,
   opts: {
-    readonly crown: Readonly<Record<string, Vec>>;
     readonly recolor?: Remap;
     readonly palette?: Legend;
     readonly parts?: Readonly<Record<string, PartGrid>>;
+    /** Frames with no crown. Defaults to every death frame but the first. */
+    readonly bare?: (frame: string) => boolean;
+    /** Palette colours the head measurement skips, like a spear held above the head. */
+    readonly ignore?: readonly string[];
+    /** Head centre and top for frames where something else is higher, like raised hands. */
+    readonly seats?: Readonly<Record<string, Vec>>;
   },
 ): SpriteDef {
-  const frames: Record<string, string | readonly Placement[]> = {};
+  if (base.shadow !== undefined) throw new Error(`elite ${base.name}: shadows are not supported`);
+  const measured = compileSprite(base, base.name ?? "elite", `elite ${base.name}`);
+  const bare = opts.bare ?? ((f: string) => /^die[1-9]/.test(f));
   const parts: Record<string, PartGrid> = { ...base.parts, ...opts.parts };
+  const frames: Record<string, readonly Placement[]> = {};
   for (const [name, src] of Object.entries(base.frames)) {
-    const stack: Placement[] = typeof src === "string" ? [`whole-${name}`] : [...src];
-    if (typeof src === "string") parts[`whole-${name}`] = src;
-    const at = opts.crown[name];
-    if (at) stack.push(["crown", at[0], at[1]]);
+    const stack: Placement[] = [];
+    if (typeof src === "string") {
+      parts[`whole-${name}`] = src;
+      stack.push([`whole-${name}`, 0, HEADROOM]);
+    } else {
+      for (const p of src) {
+        stack.push(typeof p === "string" ? [p, 0, HEADROOM] : [p[0], p[1], p[2] + HEADROOM]);
+      }
+    }
+    const img = measured.frames.get(name);
+    if (img && !bare(name)) {
+      const top =
+        opts.seats?.[name] ?? crownSeat(img, new Set((opts.ignore ?? []).map(colorIndex)));
+      if (top) stack.push(["elite-crown", top[0] - 4, top[1] - 5 + HEADROOM]);
+    }
     frames[name] = stack;
   }
-  if (parts.crown) throw new Error(`elite ${base.name}: base already has a part "crown"`);
-  parts.crown = CROWN;
+  if (base.parts && "elite-crown" in base.parts) {
+    throw new Error(`elite ${base.name}: base already has a part "elite-crown"`);
+  }
+  parts["elite-crown"] = CROWN;
   const legend = remapLegend(
     remapLegend({ ...base.palette, ...opts.palette }, base.recolor ?? {}),
     opts.recolor ?? {},
   );
-  const { recolor: _drop, ...rest } = base;
+  const { recolor: _drop, origin, ...rest } = base;
+  const [w, h] = base.size;
   return {
     ...rest,
     name: `${base.name}-elite`,
+    size: [w, h + HEADROOM],
+    origin: origin ? [origin[0], origin[1] + HEADROOM] : [Math.floor(w / 2), h + HEADROOM - 1],
     palette: { ...legend, ...CROWN_LEGEND },
     lone: `${base.lone ?? ""}${GEM}`,
     parts,
     frames,
   };
+}
+
+/** Centre x and top y of a frame's head: the top three rows of its non-lone pixels. */
+function crownSeat(img: Indexed, ignore: ReadonlySet<number>): [number, number] | undefined {
+  const counts = (i: number) =>
+    img.px[i] !== CLEAR && !img.lone[i] && !ignore.has(img.px[i] as number);
+  let top = -1;
+  for (let i = 0; i < img.px.length && top < 0; i++) {
+    if (counts(i)) top = Math.floor(i / img.w);
+  }
+  if (top < 0) return undefined;
+  let sum = 0;
+  let n = 0;
+  for (let y = top; y < Math.min(img.h, top + 3); y++) {
+    for (let x = 0; x < img.w; x++) {
+      const i = y * img.w + x;
+      if (counts(i)) {
+        sum += x;
+        n++;
+      }
+    }
+  }
+  return [Math.round(sum / n), top];
 }
 
 /** The elite crown, 9×4: three gold points over a band, a red-pen gem in the middle. */
