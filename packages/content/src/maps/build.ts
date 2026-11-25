@@ -10,7 +10,6 @@ import type {
   TileRect,
   Zone,
 } from "./format.ts";
-import { buildStage } from "./indoor.ts";
 import type { Cell, Light, Prop, SceneDef } from "./layers.ts";
 import { fractal } from "./noise.ts";
 import { gridLines, parseStamp } from "./stamp.ts";
@@ -301,7 +300,23 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
       portals,
       interactables,
       zones,
-      ...buildStage(src, rect),
+      marks: Object.fromEntries(
+        Object.entries(src.marks ?? {}).map(([name, [tx, ty]]) => [
+          name,
+          { x: tx * TILE_SIZE + TILE_SIZE / 2, y: ty * TILE_SIZE + TILE_SIZE / 2 },
+        ]),
+      ),
+      npcs: (src.npcs ?? []).map((n) => ({
+        speaker: n.speaker,
+        x: n.tile[0] * TILE_SIZE + TILE_SIZE / 2,
+        y: n.tile[1] * TILE_SIZE + TILE_SIZE - 4,
+        facing: n.facing ?? "down",
+      })),
+      arenas: (src.arenas ?? []).map((a) => ({
+        id: a.id,
+        rect: rect(a.rect, `arena ${a.id}`),
+        modes: a.modes,
+      })),
     },
     footprints,
   };

@@ -1,15 +1,16 @@
 import type { LightSource, MapSource } from "./format.ts";
-import { backWall, mount, mountLine, sideShade } from "./indoor.ts";
+import { backWall, mount, mountY, sideShade } from "./interior.ts";
 import type { Prop } from "./layers.ts";
 import { place } from "./props.ts";
 
 /**
  * 실험동 at 09:40 on a hazy morning, every floor of it in one map: the stairwell on the west
- * side climbs past each floor's door. The first floor is empty except for the electric car the
- * club built and never moved. 화학 on the second smells of the fume hoods and keeps its goggles
- * under purple light. 물리 on the third has 0조's interferometer on its bench in the middle of
- * the room, a door whose lock beeps every time, and a Van de Graaff that bites. 생명 on the top
- * floor is jars and seedlings and the skeleton by the window. These are the rooms later Pages
+ * side climbs past each floor's door. The first floor is empty, so empty that the dust still
+ * holds the shape of the club's electric car, pushed outside at last. 화학 on the second
+ * smells of the fume hoods and keeps its goggles under purple light. 물리 on the third has
+ * 0조's interferometer on its bench in the middle of the room, a door whose lock beeps every
+ * time, and a Van de Graaff that bites. 생명 on the top floor is jars and seedlings and the
+ * skeleton by the window. These are the rooms later Pages
  * will tear open; each already looks like its subject.
  */
 
@@ -25,15 +26,15 @@ const X1 = 33;
 
 /** Morning sun through a window onto the floor below it. */
 const sun = (cx: number, cap: number): LightSource => ({
-  at: [cx + 14, mountLine(cap) + 40],
+  at: [cx + 14, mountY(cap) + 40],
   radius: 60,
   color: "gold.pale",
   intensity: 0.45,
   paint: {
     bands: ["campus-lamp"],
     spill: {
-      top: [cx - 13, cx + 13, mountLine(cap) + 2],
-      bottom: [cx + 4, cx + 44, mountLine(cap) + 84],
+      top: [cx - 13, cx + 13, mountY(cap) + 2],
+      bottom: [cx + 4, cx + 44, mountY(cap) + 84],
     },
     ragged: 2,
   },
@@ -127,7 +128,9 @@ const map: MapSource = {
     ...flights(F1),
     { prop: "floor-marks", frame: "scorch", at: [180, 486] },
     { prop: "floor-marks", frame: "puddle", at: [496, 438] },
-    { prop: "floor-marks", frame: "scraps", at: [290, 646] },
+    { prop: "floor-marks", frame: "scraps", at: [290, 700] },
+    { prop: "ev-ghost", at: [296, 676] },
+    { prop: "charge-cable", at: [304, 642] },
   ],
   shadows: shades,
   objects: [
@@ -205,7 +208,10 @@ const map: MapSource = {
     mount("window", 416, F1, { frame: "day" }),
     mount("window", 480, F1, { frame: "day" }),
     place("stacked-chairs", 6, 40),
-    place("ev", 19, 43),
+    // Where the club's car stood until it was pushed outside: the dust round its shape, the
+    // charger still on the wall, its cable to nowhere, a cone guarding the empty space.
+    mount("ev-charger", 312, F1),
+    { prop: "traffic-cone", at: [348, 704] },
     place("tarp", 29, 40),
     place("extinguisher", 6, 47),
   ],
@@ -217,7 +223,7 @@ const map: MapSource = {
     { prop: "microscope", at: [184, 140] },
     { prop: "microscope", at: [344, 140] },
     // One tube still hanging on the empty floor, flickering.
-    { prop: "tube-light", anim: "flicker", play: true, at: [320, 650] },
+    { prop: "tube-light", anim: "flicker", play: true, at: [432, 650] },
   ],
   lights: [
     sun(200, F4),
@@ -266,7 +272,7 @@ const map: MapSource = {
   interactables: [
     { id: "interferometer", kind: "lore", rect: { x: 19, y: 18, w: 5, h: 1 } },
     { id: "beep-door", kind: "lore", rect: { x: 7, y: 15, w: 2, h: 1 } },
-    { id: "ev", kind: "lore", rect: { x: 19, y: 43, w: 2, h: 1 } },
+    { id: "parking-spot", kind: "lore", rect: { x: 19, y: 43, w: 2, h: 1 } },
     { id: "skeleton", kind: "lore", rect: { x: 32, y: 4, w: 1, h: 1 } },
     { id: "periodic-table", kind: "notice", rect: { x: 15, y: 27, w: 3, h: 1 } },
     { id: "chem-store", kind: "locked", rect: { x: 21, y: 27, w: 1, h: 1 } },
@@ -278,6 +284,10 @@ const map: MapSource = {
     { id: "physics", kind: "gather", rect: { x: 6, y: 16, w: 27, h: 8 } },
     { id: "chem", kind: "gather", rect: { x: 6, y: 28, w: 27, h: 8 } },
     { id: "ground", kind: "gather", rect: { x: 6, y: 40, w: 27, h: 8 } },
+    { id: "bio-lab", kind: "room", name: "4층 생명과학실", rect: { x: 6, y: 4, w: 27, h: 8 } },
+    { id: "physics-lab", kind: "room", name: "3층 물리실", rect: { x: 6, y: 16, w: 27, h: 8 } },
+    { id: "chem-lab", kind: "room", name: "2층 화학실", rect: { x: 6, y: 28, w: 27, h: 8 } },
+    { id: "silheom-1f", kind: "room", name: "실험동 1층", rect: { x: 6, y: 40, w: 27, h: 8 } },
   ],
   npcs: [
     { speaker: "senior-bio", tile: [25, 8] },

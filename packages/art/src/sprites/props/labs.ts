@@ -283,6 +283,78 @@ const stackedChairs = (() => {
   return finish(p);
 })();
 
+/**
+ * Where the club's car stood on the empty first floor until someone finally pushed it outside:
+ * a clean rectangle in the dust, four tyre prints, two tracks leading off toward the door.
+ * Ground art: lay it in `details`.
+ */
+const evGhost = (() => {
+  const p = Pic.blank(48, 60);
+  // The dust that settled round it, in a ragged band; inside, the floor is clean.
+  for (let y = 2; y < 24; y++) {
+    for (let x = 2; x < 46; x++) {
+      const edge = x < 5 || x > 42 || y < 5 || y > 20;
+      const inner = x > 6 && x < 41 && y > 6 && y < 19;
+      if (edge && !inner && (x * 5 + y * 3) % 7 !== 0) p.set(x, y, "L");
+    }
+  }
+  // Tyre prints, darker where the rubber sat for two years.
+  for (const [x, y] of [
+    [6, 5],
+    [36, 5],
+    [6, 17],
+    [36, 17],
+  ] as const)
+    rect(p, x, y, 6, 3, "V");
+  // Two tracks out of the prints toward the door, fading.
+  for (let y = 24; y < 60; y++) {
+    if (y > 46 && y % 3 === 0) continue;
+    for (const x of [8, 38]) rect(p, x - Math.floor((y - 24) / 12), y, 2, 1, "V");
+  }
+  return p;
+})();
+
+/** The charger on the wall, its cable lying across the floor to a plug with nothing to plug into. */
+const charger = (() => {
+  const p = Pic.blank(16, 22);
+  rect(p, 2, 1, 12, 16, "w");
+  vline(p, 13, 1, 16, "K");
+  hline(p, 2, 16, 12, "K");
+  rect(p, 4, 3, 8, 4, "j");
+  rect(p, 5, 4, 3, 2, "g");
+  rect(p, 4, 10, 8, 4, "M");
+  rect(p, 7, 17, 2, 4, "I");
+  return finish(p, "g");
+})();
+
+const chargeCable = (() => {
+  const p = Pic.blank(30, 60);
+  let x = 6;
+  for (let y = 0; y < 52; y++) {
+    x += Math.round(Math.sin(y / 6) * 0.9);
+    p.set(x, y, "I").set(x + 1, y, "I");
+  }
+  // The coil it ends in, and the plug.
+  for (let i = 0; i < 12; i++) p.set(x + 2 + i, 52 + Math.round(Math.sin(i / 2) * 2), "I");
+  rect(p, x + 14, 51, 4, 3, "K");
+  hline(p, x + 14, 51, 4, "k");
+  rect(p, x + 18, 52, 2, 1, "o");
+  return p;
+})();
+
+/** A traffic cone, put there so nobody parks where nothing is parked any more. */
+const trafficCone = (() => {
+  const p = Pic.blank(14, 18);
+  for (let y = 1; y < 14; y++) {
+    const half = 1 + Math.floor(y / 3);
+    rect(p, 7 - half, y, half * 2, 1, y === 5 || y === 6 || y === 10 || y === 11 ? "w" : "t");
+  }
+  vline(p, 6, 2, 11, "!");
+  rect(p, 1, 14, 12, 3, "I");
+  hline(p, 1, 14, 12, "i");
+  return finish(p);
+})();
+
 const VDG = sprite({
   name: "van-de-graaff",
   group: "interior",
@@ -340,5 +412,28 @@ export default [
     },
   ),
   frames("tarp", { still: tarp }, { shadow: boxShadow(36, 28, 1, 22, 34, 27, 3, 0) }),
+  sprite({
+    name: "ev-ghost",
+    group: "interior",
+    size: [48, 60],
+    origin: [0, 0],
+    palette: IL,
+    outline: false,
+    frames: { still: evGhost.toString() },
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
+  frames("ev-charger", { still: charger }, { lone: "g", origin: mounted([16, 22], 8) }),
+  sprite({
+    name: "charge-cable",
+    group: "interior",
+    size: [30, 60],
+    origin: [0, 0],
+    palette: IL,
+    lone: "o",
+    outline: false,
+    frames: { still: chargeCable.toString() },
+    anim: { idle: { frames: ["still"], fps: 1 } },
+  }),
+  frames("traffic-cone", { still: trafficCone }, { shadow: ovalShadow(14, 18, 8, 16.5, 6, 1.4) }),
   frames("stacked-chairs", { still: stackedChairs }, { shadow: ovalShadow(18, 36, 9, 34, 7, 1.5) }),
 ];

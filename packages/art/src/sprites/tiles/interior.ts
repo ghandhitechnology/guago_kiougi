@@ -23,8 +23,10 @@ const palette: Legend = {
 const P = (src: string): Pic => Pic.of(src);
 
 /**
- * Themes interior floors and wall tops are baked into: the campus's own light, never the field
- * at night or an era. A room lit by a rift through its windows needs that theme added here.
+ * Themes interior floors and wall tops are baked into: the campus's own light, and the rift's
+ * warm bands that fall through the windows on the night time tore (the 가설관 stair core).
+ * Never the field at night, the rift's sunlit core or an era. A room lit any other way needs
+ * that theme added here; the map checks say which.
  */
 const INDOOR = [
   "campus",
@@ -36,6 +38,8 @@ const INDOOR = [
   "golden-sun",
   "golden-warm",
   "golden-shade",
+  "rift-warm",
+  "rift-ember",
 ];
 
 // Tones ---------------------------------------------------------------------------------------

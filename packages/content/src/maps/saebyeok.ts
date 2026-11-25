@@ -1,5 +1,5 @@
 import type { LightSource, MapSource, Thing } from "./format.ts";
-import { backWall, floorLine, mount, sideShade } from "./indoor.ts";
+import { backWall, mount, mountY, sideShade } from "./interior.ts";
 import type { Prop } from "./layers.ts";
 import { place } from "./props.ts";
 
@@ -209,9 +209,9 @@ const map: MapSource = {
   ],
   overhead: [
     // The lintels over the rooms' doorways: you pass under them going in.
-    { prop: "lintel", frame: "dorm", at: [4 * T, floorLine(ROOMS)] },
-    { prop: "lintel", frame: "dorm", at: [12 * T, floorLine(ROOMS)] },
-    { prop: "lintel", frame: "cream", at: [21 * T, floorLine(ROOMS)] },
+    { prop: "lintel", frame: "dorm", at: [4 * T, mountY(ROOMS) - 1] },
+    { prop: "lintel", frame: "dorm", at: [12 * T, mountY(ROOMS) - 1] },
+    { prop: "lintel", frame: "cream", at: [21 * T, mountY(ROOMS) - 1] },
     // On the desk in the bunk room: the noodles someone is not supposed to have.
     { prop: "cup-noodles", anim: "steam", play: true, at: [24, 218] },
     { prop: "desk-lamp", anim: "glow", play: true, at: [128, 214] },
@@ -262,8 +262,12 @@ const map: MapSource = {
     { id: "rail-s", kind: "gather", rect: { x: 27, y: 21, w: 22, h: 2 } },
     { id: "rail-w", kind: "gather", rect: { x: 24, y: 8, w: 3, h: 12 } },
     { id: "rail-e", kind: "gather", rect: { x: 49, y: 8, w: 3, h: 12 } },
+    { id: "colosseum", kind: "room", name: "콜로세움", rect: { x: 28, y: 8, w: 20, h: 12 } },
+    { id: "bunk-room", kind: "room", name: "4인실", rect: { x: 1, y: 11, w: 8, h: 12 } },
+    { id: "double-room", kind: "room", name: "2인실", rect: { x: 10, y: 11, w: 6, h: 12 } },
+    { id: "laundry", kind: "room", name: "세탁실", rect: { x: 17, y: 11, w: 6, h: 12 } },
   ],
-  arenas: [{ id: "colosseum", rect: { x: 28, y: 8, w: 20, h: 12 }, modes: ["1v1", "3v3"] }],
+  arenas: [{ id: "colosseum-floor", rect: { x: 28, y: 8, w: 20, h: 12 }, modes: ["1v1", "3v3"] }],
   npcs: [
     { speaker: "sagam", tile: [7, 5] },
     { speaker: "garam", tile: [20, 5] },

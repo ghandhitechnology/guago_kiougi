@@ -1,5 +1,5 @@
 import type { Interactable, LightSource, MapSource, Thing } from "./format.ts";
-import { backWall, mount, sideShade } from "./indoor.ts";
+import { backWall, mount, sideShade } from "./interior.ts";
 import type { Prop } from "./layers.ts";
 import { place } from "./props.ts";
 

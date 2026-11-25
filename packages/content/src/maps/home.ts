@@ -1,5 +1,5 @@
 import type { LightSource, MapSource } from "./format.ts";
-import { backWall, mount, sideShade } from "./indoor.ts";
+import { backWall, mount, sideShade } from "./interior.ts";
 import { place } from "./props.ts";
 
 /**
@@ -113,11 +113,7 @@ const map: MapSource = {
   ],
   zones: [{ id: "home", kind: "safe", rect: { x: 0, y: 0, w: 24, h: 14 } }],
   npcs: [{ speaker: "parent", tile: [5, 5] }],
-  marks: {
-    door: { tile: [21, 5] },
-    table: { tile: [5, 9] },
-    fridge: { tile: [2, 5] },
-  },
+  marks: { door: [21, 5], table: [5, 9], fridge: [2, 5] },
 };
 
 export default map;
