@@ -254,7 +254,7 @@ const MORE_HOUSES: readonly [string, number, number][] = [
   ["street-house/shop", 62, 40],
   // Facing the colonnade road below the market.
   ["street-house/gable", 47, 23],
-  ["street-house/shop", 52, 23],
+  ["townhouse/ochre", 52, 23],
 ];
 /** Every other house stands a step back from the street, so the row has depth and overlaps. */
 const setBack = (i: number) => (i % 2 ? 5 : 0);
@@ -420,7 +420,7 @@ function life(): Partial<Placed> {
       // Baskets of the day's goods set out before the stalls.
       { prop: "basket", at: [51 * T + 4, 15 * T + 12] },
       { prop: "basket", at: [57 * T + 8, 15 * T + 12] },
-      { prop: "basket", at: [55 * T, 21 * T + 12] },
+      { prop: "basket", at: [60 * T + 8, 15 * T + 12] },
       { prop: "amphora-rack", at: [48 * T, 15 * T + 14] },
       // The plaza between the wound, the monument and the fountain: shade, a seller or two, jars.
       place("marble-bench", 22, 31),
@@ -441,9 +441,17 @@ function life(): Partial<Placed> {
         anim: "sit",
         play: true,
         index: 1,
-        at: [33 * T + 14, 34 * T + 6],
+        at: [33 * T + 8, 34 * T + 6],
       },
-      { rig: "crowd-c", dir: "down", anim: "sitCheer", play: true, at: [32 * T + 22, 34 * T + 6] },
+      // A bench seats one with room to spare; the friend stands at its end, talking down at them.
+      {
+        rig: "crowd-c",
+        dir: "side",
+        anim: "idle",
+        play: true,
+        flip: true,
+        at: [35 * T + 6, 34 * T + 4],
+      },
       // Cats: one on the potsherd wall, one on the stoa steps, one on a doorstep in the street.
       { prop: "cat", anim: "flick", play: true, at: [51 * T + 6, 11 * T - 14], sort: 12 * T },
       {
@@ -901,7 +909,7 @@ const map: MapSource = {
     // Where the hub's helpers stand when an escort notice is up.
     "pythagorean-junior": [38, 39],
     "lyceum-scribe": [36, 10],
-    "survey-helper": [16, 16],
+    "survey-helper": [18, 15],
     // Townspeople at what they do.
     potter: [STREET.east + 7, STREET.y + 5],
     "barber-chair": [42, 49],
@@ -921,7 +929,7 @@ const map: MapSource = {
       id: "water",
       walker: "agora-water",
       route: [
-        [47, 40],
+        [48, 38],
         [49, 43],
         [49, 49],
         [40, 49],
@@ -948,17 +956,17 @@ const map: MapSource = {
   npcs: [
     // The minds freed from their books, at their spots once their boss is freed.
     { speaker: "aristotle-freed", tile: [STOA.x + STOA.bays, STOA.steps + 2], facing: "down" },
-    { speaker: "zeno", tile: [61, 29], facing: "right" },
+    { speaker: "zeno", tile: [61, 27], facing: "right" },
     { speaker: "pythagoreans", tile: [39, 37], facing: "down" },
     { speaker: "aristarchus", tile: [GNOMON[0] - 1, GNOMON[1] + 1], facing: "right" },
-    { speaker: "guard", tile: [6, 41], facing: "right" },
+    { speaker: "guard", tile: [20, 42], facing: "left" },
     // The order under the vines, its youngest, and the one keeping an eye on the beans.
     { speaker: "pythagorean-order", tile: [36, 37], facing: "right" },
     { speaker: "pythagorean-junior", tile: [38, 39], facing: "down" },
-    { speaker: "pythagorean-bean", tile: [44, 41], facing: "right" },
+    { speaker: "pythagorean-bean", tile: [43, 42], facing: "right" },
     // The other two helpers waiting for their escort.
     { speaker: "lyceum-scribe", tile: [36, 10], facing: "down" },
-    { speaker: "survey-helper", tile: [16, 16], facing: "down" },
+    { speaker: "survey-helper", tile: [18, 15], facing: "left" },
     // Townspeople at their work.
     { speaker: "agora-potter", tile: [STREET.east + 7, STREET.y + 5], facing: "left" },
     { speaker: "agora-barber", tile: [43, 49], facing: "left" },
