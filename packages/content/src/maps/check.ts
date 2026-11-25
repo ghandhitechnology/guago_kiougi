@@ -1,4 +1,7 @@
 import { isSolidTile, type TileCollision } from "@guago/shared";
+import { CUTSCENES } from "../narrative/cutscenes.ts";
+import { OPENING } from "../narrative/opening.ts";
+import type { Cutscene } from "../narrative/schema.ts";
 import { SPEAKERS } from "../narrative/speakers.ts";
 import type { BuildResult } from "./build.ts";
 import type { BuiltMap, TileRect } from "./format.ts";
@@ -34,10 +37,12 @@ export interface ArtIndex {
         readonly upper: string;
         readonly lower: string;
         readonly decals: readonly { readonly frame: string }[];
+        /** Theme atlases holding its tiles; null or absent for every theme. */
+        readonly bake?: readonly string[] | null;
       }
     >
   >;
-  readonly overlays: Readonly<Record<string, unknown>>;
+  readonly overlays: Readonly<Record<string, { readonly bake?: readonly string[] | null }>>;
 }
 
 export interface MapRegistry {
@@ -174,6 +179,22 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     else if (e.anim && !(e.anim in s.anims))
       say(`emitters: ${e.sprite} has no animation ${e.anim}`);
   }
+  // Baking: every terrain and overlay the map draws is in the atlas of every theme it paints
+  // with (its theme, its shade, cell themes and each light band).
+  const painted = new Set<string>([scene.theme]);
+  if (scene.shade) painted.add(scene.shade);
+  for (const cell of Object.values(scene.legend)) if (cell.theme) painted.add(cell.theme);
+  for (const l of scene.lights ?? []) for (const b of l.bands) painted.add(b);
+  const used = new Set(Object.values(scene.legend).flatMap((c) => (c.terrain ? [c.terrain] : [])));
+  const unbaked = (name: string, bake: readonly string[] | null | undefined) => {
+    for (const t of painted)
+      if (bake && !bake.includes(t)) say(`${name} is not baked into theme ${t}`);
+  };
+  for (const [name, set] of Object.entries(art.tilesets))
+    if (used.has(set.upper) || used.has(set.lower)) unbaked(name, set.bake);
+  for (const e of scene.edges ?? [])
+    for (const o of typeof e.overlay === "string" ? [e.overlay] : e.overlay)
+      unbaked(o, art.overlays[o]?.bake);
   if (!colour(map.ambient.color)) say(`ambient ${map.ambient.color} is not a palette colour`);
   map.lights.forEach((l, i) => {
     if (!colour(l.color)) say(`light ${i + 1}: ${l.color} is not a palette colour`);
@@ -249,6 +270,47 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     if (!speakers.has(n.speaker)) say(`npc spot for ${n.speaker}: no such speaker`);
     if (solid(tx, ty) || !reached[ty * map.w + tx])
       say(`npc spot for ${n.speaker} at tile ${tx},${ty} is not walkable from the main spawn`);
+  }
+  for (const a of map.arenas) {
+    unique("arena", a.id);
+    if (!inBounds(a.rect)) say(`arena ${a.id} reaches past the map`);
+    const shut = tilesOf(a.rect).filter(([x, y]) => solid(x, y));
+    if (shut.length > 0) say(`arena ${a.id} is not open floor at ${list(shut)}`);
+  }
+  return out;
+}
+
+/** Every scene the story stages: the cutscenes and the opening's beats. */
+const SCENES: readonly Cutscene[] = [...CUTSCENES, ...OPENING.map((b) => b.scene)];
+
+/**
+ * The map a scene is staged on: one built with that id, or one with a room zone of that id (a
+ * scene staged in `study-hall` plays in the map that names that room).
+ */
+export function sceneMap(maps: readonly BuiltMap[], place: string): BuiltMap | undefined {
+  return (
+    maps.find((m) => m.id === place) ??
+    maps.find((m) => m.zones.some((z) => z.kind === "room" && z.id === place))
+  );
+}
+
+/**
+ * Every scene staged on a built map finds the marks it names there, and every mark it walks the
+ * player to is walkable. Other marks may be solid: a camera on the clock, the cat on a sill.
+ */
+export function checkScenes(maps: readonly BuiltMap[], scenes = SCENES): string[] {
+  const out: string[] = [];
+  for (const c of scenes) {
+    const map = sceneMap(maps, c.map);
+    if (!map) continue;
+    const say = (msg: string) => out.push(`map ${map.id}: scene ${c.id} ${msg}`);
+    for (const mark of c.marks) if (!(mark in map.marks)) say(`needs mark ${mark}`);
+    for (const step of c.steps) {
+      if (step.do !== "move" || step.actor !== "player") continue;
+      const m = map.marks[step.to];
+      if (m && isSolidTile(map, Math.floor(m.x / 16), Math.floor(m.y / 16)))
+        say(`moves ${step.actor} to mark ${step.to}, which is solid`);
+    }
   }
   return out;
 }

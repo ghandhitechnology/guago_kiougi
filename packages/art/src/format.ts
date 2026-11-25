@@ -251,6 +251,12 @@ export interface TerrainDef extends Common {
   readonly decals?: Readonly<Record<string, Decal>>;
   /** Themes the pair is meant for. The contact sheet shows it in these only. Defaults to all. */
   readonly themes?: readonly string[];
+  /**
+   * Themes the art is baked into. Defaults to every theme. Interior floors leave out the
+   * outdoor field and era themes, so those atlases do not grow with every room. A map that lights
+   * a terrain in a theme it is not baked into fails the map checks.
+   */
+  readonly bake?: readonly string[];
 }
 
 export function terrain(def: Omit<TerrainDef, "kind">): TerrainDef {
@@ -261,6 +267,12 @@ export function terrain(def: Omit<TerrainDef, "kind">): TerrainDef {
 export interface OverlayDef extends Common, OverlayPictures {
   readonly kind: "overlay";
   readonly themes?: readonly string[];
+  /**
+   * Themes the art is baked into. Defaults to every theme. Interior floors leave out the
+   * outdoor field and era themes, so those atlases do not grow with every room. A map that lights
+   * a terrain in a theme it is not baked into fails the map checks.
+   */
+  readonly bake?: readonly string[];
   /**
    * Picture characters that belong to the region itself, drawn or clear. With it, each tile
    * also carries its shape, and scenes cut the ground inside and outside along that shape

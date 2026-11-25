@@ -118,7 +118,7 @@ const lights: LightSource[] = [
     intensity: 1,
     flicker: { amount: 0.08, period: 1.3 },
     paint: {
-      bands: ["greece", "rift-sun"],
+      bands: ["golden-sun", "golden-warm"],
       at: [FORGE[0], FORGE[1] + 18],
       r: [60, 24],
       ragged: 4,

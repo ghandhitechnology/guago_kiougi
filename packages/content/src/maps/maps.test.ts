@@ -1,7 +1,7 @@
 import { isSolidTile } from "@guago/shared";
 import { describe, expect, it } from "vitest";
 import { applyRules, buildMap, readPlan } from "./build.ts";
-import { type ArtIndex, checkMap, narrowTiles, reach } from "./check.ts";
+import { type ArtIndex, checkMap, checkScenes, narrowTiles, reach } from "./check.ts";
 import type { MapSource, Stamp } from "./format.ts";
 import { interiorWalls, mountY } from "./interior.ts";
 import { place } from "./props.ts";
@@ -196,5 +196,48 @@ describe("interior walls", () => {
       frame: "open",
       at: [80, mountY(6)],
     });
+  });
+});
+
+describe("arenas, baking and scenes", () => {
+  const ROOM: MapSource = {
+    ...SOURCE,
+    id: "room",
+    stamps: [],
+    portals: [],
+    objects: [place("bench", 4, 5)],
+    zones: [{ id: "study-hall", kind: "room", name: "자습실", rect: { x: 0, y: 1, w: 8, h: 7 } }],
+    marks: { seat: [3, 3], desk: [4, 5] },
+    arenas: [{ id: "ring", rect: { x: 3, y: 4, w: 3, h: 3 }, modes: ["1v1"] }],
+  };
+  const built = buildMap(ROOM, new Set(["room"]));
+
+  it("finds solid tiles inside an arena and terrains missing from a theme's atlas", () => {
+    const baked: ArtIndex = {
+      ...ART,
+      tilesets: {
+        "lawn-walk": { upper: "grass", lower: "walk", decals: [], bake: ["campus-night"] },
+      },
+    };
+    const problems = checkMap(built, baked, { ...REGISTRY, built: new Map([["room", ["main"]]]) });
+    expect(problems.join("\n")).toMatch(/arena ring is not open floor at 4,5/);
+    expect(problems.join("\n")).toMatch(/lawn-walk is not baked into theme campus/);
+  });
+
+  it("stages a scene by map id or room name, needing its marks and a walkable spot for the player", () => {
+    const scene = (map: string, to: string) => ({
+      id: "s",
+      map,
+      cast: ["player"],
+      marks: ["seat", "desk"],
+      steps: [{ do: "move" as const, actor: "player", to }],
+    });
+    expect(checkScenes([built.map], [scene("study-hall", "seat")])).toEqual([]);
+    expect(checkScenes([built.map], [scene("room", "desk")]).join("\n")).toMatch(
+      /moves player to mark desk, which is solid/,
+    );
+    const missing = { ...scene("room", "seat"), marks: ["clock"] };
+    expect(checkScenes([built.map], [missing]).join("\n")).toMatch(/needs mark clock/);
+    expect(checkScenes([built.map], [scene("elsewhere", "seat")])).toEqual([]);
   });
 });
