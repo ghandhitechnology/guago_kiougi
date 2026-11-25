@@ -27,6 +27,7 @@ import {
   terrainSheet,
 } from "./static.ts";
 import { uiSheets } from "./ui-static.ts";
+import { wardrobeSheets } from "./wardrobe.ts";
 
 const { values } = parseArgs({
   options: {
@@ -74,6 +75,7 @@ if (values.png) {
         sprites: spriteSheet(fonts, art),
         combat: combatSheet(fonts, art),
         rigs: rigSheet(fonts, art),
+        ...wardrobeSheets(fonts, art),
         terrain: terrainSheet(fonts, art),
         ...uiSheets(art, built, sceneMeta, atlases),
       };
