@@ -171,7 +171,9 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
     );
     drawText(b.c, f.head, "hair · back, front, profile", 20, b.y, HEAD);
     b.y += 28;
-    hairs.forEach((hair, i) => drawText(b.c, f.label, hair, 20 + i * (w * z + 8), b.y, TEXT));
+    hairs.forEach((hair, i) => {
+      drawText(b.c, f.label, hair, 20 + i * (w * z + 8), b.y, TEXT);
+    });
     b.y += 16;
     for (const dir of ["up", "down", "side"]) {
       hairs.forEach((hair, i) => {

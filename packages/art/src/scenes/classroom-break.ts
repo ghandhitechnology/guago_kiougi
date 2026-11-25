@@ -10,7 +10,7 @@ import { type Doll, type Prop, scene } from "../scene.ts";
 const WALL_Y = 63;
 const MOUNT_Y = WALL_Y + 1;
 
-function wallRun(prop: string, x0: number, x1: number, worn: readonly number[] = []): Prop[] {
+function wallRun(x0: number, x1: number, worn: readonly number[] = []): Prop[] {
   const out: Prop[] = [];
   for (let x = x0; x < x1; x += 16) {
     const frame = x === x0 ? "end-l" : x + 16 >= x1 ? "end-r" : worn.includes(x) ? "worn" : "run";
@@ -98,7 +98,7 @@ export default scene({
   `,
   edges: [{ overlay: "wall-top", inside: "#" }],
   objects: [
-    ...wallRun("wall-cream", 0, 480, [96, 256, 400]),
+    ...wallRun(0, 480, [96, 256, 400]),
     { prop: "window", frame: "day", at: [32, MOUNT_Y] },
     { prop: "window", frame: "day-curtain", at: [80, MOUNT_Y] },
     { prop: "blackboard", frame: "written", at: [240, MOUNT_Y + 12] },

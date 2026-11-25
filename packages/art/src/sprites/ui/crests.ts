@@ -1,6 +1,5 @@
 import { body, grid, mask, stack } from "../../draw.ts";
 import { type Legend, sprite } from "../../format.ts";
-import { gridRows } from "../../grid.ts";
 
 /**
  * Club crests (PLAN §12 "과잠"): a club builds one in the 동아리 editor from a background, a
