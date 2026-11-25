@@ -9,17 +9,26 @@
  * server delivered it (masked by the filter, with its id and time) or with a refusal code. The
  * server may mask, refuse or mute, so an optimistic copy could show words nobody else saw; the
  * round trip is one hop on an open socket, and the input can show the pending text meanwhile.
+ *
+ * Item and currency operations (`op`) carry an operation id and resolve with the one `result`
+ * the server gives that id. After `offline` or `timeout`, send again with the same id: the server
+ * answers a known id with its recorded result and never applies it twice.
  */
 import { Client, type Room } from "@colyseus/sdk";
 import {
+  type ChangeNotice,
   type ChatLine,
   type ChatSend,
   CLOSE_SESSION_REPLACED,
   cleanChatText,
+  type OpName,
+  type OpRequests,
+  type OpResult,
   type PresenceEntry,
   type PresenceMessage,
   type Refusal,
   type RefusalCode,
+  ResultLog,
   ROOMS_PATH,
   type SpeakChannel,
   type SystemLine,
@@ -56,12 +65,19 @@ export type PresenceChange =
   /** Map or level changed; `entry` holds the new values. */
   | { kind: "update"; entry: PresenceEntry };
 
+/** An operation's result, or why none arrived. */
+export type OpCall = OpResult | { id: string; op: OpName; ok: false; error: "offline" | "timeout" };
+
 export type WorldEvent =
   | { type: "status"; status: WorldStatus }
   | { type: "presence"; change: PresenceChange }
   /** `mine` is true for the player's own lines, which also resolve their `send`. */
   | { type: "chat"; line: ChatLine; mine: boolean }
-  | { type: "system"; line: SystemLine };
+  | { type: "system"; line: SystemLine }
+  /** Every operation result once, including those of calls made before a reconnect. */
+  | { type: "result"; result: OpResult }
+  /** A change the player did not ask for (a combat grant), applied like a result's, by `rev`. */
+  | { type: "change"; change: ChangeNotice };
 
 export interface WorldLink {
   readonly status: WorldStatus;
@@ -73,6 +89,11 @@ export interface WorldLink {
   on(listener: (event: WorldEvent) => void): () => void;
   /** `target` is the character name for `whisper`. */
   send(channel: SpeakChannel, text: string, target?: string): Promise<SendResult>;
+  /**
+   * One item or currency operation. `id` defaults to a fresh UUID; pass the earlier id to retry.
+   * The result's `change` holds the new values to apply over the inventory snapshot.
+   */
+  op<K extends OpName>(op: K, req: OpRequests[K], id?: string): Promise<OpCall>;
   close(): Promise<void>;
 }
 
@@ -81,6 +102,8 @@ const SEND_TIMEOUT_MS = 8000;
 const FIRST_RETRY_MS = 1000;
 /** Line ids remembered to drop the repeats the server replays after a reconnect. */
 const SEEN_LINES = 256;
+/** Operation ids remembered for the same reason. */
+const SEEN_RESULTS = 64;
 const MAX_RETRY_MS = 8000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -106,6 +129,11 @@ export function connectWorld(
     { resolve: (r: SendResult) => void; timer: ReturnType<typeof setTimeout> | undefined }
   >();
   const seen = new Set<number>();
+  const ops = new Map<
+    string,
+    { op: OpName; resolve: (r: OpCall) => void; timer: ReturnType<typeof setTimeout> | undefined }
+  >();
+  const results = new ResultLog(SEEN_RESULTS);
   let status: WorldStatus = "connecting";
   let me: string | undefined;
   let room: Room | undefined;
@@ -128,6 +156,18 @@ export function connectWorld(
     seen.add(id);
     if (seen.size > SEEN_LINES) seen.delete(seen.values().next().value as number);
     return true;
+  };
+  const armOp = (id: string) =>
+    setTimeout(() => {
+      const p = ops.get(id);
+      if (p) settleOp(id, { id, op: p.op, ok: false, error: "timeout" });
+    }, SEND_TIMEOUT_MS);
+  const settleOp = (id: string, result: OpCall) => {
+    const p = ops.get(id);
+    if (!p) return;
+    ops.delete(id);
+    clearTimeout(p.timer);
+    p.resolve(result);
   };
   const settle = (n: number, result: SendResult) => {
     const p = pending.get(n);
@@ -171,6 +211,13 @@ export function connectWorld(
     joined.onMessage(WORLD_MESSAGES.system, (line: SystemLine) => {
       if (fresh(line.id)) emit({ type: "system", line });
     });
+    joined.onMessage(WORLD_MESSAGES.result, (result: OpResult) => {
+      if (results.admit(result)) emit({ type: "result", result });
+      settleOp(result.id, result);
+    });
+    joined.onMessage(WORLD_MESSAGES.change, (change: ChangeNotice) => {
+      emit({ type: "change", change });
+    });
     joined.onMessage(WORLD_MESSAGES.refused, (r: Refusal) => {
       if (r.type !== WORLD_MESSAGES.chat || r.n === undefined) return;
       const { code, until, retryMs, need } = r;
@@ -186,10 +233,12 @@ export function connectWorld(
     // the server then replays the answers the drop swallowed.
     joined.onDrop(() => {
       for (const p of pending.values()) clearTimeout(p.timer);
+      for (const p of ops.values()) clearTimeout(p.timer);
       setStatus("reconnecting");
     });
     joined.onReconnect(() => {
       for (const [n, p] of pending) p.timer = arm(n);
+      for (const [id, p] of ops) p.timer = armOp(id);
       setStatus("online");
     });
   }
@@ -225,6 +274,7 @@ export function connectWorld(
       const code = await new Promise<number>((resolve) => joined.onLeave((c) => resolve(c)));
       room = undefined;
       for (const n of [...pending.keys()]) settle(n, { ok: false, code: "offline" });
+      for (const [id, p] of [...ops]) settleOp(id, { id, op: p.op, ok: false, error: "offline" });
       if (code === CLOSE_SESSION_REPLACED) {
         setStatus("replaced");
         return;
@@ -267,6 +317,27 @@ export function connectWorld(
       return new Promise<SendResult>((resolve) => {
         pending.set(n, { resolve, timer: arm(n) });
         open.send(WORLD_MESSAGES.chat, message);
+      });
+    },
+    op(name, req, id = crypto.randomUUID()) {
+      const open = room;
+      if (!open || status !== "online") {
+        return Promise.resolve({ id, op: name, ok: false, error: "offline" });
+      }
+      // A second call with an id still waiting shares the first call's answer.
+      const waiting = ops.get(id);
+      if (waiting) {
+        return new Promise<OpCall>((resolve) => {
+          const first = waiting.resolve;
+          waiting.resolve = (r) => {
+            first(r);
+            resolve(r);
+          };
+        });
+      }
+      return new Promise<OpCall>((resolve) => {
+        ops.set(id, { op: name, resolve, timer: armOp(id) });
+        open.send(name, { id, req });
       });
     },
     async close() {

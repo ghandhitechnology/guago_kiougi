@@ -151,6 +151,7 @@ beforeAll(async () => {
     SETTINGS,
     studentLooks,
     {},
+    {},
     { channelSeats: 2, emptyGraceSeconds: 1 },
   );
   provideSeatServices({

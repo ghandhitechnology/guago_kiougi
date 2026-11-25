@@ -23,6 +23,8 @@ interface Services {
   auth: AuthService;
   clientOrigin: string;
   secureCookies: boolean;
+  /** Runs when a character leaves a room, before its seat is freed: pending grants land. */
+  onLeave?: (characterId: string) => Promise<void>;
 }
 
 let services: Services | undefined;
@@ -230,6 +232,9 @@ export class RoomSeats {
     this.seats.delete(client.sessionId);
     try {
       await this.save(client.sessionId, seat);
+      await use()
+        .onLeave?.(seat.characterId)
+        .catch((error) => console.error(`leave hook failed: ${describeError(error)}`));
     } finally {
       seat.release();
     }

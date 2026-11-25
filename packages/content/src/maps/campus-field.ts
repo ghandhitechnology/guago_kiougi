@@ -182,7 +182,7 @@ const map: MapSource = {
   time: { clock: "23:40", phase: "night", weather: "sea-wind" },
   theme: "field-night",
   sky: "ink.deep",
-  ambient: { color: "navy.light", intensity: 0.34 },
+  ambient: { color: "navy.light", intensity: 0.34, unlit: "campus" },
   plan: PLAN,
   legend: {
     "~": { terrain: null },
