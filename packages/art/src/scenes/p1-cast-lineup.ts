@@ -44,15 +44,17 @@ const SPRITES: readonly (readonly [sprite: string, x: number])[] = [
 
 function rows(top: number): (Doll | Actor)[] {
   return [
-    ...RIGS.map(([rig, look], i): Doll => ({
-      rig,
-      look,
-      dir: "down",
-      anim: "idle",
-      play: true,
-      index: i % 3,
-      at: [20 + (i % 12) * 40, top + (i < 12 ? 38 : 82)],
-    })),
+    ...RIGS.map(
+      ([rig, look], i): Doll => ({
+        rig,
+        look,
+        dir: "down",
+        anim: "idle",
+        play: true,
+        index: i % 3,
+        at: [20 + (i % 12) * 40, top + (i < 12 ? 38 : 82)],
+      }),
+    ),
     ...SPRITES.map(
       ([actor, x], i): Actor => ({ actor, anim: "idle", play: true, index: i, at: [x, top + 126] }),
     ),
