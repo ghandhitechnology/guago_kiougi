@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { bakeTiles, type TileArt, tileLayout } from "./build/emit.ts";
 import { BL, BR, dualMask, pickTiles, TL, TR } from "./dualgrid.ts";
 import { part, rig } from "./format.ts";
 import { ArtError, parseGrid } from "./grid.ts";
 import { pack } from "./pack.ts";
 import { colorIndex } from "./palette.ts";
-import { CLEAR } from "./raster.ts";
+import { CLEAR, indexed } from "./raster.ts";
 import { compileRig } from "./rig.ts";
 
 const legend = { ".": null, o: "red.deep", r: "red.mid" } as const;
@@ -163,5 +164,36 @@ describe("pack", () => {
     ];
     expect(pack(rects)).toEqual(pack([...rects].reverse()));
     expect(pack([{ key: "big", w: 3000, h: 4 }])).toBeNull();
+  });
+});
+
+describe("tile baking", () => {
+  const set = (name: string, tiles: number, bake: string[] | null): TileArt => ({
+    kind: "overlay",
+    name,
+    themes: null,
+    bake,
+    tiles: Array.from({ length: tiles }, () => indexed(16, 16)),
+    shapes: [],
+    masks: [],
+  });
+
+  it("lays art baked everywhere first, so restricted sets never move other indices", () => {
+    const sets = [set("indoor", 3, ["campus"]), set("lawn", 2, null), set("rift", 4, null)];
+    const layout = tileLayout(sets);
+    expect(layout.first.get("lawn")).toBe(0);
+    expect(layout.first.get("rift")).toBe(2);
+    expect(layout.first.get("indoor")).toBe(6);
+    expect(layout.count).toBe(9);
+  });
+
+  it("leaves a restricted set out of other themes' atlases and ends them early", () => {
+    const sets = Array.from({ length: 3 }, (_, i) => set(`s${i}`, 16, null));
+    sets.push(set("indoor", 16, ["campus"]));
+    const campus = bakeTiles("campus", sets);
+    const greece = bakeTiles("greece", sets);
+    expect(Object.keys(campus.frames)).toContain("indoor/0");
+    expect(Object.keys(greece.frames)).not.toContain("indoor/0");
+    expect(greece.png.h).toBeLessThan(campus.png.h);
   });
 });

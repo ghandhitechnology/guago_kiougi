@@ -1,14 +1,20 @@
 import { type BuildResult, buildMap } from "./build.ts";
+import cafeteria from "./cafeteria.ts";
 import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
-import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
+import { type ArtIndex, checkMap, checkScenes, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 // 가설관 and 증명관 interiors.
 import gaseol1f from "./gaseol-1f.ts";
 import gaseol2f from "./gaseol-2f.ts";
 import gaseol4f from "./gaseol-4f.ts";
 import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
+// Campus life interiors.
+import home from "./home.ts";
 import jeungmyeong from "./jeungmyeong.ts";
+import lounge from "./lounge.ts";
+import saebyeok from "./saebyeok.ts";
+import silheom from "./silheom.ts";
 
 export * from "./build.ts";
 export * from "./buildings.ts";
@@ -31,6 +37,12 @@ export const MAP_SOURCES: readonly MapSource[] = [
   gaseol2f,
   gaseol4f,
   jeungmyeong,
+  // Campus life interiors: the 급식실, the lounge, 실험동, 새벽관 and home.
+  cafeteria,
+  lounge,
+  silheom,
+  saebyeok,
+  home,
 ];
 
 /**
@@ -42,10 +54,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "gaseol-2f",
   "gaseol-4f",
   "jeungmyeong",
-  "silheom",
-  "cafeteria",
-  "lounge",
-  "saebyeok",
   "agora",
   "eco-park",
   // 가설관 and 증명관 interiors: rooms and places their doors lead to before they exist.
@@ -72,8 +80,9 @@ export function checkAllMaps(art: ArtIndex): { maps: BuiltMap[]; problems: strin
     built: new Map(results.map((r) => [r.map.id, Object.keys(r.map.spawns)])),
     planned: PLANNED_MAPS,
   };
+  const maps = results.map((r) => r.map);
   return {
-    maps: results.map((r) => r.map),
-    problems: results.flatMap((r) => checkMap(r, art, registry)),
+    maps,
+    problems: [...results.flatMap((r) => checkMap(r, art, registry)), ...checkScenes(maps)],
   };
 }
