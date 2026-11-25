@@ -372,7 +372,34 @@ const spill = (() => {
   return finish(p);
 })();
 
+/** Steam off the pans and the pot: wisps that rise, lean and thin out. Atmosphere. */
+function steam(f: number): Pic {
+  const p = Pic.blank(16, 28);
+  for (const phase of [0, 5]) {
+    const t = (f * 2 + phase) % 12;
+    const y = 24 - t * 2;
+    const x = 6 + Math.round(Math.sin((t + phase) / 2.2) * 2) + (phase ? 3 : 0);
+    const c = t < 6 ? "w" : "k";
+    p.set(x, y, c).set(x + 1, y, c);
+    if (t < 9) p.set(x + 1, y - 1, c);
+  }
+  return p;
+}
+
 export default [
+  sprite({
+    name: "steam",
+    group: "interior",
+    size: [16, 28],
+    palette: IL,
+    lone: "wk",
+    outline: false,
+    frames: Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`s${i}`, steam(i).toString()])),
+    anim: {
+      idle: { frames: ["s0"], fps: 1 },
+      rise: { frames: Array.from({ length: 6 }, (_, i) => `s${i}`), fps: 6, jump: 1 },
+    },
+  }),
   servingLine,
   frames(
     "cook",

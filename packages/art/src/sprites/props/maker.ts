@@ -691,6 +691,47 @@ const lumber = (() => {
   return finish(p);
 })();
 
+/** Two sawhorses with a plank across them, half cut through, the saw left in the kerf. */
+const sawhorses = (() => {
+  const p = Pic.blank(46, 22);
+  for (const x of [5, 33]) {
+    rect(p, x, 6, 8, 2, "u");
+    for (let i = 0; i < 12; i++) {
+      p.set(x + 1 - Math.floor(i / 4), 8 + i, "U");
+      p.set(x + 6 + Math.floor(i / 4), 8 + i, "U");
+    }
+  }
+  rect(p, 1, 3, 44, 4, "W");
+  hline(p, 1, 3, 44, "P");
+  hline(p, 1, 6, 44, "u");
+  vline(p, 26, 3, 4, "U");
+  // The saw, blade down in the cut.
+  rect(p, 24, 0, 5, 3, "K");
+  rect(p, 29, 0, 4, 2, "R");
+  // Sawdust under the cut.
+  rect(p, 23, 19, 7, 2, "P");
+  hline(p, 25, 18, 3, "P");
+  return finish(p);
+})();
+
+/** Cardboard boxes, flattened sheets on top: the robot club's supply. */
+const boxes = (() => {
+  const p = Pic.blank(30, 26);
+  rect(p, 1, 9, 16, 16, "P");
+  hline(p, 1, 9, 16, "E");
+  vline(p, 16, 9, 16, "p");
+  hline(p, 1, 13, 16, "p");
+  rect(p, 7, 13, 4, 4, "w");
+  rect(p, 14, 3, 15, 22, "p");
+  hline(p, 14, 3, 15, "P");
+  vline(p, 28, 3, 22, "t");
+  hline(p, 14, 7, 15, "t");
+  rect(p, 18, 9, 7, 3, "w");
+  rect(p, 2, 6, 14, 3, "P");
+  hline(p, 2, 6, 14, "E");
+  return finish(p);
+})();
+
 /** A red tool cart, drawers half open, a coil of extension cord on top. */
 const cart = (() => {
   const p = Pic.blank(24, 26);
@@ -734,6 +775,8 @@ export default [
   frames("guillotine", { still: guillotine }, { shadow: boxShadow(34, 44, 2, 38, 31, 43, 2, 0) }),
   frames("stool", { still: stool }, { shadow: ovalShadow(12, 14, 7, 12.5, 5, 1.5) }),
   frames("lumber", { still: lumber }, { shadow: boxShadow(22, 44, 1, 40, 20, 43, 2, 0) }),
+  frames("sawhorses", { still: sawhorses }, { shadow: boxShadow(46, 22, 3, 18, 42, 21, 2, 0) }),
+  frames("boxes", { still: boxes }, { shadow: boxShadow(30, 26, 1, 20, 28, 25, 2, 0) }),
   frames("tool-cart", { still: cart }, { shadow: boxShadow(24, 26, 1, 22, 22, 25, 2, 0) }),
   floorMarks,
   sparkSprite,

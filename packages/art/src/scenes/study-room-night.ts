@@ -35,7 +35,7 @@ const SEATS: readonly (readonly Seat[])[] = [
     { frame: "bare" },
     { frame: "books" },
     { frame: "study", lamp: true, chair: "back" },
-    { frame: "bare" },
+    { frame: "notes" },
     { frame: "gone", chair: "recline" },
     { frame: "books" },
     { frame: "bare" },
@@ -46,14 +46,14 @@ const SEATS: readonly (readonly Seat[])[] = [
     { frame: "study", lamp: true, chair: "back" },
     { frame: "bare" },
     { frame: "asleep0", anim: "asleep", lamp: true, chair: "back" },
-    { frame: "bare" },
+    { frame: "notes" },
     { frame: "bare" },
     { frame: "gone", chair: "back" },
     { frame: "books" },
   ],
   [
     { frame: "bare" },
-    { frame: "bare" },
+    { frame: "notes" },
     { frame: "books" },
     { frame: "study", lamp: true, chair: "back" },
     { frame: "bare" },
@@ -178,10 +178,10 @@ export default scene({
     { prop: "tumbler", at: [400, 133] },
     { prop: "tumbler", at: [446, 203] },
     { prop: "entropy", anim: "sleep", play: true, at: [400, 49], raw: true },
-    { prop: "tube-light", anim: "flicker", play: true, at: [140, 64] },
-    { prop: "tube-light", frame: "off", at: [230, 64] },
-    { prop: "tube-light", frame: "off", at: [320, 64] },
-    { prop: "tube-light", frame: "on", at: [402, 64] },
+    { prop: "tube-light", anim: "flicker", play: true, at: [130, 80] },
+    { prop: "tube-light", frame: "off", at: [222, 80] },
+    { prop: "tube-light", frame: "off", at: [316, 80] },
+    { prop: "tube-light", frame: "on", at: [404, 80] },
   ],
   lights: [
     { bands: TUBE, at: [420, 114], r: [74, 40], ragged: 4 },
@@ -194,6 +194,14 @@ export default scene({
       pulse: { amount: 0.05, period: 0.7 },
     },
     ...carrelLights,
+    // Moonlight, barely, under each window.
+    ...[184, 240, 344].map(
+      (x): Light => ({
+        bands: ["campus-glow"],
+        spill: { top: [x - 12, x + 12, 66], bottom: [x - 2, x + 30, 104] },
+        ragged: 2,
+      }),
+    ),
     // The doorway lets the room's light into the corridor.
     {
       bands: ["campus-glow"],

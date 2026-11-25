@@ -16,8 +16,7 @@ const LINE_Y = 104;
 function wallRun(prop: string, x0: number, x1: number, worn: readonly number[] = []): Prop[] {
   const out: Prop[] = [];
   for (let x = x0; x < x1; x += 16) {
-    const frame = worn.includes(x) ? "worn" : x % 64 === 32 ? "outlet" : "run";
-    out.push({ prop, frame: frame === "outlet" && x > 200 ? "run" : frame, at: [x, WALL_Y] });
+    out.push({ prop, frame: worn.includes(x) ? "worn" : "run", at: [x, WALL_Y] });
   }
   return out;
 }
@@ -199,6 +198,10 @@ export default scene({
     { prop: "pendant", frame: "on", at: [86, 116] },
     { prop: "pendant", frame: "on", at: [216, 116] },
     { prop: "pendant", frame: "on", at: [346, 116] },
+  ],
+  atmosphere: [
+    { prop: "steam", anim: "rise", play: true, at: [124, 92] },
+    { prop: "steam", anim: "rise", play: true, index: 2, at: [156, 92] },
   ],
   lights: [
     sun(24),

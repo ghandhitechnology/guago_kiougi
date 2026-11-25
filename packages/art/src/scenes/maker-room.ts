@@ -79,7 +79,7 @@ export default scene({
     { prop: "window", frame: "gold", at: [104, MOUNT_Y] },
     { prop: "window", frame: "gold-curtain", at: [152, MOUNT_Y] },
     { prop: "tool-wall", at: [236, MOUNT_Y] },
-    { prop: "poster", frame: "safety", at: [290, MOUNT_Y] },
+    { prop: "poster", frame: "safety", at: [278, MOUNT_Y] },
     // 제련기 and everything around it.
     { prop: "forge", anim: "burn", play: true, at: [FORGE.x, FORGE.y], raw: true },
     { prop: "anvil", at: [404, 124] },
@@ -101,6 +101,9 @@ export default scene({
     { prop: "tool-cart", at: [372, 196] },
     { prop: "bag", frame: "green", at: [90, 116] },
     { prop: "bag", frame: "slump", at: [118, 236] },
+    { prop: "sawhorses", at: [100, 262] },
+    { prop: "boxes", at: [446, 160] },
+    { prop: "poster", frame: "club", at: [300, MOUNT_Y] },
     // People.
     {
       rig: "student",
@@ -127,8 +130,8 @@ export default scene({
     sun(152),
     {
       bands: ["greece", "rift-sun"],
-      at: [FORGE.x, FORGE.y + 22],
-      r: [86, 32],
+      at: [FORGE.x, FORGE.y + 16],
+      r: [64, 24],
       ragged: 4,
       pulse: { amount: 0.06, period: 1.3 },
     },

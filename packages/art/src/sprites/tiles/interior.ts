@@ -284,20 +284,6 @@ const TILE_BASES = [
   tiles([], false),
 ];
 
-/** Mopped, still wet: a shine across the tiles. */
-const TILE_WET: readonly (readonly Mark[])[] = [
-  [
-    [1, 1, P("EE\nE.")],
-    [9, 9, P("EE\nE.")],
-    [10, 2, P(".E\nEE")],
-  ],
-  [
-    [2, 9, P("EE\nE.")],
-    [9, 1, P("EE\nE.")],
-  ],
-];
-const TILE_WET_FRINGE: readonly (readonly Mark[])[] = [[[9, 9, P("E.\n.E")]], []];
-
 // Dorm vinyl ----------------------------------------------------------------------------------
 
 /** 장판: glossy, warm, mottled like oiled paper. */
@@ -482,9 +468,6 @@ const tileFloor = terrain({
   ...mats("tile", "t"),
   themes: ["campus", "campus-dusk"],
   base: TILE_BASES,
-  tones: [
-    { name: "wet", on: "lower", band: [0.64, 1], ...tonePictures(TILE_WET, TILE_WET_FRINGE) },
-  ],
 });
 
 const vinyl = terrain({

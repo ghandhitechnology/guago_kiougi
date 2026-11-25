@@ -24,7 +24,7 @@ import { Pic } from "../../paint.ts";
 const CW = 26;
 const CH = 34;
 
-type Desk = "bare" | "books" | "study" | "asleep" | "gone";
+type Desk = "bare" | "books" | "study" | "asleep" | "gone" | "notes";
 
 /** Spines standing on the shelf: colour pairs, left to right, each two pixels wide. */
 const SPINES: Readonly<Record<string, string>> = {
@@ -33,6 +33,7 @@ const SPINES: Readonly<Record<string, string>> = {
   study: "RrNnTtwwRrGg",
   asleep: "NnwwGgRr",
   gone: "RrNnGgwwTt",
+  notes: "wwNnRr",
 };
 
 function carrel(kind: Desk, lamp: "on" | "off", breath = false): Pic {
@@ -87,6 +88,20 @@ function carrel(kind: Desk, lamp: "on" | "off", breath = false): Pic {
     rect(p, 4, 16, 2, 4, "K");
     vline(p, 5, 16, 4, "M");
   }
+  if (kind === "notes") {
+    // Somebody lives here: sticky notes all over the felt, a photo, a timetable.
+    for (const [x, y, c] of [
+      [14, 3, "Y"],
+      [17, 4, "+"],
+      [20, 3, "Y"],
+      [15, 12, "c"],
+    ] as const)
+      rect(p, x, y, 3, 3, c);
+    rect(p, 4, 12, 5, 3, "w");
+    rect(p, 5, 13, 3, 1, "n");
+    rect(p, 8, 17, 9, 4, "6");
+    hline(p, 8, 17, 9, "s");
+  }
   if (kind === "books") {
     rect(p, 5, 17, 8, 2, "N");
     rect(p, 5, 19, 8, 2, "R");
@@ -121,7 +136,7 @@ function carrel(kind: Desk, lamp: "on" | "off", breath = false): Pic {
       hline(p, 5, 32, 16, "N");
     }
   }
-  return finish(p, "Y");
+  return finish(p, "Y+c");
 }
 
 const carrelShadow = boxShadow(CW, CH, 1, 24, CW - 2, CH - 1, 2, 0);
@@ -131,10 +146,12 @@ const carrels = sprite({
   group: "interior",
   size: [CW, CH],
   palette: IL,
+  lone: "Y+c",
   shadow: carrelShadow,
   frames: {
     bare: carrel("bare", "off").toString(),
     books: carrel("books", "off").toString(),
+    notes: carrel("notes", "off").toString(),
     gone: carrel("gone", "off").toString(),
     study: carrel("study", "on").toString(),
     "study-off": carrel("study", "off").toString(),
@@ -342,28 +359,28 @@ const logStand = (() => {
  * about 44 pixels below it.
  */
 function tube(state: "on" | "off" | "dim"): Pic {
-  const p = Pic.blank(36, 16);
-  // Wires up to the ceiling.
-  vline(p, 5, 0, 10, "M");
-  vline(p, 30, 0, 10, "M");
+  const p = Pic.blank(36, 50);
+  // Two long wires up to the ceiling.
+  vline(p, 5, 0, 44, "S");
+  vline(p, 30, 0, 44, "S");
+  rect(p, 4, 0, 3, 1, "M");
+  rect(p, 29, 0, 3, 1, "M");
   // Housing: its top in the light, its lip, the diffuser below.
-  rect(p, 0, 9, 36, 5, "d");
-  rect(p, 1, 10, 34, 2, "k");
-  hline(p, 1, 10, 34, "w");
-  rect(p, 1, 12, 34, 1, "M");
+  const y = 43;
+  rect(p, 0, y, 36, 5, "d");
+  rect(p, 1, y + 1, 34, 2, "k");
+  hline(p, 1, y + 1, 34, "w");
   const glow = state === "on" ? "Y" : state === "dim" ? "y" : "K";
-  rect(p, 1, 13, 34, 2, glow);
-  hline(p, 1, 14, 34, state === "off" ? "M" : glow === "Y" ? "y" : "o");
-  hline(p, 0, 15, 36, "d");
-  vline(p, 0, 13, 2, "d");
-  vline(p, 35, 13, 2, "d");
+  rect(p, 1, y + 3, 34, 2, glow);
+  hline(p, 1, y + 4, 34, state === "off" ? "M" : glow === "Y" ? "y" : "o");
+  hline(p, 0, y + 6, 36, "d");
   return p;
 }
 
 const tubes = sprite({
   name: "tube-light",
   group: "interior",
-  size: [36, 16],
+  size: [36, 50],
   palette: IL,
   outline: false,
   frames: {
