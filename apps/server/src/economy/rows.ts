@@ -91,6 +91,21 @@ export interface QuestRow {
 export const ITEM_COLUMNS =
   "id, def_id, kind, grade, level, exp, pilgi, pilgi_fail_streak, affixes, evolved, bound, tradable_at, slot";
 
+/**
+ * Drizzle's driver hands raw-query timestamps back as Postgres text (`2026-11-25 03:00:00+00`);
+ * rows built by the query builder hold `Date`s. Either becomes a `Date`.
+ */
+export function timeFromDb(v: unknown): Date | null {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  const iso = String(v)
+    .replace(" ", "T")
+    .replace(/([+-]\d\d)$/, "$1:00");
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) throw new Error("unreadable timestamp");
+  return at;
+}
+
 export function itemFromDb(r: Record<string, unknown>): ItemRow {
   return {
     id: r.id as string,
@@ -104,7 +119,7 @@ export function itemFromDb(r: Record<string, unknown>): ItemRow {
     affixes: r.affixes as unknown[],
     evolved: r.evolved as boolean,
     bound: r.bound as boolean,
-    tradableAt: (r.tradable_at as Date | null) ?? null,
+    tradableAt: timeFromDb(r.tradable_at),
     slot: (r.slot as number | null) ?? null,
   };
 }
@@ -131,11 +146,11 @@ export function characterFromDb(r: Record<string, unknown>): CharacterRow {
     },
     demerits: r.demerits as number,
     merits: r.merits as number,
-    poolStartedAt: (r.pool_started_at as Date | null) ?? null,
+    poolStartedAt: timeFromDb(r.pool_started_at),
     poolRates: (r.pool_rates as PoolRates | null) ?? null,
     poolPlace: (r.pool_place as LogoutPlace | null) ?? null,
     poolSheetBook: (r.pool_sheet_book as string | null) ?? null,
-    restedUntil: (r.rested_until as Date | null) ?? null,
+    restedUntil: timeFromDb(r.rested_until),
     rev: Number(r.rev),
   };
 }

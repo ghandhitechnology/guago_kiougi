@@ -494,7 +494,9 @@ export function isClientOp(name: string): name is OpName {
 
 const KEY_PART = /^[a-z0-9-]{1,40}$/;
 const TOOL_IDS = new Set(TOOLS.map((t) => t.id));
-const positive = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) > 0;
+/** Whole and above zero. Coin late in a Theme passes 2^53; the ledger stores it exactly. */
+const positive = (n: unknown): n is number =>
+  Number.isInteger(n) && (n as number) > 0 && (n as number) < 1e30;
 
 /**
  * Checks a grant before it reaches the executor. Combat is server code, but a bug there must not

@@ -49,14 +49,14 @@ interface Pending {
 }
 
 export class GrantBuffer {
-  private readonly executor: Executor;
+  private readonly executor: Pick<Executor, "execute">;
   private readonly prefix = `grant:${randomUUID()}`;
   private seq = 0;
   private pending = new Map<string, Pending>();
   private inflight = new Map<string, Batch>();
   private running = new Map<string, Promise<void>>();
 
-  constructor(executor: Executor) {
+  constructor(executor: Pick<Executor, "execute">) {
     this.executor = executor;
   }
 
