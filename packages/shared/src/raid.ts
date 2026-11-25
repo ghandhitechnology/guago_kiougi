@@ -38,7 +38,10 @@ export const RAID = {
   shieldLeak: 0.2,
   /** Share of the shield one objective strips, the same for every level. */
   shieldPerObjective: 0.05,
-  /** A stripped shield grows back this much a Page hour, so objectives matter all phase long. */
+  /**
+   * A stripped shield grows back this much an hour of fighting (real time, so a compressed test
+   * clock keeps the live balance against objectives), and objectives matter all phase long.
+   */
   shieldRegrowPerHour: 0.1,
   /** 기여: 30 minutes of active fighting or 3 objectives; 핵심: 2 hours or 10. */
   tiers: {

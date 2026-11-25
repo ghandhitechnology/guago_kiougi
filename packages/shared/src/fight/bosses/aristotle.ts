@@ -141,7 +141,7 @@ export const aristotle: BossBrain = {
     if (phase === 4) slide4(b, w);
     if (tick >= (b.n[NEXT_SLAM] as number)) {
       b.n[NEXT_SLAM] = tick + (all ? 60 : 100);
-      b.tell(w, TellKind.Slam, b.core.x, b.core.y, 84, 0, 0, 84, tick + SLAM_WARN, 1, 200);
+      b.tell(w, TellKind.Slam, b.core.x, b.core.y, 80, 0, 0, 80, tick + SLAM_WARN, 1, 200);
       act(b, w, MState.Slam, SLAM_WARN + 6);
     }
     const stunned = tick < (b.n[STUNNED] as number);
@@ -219,7 +219,7 @@ function drops(b: Boss, w: FightWorld): void {
     const ax = Math.cos(a);
     const ay = Math.sin(a);
     b.tell(w, TellKind.Boulder, p.x + ax * 10, p.y + ay * 10, 24, 0, 0, 24, land, 1);
-    b.tell(w, TellKind.Feather, p.x - ax * 26, p.y - ay * 26, 40, 0, 0, 40, land, 0.6);
+    b.tell(w, TellKind.Feather, p.x - ax * 26, p.y - ay * 26, 48, 0, 0, 48, land, 0.6);
   }
   if (given > 0 && tick >= (b.n[NEXT_FALL_CUE] as number)) {
     b.n[NEXT_FALL_CUE] = tick + 240;

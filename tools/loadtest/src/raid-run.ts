@@ -315,6 +315,19 @@ async function replay(boss: string, index: number): Promise<{ cleared: boolean; 
   return { cleared, tokens: after - before };
 }
 
+/**
+ * The bots' characters at a boss's band level, as the class would be by that week (the books
+ * keep their levels; phases are sized to whatever the class deals). Off any bot's seat only.
+ */
+async function levelBots(level: number): Promise<void> {
+  const r = await db.pool.query(
+    `update characters c set level = $1, exp = 0 from accounts a
+     where a.id = c.account_id and a.login_id like $2 and c.level < $1`,
+    [level, `${values.accounts}%`],
+  );
+  say(`the class at level ${level} (${r.rowCount} characters)`);
+}
+
 // The run -------------------------------------------------------------------------------------
 
 function finish(code: number): never {
@@ -336,8 +349,15 @@ say(
   `Page ${page.page} restarted at rate ${rate}: ${page.milestone}, a Page day is ${(DAY_MS / rate / 1000).toFixed(1)} s real`,
 );
 
+// The class signs up in the 아고라 first, so its characters exist to be levelled.
+await crowd("p1-agora", BOTS, 0, 0);
+for (let i = 0; i < 60 && (await seated()) < BOTS; i++) await sleep(1000);
+stopCrowd();
+for (let i = 0; i < 30 && (await seated()) > 0; i++) await sleep(1000);
+
 // Week 3: the 피타고라스 학파 at the 크로톤 학당.
 page = await toWeek(3);
+await levelBots(raidBoss("pythagoreans")?.level ?? 50);
 say(`week ${page.week}: ${page.milestone}`);
 await watch("pythagoreans", page.openedAt, () => true, 20_000);
 await crowd("p1-croton-school", BOTS, 0.4);
@@ -346,6 +366,9 @@ stopCrowd();
 for (const l of await phases(pyth.id, rate)) say(l);
 
 // Week 6: 제논 at the 엘레아 경주로.
+stopCrowd();
+for (let i = 0; i < 30 && (await seated()) > 0; i++) await sleep(1000);
+await levelBots(raidBoss("zeno")?.level ?? 80);
 page = await toWeek(6);
 say(`week ${page.week}: ${page.milestone}`);
 await watch("zeno", page.openedAt, () => true, 20_000);
@@ -355,6 +378,9 @@ stopCrowd();
 for (const l of await phases(zeno.id, rate)) say(l);
 
 // Weeks 8 and 9: the class hunts a field, and the server measures what it deals.
+stopCrowd();
+for (let i = 0; i < 30 && (await seated()) > 0; i++) await sleep(1000);
+await levelBots(raidBoss("aristotle")?.level ?? 100);
 page = await toWeek(8);
 say(
   `week ${page.week}: ${page.milestone}; the bots hunt 아고라 변두리 until 아리스토텔레스 appears`,

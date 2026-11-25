@@ -329,7 +329,8 @@ export class RaidHub {
       }
       standing = true;
       if (!r.emptied && r.def.rank === "era" && r.shield < 1) {
-        r.shield = regrowShield(r.shield, elapsed);
+        // An hour of fighting, not of Page time: objectives are done in real seconds on any clock.
+        r.shield = regrowShield(r.shield, elapsed / Math.max(1, this.o.clock.rate));
         r.dirty = true;
       }
       if (r.emptied && !r.ending) this.empty(r);
