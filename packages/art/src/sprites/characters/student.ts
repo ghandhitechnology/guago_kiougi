@@ -2,7 +2,7 @@ import { type Dir, rig, type Vec } from "../../format.ts";
 import { glasses, goggles } from "../../student/accessories.ts";
 import { frame, shadow, skin, walkArms, withKo } from "../../student/base.ts";
 import { textbook } from "../../student/book.ts";
-import { bright, sharp, sleepy } from "../../student/faces.ts";
+import { bright, cool, goofy, sharp, shy, sleepy } from "../../student/faces.ts";
 import { blazer, shirt, varsity } from "../../student/garments.ts";
 import {
   bob,
@@ -60,7 +60,7 @@ export default rig({
     body: { base: withKo(skin) },
     uniform: { blazer, shirt },
     jacket: { varsity },
-    face: { bright, sleepy, sharp },
+    face: { bright, sleepy, sharp, goofy, shy, cool },
     hair: { crop, spiky, bob, long, ponytail, curly, buzz, twintails, bun, braids, shag, undercut },
     accessory: { glasses, goggles },
     book: { textbook },

@@ -33,6 +33,53 @@ const yawn = {
   `,
 };
 
+/** Eyes squeezed into arcs, mouth wide open: 박수 and ㅋㅋ. */
+const laugh = {
+  down: `
+    ...*......*...
+    ..*.*....*.*..
+    ...'.!!!!.'...
+    ......!!......
+  `,
+  side: `
+    ...........*...
+    ..........*.*..
+    ...........'...
+    ............!!.
+  `,
+};
+
+/** Eyes shut, breathing slow: dozing off, asleep, and the 절. */
+const doze = {
+  down: `
+    ..............
+    ..**......**..
+    ...'..--..'...
+  `,
+  side: `
+    ...............
+    ..........**...
+    ...........'...
+    .............-.
+  `,
+};
+
+/** 멘붕: white eyes with pinprick pupils, mouth gone wobbly. Due tomorrow, started tonight. */
+const panic = {
+  down: `
+    ...~~....~~...
+    ...~*....*~...
+    .....!.!!.....
+    ......!..!....
+  `,
+  side: `
+    ...........~~..
+    ...........*~..
+    ...............
+    ...........!.!.
+  `,
+};
+
 /** Profile for the knocked-out pose, drawn upright; it is transposed with the head. */
 const koSide = `
   ...............
@@ -52,9 +99,24 @@ function face(own: {
       pieces: {
         head: {
           at: { down: [5, 8], up: [5, 8], side: [3, 8] },
-          down: { ...own.down, hurt: hurt.down, yawn: yawn.down },
+          down: {
+            ...own.down,
+            hurt: hurt.down,
+            yawn: yawn.down,
+            laugh: laugh.down,
+            doze: doze.down,
+            panic: panic.down,
+          },
           up: null,
-          side: { ...own.side, hurt: hurt.side, yawn: yawn.side, ko: koSide },
+          side: {
+            ...own.side,
+            hurt: hurt.side,
+            yawn: yawn.side,
+            laugh: laugh.side,
+            doze: doze.side,
+            panic: panic.side,
+            ko: koSide,
+          },
         },
       },
     }),
@@ -180,6 +242,138 @@ export const sharp = face({
     read: `
       ...............
       ...........ee..
+      ...............
+      ............--.
+    `,
+  },
+});
+
+/** 엉뚱: beady eyes set wide and the tip of a tongue. Was thinking about something else entirely. */
+export const goofy = face({
+  down: {
+    rest: `
+      ...e......e...
+      ...e......e...
+      .'...---....'.
+      .......'......
+    `,
+    shout: `
+      ...e......e...
+      ...e......e...
+      .'....!!....'.
+      ......!!......
+    `,
+    read: `
+      ..............
+      ...*......*...
+      .'...---....'.
+      .......'......
+    `,
+  },
+  side: {
+    rest: `
+      ............e..
+      ............e..
+      ..........'....
+      ............--.
+      ..............'
+    `,
+    shout: `
+      ............e..
+      ............e..
+      ..........'....
+      ............!!.
+    `,
+    read: `
+      ...............
+      ............*..
+      ..........'....
+      ............--.
+      ..............'
+    `,
+  },
+});
+
+/** 수줍음: eyes kept low, cheeks that give everything away. */
+export const shy = face({
+  down: {
+    rest: `
+      ..............
+      ...ee....ee...
+      ..'''....'''..
+      .......-......
+    `,
+    shout: `
+      ..............
+      ...ee....ee...
+      ..'''.!!.'''..
+      ......!!......
+    `,
+    read: `
+      ..............
+      ...--....--...
+      ..'''....'''..
+      .......-......
+    `,
+  },
+  side: {
+    rest: `
+      ...............
+      ...........ee..
+      ..........''...
+      .............-.
+    `,
+    shout: `
+      ...............
+      ...........ee..
+      ..........''...
+      ............!!.
+    `,
+    read: `
+      ...............
+      ...........--..
+      ..........''...
+      .............-.
+    `,
+  },
+});
+
+/** 시크: flat lids, a sideways look, a mouth that has heard it before. */
+export const cool = face({
+  down: {
+    rest: `
+      ..eee....eee..
+      ..~ee....~ee..
+      ......---.....
+    `,
+    shout: `
+      ..eee....eee..
+      ..~ee....~ee..
+      ......!!!.....
+      .......!......
+    `,
+    read: `
+      ..............
+      ..eee....eee..
+      ......---.....
+    `,
+  },
+  side: {
+    rest: `
+      ..........eee..
+      ..........~ee..
+      ...............
+      ............--.
+    `,
+    shout: `
+      ..........eee..
+      ..........~ee..
+      ...............
+      ............!!.
+    `,
+    read: `
+      ...............
+      ..........eee..
       ...............
       ............--.
     `,
