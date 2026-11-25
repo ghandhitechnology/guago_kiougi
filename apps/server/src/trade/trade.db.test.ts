@@ -1473,6 +1473,29 @@ describe("direct trade windows", () => {
     expect(await ownerOf(item)).toBe(a);
   });
 
+  it("a request to a busy player who blocked you reads busy, as it does for anyone", async () => {
+    const eco = economy();
+    const w = world();
+    const [a, b, c, alt] = [
+      await student(eco),
+      await student(eco),
+      await student(eco),
+      await student(eco),
+    ];
+    for (const id of [a, b, c, alt]) w.join(id);
+    const trades = createTrades({
+      db,
+      executor: eco.executor,
+      link: w.link,
+      isBlocked: (x, y) => x === b && y === a,
+    });
+    await opened(trades, b, c);
+    const asked = await trades.handle(a, msg("trade.request", { to: b }));
+    const control = await trades.handle(alt, msg("trade.request", { to: b }));
+    expect(asked).toEqual(control);
+    expect(asked).toMatchObject({ ok: false, code: "trade_busy" });
+  });
+
   it("a side that leaves while the commit is in flight still gets a whole trade, not half of one", async () => {
     let release!: () => void;
     const held = new Promise<void>((r) => {

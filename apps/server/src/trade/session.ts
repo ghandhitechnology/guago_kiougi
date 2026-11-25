@@ -259,8 +259,10 @@ export function createTrades({
     if (byCharacter.has(me)) return fail("trade_busy");
     const far = apart(me, to);
     if (far) return fail(far);
+    // Busy is told before a block is looked at, so it reads the same whether or not the target
+    // blocked the asker.
+    if (byCharacter.has(to)) return fail("trade_busy");
     const ghost = isBlocked(to, me) || isBlocked(me, to);
-    if (!ghost && byCharacter.has(to)) return fail("trade_busy");
     const w: Window = {
       id: randomUUID(),
       from: me,
