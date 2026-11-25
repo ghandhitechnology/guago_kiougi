@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Db, pgErrorCode } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
-import { createEconomy } from "../economy/index.ts";
+import { createEconomy, pruneOperations } from "../economy/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { executorFees, MemoryWallet } from "./fees.ts";
 import { createSocial, type Social } from "./index.ts";
@@ -93,7 +93,10 @@ describe("friends", () => {
 
   it("asking each other at once ends in one friendship, not a deadlock", async () => {
     const [a, b] = [await character(), await character()];
+    // A deadlock would be retried out of sight; the count shows it.
+    const before = retries.count;
     const results = await Promise.all([social.friends.request(a, b), social.friends.request(b, a)]);
+    expect(retries.count).toBe(before);
     expect(results.sort()).toEqual(["friends", "requested"]);
     expect(await count(sql`select count(*) as n from friends where character_id = ${a}`)).toBe(1);
     expect(
@@ -138,9 +141,23 @@ describe("blocks", () => {
 });
 
 describe("clubs", () => {
-  it("charge the founding fee once, however the request is retried", async () => {
+  it("find a retried founding by the club's own key, even after the executor forgot the id", async () => {
+    const economy = createEconomy(db);
+    const real = createSocial(db, {
+      fees: executorFees(db, economy.executor),
+      jackets: () => ["navy"],
+    });
     const me = await character(CLUB_FOUND_LEVEL);
-    wallet.credit(me, CLUB_FEE * 3);
+    const earned = await economy.executor.execute(me, `earn-${me}`, "grant", {
+      exp: 0,
+      drops: [
+        {
+          item: { kind: "coin", amount: CLUB_FEE * 3 },
+          source: { kind: "monster", fieldId: "p1-colonnade", monsterId: "odap", rank: "elite" },
+        },
+      ],
+    });
+    expect(earned.ok).toBe(true);
     const req = {
       op: "found-once-1",
       name: "재시도부",
@@ -148,15 +165,26 @@ describe("clubs", () => {
       jacket: "navy",
       emblem: EMBLEM,
     } as const;
-    const first = await Promise.all([
-      social.clubs.found(me, CLUB_FOUND_LEVEL, req),
-      social.clubs.found(me, CLUB_FOUND_LEVEL, req),
-    ]);
-    const again = await social.clubs.found(me, CLUB_FOUND_LEVEL, req);
-    const ids = [...first, again].map((r) => (r instanceof Refuse ? r.code : r.club));
-    expect(new Set(ids).size).toBe(1);
-    expect(wallet.balance(me)).toBe(CLUB_FEE * 2);
-    expect(wallet.ledger.filter((e) => e.characterId === me)).toHaveLength(1);
+    const first = await real.clubs.found(me, CLUB_FOUND_LEVEL, req);
+    // Operation ids are pruned after an hour; a retry that late still pays nothing.
+    await db.execute(sql`
+      update operations set at = now() - interval '2 hours'
+      where character_id = ${me} and op_id = ${req.op}`);
+    await db.execute(sql`
+      update economy_ledger set at = now() - interval '2 hours'
+      where character_id = ${me} and operation_id = ${req.op}`);
+    await pruneOperations(db, []);
+    expect(
+      await count(
+        sql`select count(*) as n from operations where character_id = ${me} and op_id = ${req.op}`,
+      ),
+    ).toBe(0);
+    const late = await real.clubs.found(me, CLUB_FOUND_LEVEL, req);
+    expect(codeOf(first)).toBe("ok");
+    expect(late).toEqual(first);
+    expect(await count(sql`select pinecones as n from wallets where character_id = ${me}`)).toBe(
+      CLUB_FEE * 2,
+    );
     expect(await count(sql`select count(*) as n from clubs where founded_by = ${me}`)).toBe(1);
   });
 

@@ -168,6 +168,7 @@ describe("a block", () => {
     expect(funded.ok).toBe(true);
     const blocker = await join(blockerJar);
     const pest = await join(pestJar);
+    const witness = await join(await player("보는이"));
     expect(codeOf(await ask(blocker, "block.add", { name: "막힌이" }))).toBe("ok");
     blocker.inbox.length = 0;
 
@@ -187,9 +188,20 @@ describe("a block", () => {
     expect(codeOf(founded)).toBe("ok");
     expect(codeOf(await ask(pest, "club.invite", { name: "막는이" }))).toBe("ok");
 
-    // Nothing reached the blocker.
-    await new Promise((r) => setTimeout(r, 300));
-    expect(blocker.inbox.filter((m) => m.type === WORLD_MESSAGES.chat)).toEqual([]);
+    // A witness whispers the blocker after every answer above has arrived. The server sent
+    // anything it meant for the blocker before those answers, and one socket keeps order, so
+    // once the witness's line is in, everything sent before it is in too.
+    witness.room.send(WORLD_MESSAGES.chat, { ch: "whisper", to: "막는이", text: "나야", n: 950 });
+    await waitFor(() =>
+      blocker.inbox.some(
+        (m) => m.type === WORLD_MESSAGES.chat && (m.body as { text: string }).text === "나야",
+      ),
+    );
+    expect(
+      blocker.inbox.filter(
+        (m) => m.type === WORLD_MESSAGES.chat && (m.body as { text: string }).text !== "나야",
+      ),
+    ).toEqual([]);
     const seen = events(blocker);
     expect(seen.filter((e) => e.t === "partyInvites" || e.t === "clubInvites")).toEqual([]);
     for (const e of seen) {
@@ -211,6 +223,7 @@ describe("a block", () => {
     const refused = blocker.inbox.find((m) => m.type === WORLD_MESSAGES.refused)?.body as Refusal;
     expect(refused.code).toBe("blocked");
     await pest.room.leave();
+    await witness.room.leave();
     await blocker.room.leave();
   });
 });
