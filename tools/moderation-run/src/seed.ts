@@ -130,6 +130,18 @@ const LINES: [string, string, string, string?][] = [
 for (const [name, ch, text, to] of LINES) await speak(name, ch, text, to);
 say("chat sent");
 
+// 대자보 posts, as players leave them.
+const POSTS: [string, string, string][] = [
+  ["별빛소년", "party", "아고라 외곽 같이 도실 분 3/4, 물리 환영"],
+  ["도배왕", "trade", "골드 현금으로 삽니다 귓 주세요"],
+  ["착한친구", "chat", "생태공원 밤 풍경 진짜 예뻐요"],
+  ["급식대장", "club", "급식동아리 부원 모집 중, 매일 급식 인증"],
+];
+for (const [name, cat, text] of POSTS) {
+  rooms.get(name)?.send("board.post", { n: ++n, cat, text });
+  await sleep(300);
+}
+
 // Reports, from the players' own clients.
 const report = (from: string, about: string, cat: string, note?: string) =>
   rooms.get(from)?.send("report", {
