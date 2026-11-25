@@ -29,11 +29,13 @@ import {
   RAID_TIER_NAMES,
   REPLAY_MESSAGE,
   type Seating,
+  TICK_MS,
   WEEK_MS,
 } from "@guago/shared";
 import { config } from "../../../apps/server/src/config.ts";
 import { createDb } from "../../../apps/server/src/db/index.ts";
 import { signIn } from "./account.ts";
+import { Bot } from "./bot.ts";
 
 const { values } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== "--"),
@@ -45,6 +47,8 @@ const { values } = parseArgs({
     accounts: { type: "string", default: "raid" },
     out: { type: "string" },
     database: { type: "string" },
+    /** `replay`: only the 복습 part, against a server whose bosses are already freed. */
+    from: { type: "string" },
   },
 });
 const BASE = values.url as string;
@@ -297,11 +301,16 @@ async function replay(boss: string, index: number): Promise<{ cleared: boolean; 
   if (!into) fail(`no 복습 seat for ${boss}`);
   await room.leave();
   room = await client.consumeSeatReservation(into.seat, MapState);
-  room.send(MODE_MESSAGE, [0]);
-  say(`복습 ${boss}: seated alone in its arena (${into.map}, channel ${into.channel})`);
+  // 반자동, playing the fight's mechanic the way a player who watched it would.
+  room.send(MODE_MESSAGE, [1]);
   next = moved(room);
-  const back = await Promise.race([next, sleep(240_000).then(() => null)]);
-  if (!back) fail(`복습 ${boss} not cleared in 240 s`);
+  const bot = new Bot(room, false, 0);
+  let n = 0;
+  const driver = setInterval(() => bot.tick(++n), TICK_MS);
+  say(`복습 ${boss}: seated alone in its arena (${into.map}, channel ${into.channel})`);
+  const back = await Promise.race([next, sleep(480_000).then(() => null)]);
+  clearInterval(driver);
+  if (!back) fail(`복습 ${boss} not cleared in 480 s`);
   await room.leave();
   const after = await tokens();
   const cleared =
@@ -334,7 +343,8 @@ function finish(code: number): never {
   stopCrowd();
   if (OUT) {
     mkdirSync(OUT, { recursive: true });
-    writeFileSync(path.join(OUT, "raid-run.txt"), `${lines.join("\n")}\n`);
+    const name = values.from ? `raid-run-${values.from}.txt` : "raid-run.txt";
+    writeFileSync(path.join(OUT, name), `${lines.join("\n")}\n`);
   }
   void db.pool.end();
   process.exit(code);
@@ -342,6 +352,10 @@ function finish(code: number): never {
 process.on("SIGINT", () => finish(130));
 
 const rate = Number(values.rate);
+if (values.from === "replay") {
+  await replays();
+  finish(0);
+}
 await admin({ cmd: "restart" });
 await admin({ cmd: "rate", rate });
 let page = await view();
@@ -418,14 +432,18 @@ page = await view();
 say(`시대 전환: ${page.milestone}${page.sealed ? ", the Page is sealed" : ""}`);
 if (page.milestone !== "p1.era-change") fail("the Page did not reach 시대 전환");
 
-// 복습: zeno twice, the first clear paid once.
-const z = raidBoss("zeno");
-const first = await replay("zeno", 1);
-const second = await replay("zeno", 1);
-say(
-  `복습 first clear paid ${first.tokens} 탐구 토큰 (content: ${z?.firstClear.tokens}), the second clear ${second.tokens}`,
-);
-if (!first.cleared || first.tokens !== z?.firstClear.tokens || second.tokens !== 0)
-  fail("복습's first clear was not paid exactly once");
+await replays();
 say("ok");
 finish(0);
+
+/** 복습: 제논 twice by one student, the first clear paid once. */
+async function replays(): Promise<void> {
+  const z = raidBoss("zeno");
+  const first = await replay("zeno", 1);
+  const second = await replay("zeno", 1);
+  say(
+    `복습 first clear paid ${first.tokens} 탐구 토큰 (content: ${z?.firstClear.tokens}), the second clear ${second.tokens}`,
+  );
+  if (!first.cleared || first.tokens !== z?.firstClear.tokens || second.tokens !== 0)
+    fail("복습's first clear was not paid exactly once");
+}

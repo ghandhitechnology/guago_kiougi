@@ -46,9 +46,11 @@ class Replay implements Encounter {
     this.owner = owner;
   }
 
+  /** The owner arrived: a fresh fight, also when the copy is reused for another 복습. */
   joined(p: Player, characterId: string): void {
-    if (characterId !== this.owner || this.boss) return;
+    if (characterId !== this.owner || (this.boss && !this.boss.freed)) return;
     this.boss = startBoss(this.host.world, this.def.id, p.level);
+    this.back = -1;
   }
 
   afterStep(): void {
