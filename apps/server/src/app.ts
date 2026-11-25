@@ -2,10 +2,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineRoom, defineServer, matchMaker } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { type LookOptions, MAP_ROOM, WORLD_ROOM } from "@guago/shared";
-import { createApiHandler, type HttpSettings } from "./auth/http.ts";
+import { type ApiRoute, createApiHandler, type HttpSettings } from "./auth/http.ts";
 import type { AuthService } from "./auth/service.ts";
 import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
+import type { OpHandler } from "./economy/handler.ts";
 import { MapRoom } from "./map-room.ts";
 import { provideSeatServices } from "./seats.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
@@ -18,10 +19,11 @@ export function createGameServer(
   settings: HttpSettings,
   looks: () => LookOptions,
   chat: { filter?: ChatFilter; log?: ChatSink } = {},
+  economy: { ops?: OpHandler; routes?: readonly ApiRoute[] } = {},
 ) {
   provideSeatServices({ auth, ...settings });
-  provideWorldServices(chat);
-  const api = createApiHandler(auth, settings, looks);
+  provideWorldServices({ ...chat, ...(economy.ops ? { ops: economy.ops } : {}) });
+  const api = createApiHandler(auth, settings, looks, economy.routes);
 
   // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays
   // the one the server made, and map rooms open only through `joinOrCreate`, when none has room.

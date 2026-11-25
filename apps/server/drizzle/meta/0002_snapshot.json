@@ -95,9 +95,7 @@
         "accounts_login_id_unique": {
           "name": "accounts_login_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "login_id"
-          ]
+          "columns": ["login_id"]
         }
       },
       "policies": {},
@@ -332,12 +330,8 @@
           "name": "characters_account_id_accounts_id_fk",
           "tableFrom": "characters",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -347,9 +341,7 @@
         "characters_account_id_unique": {
           "name": "characters_account_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id"
-          ]
+          "columns": ["account_id"]
         }
       },
       "policies": {},
@@ -482,10 +474,7 @@
       "compositePrimaryKeys": {
         "chat_log_id_at_pk": {
           "name": "chat_log_id_at_pk",
-          "columns": [
-            "id",
-            "at"
-          ]
+          "columns": ["id", "at"]
         }
       },
       "uniqueConstraints": {},
@@ -523,12 +512,8 @@
           "name": "codex_unlocks_character_id_characters_id_fk",
           "tableFrom": "codex_unlocks",
           "tableTo": "characters",
-          "columnsFrom": [
-            "character_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -536,10 +521,7 @@
       "compositePrimaryKeys": {
         "codex_unlocks_character_id_entry_id_pk": {
           "name": "codex_unlocks_character_id_entry_id_pk",
-          "columns": [
-            "character_id",
-            "entry_id"
-          ]
+          "columns": ["character_id", "entry_id"]
         }
       },
       "uniqueConstraints": {},
@@ -690,12 +672,8 @@
           "name": "economy_ledger_character_id_characters_id_fk",
           "tableFrom": "economy_ledger",
           "tableTo": "characters",
-          "columnsFrom": [
-            "character_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -876,12 +854,8 @@
           "name": "items_owner_id_characters_id_fk",
           "tableFrom": "items",
           "tableTo": "characters",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1058,12 +1032,8 @@
           "name": "materials_character_id_characters_id_fk",
           "tableFrom": "materials",
           "tableTo": "characters",
-          "columnsFrom": [
-            "character_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1071,10 +1041,7 @@
       "compositePrimaryKeys": {
         "materials_character_id_def_id_pk": {
           "name": "materials_character_id_def_id_pk",
-          "columns": [
-            "character_id",
-            "def_id"
-          ]
+          "columns": ["character_id", "def_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1161,12 +1128,8 @@
           "name": "operations_character_id_characters_id_fk",
           "tableFrom": "operations",
           "tableTo": "characters",
-          "columnsFrom": [
-            "character_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1174,10 +1137,7 @@
       "compositePrimaryKeys": {
         "operations_character_id_op_id_pk": {
           "name": "operations_character_id_op_id_pk",
-          "columns": [
-            "character_id",
-            "op_id"
-          ]
+          "columns": ["character_id", "op_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1240,12 +1200,8 @@
           "name": "quest_progress_character_id_characters_id_fk",
           "tableFrom": "quest_progress",
           "tableTo": "characters",
-          "columnsFrom": [
-            "character_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1253,10 +1209,7 @@
       "compositePrimaryKeys": {
         "quest_progress_character_id_quest_id_pk": {
           "name": "quest_progress_character_id_quest_id_pk",
-          "columns": [
-            "character_id",
-            "quest_id"
-          ]
+          "columns": ["character_id", "quest_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1325,12 +1278,8 @@
           "name": "sessions_account_id_accounts_id_fk",
           "tableFrom": "sessions",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1340,9 +1289,7 @@
         "sessions_account_id_unique": {
           "name": "sessions_account_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id"
-          ]
+          "columns": ["account_id"]
         }
       },
       "policies": {},
@@ -1387,12 +1334,8 @@
           "name": "wallets_character_id_characters_id_fk",
           "tableFrom": "wallets",
           "tableTo": "characters",
-          "columnsFrom": [
-            "character_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }

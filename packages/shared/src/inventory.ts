@@ -3,7 +3,7 @@
  * one `result` each operation id gets, the inventory snapshot read at login and the change
  * notices that follow each operation. The server runs the same validators the client may run.
  */
-
+import type { WorldMessageSchema } from "./chat.ts";
 import type { ItemKind } from "./loadout.ts";
 import type { LogoutPlace, PoolFill } from "./progress.ts";
 import { STAT_IDS, type Stats } from "./stats.ts";
@@ -94,14 +94,19 @@ export const OP_ERRORS = [
 ] as const;
 export type OpError = (typeof OP_ERRORS)[number];
 
-/** Requests per second each operation may be sent at, after a burst. */
-export const OP_RATE = {
+export interface OpRate {
+  readonly burst: number;
+  readonly perSecond: number;
+}
+
+/** How fast each operation may be sent, per character: a burst, then so many a second. */
+export const OP_RATE: { readonly default: OpRate } & Readonly<Partial<Record<OpName, OpRate>>> = {
   default: { burst: 10, perSecond: 5 },
   pilgi: { burst: 6, perSecond: 3 },
   craft: { burst: 5, perSecond: 2 },
   "shop.buy": { burst: 5, perSecond: 2 },
   claimPool: { burst: 2, perSecond: 0.2 },
-} as const satisfies Partial<Record<OpName | "default", { burst: number; perSecond: number }>>;
+};
 
 // Views ---------------------------------------------------------------------------------------
 
@@ -295,16 +300,21 @@ export function parseOpMessage(value: unknown): OpMessage | null {
 }
 
 /**
- * The same check as a Standard Schema (standardschema.dev v1), the form a Colyseus
- * `onMessage(type, schema, handler)` validates against.
+ * The WorldRoom form (PLAN §21): the message type is the operation's name and the body is
+ * `{ id, req }`. As a Standard Schema (standardschema.dev v1), so the room can drop a sender
+ * whose message does not parse, the way it treats chat.
  */
-export const opMessageSchema = {
-  "~standard": {
-    version: 1 as const,
-    vendor: "guago",
-    validate(value: unknown) {
-      const parsed = parseOpMessage(value);
-      return parsed === null ? { issues: [{ message: "malformed operation" }] } : { value: parsed };
+export function opSchema<K extends OpName>(op: K): WorldMessageSchema<OpMessage & { op: K }> {
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "guago",
+      validate(value: unknown) {
+        const parsed = isObject(value) ? parseOpMessage({ ...value, op }) : null;
+        return parsed === null
+          ? { issues: [{ message: `malformed ${op}` }] }
+          : { value: parsed as OpMessage & { op: K } };
+      },
     },
-  },
-};
+  };
+}
