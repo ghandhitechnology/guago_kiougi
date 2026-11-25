@@ -177,7 +177,9 @@ function shadowWall(frame: number): Pic {
   const shapes = [0, 1, 3, 1, 2, 0];
   shapes.forEach((s, i) => {
     const pic = Pic.of(SHAPES[s] as string);
-    const x = ((i * 38 + 220 - frame * 6) % 240) - 20;
+    // Six figures forty pixels apart; over the loop the whole procession moves one full round, so
+    // the last frame runs straight on into the first.
+    const x = ((((i * 40 - frame * 10) % 240) + 240) % 240) - 24;
     const y = 30 - pic.h;
     for (let yy = 0; yy < pic.h; yy++)
       for (let xx = 0; xx < pic.w; xx++) {
@@ -345,6 +347,95 @@ function stalagmite(w: number, h: number, seed: number): Pic {
   return out.put(finish(p), Math.floor((18 - w) / 2), 30 - h);
 }
 
+/** The procession's frames: 24 steps of ten pixels, one full round of six figures. */
+const PASS = Array.from({ length: 24 }, (_, i) => i);
+
+// Rock with height ------------------------------------------------------------------------------
+
+/**
+ * A stretch of cave wall seen from the floor: rough rock going up into the dark, a lip catching
+ * what light there is at its foot, wet streaks, and the stain where it meets the floor. 16 wide,
+ * joins end to end; hung from the floor line up over the rock it stands for.
+ */
+function face(seed: number): Pic {
+  const W = 16;
+  const H = 44;
+  const p = Pic.blank(W, H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const t = y / H;
+      const n = hash(x >> 1, y >> 2, seed);
+      // Darkest high up where no light reaches, a little lighter toward the floor.
+      let ch = t < 0.35 ? "j" : t < 0.7 ? (n > 0.5 ? "I" : "j") : n > 0.4 ? "I" : "i";
+      if ((x + seed * 3) % 7 === 0 && t > 0.2) ch = t > 0.6 ? "S" : "I";
+      if (y >= H - 3) ch = y === H - 1 ? "J" : "S";
+      if (hash(x, y, seed + 9) > 0.97 && t > 0.4) ch = "M";
+      p.set(x, y, ch);
+    }
+  return p;
+}
+
+/** Stalactites hanging from the ceiling at the wall's top: overhead, players pass under. */
+function stalactites(seed: number): Pic {
+  const W = 48;
+  const H = 30;
+  const p = Pic.blank(W, H);
+  for (let k = 0; k < 6; k++) {
+    const cx = 3 + Math.floor(hash(k, seed) * (W - 6));
+    const len = 8 + Math.floor(hash(seed, k) * 20);
+    for (let y = 0; y < len; y++) {
+      const half = Math.max(0, Math.round((1 - y / len) * 3));
+      for (let x = cx - half; x <= cx + half; x++) p.set(x, y, x < cx ? "I" : "j");
+    }
+  }
+  for (let x = 0; x < W; x++) p.set(x, 0, "J").set(x, 1, "j");
+  return p;
+}
+
+/** Far rock past the lit hall, for the dark: a pillar, a ledge, only just there. */
+function far(kind: number): Pic {
+  const W = 64;
+  const H = 80;
+  const p = Pic.blank(W, H);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const pillar = kind === 0 && Math.abs(x - 30 - Math.sin(y / 9) * 4) < 7 + Math.sin(y / 5) * 2;
+      const ledge =
+        kind === 1 && y > 50 && y < 60 + Math.sin(x / 6) * 3 && x > 4 + Math.sin(y) && x < 60;
+      const spire = kind === 2 && Math.abs(x - 32) < (y / H) * 14 + 1;
+      if (pillar || ledge || spire) p.set(x, y, hash(x >> 1, y >> 2, kind) > 0.7 ? "j" : "J");
+    }
+  return p;
+}
+
+/** The floor's own marks: a crack, gravel, a puddle with a glint, rubble. */
+const FLOOR_MARKS: Readonly<Record<string, string>> = {
+  crack: `
+    S...........S..
+    .S.......SSS...
+    ..SS...SS......
+    ....SSS........
+  `,
+  gravel: `
+    .M....M..M.....
+    ...M.S....M..M.
+    .S.....M.S.....
+    ...M.......M...
+  `,
+  puddle: `
+    ...IIIIII......
+    .IIjjjjjjII....
+    IjjjjiijjjjI...
+    .IIjjjjjjII....
+  `,
+  rubble: `
+    ..SS....MM.....
+    .SMMS..MKKM....
+    .SSS....MM..SS.
+    ...........SMS.
+  `,
+};
+
 export default [
   greek(
     "cave-fire",
@@ -365,14 +456,30 @@ export default [
       lone: "Yyo",
     },
   ),
+  greek("shadow-wall", Object.fromEntries(PASS.map((f) => [`pass${f}`, shadowWall(f)])), {
+    anim: { pass: { frames: PASS.map((f) => `pass${f}`), fps: 4 } },
+    origin: [104, 51],
+    outline: false,
+  }),
   greek(
-    "shadow-wall",
-    { pass0: shadowWall(0), pass1: shadowWall(1), pass2: shadowWall(2), pass3: shadowWall(3) },
-    {
-      anim: { pass: { frames: ["pass0", "pass1", "pass2", "pass3"], fps: 2 } },
-      origin: [104, 51],
-      outline: false,
-    },
+    "cave-face",
+    { a: face(1), b: face(2), c: face(3), d: face(4) },
+    { origin: [0, 43], outline: false, lone: "jIiSMJ" },
+  ),
+  greek(
+    "stalactites",
+    { a: stalactites(1), b: stalactites(2) },
+    { origin: [0, 0], outline: false, lone: "JjI" },
+  ),
+  greek(
+    "far-rock",
+    { pillar: far(0), ledge: far(1), spire: far(2) },
+    { origin: [0, 0], outline: false, lone: "Jj" },
+  ),
+  greek(
+    "cave-floor",
+    Object.fromEntries(Object.entries(FLOOR_MARKS).map(([k, g]) => [k, Pic.of(g)])),
+    { outline: false, lone: "SMKIji" },
   ),
   greek(
     "low-wall",

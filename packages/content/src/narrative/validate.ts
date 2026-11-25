@@ -28,7 +28,9 @@ import {
   knownJosa,
   registerSlips,
   slotsIn,
+  TOAST_PX,
   widest,
+  width,
 } from "./text.ts";
 
 export interface Problem {
@@ -36,7 +38,7 @@ export interface Problem {
   readonly message: string;
 }
 
-type Limit = "dialogue" | "row" | "chat" | "codex" | "none";
+type Limit = "dialogue" | "row" | "toast" | "chat" | "codex" | "none";
 
 export function validateNarrative(n: Narrative): Problem[] {
   const problems: Problem[] = [];
@@ -84,6 +86,8 @@ export function validateNarrative(n: Narrative): Problem[] {
       );
     if (opts.limit === "row" && dialogueRows(value) > 1)
       report(where, `${key} takes ${dialogueRows(value)} rows; it must fit one`);
+    if (opts.limit === "toast" && width(widest(value)) > TOAST_PX)
+      report(where, `${key} is wider than one toast row (${TOAST_PX} px)`);
     if (opts.limit === "chat" && [...widest(value)].length > CHAT_CHARS)
       report(where, `${key} is longer than ${CHAT_CHARS} characters`);
     if (opts.limit === "codex" && [...value].length > CODEX_CHARS)
@@ -286,11 +290,26 @@ export function validateNarrative(n: Narrative): Problem[] {
         : { limit: "dialogue", slots: q.slots },
     );
   }
+  for (const c of n.chores ?? []) {
+    const where = `chore ${c.id}`;
+    unique("quest", c.id);
+    const voice = c.voice ? speakerOf(where, c.voice) : undefined;
+    for (const slot of c.slots)
+      if (!(SLOTS as readonly string[]).includes(slot)) report(where, `unknown slot ${slot}`);
+    text(where, c.poster, { limit: "row" });
+    text(where, c.title, { limit: "row", slots: c.slots });
+    text(where, c.body, {
+      limit: "dialogue",
+      slots: c.slots,
+      ...(voice ? { register: voice.register } : {}),
+    });
+  }
   for (const m of [...n.system, ...n.announcements]) {
     const where = `message ${m.id}`;
     unique("message", m.id);
     const s = speakerOf(where, m.voice);
-    const limit: Limit = m.channel === "dialogue" ? "dialogue" : "chat";
+    const limit: Limit =
+      m.channel === "dialogue" ? "dialogue" : m.channel === "toast" ? "toast" : "chat";
     text(
       where,
       m.text,

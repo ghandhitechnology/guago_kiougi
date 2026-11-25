@@ -204,7 +204,7 @@ export function spriteSheet(f: Fonts, art: readonly Compiled[]): Rgba {
   const s = new Sheet(1200);
   let y = 20;
   for (const a of art) {
-    if (a.kind !== "sprite" || a.group === "ui" || a.group === "combat") continue;
+    if (a.kind !== "sprite" || a.group === "ui" || a.group.startsWith("combat")) continue;
     drawText(s.c, f.head, a.name, 20, y, UI.head);
     y += 26;
     y = frameStrip(s, f, [...a.frames], INDEX_RGB, y, backdrops);
@@ -323,7 +323,8 @@ export function sceneSheet(f: Fonts, meta: SceneMeta, atlases: readonly Atlas[])
   const pixels = new Map<string, SceneAtlas>(
     atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
   );
-  const s = new Sheet(SCREEN.w * 3 + 40);
+  // Each scene takes its ×1 and ×3 rows and a title; the canvas fits however many there are.
+  const s = new Sheet(SCREEN.w * 3 + 40, SCENES.length * (SCREEN.h * 4 + 90) + 40);
   let y = 20;
   for (const def of SCENES) {
     const img = renderScene(def, meta, pixels, 0);
@@ -381,12 +382,21 @@ export function combatGrounds(art: readonly Compiled[]): { name: string; patch: 
 }
 
 /**
- * Every combat effect (the `combat` atlas), each animation's frames at ×1 and ×3 on the dark
- * field and on Greek ground. Light meant for additive blending is marked `add`.
+ * Every combat effect in one atlas group (`combat`, `combat-evolved`), each animation's frames at
+ * ×1 and ×3 on the dark field and on Greek ground. Light meant for additive blending is marked
+ * `add`. A sprite with many animations (one per direction or per kind) shows its first three at
+ * ×3 and the rest at ×1, so a sixteen-direction cone does not take a page of its own.
  */
-export function combatSheet(f: Fonts, art: readonly Compiled[]): Rgba {
+export function combatSheet(f: Fonts, art: readonly Compiled[], group = "combat"): Rgba {
+  // Laid out once on a one-row canvas (drawing clips) to measure, then drawn at that height.
+  const measure = layoutCombat(new Sheet(1600, 1), f, art, group);
+  const s = new Sheet(1600, measure + 40);
+  layoutCombat(s, f, art, group);
+  return s.done();
+}
+
+function layoutCombat(s: Sheet, f: Fonts, art: readonly Compiled[], group: string): number {
   const grounds = combatGrounds(art);
-  const s = new Sheet(1600, 40000);
   let y = 20;
   const gap = 6;
   let gx = 0;
@@ -395,11 +405,12 @@ export function combatSheet(f: Fonts, art: readonly Compiled[]): Rgba {
     s.c.draw(crop(g, gx, (gx * 7) % Math.max(1, g.h - h), w, h), x, y0, INDEX_RGB, scale);
   };
   for (const a of art) {
-    if (a.kind !== "sprite" || a.group !== "combat") continue;
+    if (a.kind !== "sprite" || a.group !== group) continue;
     drawText(s.c, f.head, a.blend ? `${a.name}  add` : a.name, 20, y, UI.head);
     y += 26;
     const [w, h] = a.size;
-    for (const [name, anim] of Object.entries(a.anim)) {
+    const many = Object.keys(a.anim).length > 6;
+    Object.entries(a.anim).forEach(([name, anim], index) => {
       drawText(
         s.c,
         f.label,
@@ -420,6 +431,7 @@ export function combatSheet(f: Fonts, art: readonly Compiled[]): Rgba {
         x += 16;
       }
       y += h + 8;
+      if (many && index >= 3) return;
       for (const g of grounds) {
         x = 20;
         for (const img of imgs) {
@@ -434,11 +446,11 @@ export function combatSheet(f: Fonts, art: readonly Compiled[]): Rgba {
         y += h * 3 + gap;
       }
       y += 8;
-    }
+    });
     y += 12;
     s.mark(y);
   }
-  return s.done();
+  return y;
 }
 
 /**

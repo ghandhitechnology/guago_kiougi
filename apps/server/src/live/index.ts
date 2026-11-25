@@ -5,7 +5,7 @@
  * the raid system call. Nothing here runs on a map's simulation tick: events land in memory and
  * the database work happens in batches and in the background.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   CODEX_SETS,
@@ -17,8 +17,10 @@ import {
   mealById,
   mealOf,
   NEAT,
+  narrative,
 } from "@guago/content";
 import {
+  boardDay,
   boardWeek,
   type Character,
   CLUB_EXP_FOR_NOTICE,
@@ -28,10 +30,12 @@ import {
   DESK_CURE_SECONDS,
   type DemeritReason,
   DROWSY,
+  dayStart,
   EXPEL,
   FLOOR_LEADERS,
   type HelpTemplate,
   helpCancelSchema,
+  helpDropSchema,
   helpPostSchema,
   helpTakeSchema,
   LIVE_MESSAGES,
@@ -44,6 +48,7 @@ import {
   liveReadSchema,
   MERITS,
   type MeritReason,
+  MINUTE_MS,
   type Modifiers,
   modifiers,
   NO_MODIFIERS,
@@ -98,8 +103,13 @@ export interface LiveOptions {
   world: () => LiveWorld | undefined;
   /** Student look options, to tell the school uniform. */
   looks?: () => LookOptions;
-  /** Lets the admin route inject combat and navigation events (test servers only). */
+  /**
+   * A test server: the admin route may also move the clock, free bosses, restart the Page and
+   * inject combat and navigation events. Off, it only reads.
+   */
   testEvents?: boolean;
+  /** Bearer token `POST /admin/live` requires (`SERVER_SECRET`); without it the route is off. */
+  adminSecret?: string;
   log?: (line: string) => void;
 }
 
@@ -149,6 +159,8 @@ export function createLive(db: Db, o: LiveOptions) {
   const autoSince = new Map<string, number>();
   const deskSince = new Map<string, number>();
   const homeUntil = new Map<string, number>();
+  /** The last `home-minute` sent to each player at home. */
+  const homeMinute = new Map<string, number>();
   const sentHome = new Set<(characterId: string, until: number) => void>();
   let floorLeaders = { week: -1, ids: new Set<string>() };
   const buckets = new Buckets();
@@ -169,6 +181,30 @@ export function createLive(db: Db, o: LiveOptions) {
         () => {},
         (error) => log(`live ${what} failed: ${describeError(error)}`),
       );
+
+  /**
+   * An award given: the 상장 to the player, and the principal's line to everyone when the
+   * narrative has one (`award.given.<id>`; 집에 갔상 has its own, `expel.title`).
+   */
+  async function award(characterId: string, id: string): Promise<void> {
+    push(characterId, { t: "award", award: id });
+    const key = id === "went-home" ? "expel.title" : `award.given.${id}`;
+    if (!SYSTEM_KEYS.has(key)) return;
+    const name = online.get(characterId)?.name ?? (await character(characterId))?.name ?? "";
+    line(key, { player: name });
+  }
+
+  /** 도감 entries unlocked: the push, the line for every set they completed, the new bonus. */
+  async function unlockedNow(characterId: string, entries: readonly string[]): Promise<void> {
+    if (entries.length === 0) return;
+    push(characterId, { t: "unlock", entries: [...entries] });
+    const all = new Set((await unlocked(characterId)).map((u) => u.id));
+    for (const set of completedSets(all)) {
+      if (set.entries.some((e) => entries.includes(e)))
+        line(`codex-set.${set.id}`, undefined, characterId);
+    }
+    await refreshRules(characterId);
+  }
 
   /** Runs a server operation, retrying a dropped connection under the same id. */
   async function run<K extends AnyOp>(
@@ -310,6 +346,10 @@ export function createLive(db: Db, o: LiveOptions) {
     for (const id of done) {
       const q = await board.quest(characterId, id);
       if (q) push(characterId, { t: "done", quest: noticeView(q) });
+      if (id.startsWith("chore:")) {
+        line("merit.cleaning", undefined, characterId);
+        void refreshRules(characterId);
+      }
       if (id.startsWith("help:")) {
         const h = helping.get(characterId);
         helping.delete(characterId);
@@ -343,10 +383,7 @@ export function createLive(db: Db, o: LiveOptions) {
       notify(characterId, result);
       const done = (result.outcome.done as readonly string[] | undefined) ?? [];
       const codex = result.change.codex ?? [];
-      if (codex.length > 0) {
-        push(characterId, { t: "unlock", entries: [...codex] });
-        background("rules", () => refreshRules(characterId));
-      }
+      if (codex.length > 0) background("unlock", () => unlockedNow(characterId, codex));
       if (done.length > 0) background("done", () => finished(characterId, done));
     },
   });
@@ -381,7 +418,9 @@ export function createLive(db: Db, o: LiveOptions) {
 
   async function conduct(
     characterId: string,
-    req: { kind: "demerit"; reason: DemeritReason } | { kind: "merit"; reason: MeritReason },
+    req:
+      | { kind: "demerit"; reason: DemeritReason; key?: string }
+      | { kind: "merit"; reason: MeritReason },
     opId = `conduct:${randomUUID()}`,
   ): Promise<ExecResult> {
     const amount = req.kind === "demerit" ? DEMERITS[req.reason] : MERITS[req.reason];
@@ -390,21 +429,23 @@ export function createLive(db: Db, o: LiveOptions) {
       opId,
       "live.conduct",
       req.kind === "demerit"
-        ? { kind: "demerit", reason: req.reason, amount }
+        ? { kind: "demerit", reason: req.reason, amount, ...(req.key ? { key: req.key } : {}) }
         : {
             kind: "merit",
             reason: req.reason,
             amount,
             neat: neat(characterId),
             week: boardWeek(now()),
+            day: boardDay(now()),
           },
     );
     if (!result.ok) {
       log(`conduct ${req.kind}.${req.reason} for ${characterId} refused: ${result.error}`);
       return result;
     }
-    notify(characterId, result);
     const out = result.outcome;
+    if (out.already) return result;
+    notify(characterId, result);
     line(`${req.kind}.${req.reason}`, undefined, characterId);
     if (req.kind === "merit" && Number(out.cancelled) > 0) {
       line("merit.cancel", { count: Number(out.demerits) }, characterId);
@@ -425,26 +466,28 @@ export function createLive(db: Db, o: LiveOptions) {
         }
       }
     }
-    for (const award of (out.titles as readonly string[] | undefined) ?? []) {
-      push(characterId, { t: "award", award });
-      if (award === "went-home") {
-        const name = online.get(characterId)?.name ?? (await character(characterId))?.name ?? "";
-        line("expel.title", { player: name });
-      }
-    }
+    for (const id of (out.titles as readonly string[] | undefined) ?? [])
+      await award(characterId, id);
     await refreshRules(characterId);
     return result;
   }
 
   async function eat(characterId: string): Promise<"ok" | "meal_full" | "sent_home"> {
-    if ((homeUntil.get(characterId) ?? 0) > now()) return "sent_home";
+    if ((homeUntil.get(characterId) ?? 0) > now()) {
+      line("meal.sent-home", undefined, characterId);
+      return "sent_home";
+    }
     const t = now();
     const meal = mealOf(t);
     const result = await run(characterId, `meal:${randomUUID()}`, "live.meal", {
       meal: meal.id,
       week: boardWeek(t),
     });
-    if (!result.ok) return "meal_full";
+    if (!result.ok) {
+      line("meal.full", undefined, characterId);
+      return "meal_full";
+    }
+    line(`meal.eat.${meal.id}`, undefined, characterId);
     notify(characterId, result);
     await refreshRules(characterId);
     return "ok";
@@ -453,6 +496,7 @@ export function createLive(db: Db, o: LiveOptions) {
   async function setDrowsy(characterId: string, drowsy: boolean): Promise<void> {
     const r = await run(characterId, `drowsy:${randomUUID()}`, "live.drowsy", { drowsy });
     notify(characterId, r);
+    if (r.ok) line(drowsy ? "rule.drowsy" : "rule.drowsy-desk", undefined, characterId);
     await refreshRules(characterId);
   }
 
@@ -474,10 +518,21 @@ export function createLive(db: Db, o: LiveOptions) {
     }
   }
 
+  /**
+   * 명령퇴사: one `home-minute:<n>` a minute to the player at home (the home scene waits on
+   * them, one line from the parent each), then the return line.
+   */
   function checkHome(t: number): void {
     for (const [id, until] of homeUntil) {
+      const start = until - EXPEL.homeSeconds * SECOND_MS;
+      const due = Math.min(HOME_MINUTES, Math.floor((t - start) / MINUTE_MS));
+      for (let n = (homeMinute.get(id) ?? 0) + 1; n <= due; n++) {
+        push(id, { t: "scene", until: `home-minute:${n}` });
+        homeMinute.set(id, n);
+      }
       if (until > t) continue;
       homeUntil.delete(id);
+      homeMinute.delete(id);
       if (online.has(id)) line("expel.return", undefined, id);
     }
   }
@@ -498,10 +553,7 @@ export function createLive(db: Db, o: LiveOptions) {
     );
     notify(characterId, r);
     const codex = r.ok ? (r.change.codex ?? []) : [];
-    if (codex.length > 0) {
-      push(characterId, { t: "unlock", entries: [...codex] });
-      await refreshRules(characterId);
-    }
+    await unlockedNow(characterId, codex);
   }
 
   // Sessions ----------------------------------------------------------------------------------
@@ -515,8 +567,9 @@ export function createLive(db: Db, o: LiveOptions) {
       look: c.look,
       rules: row ? ruleState(row, []) : NO_RULES,
     });
-    const login = await run(c.id, `login:${sessionId}`, "live.login", {});
+    const login = await run(c.id, `login:${sessionId}`, "live.login", { session: sessionId });
     notify(c.id, login);
+    if (login.ok && login.outcome.rested) line("rule.rested", undefined, c.id);
     push(c.id, { t: "page", page: page.view() });
     await freedCodex(c.id);
     await ensureBoard(c.id, false);
@@ -550,6 +603,7 @@ export function createLive(db: Db, o: LiveOptions) {
     const measured = income.measure(characterId);
     income.end(characterId);
     const result = await run(characterId, `logout:${sessionId}`, "live.logout", {
+      session: sessionId,
       place: logoutPlace(where.mapId, where.x, where.y),
       measured,
       floorLeader: await isFloorLeader(characterId),
@@ -571,25 +625,64 @@ export function createLive(db: Db, o: LiveOptions) {
     for (const id of online.keys()) background("codex", () => freedCodex(id));
   }
 
-  async function onDay(): Promise<void> {
+  async function onDay(day: number): Promise<void> {
+    // A menu with its own broadcast (수요 특식) is announced as its day begins.
+    const menu = mealOf(dayStart(day));
+    if (menu.announce) line(menu.announce);
     await board.sweep();
     for (const id of online.keys()) background("board", () => ensureBoard(id, true));
   }
 
-  /** The week turned: the last week's five most 상점 become 층장, the most meals 다 먹었상. */
+  /**
+   * The week turned: the last week's five most 상점 become 층장, the most meals 다 먹었상. Safe
+   * to run again after a crash at any point: the leaders are chosen once (the rows written the
+   * first time stand, `on conflict do nothing`), each is paid once by its row's `paid` flag
+   * inside the paying transaction, and the award once by the title.
+   */
   async function onWeek(week: number, previous: number): Promise<void> {
-    const leaders = await db.execute(sql`
-      select character_id from weekly_tally where week = ${previous} and kind = 'merit' and n > 0
-      order by n desc, character_id limit ${FLOOR_LEADERS}`);
-    const ids = leaders.rows.map((r) => r.character_id as string);
-    for (const [rank, id] of ids.entries()) {
-      await db.execute(sql`
-        insert into floor_leaders (week, character_id, rank) values (${week}, ${id}, ${rank + 1})
-        on conflict do nothing`);
+    const fault = (point: string) => page.fault?.(`week:${week}:${point}`);
+    const exists = await db.execute(sql`select 1 from floor_leaders where week = ${week} limit 1`);
+    if (exists.rows.length === 0) {
+      const top = await db.execute(sql`
+        select character_id from weekly_tally where week = ${previous} and kind = 'merit' and n > 0
+        order by n desc, character_id limit ${FLOOR_LEADERS}`);
+      await fault("chosen");
+      const ids = top.rows.map((r) => r.character_id as string);
+      if (ids.length > 0) {
+        await db.execute(sql`
+          insert into floor_leaders (week, character_id, rank)
+          select ${week}, u.id, u.rank
+          from unnest(${sql.param(ids)}::uuid[], ${sql.param(ids.map((_, i) => i + 1))}::smallint[])
+            as u(id, rank)
+          on conflict do nothing`);
+      }
+      await fault("written");
     }
-    floorLeaders = { week, ids: new Set(ids) };
-    for (const id of ids) {
-      await conduct(id, { kind: "merit", reason: "floor-leader" }, `floor-leader:${week}`);
+    const rows = await db.execute(
+      sql`select character_id, paid from floor_leaders where week = ${week} order by rank`,
+    );
+    const ids = rows.rows.map((r) => r.character_id as string);
+    if (week === boardWeek(now())) floorLeaders = { week, ids: new Set(ids) };
+    let announce = false;
+    for (const r of rows.rows.filter((x) => x.paid !== true)) {
+      const id = r.character_id as string;
+      const paid = await run(id, `floor-leader:${week}`, "live.floorLeader", { week });
+      if (paid.ok && paid.outcome.paid) {
+        announce = true;
+        notify(id, paid);
+        line("merit.floor-leader", undefined, id);
+        if (Number(paid.outcome.cancelled) > 0) {
+          line("merit.cancel", { count: Number(paid.outcome.demerits) }, id);
+        }
+        if (online.has(id)) await refreshRules(id);
+      }
+      await fault(`paid:${id}`);
+    }
+    if (announce) {
+      const named = await db.execute(sql`
+        select c.name from floor_leaders f join characters c on c.id = f.character_id
+        where f.week = ${week} order by f.rank`);
+      line("floor-leaders", { names: named.rows.map((r) => r.name as string).join(", ") });
     }
     const meals = await db.execute(sql`
       select character_id from weekly_tally where week = ${previous} and kind = 'meal' and n > 0
@@ -599,9 +692,10 @@ export function createLive(db: Db, o: LiveOptions) {
       const r = await run(eater, `award:ate-it-all:${week}`, "live.award", { award: "ate-it-all" });
       if (r.ok && r.outcome.award) {
         notify(eater, r);
-        push(eater, { t: "award", award: "ate-it-all" });
+        await award(eater, "ate-it-all");
       }
     }
+    await fault("awarded");
   }
 
   // Listening to operations -------------------------------------------------------------------
@@ -615,24 +709,26 @@ export function createLive(db: Db, o: LiveOptions) {
       if (club) clubActivity.add(characterId, club);
       if (kind === "daily" && dailyIds(Number(day)).includes(quest)) {
         background("streak", async () => {
-          const r = await run(characterId, `board-day:${day}`, "live.boardDay", {
+          // One id per claim: the board is full only at the last one, and the operation is
+          // idempotent by state (`board_streak_day`), so the others change nothing.
+          const r = await run(characterId, `board-day:${quest}`, "live.boardDay", {
             day: Number(day),
           });
           notify(characterId, r);
-          if (r.ok && r.outcome.award)
-            push(characterId, { t: "award", award: String(r.outcome.award) });
+          if (r.ok && r.outcome.award) await award(characterId, String(r.outcome.award));
         });
       }
       if (kind === "repeat") background("board", () => ensureBoard(characterId, true));
     }
     if (name === "craft" && (result.change.codex ?? []).length > 0) {
-      push(characterId, { t: "unlock", entries: [...(result.change.codex ?? [])] });
-      background("rules", () => refreshRules(characterId));
+      const entries = result.change.codex ?? [];
+      background("unlock", () => unlockedNow(characterId, entries));
     }
     if (name === "drowsy.drink") {
       const me = online.get(characterId);
       if (me) me.rules = { ...me.rules, drowsy: false };
       if (autoSince.has(characterId)) autoSince.set(characterId, now());
+      line("rule.drowsy-drink", undefined, characterId);
       background("rules", () => refreshRules(characterId));
     }
   }
@@ -730,17 +826,29 @@ export function createLive(db: Db, o: LiveOptions) {
     },
     /** Ate at the 급식실: today's menu as a 30-minute buff. */
     eat,
-    /** The 청소 당번 daily was done: +1 상점. */
-    cleaning(characterId: string): Promise<void> {
-      return background("cleaning", () =>
-        conduct(characterId, { kind: "merit", reason: "cleaning" }),
-      );
+    /** The 청소 당번 chore was done where its notice said: +1 상점 once a day, with the notice. */
+    cleaning(characterId: string): void {
+      progress.mark(characterId, "chores", "cleaning");
     },
 
     // Moderation.
-    /** A chat filter strike an admin confirmed: +3 벌점. */
-    chatStrike(characterId: string): Promise<void> {
-      return background("chat", () => conduct(characterId, { kind: "demerit", reason: "chat" }));
+    /**
+     * A chat filter strike an admin confirmed: +3 벌점, once per `strikeId`. Resolves true when
+     * the 벌점 is booked (now or by an earlier call with the same id), false when it could not be
+     * and a retry with the same id is safe. Never throws.
+     */
+    async chatStrike(characterId: string, strikeId: string): Promise<boolean> {
+      try {
+        const r = await conduct(characterId, {
+          kind: "demerit",
+          reason: "chat",
+          key: `chat-strike:${strikeId}`,
+        });
+        return r.ok;
+      } catch (error) {
+        log(`live chat strike ${strikeId} failed: ${describeError(error)}`);
+        return false;
+      }
     },
 
     // The raid system.
@@ -835,6 +943,19 @@ export function createLive(db: Db, o: LiveOptions) {
     if (view) push(characterId, { t: "help", notice: view });
   }
 
+  async function dropHelp(characterId: string, notice: string, n: number) {
+    const r = await board.drop(characterId, notice);
+    if (!r.ok)
+      return refuse(characterId, LIVE_MESSAGES.helpDrop, refusalOf[r.error] ?? "server_error", n);
+    notify(characterId, r);
+    helping.delete(characterId);
+    const view = await board.notice(notice);
+    if (view) {
+      push(characterId, { t: "help", notice: view });
+      push(view.poster.id, { t: "help", notice: view });
+    }
+  }
+
   const guarded =
     <T extends { n: number }>(
       type: string,
@@ -879,6 +1000,13 @@ export function createLive(db: Db, o: LiveOptions) {
         cancelHelp(id, m.notice, m.n),
       ),
     },
+    {
+      type: LIVE_MESSAGES.helpDrop,
+      schema: helpDropSchema as WorldMessageSchema<unknown>,
+      run: guarded<{ notice: string; n: number }>(LIVE_MESSAGES.helpDrop, (id, m) =>
+        dropHelp(id, m.notice, m.n),
+      ),
+    },
   ];
 
   // Admin -------------------------------------------------------------------------------------
@@ -900,6 +1028,9 @@ export function createLive(db: Db, o: LiveOptions) {
   };
 
   async function admin(body: Record<string, unknown>): Promise<unknown> {
+    if (!o.testEvents && !ADMIN_READS.has(String(body.cmd))) {
+      throw new Error(`${String(body.cmd)} is for test servers (LIVE_TEST_EVENTS=1)`);
+    }
     switch (body.cmd) {
       case "state":
         return { page: page.view(), freed: page.freedBosses() };
@@ -925,13 +1056,11 @@ export function createLive(db: Db, o: LiveOptions) {
         await progress.flush();
         return { ok: true };
       case "restart":
-        if (!o.testEvents) throw new Error("restart is for test servers (LIVE_TEST_EVENTS=1)");
         await page.restart();
         await page.tick();
         return { page: page.view() };
       case "credit": {
         // Income as combat hands it to the grant buffer, for the pool's measurement.
-        if (!o.testEvents) throw new Error("credit is for test servers (LIVE_TEST_EVENTS=1)");
         const credit = body.credit as Parameters<IncomeTracker["credit"]>[1];
         for (let i = 0; i < Number(body.times ?? 1); i++) {
           income.credit(String(body.character), credit);
@@ -941,7 +1070,6 @@ export function createLive(db: Db, o: LiveOptions) {
         return { measured: income.measure(String(body.character)) };
       }
       case "event": {
-        if (!o.testEvents) throw new Error("events are for test servers (LIVE_TEST_EVENTS=1)");
         const name = String(body.name) as keyof typeof events;
         const fn = events[name] as ((...args: unknown[]) => unknown) | undefined;
         if (!fn) throw new Error(`no event ${name}`);
@@ -955,15 +1083,35 @@ export function createLive(db: Db, o: LiveOptions) {
   }
 
   const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
-  /** `POST /admin/live` from this machine only: the clock, bosses and (test servers) events. */
+  const secret = o.adminSecret ? createHash("sha256").update(o.adminSecret).digest() : undefined;
+  /** The bearer token, compared in constant time over digests of equal length. */
+  const authorized = (header: string | undefined) => {
+    const token = /^Bearer (.+)$/.exec(header ?? "")?.[1];
+    if (!secret || !token) return false;
+    return timingSafeEqual(createHash("sha256").update(token).digest(), secret);
+  };
+  /**
+   * `POST /admin/live`: from this machine, not through a proxy (any forwarding header refuses),
+   * and with `Authorization: Bearer <SERVER_SECRET>`. Reads always; the rest on test servers.
+   */
   const adminRoute = (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     if (req.url !== "/admin/live" || req.method !== "POST") return next();
-    if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) {
+    const proxied = PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
+    if (!secret || !LOOPBACK.has(req.socket.remoteAddress ?? "") || proxied) {
       res.statusCode = 404;
       return res.end();
     }
+    if (!authorized(req.headers.authorization)) {
+      res.statusCode = 401;
+      return res.end();
+    }
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > ADMIN_BODY_MAX) req.destroy();
+      else chunks.push(c);
+    });
     req.on("end", () => {
       void (async () => {
         res.setHeader("content-type", "application/json");
@@ -980,6 +1128,7 @@ export function createLive(db: Db, o: LiveOptions) {
     });
   };
 
+  page.log = log;
   page.hooks = {
     announce: (key, params) => line(key, params),
     milestone: onMilestone,
@@ -1067,6 +1216,17 @@ export type Live = ReturnType<typeof createLive>;
 
 /** Every map a Page's lifecycle opens; anything else is campus and always open. */
 const ERA_MAPS = new Set(LIFECYCLES.flatMap((l) => l.steps.flatMap((s) => s.maps ?? [])));
+
+/** Every system line id the narrative words; a line is sent only when it has one. */
+const SYSTEM_KEYS = new Set(narrative.NARRATIVE.system.map((m) => m.id));
+/** The home scene's minutes (`home-minute:1` … `:10`): one a minute of 명령퇴사. */
+const HOME_MINUTES = EXPEL.homeSeconds / 60;
+
+/** Admin commands a live server answers; the rest are for test servers. */
+const ADMIN_READS = new Set(["state", "notebook"]);
+/** Headers a forwarding proxy adds: a request carrying one did not start on this machine. */
+const PROXY_HEADERS = ["x-forwarded-for", "forwarded", "x-real-ip", "via"];
+const ADMIN_BODY_MAX = 64 * 1024;
 
 const NO_RULES: RuleState = {
   restedUntil: null,
