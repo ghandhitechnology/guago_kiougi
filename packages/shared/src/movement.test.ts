@@ -1,18 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { type CollisionMap, openMap } from "./collision.ts";
+import { type Collidable, gridOf } from "./collision.ts";
 import { TILE_SIZE } from "./constants.ts";
 import { type Body, Facing, MOVE_MAX, moveBody, PLAYER_RADIUS, PLAYER_SPEED } from "./movement.ts";
 
 const M = MOVE_MAX;
 const STEP = PLAYER_SPEED / 20;
 
-function walls(tiles: readonly [number, number][]): CollisionMap {
-  const map = openMap(20, 20);
-  for (const [tx, ty] of tiles) map.solid[ty * map.width + tx] = 1;
-  return map;
+function walls(tiles: readonly [number, number][]): Collidable {
+  return gridOf(20, 20, tiles);
 }
 
-function walk(map: CollisionMap, from: Body, mx: number, my: number, ticks: number): Body[] {
+function walk(map: Collidable, from: Body, mx: number, my: number, ticks: number): Body[] {
   const path = [from];
   for (let i = 0; i < ticks; i++)
     path.push(moveBody(map, path.at(-1) as Body, mx, my, PLAYER_SPEED));
@@ -22,7 +20,7 @@ function walk(map: CollisionMap, from: Body, mx: number, my: number, ticks: numb
 const at = (x: number, y: number): Body => ({ x, y, facing: Facing.Down });
 
 describe("player movement", () => {
-  const open = openMap(20, 20);
+  const open = gridOf(20, 20);
 
   it("starts and stops within one tick", () => {
     const moved = moveBody(open, at(100, 100), M, 0, PLAYER_SPEED);

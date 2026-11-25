@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { collisionOf, LAWN } from "@guago/content";
+import { LAWN } from "@guago/content";
 import {
   encodeInput,
   INPUT_MESSAGE,
@@ -120,7 +120,7 @@ class Bot {
     if (!me) return;
     const body = { x: me.x / POS_SCALE, y: me.y / POS_SCALE, facing: me.facing as 0 };
     if (!this.predictor) {
-      this.predictor = new Predictor(collisionOf(LAWN), body, PLAYER_SPEED);
+      this.predictor = new Predictor(LAWN, body, PLAYER_SPEED);
       this.seen = { x: me.x, y: me.y, seq: me.seq };
       return;
     }

@@ -9,6 +9,7 @@ export * from "./buildings.ts";
 export * from "./check.ts";
 export * from "./format.ts";
 export * from "./lawn.ts";
+export * from "./lawn-props.ts";
 export * from "./layers.ts";
 export * from "./props.ts";
 export * from "./stamp.ts";

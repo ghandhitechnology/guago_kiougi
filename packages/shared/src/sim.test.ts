@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CollisionMap, openMap, overlapsSolid } from "./collision.ts";
+import { type Collidable, gridOf, overlapsSolid } from "./collision.ts";
 import { INPUT_BURST, InputQueue } from "./input-queue.ts";
 import { MOVE_MAX, type MoveInput, PLAYER_RADIUS, PLAYER_SPEED } from "./movement.ts";
 import { Predictor } from "./prediction.ts";
@@ -14,17 +14,9 @@ import {
 } from "./sim.ts";
 
 /** 36×22 tiles with a wall, a block and two shrubs touching at a corner. */
-function testMap(): CollisionMap {
-  const map = openMap(36, 22);
-  const block = (tx: number, ty: number) => {
-    map.solid[ty * map.width + tx] = 1;
-  };
-  for (let tx = 6; tx <= 20; tx++) block(tx, 5);
-  block(12, 12);
-  block(13, 12);
-  block(25, 15);
-  block(26, 16);
-  return map;
+function testMap(): Collidable {
+  const wall = Array.from({ length: 15 }, (_, i) => [6 + i, 5] as [number, number]);
+  return gridOf(36, 22, [...wall, [12, 12], [13, 12], [25, 15], [26, 16]]);
 }
 
 /** What the server saw: per tick, which players joined or left and which inputs arrived. */
@@ -89,7 +81,7 @@ interface ServerRun {
 }
 
 /** The server's side: queues fill as inputs arrive, each tick spends from them, then steps. */
-function serve(map: CollisionMap, ticks: readonly Tick[]): ServerRun {
+function serve(map: Collidable, ticks: readonly Tick[]): ServerRun {
   let world = createWorld(map, [{ kind: "odap", count: 12 }], 7);
   const queues = new Map<string, InputQueue>();
   const applied = new Map<string, number>();
@@ -116,7 +108,7 @@ function serve(map: CollisionMap, ticks: readonly Tick[]): ServerRun {
   return { world, spent, applied };
 }
 
-function replay(map: CollisionMap, ticks: readonly Tick[], spent: readonly TickInputs[]): SimWorld {
+function replay(map: Collidable, ticks: readonly Tick[], spent: readonly TickInputs[]): SimWorld {
   let world = createWorld(map, [{ kind: "odap", count: 12 }], 7);
   ticks.forEach((tick, i) => {
     for (const j of tick.join) world = addPlayer(world, j.id, j.x, j.y);

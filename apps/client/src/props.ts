@@ -1,5 +1,5 @@
 import type { ArtMetadata } from "@guago/art";
-import { type MapDef, propsOf } from "@guago/content";
+import type { MapDef } from "@guago/content";
 import { TILE_SIZE } from "@guago/shared";
 import type * as Phaser from "phaser";
 import { ENTITY_DEPTH, SHADOW_ALPHA, SHADOW_DEPTH } from "./actors.ts";
@@ -11,7 +11,7 @@ import { spriteAnim } from "./art.ts";
  * that has one. A stand-in until the layered map renderer takes over.
  */
 export function drawProps(scene: Phaser.Scene, meta: ArtMetadata, map: MapDef): void {
-  for (const p of propsOf(map)) {
+  for (const p of map.props) {
     const sprite = meta.sprites[p.sprite];
     if (!sprite) throw new Error(`art has no sprite ${p.sprite}`);
     const x = (p.tx + (p.w ?? 1) / 2) * TILE_SIZE;

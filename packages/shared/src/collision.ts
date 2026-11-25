@@ -25,59 +25,28 @@ export interface Collidable {
   readonly collision: TileCollision;
 }
 
-/** Whether a tile stops a walker. Tiles outside the map are solid. */
+/**
+ * Whether a tile stops a walker. Tiles outside the map are solid. The simulation reads collision
+ * through this one function and nothing else.
+ */
 export function isSolidTile(map: Collidable, tx: number, ty: number): boolean {
   const { w, h, rows } = map.collision;
   if (tx < 0 || ty < 0 || tx >= w || ty >= h) return true;
   return rows[ty]?.charCodeAt(tx) !== 46; // "."
 }
 
-/**
- * The simulation's copy of a map's collision: one byte a tile, row major, read through
- * {@link blocksAt}. Built once per map from its {@link TileCollision} by {@link collisionGrid}.
- */
-export interface CollisionMap {
-  /** Size in tiles. */
-  readonly width: number;
-  readonly height: number;
-  /** One byte per tile: 0 walkable, {@link GRID_SOLID} or {@link GRID_WATER} block walkers. */
-  readonly solid: Uint8Array;
-}
-
-/** A wall, a building or a prop footprint: stops walkers and anything flying. */
-export const GRID_SOLID = 1;
-/** Water or void: stops walkers, not what flies over it. */
-export const GRID_WATER = 2;
-
-/** Whether a tile blocks a walker. Everything outside the map is solid. */
-export function blocksAt(map: CollisionMap, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return true;
-  return map.solid[ty * map.width + tx] !== 0;
-}
-
-/** Whether a tile stops something flying low (a projectile): walls do, water does not. */
-export function wallAt(map: CollisionMap, tx: number, ty: number): boolean {
-  if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height) return true;
-  return map.solid[ty * map.width + tx] === GRID_SOLID;
-}
-
-/** A map with nothing in it but its border. */
-export function openMap(width: number, height: number): CollisionMap {
-  return { width, height, solid: new Uint8Array(width * height) };
-}
-
-/** The simulation grid for a map's character grid. */
-export function collisionGrid(c: TileCollision): CollisionMap {
-  const grid = openMap(c.w, c.h);
-  for (let ty = 0; ty < c.h; ty++) {
-    const row = c.rows[ty] ?? "";
-    for (let tx = 0; tx < c.w; tx++) {
-      const ch = row[tx];
-      if (ch === TILE_WALK) continue;
-      grid.solid[ty * c.w + tx] = ch === TILE_WATER ? GRID_WATER : GRID_SOLID;
-    }
+/** A map of `w`×`h` tiles with the `solid` ones blocked, for tests and tools. */
+export function gridOf(
+  w: number,
+  h: number,
+  solid: readonly (readonly [number, number])[] = [],
+): Collidable {
+  const rows = Array.from({ length: h }, () => Array<string>(w).fill(TILE_WALK));
+  for (const [tx, ty] of solid) {
+    const row = rows[ty];
+    if (row && tx >= 0 && tx < w) row[tx] = TILE_SOLID;
   }
-  return grid;
+  return { collision: { w, h, rows: rows.map((r) => r.join("")) } };
 }
 
 const T = TILE_SIZE;
@@ -91,7 +60,7 @@ const T = TILE_SIZE;
  * corner the circle rolls around.
  */
 export function pushOut(
-  map: CollisionMap,
+  map: Collidable,
   x: number,
   y: number,
   r: number,
@@ -105,11 +74,11 @@ export function pushOut(
     const ty1 = Math.floor((y + r) / T);
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
-        if (!blocksAt(map, tx, ty)) continue;
-        const left = blocksAt(map, tx - 1, ty) ? -Infinity : tx * T;
-        const right = blocksAt(map, tx + 1, ty) ? Infinity : (tx + 1) * T;
-        const top = blocksAt(map, tx, ty - 1) ? -Infinity : ty * T;
-        const bottom = blocksAt(map, tx, ty + 1) ? Infinity : (ty + 1) * T;
+        if (!isSolidTile(map, tx, ty)) continue;
+        const left = isSolidTile(map, tx - 1, ty) ? -Infinity : tx * T;
+        const right = isSolidTile(map, tx + 1, ty) ? Infinity : (tx + 1) * T;
+        const top = isSolidTile(map, tx, ty - 1) ? -Infinity : ty * T;
+        const bottom = isSolidTile(map, tx, ty + 1) ? Infinity : (ty + 1) * T;
         const cx = Math.min(right, Math.max(left, x));
         const cy = Math.min(bottom, Math.max(top, y));
         const dx = x - cx;
@@ -160,7 +129,7 @@ export function pushOut(
 }
 
 /** Whether a circle overlaps any solid tile, with slack for positions snapped to the 1/8 px grid. */
-export function overlapsSolid(map: CollisionMap, x: number, y: number, r: number): boolean {
+export function overlapsSolid(map: Collidable, x: number, y: number, r: number): boolean {
   const rr = r - 1 / 8;
   const tx0 = Math.floor((x - rr) / T);
   const tx1 = Math.floor((x + rr) / T);
@@ -168,7 +137,7 @@ export function overlapsSolid(map: CollisionMap, x: number, y: number, r: number
   const ty1 = Math.floor((y + rr) / T);
   for (let ty = ty0; ty <= ty1; ty++) {
     for (let tx = tx0; tx <= tx1; tx++) {
-      if (!blocksAt(map, tx, ty)) continue;
+      if (!isSolidTile(map, tx, ty)) continue;
       const cx = Math.min((tx + 1) * T, Math.max(tx * T, x));
       const cy = Math.min((ty + 1) * T, Math.max(ty * T, y));
       const dx = x - cx;

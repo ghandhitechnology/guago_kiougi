@@ -1,6 +1,6 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { collisionOf, LAWN, mapSize } from "@guago/content";
+import { LAWN, mapSize } from "@guago/content";
 import {
   encodeInput,
   type Facing,
@@ -86,9 +86,7 @@ export class WorldScene extends Phaser.Scene {
   private attach(room: Room<unknown, MapState>): () => void {
     this.selfId = room.sessionId;
     this.live = true;
-    this.self = new SelfMover(collisionOf(LAWN), (input) =>
-      room.send(INPUT_MESSAGE, encodeInput(input)),
-    );
+    this.self = new SelfMover(LAWN, (input) => room.send(INPUT_MESSAGE, encodeInput(input)));
     room.onStateChange((state) => this.onPatch(state));
     room.onDrop(() => {
       this.live = false;
