@@ -88,6 +88,9 @@ importers:
 
   packages/art:
     dependencies:
+      '@guago/content':
+        specifier: workspace:*
+        version: link:../content
       galmuri:
         specifier: ^2.40.3
         version: 2.40.3

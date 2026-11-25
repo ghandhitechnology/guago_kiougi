@@ -27,6 +27,13 @@ const LEGEND = {
   h: "grass.mid",
   H: "grass.light",
   j: "grass.pale",
+  // Sea pale, gold deep and wood, for the newer covers.
+  "5": "sea.pale",
+  v: "gold.deep",
+  a: "wood.deep",
+  c: "wood.dark",
+  C: "wood.mid",
+  E: "wood.light",
   // Lone details: glints, symbols and pips on covers.
   "*": "stone.bright",
   w: "stone.bright",
@@ -153,7 +160,17 @@ function book(c: Cover, symbol: string, at: readonly [number, number] = [5, 4]):
   return over(base, symbol, at[0], at[1]);
 }
 
-const RED = { line: "X", spine: "x", light: "R", mid: "r", dark: "x" };
+/**
+ * Pale covers: a cream workbook bound in the class colour. With the solid covers they give each
+ * class two looks, so two books of one class still tell apart in the bag.
+ */
+const paleCover = (line: string, spine: string) => ({
+  line,
+  spine,
+  light: "W",
+  mid: "p",
+  dark: "s",
+});
 const SEA = { line: "1", spine: "2", light: "4", mid: "3", dark: "2" };
 const GOLD = { line: "u", spine: "G", light: "Y", mid: "g", dark: "G" };
 const PLUM = { line: "6", spine: "7", light: "9", mid: "8", dark: "7" };
@@ -167,14 +184,22 @@ const books = sprite({
   palette: LEGEND,
   lone: "wqt",
   frames: {
-    /** 수학의 왕도: a regular polygon on its way to a circle. */
+    /**
+     * The ten launch-set covers take their class colour, the colour their attack is drawn in
+     * (수학 navy, 물리 plum, 화학 sea, 생명 grass, 지구과학 gold): a solid cover or a pale one.
+     */
+    /** 수학의 왕도: a chalk polygon on its way to a circle. */
     wangdo: book(
-      RED,
+      NAVY,
       stack("..www..", ".w...w.", "w.....w", "w.....w", ".w...w.", "..www.."),
       [5, 5],
     ),
-    /** 함수 그래프 노트: one period of a sine. */
-    graph: book(SEA, stack(".ww....", "w..w..w", "....ww."), [5, 6]),
+    /** 함수 그래프 노트: graph paper with one period of a sine. */
+    graph: book(
+      paleCover("k", "n"),
+      stack("b......", "b.nn...", "bn..n.n", "b....n.", "bbbbbbb"),
+      [5, 5],
+    ),
     /** 수열 문제집: 1, 2, 3, 5. */
     sequence: book(GOLD, stack("......w", "......w", "....w.w", "..w.w.w", "w.w.w.w"), [5, 5]),
     /** 확률과 통계: a die showing five. */
@@ -194,6 +219,60 @@ const books = sprite({
       NAVY,
       stack("wwwww..", ".......", "wwww...", ".......", "www..ww", ".....ww"),
       [5, 5],
+    ),
+    /** 홀리데이 일반물리: the heavy plum tome with its gold band and a thrown arc. */
+    "holiday-physics": over(
+      book(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),
+      stack("YYYYYYYYYY", "gggggggggg"),
+      3,
+      9,
+    ),
+    /** 전자기 실습서: a lab manual with a bolt across it. */
+    "em-lab": book(
+      paleCover("6", "8"),
+      stack("....88", "...88.", "..88..", ".8888.", "..88..", ".88...", "88...."),
+      [5, 4],
+    ),
+    /** 줌인 일반화학: a flask, half full. */
+    "zoomin-chem": book(
+      SEA,
+      stack("..www..", "..w.w..", "..w.w..", ".w...w.", "w55555w", "wwwwwww"),
+      [5, 5],
+    ),
+    /** 실험 보고서: a report under a clip, with the alcohol lamp's flame on it. */
+    "lab-report": over(
+      book(
+        paleCover("1", "3"),
+        stack("...2...", "..22...", "..242..", ".24442.", ".24w42.", "..222.."),
+        [5, 5],
+      ),
+      stack(".oooo.", "oSSSSo"),
+      5,
+      0,
+    ),
+    /** 캠핑 생명과학: a cell, looking out. */
+    "camping-bio": book(
+      GRASS,
+      stack("..www..", ".wjjjw.", "wjjFFjw", "wjjFFjw", ".wjjjw.", "..www.."),
+      [5, 5],
+    ),
+    /** 해부 실습서: a scalpel across a pale workbook. */
+    dissection: book(
+      paleCover("F", "h"),
+      stack("......S", ".....SS", "....SS.", "...hf..", "..hf...", ".hf....", "hf....."),
+      [5, 4],
+    ),
+    /** 지구는 둥글다 지구과학: the globe, parallels and a meridian. */
+    "round-earth": book(
+      GOLD,
+      stack("..www..", ".wYwYw.", "wYYwYYw", "wwwwwww", "wYYwYYw", ".wYwYw.", "..www.."),
+      [5, 4],
+    ),
+    /** 암석 표본 상자: the specimen tray, three stones in their compartments. */
+    "rock-box": book(
+      paleCover("v", "g"),
+      stack("vvvvvvvvvv", "vqqvEEvllv", "vqqvCCvppv", "vvvvvvvvvv"),
+      [4, 6],
     ),
   },
 });

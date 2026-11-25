@@ -9,10 +9,13 @@ import { extname, join, normalize, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ART_ROOT, compileAll } from "../build/compile.ts";
 import { metadata, writeOutput } from "../build/emit.ts";
+import { buildMaps } from "../build/maps.ts";
 import { COLORS, colorIndex } from "../palette.ts";
 import type { SceneMeta } from "../scene.ts";
 import { galmuriDir } from "./font.ts";
+import { mapSheets } from "./maps-static.ts";
 import {
+  combatSheet,
   loadFonts,
   paletteSheet,
   rigSheet,
@@ -24,7 +27,12 @@ import {
 import { uiSheets } from "./ui-static.ts";
 
 const { values } = parseArgs({
-  options: { png: { type: "string" }, port: { type: "string", default: "4310" } },
+  options: {
+    png: { type: "string" },
+    port: { type: "string", default: "4310" },
+    /** With --png, write the map sheets only. */
+    maps: { type: "boolean", default: false },
+  },
 });
 
 const DIST = join(ART_ROOT, "dist");
@@ -37,23 +45,35 @@ if (problems.length > 0) {
   process.exit(1);
 }
 const { atlases, fonts: built } = writeOutput(DIST, art);
+const meta = metadata(art, atlases, built);
+const { maps, problems: mapProblems } = buildMaps(DIST, meta);
+if (mapProblems.length > 0) {
+  const n = mapProblems.length;
+  console.error(`map checks found ${n} problem${n === 1 ? "" : "s"}:\n`);
+  for (const p of mapProblems) console.error(`  ${p}`);
+  process.exit(1);
+}
 
 if (values.png) {
   const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.png);
   mkdirSync(dir, { recursive: true });
   const fonts = loadFonts();
-  const meta = metadata(art, atlases, built) as SceneMeta;
-  const sheets = {
-    scenes: sceneSheet(fonts, meta, atlases),
-    ...Object.fromEntries(
-      [...sceneScreens(meta, atlases)].map(([name, png]) => [`scene-${name}`, png]),
-    ),
-    palette: paletteSheet(fonts),
-    sprites: spriteSheet(fonts, art),
-    rigs: rigSheet(fonts, art),
-    terrain: terrainSheet(fonts, art),
-    ...uiSheets(art, built, meta, atlases),
-  };
+  const sceneMeta = meta as SceneMeta;
+  const sheets = values.maps
+    ? mapSheets(fonts, sceneMeta, atlases, maps)
+    : {
+        ...mapSheets(fonts, sceneMeta, atlases, maps),
+        scenes: sceneSheet(fonts, sceneMeta, atlases),
+        ...Object.fromEntries(
+          [...sceneScreens(sceneMeta, atlases)].map(([name, png]) => [`scene-${name}`, png]),
+        ),
+        palette: paletteSheet(fonts),
+        sprites: spriteSheet(fonts, art),
+        combat: combatSheet(fonts, art),
+        rigs: rigSheet(fonts, art),
+        terrain: terrainSheet(fonts, art),
+        ...uiSheets(art, built, sceneMeta, atlases),
+      };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);
     writeFileSync(file, png.png());

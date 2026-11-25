@@ -288,6 +288,7 @@ export function metadata(
                   },
                 }
               : {}),
+            ...(s.blend ? { blend: s.blend } : {}),
           },
         ]),
     ),
