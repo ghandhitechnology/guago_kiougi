@@ -564,19 +564,26 @@ export class FightNet {
     let dy = 0;
     const eps = this.eps(id);
     if (Math.abs(tx - px) > eps || Math.abs(ty - py) > eps) {
-      dx = tx - qx;
-      dy = ty - qy;
+      // The new velocity is the body's own, as far as landing within half the band allows: one
+      // that lands exactly would carry the error into the next ticks and need another move.
+      const band = eps >> 1;
+      const cx = tx - qx;
+      const cy = ty - qy;
+      dx = Math.max(cx - band, Math.min(cx + band, tx - (this.ptx[id] as number)));
+      dy = Math.max(cy - band, Math.min(cy + band, ty - (this.pty[id] as number)));
       if (Math.abs(dx) <= 127 && Math.abs(dy) <= 127) {
         mask |= Extra.Move;
         this.qvx[id] = dx;
         this.qvy[id] = dy;
+        px = qx + dx;
+        py = qy + dy;
       } else {
         mask |= Extra.Abs;
         this.qvx[id] = 0;
         this.qvy[id] = 0;
+        px = tx;
+        py = ty;
       }
-      px = tx;
-      py = ty;
     }
     this.qx[id] = px;
     this.qy[id] = py;
@@ -1025,7 +1032,7 @@ export class FightNet {
           this.note(v, Priv.Down, 0, 0, 0);
           break;
         case Ev.Revive:
-          this.note(v, Priv.Revive, ev.b, 0, 0);
+          this.note(v, Priv.Revive, w.players[ev.b]?.slot ?? -1, 0, 0);
           break;
         case Ev.Wake:
           this.note(v, Priv.Wake, 0, 0, 0);

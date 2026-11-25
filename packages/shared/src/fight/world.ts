@@ -536,6 +536,8 @@ export class FightWorld {
     region: new Uint8Array(0),
     regionCount: 1,
     openingDone: false,
+    /** A closed map (its Page not open yet) spawns nothing. */
+    paused: false,
   };
   /** Effects that can hurt a player (tells, enemy shots), listed once a tick for the AI. */
   readonly dangers: Effect[] = [];

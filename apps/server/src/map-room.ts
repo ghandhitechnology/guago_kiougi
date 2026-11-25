@@ -29,30 +29,35 @@ import {
   MAX_MAP_PX,
   MapState,
   MODE_MESSAGE,
-  type Mode,
+  Mode,
+  type Modifiers,
   modeMessage,
   type NetViewer,
+  NO_MODIFIERS,
   newViewer,
   OWNER_TAG,
   overlapsSolid,
   PLAYER_RADIUS,
   type Player,
+  type PlayerKit,
   PlayerState,
   RECONNECT_SECONDS,
   REVIVE_MESSAGE,
   reviveMessage,
   SNAPSHOT_MESSAGE,
+  sameModifiers,
   spawnMonster,
   startRevive,
   stepFight,
   TILE_SIZE,
   wearClub,
+  withModifiers,
 } from "@guago/shared";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
-import { expMultiplier, fightFacts } from "./fight/seams.ts";
+import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { parties } from "./parties.ts";
 import { places } from "./places.ts";
@@ -84,8 +89,11 @@ function partyOf(id: number | undefined): string | null {
   return id === undefined ? null : String(id);
 }
 
-/** EXP modifiers are read this often. */
-const MODIFIERS_EVERY_MS = 2_000;
+/**
+ * The living world's modifiers and whether the map is open are read this often. Buffs end on the
+ * game clock with no signal, so the room asks; a kit is rebuilt only when a value changed.
+ */
+const LIVE_EVERY_MS = 2_000;
 /** Aim, mode and revive requests a client may send per second, after a small burst. */
 const RATES = { aim: [20, 10], mode: [2, 2], revive: [4, 4] } as const;
 
@@ -124,6 +132,8 @@ interface Pawn {
   readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
   /** What it fights with; replaced when an operation changes it. */
   loadout: Loadout;
+  /** The living world's multipliers its kit was built with. */
+  mods: Modifiers;
   /** EXP below one, carried to the next grant: grants take whole numbers. */
   expCarry: number;
   /** Tick it was seated, for "present for the whole surge". */
@@ -247,8 +257,10 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.onMessage(MODE_MESSAGE, modeMessage, (client, mode) => {
       const pawn = this.pawns.get(client.sessionId);
       if (!pawn?.buckets.mode.take()) return;
+      if (pawn.player.mode === mode) return;
       pawn.player.mode = mode as Mode;
       pawn.player.casts = 0;
+      this.tellMode(pawn);
     });
     this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
       const pawn = this.pawns.get(client.sessionId);
@@ -286,19 +298,42 @@ export class MapRoom extends Room<{ state: MapState }> {
         parties.report(pawn.character.id, { hp: p.hp, maxHp: p.kit.maxHp, mode });
       }
     }, VITALS_EVERY_MS);
-    // EXP modifiers come from memory every couple of seconds, never on the tick.
-    this.clock.setInterval(() => {
-      for (const pawn of this.pawns.values())
-        pawn.player.expMult = expMultiplier(pawn.character.id);
-    }, MODIFIERS_EVERY_MS);
+    // The living world is read every couple of seconds from memory, never on the tick.
+    this.readLive();
+    this.clock.setInterval(() => this.readLive(), LIVE_EVERY_MS);
   }
 
-  /** The step's events that other systems learn about (`fight/seams.ts`), all buffered. */
-  private tellFacts(): void {
-    const sink = fightFacts();
-    if (!sink) return;
+  /** A closed map spawns nothing; a changed modifier rebuilds that player's kit. */
+  private readLive(): void {
+    const l = live();
+    this.world.director.paused = !(l?.isOpen(this.mapId) ?? true);
+    if (!l) return;
+    for (const pawn of this.pawns.values()) {
+      const mods = l.modifiers(pawn.character.id);
+      if (sameModifiers(mods, pawn.mods)) continue;
+      pawn.mods = mods;
+      pawn.player.expMult = mods.exp;
+      this.world.setKit(pawn.player, this.kitOf(pawn, pawn.player.level));
+    }
+  }
+
+  /** A character's kit at a level: its loadout's books and stats, then the living world's modifiers. */
+  private kitOf(pawn: Pawn, level: number): PlayerKit {
+    const kit = this.world.rules.kit(buildOf(pawn.character, pawn.loadout, level));
+    return withModifiers(kit, pawn.mods);
+  }
+
+  /** A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. */
+  private tellMode(pawn: Pawn): void {
+    live()?.events.autoHunting(pawn.character.id, pawn.player.mode === Mode.Auto);
+  }
+
+  /** The step's events the living world counts (notices, 상점 and 벌점); it buffers them all. */
+  private tellLive(): void {
+    const l = live();
+    if (!l) return;
     const w = this.world;
-    const field = w.field?.id ?? this.mapId;
+    const place = w.field?.id ?? this.mapId;
     const of = (index: number) => {
       const p = w.players[index];
       return p?.joined ? this.pawns.get(p.id) : undefined;
@@ -310,43 +345,28 @@ export class MapRoom extends Room<{ state: MapState }> {
         case Ev.Credit: {
           const pawn = of(e.a);
           const kind = w.rules.monsters[e.d];
-          if (!pawn || !kind) break;
-          const rank = e.f === 2 ? "boss" : e.f === 1 ? "elite" : "normal";
-          sink.add({
-            kind: "kill",
-            characterId: pawn.character.id,
-            field,
-            monster: kind.id,
-            level: e.e,
-            rank,
-          });
+          if (pawn && kind) l.events.kill(pawn.character.id, kind.id, 1);
           break;
         }
-        case Ev.Down:
         case Ev.Wake: {
+          // Woke at the arrival point without being got up: the 기절 counts.
           const pawn = of(e.a);
-          if (pawn)
-            sink.add({
-              kind: e.type === Ev.Down ? "down" : "wake",
-              characterId: pawn.character.id,
-              field,
-            });
+          if (pawn) void l.events.knockout(pawn.character.id);
           break;
         }
         case Ev.Revive: {
           const target = of(e.a);
           const by = of(e.b);
-          if (target && by)
-            sink.add({ kind: "revive", characterId: by.character.id, target: target.character.id });
+          if (target && by) void l.events.revive(by.character.id, target.character.id);
           break;
         }
         case Ev.Phase:
           if (e.d === 1) this.surgeFrom = w.tick;
           else {
+            // A wave is clean for whoever was here for all of it and took no hit.
             for (const pawn of this.pawns.values()) {
-              if (pawn.since > this.surgeFrom) continue;
-              const hit = pawn.player.lastHurt >= this.surgeFrom;
-              sink.add({ kind: "wave", characterId: pawn.character.id, field, hit });
+              if (pawn.since > this.surgeFrom || pawn.player.lastHurt >= this.surgeFrom) continue;
+              l.events.cleanWave(pawn.character.id, place);
             }
           }
           break;
@@ -354,8 +374,11 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
     for (const g of w.grants) {
       const pawn = this.pawns.get(g.player.id);
-      if (pawn)
-        sink.add({ kind: "collect", characterId: pawn.character.id, drop: g.drop.payload as Drop });
+      const item = (g.drop.payload as Drop).item;
+      if (!pawn) continue;
+      if (item.kind === "page") l.events.collect(pawn.character.id, "sheet", item.qty);
+      else if (item.kind === "ink" || item.kind === "binding")
+        l.events.collect(pawn.character.id, item.kind, item.qty);
     }
   }
 
@@ -367,7 +390,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     const p = pawn.player;
     // The inventory's level is the record; the fight may run ahead of grants not yet landed.
     if (loadout.level > p.level) p.level = loadout.level;
-    this.world.setKit(p, this.world.rules.kit(buildOf(pawn.character, loadout, p.level)));
+    this.world.setKit(p, this.kitOf(pawn, p.level));
   }
 
   /**
@@ -464,19 +487,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     start: { x: number; y: number },
   ): void {
     const id = client.sessionId;
-    const rules = this.world.rules;
     const level = Math.max(1, loadout.level);
-    const kitAt = (lv: number) => rules.kit(buildOf(character, pawn.loadout, lv));
-    const player = this.world.addPlayer(
-      id,
-      Number(slot),
-      start.x,
-      start.y,
-      rules.kit(buildOf(character, loadout, level)),
-      level,
-    );
+    const mods = live()?.modifiers(character.id) ?? NO_MODIFIERS;
+    const kit = withModifiers(this.world.rules.kit(buildOf(character, loadout, level)), mods);
+    const player = this.world.addPlayer(id, Number(slot), start.x, start.y, kit, level);
     player.exp = loadout.exp;
-    player.rebuild = kitAt;
+    player.expMult = mods.exp;
+    player.rebuild = (lv) => this.kitOf(pawn, lv);
     player.party = partyOf(parties.of(character.id)?.id);
     state.sid = id;
     dressPlayer(state, character);
@@ -498,6 +515,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       player,
       character,
       loadout,
+      mods,
       expCarry: 0,
       since: this.world.tick,
       buckets: {
@@ -509,6 +527,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.pawns.set(id, pawn);
     this.bySlot.set(Number(slot), pawn);
     fighting.set(character.id, { room: this, pawn });
+    this.tellMode(pawn);
     // Who is here is small and rare, so every client holds every seated player's identity;
     // the bodies themselves move in the snapshot.
     for (const other of this.pawns.values()) {
@@ -632,7 +651,7 @@ export class MapRoom extends Room<{ state: MapState }> {
         if (pawn) sink?.add(pawn.character.id, { exp: 0, drops: [g.drop.payload as Drop] });
       }
       for (const pawn of this.pawns.values()) this.handOverExp(pawn);
-      this.tellFacts();
+      this.tellLive();
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {

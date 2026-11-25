@@ -22,10 +22,19 @@
  * two slots or share one, and the operation id is a primary key.
  */
 import { createHash, getRandomValues, randomUUID } from "node:crypto";
-import type { ChangeNotice, LedgerEntry, OpError, OpOutcome, OpResult, Purse } from "@guago/shared";
+import type {
+  ChangeNotice,
+  LedgerEntry,
+  OpError,
+  OpOutcome,
+  OpResult,
+  Purse,
+  QuestView,
+} from "@guago/shared";
 import { sql } from "drizzle-orm";
-import { CURRENT_COHORT } from "../auth/service.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
+import { livePage } from "../live/current.ts";
+import { loadLive, writeLive } from "../live/rows.ts";
 import {
   type AnyOp,
   type Applied,
@@ -97,11 +106,8 @@ export interface ExecutorOptions {
   };
   /** Called after a commit that changed the character's level. */
   onLevel?(characterId: string, level: number): void;
-  /**
-   * Called after every commit that applied an operation, with its change notice: a fight in
-   * progress rebuilds the character's books from it (an equip, 필기, a level from a grant).
-   */
-  onApplied?(characterId: string, name: string, change: ChangeNotice): void;
+  /** Called after every operation that applied, once it committed (the living world listens). */
+  onApplied?(characterId: string, name: AnyOp, result: ExecResult): void;
 }
 
 const cryptoRoll = () => (getRandomValues(new Uint32Array(1))[0] as number) / 2 ** 32;
@@ -337,6 +343,8 @@ interface Written {
   wallet?: Record<string, string>;
   materials?: Record<string, number>;
   codex: string[];
+  /** Notices the operation posted. */
+  posted: QuestView[];
 }
 
 async function write(
@@ -454,6 +462,7 @@ async function write(
     out.codex = rows.map((r) => r.entry_id as string);
   }
 
+  out.posted = (await writeLive(q, c, opId, applied.live)).quests;
   const ch = { ...loaded.character, ...applied.character };
   const { rows } = await q.execute(sql`
     update characters set
@@ -496,8 +505,8 @@ async function record(
 
 // The executor --------------------------------------------------------------------------------
 
-/** The live Page until server state owns it (PLAN §10): the cohort new characters join. */
-export const livePage = (): number => CURRENT_COHORT;
+/** The live Page (PLAN §10): the Page clock's, once the server provided it (live/current.ts). */
+export { livePage };
 
 /**
  * Errors worth retrying unchanged: the connection or the database server failed, not the
@@ -575,7 +584,8 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     const touched = new Set(def.currencies(request, { character, items, quests }, ctx));
     const purse = await loadPurse(q, character.id, [...touched].sort());
     const worn = want.worn ? [...items.values()].filter((r) => r.slot !== null) : [];
-    const loaded: Loaded = { character, items, worn, quests, purse: purse as Purse };
+    const live = await loadLive(q, character.id, want.live);
+    const loaded: Loaded = { character, items, worn, quests, purse: purse as Purse, live };
     await hooks.afterLoad?.(op);
 
     const step = def.apply(loaded, request, env);
@@ -602,7 +612,9 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
             ? { progression: progressionView(written.character, ctx.now, ctx.page) }
             : {}),
           ...(written.codex.length > 0 ? { codex: written.codex } : {}),
-          ...(applied.quests ? { quests: applied.quests.map(questView) } : {}),
+          ...(applied.quests || written.posted.length > 0
+            ? { quests: [...(applied.quests ?? []).map(questView), ...written.posted] }
+            : {}),
         },
       };
       if (written.character.level !== character.level) level = written.character.level;
@@ -643,13 +655,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash));
         if (out.level !== undefined) notifyLevel(characterId, out.level);
-        if (out.result.ok && options.onApplied) {
-          try {
-            options.onApplied(characterId, name, out.result.change);
-          } catch (error) {
-            console.error(`applied listener failed: ${describeError(error)}`);
-          }
-        }
+        if (out.result.ok) notifyApplied(characterId, name, out.result);
         return out.result;
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);
@@ -676,6 +682,14 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         }
         throw error;
       }
+    }
+  }
+
+  function notifyApplied(characterId: string, name: AnyOp, result: ExecResult): void {
+    try {
+      options.onApplied?.(characterId, name, result);
+    } catch (error) {
+      console.error(`operation listener failed: ${describeError(error)}`);
     }
   }
 

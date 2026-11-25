@@ -23,6 +23,8 @@ export const OPS = [
   "shop.buy",
   "claimPool",
   "quest.claim",
+  // The living world (PLAN §11).
+  "drowsy.drink",
 ] as const;
 export type OpName = (typeof OPS)[number];
 
@@ -43,6 +45,8 @@ export interface OpRequests {
   "shop.buy": { item: string; qty: number };
   claimPool: Record<string, never>;
   "quest.claim": { quest: string };
+  /** Drinks one 에너지 드링크 from the bag: 졸음 clears. */
+  "drowsy.drink": Record<string, never>;
 }
 
 export type OpMessage = { [K in OpName]: { id: string; op: K; req: OpRequests[K] } }[OpName];
@@ -91,6 +95,8 @@ export const OP_ERRORS = [
   "equip_duplicate",
   "equip_minor_slots",
   "equip_not_worn",
+  // The living world (live/ops.ts)
+  "drink_none",
 ] as const;
 export type OpError = (typeof OP_ERRORS)[number];
 
@@ -333,6 +339,7 @@ const CHECKS: { [K in OpName]: Check<OpRequests[K]> } = {
     only(r, ["quest"]) && typeof r.quest === "string" && /^[a-z0-9:-]{1,64}$/.test(r.quest)
       ? { quest: r.quest }
       : null,
+  "drowsy.drink": (r) => (only(r, []) ? {} : null),
 };
 
 export function isOpName(v: unknown): v is OpName {

@@ -313,6 +313,7 @@ export function compileKit(build: PlayerBuild): PlayerKit {
   return {
     major,
     weapons,
+    damage: 1,
     maxHp: playerHP(build.level, build.stats.vitality),
     regen: fx.regenPerSecond / T,
     critChance: Math.min(0.95, fx.critChance + passive.critChance),
