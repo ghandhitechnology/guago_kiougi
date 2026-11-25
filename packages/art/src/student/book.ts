@@ -349,9 +349,9 @@ export const textbook = withKo(
               .TTTT
               .TUuT
               .TUuT
-              OTUuT
-              OTuuT
-              OTuuT
+              @TUuT
+              @TuuT
+              @TuuT
               .TyyT
               .TTTT
             `,
@@ -361,7 +361,7 @@ export const textbook = withKo(
             grid: `
               ..TTTTT
               .TUuuuT
-              OTUyyyT
+              @TUyyyT
               .TTTTT.
             `,
           },

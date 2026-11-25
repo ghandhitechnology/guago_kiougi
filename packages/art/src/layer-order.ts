@@ -100,9 +100,19 @@ export function stackLayers(
     const pick = (edge ? choices.find((j) => isOutline(px[j] as number)) : undefined) ?? choices[0];
     if (pick !== undefined) taken.push([i, pick]);
   }
-  const colors = taken.map(([, j]) => [px[j] as number, owner[j] as number] as const);
-  taken.forEach(([i, j], k) => {
-    const [c, l] = colors[k] as readonly [number, number];
+  // A stray whose only cover is another stray takes the colour that one ends up with. Each step
+  // goes to a later layer, so the chain always ends.
+  const pickOf = new Map(taken);
+  const settle = (j: number): number => {
+    const next = stray[j] ? pickOf.get(j) : undefined;
+    return next === undefined ? j : settle(next);
+  };
+  const colors = taken.map(([, j]) => {
+    const end = settle(j);
+    return [end, px[end] as number, owner[end] as number] as const;
+  });
+  taken.forEach(([i], k) => {
+    const [j, c, l] = colors[k] as readonly [number, number, number];
     px[i] = c;
     owner[i] = l;
     source[i] = j;

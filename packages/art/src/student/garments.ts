@@ -236,3 +236,105 @@ export const cardigan = garment(
   },
   true,
 );
+
+/** 실험복: a lab coat worn open to the knee, a pen in the breast pocket. */
+export const labcoat = garment(
+  {
+    "1": "stone.deep",
+    "2": "stone.bright",
+    "3": "stone.light",
+    "4": "stone.deep",
+    "5": "stone.pale",
+    "6": "stone.light",
+    g: "stone.mid",
+  },
+  {
+    down: `
+      Gww..qqG
+      Gww..qqG
+      Gwp..vqG
+      Gwp..vqG
+      Gwp..qgG
+      Gpp..qgG
+      Gpp..ggG
+      Gpp..ggG
+      Gpp..ggG
+      GGG..GGG
+    `,
+    up: `
+      GGGGGGGG
+      GwwwwqqG
+      GwwwwqqG
+      GwpppqqG
+      GwpppqgG
+      GpppqqgG
+      GpppGqgG
+      GpppGggG
+      GpppGggG
+      GGGGGGGG
+    `,
+    side: `
+      GGGGG.
+      GwwqG.
+      GwwqG.
+      GwpqG.
+      GwpqG.
+      GppqG.
+      GppgG.
+      GppgG.
+      GppgG.
+      GGGGG.
+    `,
+  },
+  false,
+);
+
+/** 우비: a yellow raincoat, hood down, toggles done up wrong. */
+export const raincoat = garment(
+  {
+    "1": "gold.deep",
+    "2": "gold.pale",
+    "3": "gold.light",
+    "4": "gold.deep",
+    "5": "gold.light",
+    "6": "gold.mid",
+    A: "gold.light",
+    Y: "gold.pale",
+  },
+  {
+    down: `
+      DYYDDaaD
+      DYAAaaaD
+      DYAAWaaD
+      DYAAWaaD
+      DAAAaaaD
+      DAAAWaaD
+      DAAAWaaD
+      DAAAaaaD
+      DDDDDDDD
+    `,
+    up: `
+      DDDDDDDD
+      DYYYYAAD
+      DYAAAaaD
+      DDDDDDDD
+      DAAAAaaD
+      DAAAAaaD
+      DAAAAaaD
+      DAAAaaaD
+      DDDDDDDD
+    `,
+    side: `
+      DDDDD.
+      DYAAD.
+      DYAaD.
+      DYAaD.
+      DAAaD.
+      DAAaD.
+      DAAaD.
+      DAaaD.
+      DDDDD.
+    `,
+  },
+  false,
+);

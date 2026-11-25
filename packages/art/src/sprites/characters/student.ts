@@ -1,18 +1,33 @@
 import { type PartDef, rig } from "../../format.ts";
 import {
+  blanket,
+  catears,
   glasses,
   goggles,
+  gradcap,
   hairclip,
+  headband,
   headphones,
   lanyard,
   mask,
+  sash,
+  tortoise,
+  wreath,
 } from "../../student/accessories.ts";
 import { frame, shadow, skin, withKo } from "../../student/base.ts";
 import { textbook } from "../../student/book.ts";
 import { withDerived } from "../../student/derive.ts";
 import { bright, cool, goofy, sharp, shy, sleepy } from "../../student/faces.ts";
 import { anims, frames } from "../../student/frames.ts";
-import { blazer, cardigan, gym, shirt, varsity } from "../../student/garments.ts";
+import {
+  blazer,
+  cardigan,
+  gym,
+  labcoat,
+  raincoat,
+  shirt,
+  varsity,
+} from "../../student/garments.ts";
 import {
   bob,
   braids,
@@ -71,10 +86,24 @@ export default rig({
     shadow: { blob: shadow },
     body: { base: withKo(skin) },
     uniform: { blazer, shirt, gym, cardigan },
-    jacket: { varsity },
+    jacket: { varsity, labcoat, raincoat },
     face: { bright, sleepy, sharp, goofy, shy, cool },
     hair: { crop, spiky, bob, long, ponytail, curly, buzz, twintails, bun, braids, shag, undercut },
-    accessory: { glasses, goggles, headphones, hairclip, mask, lanyard },
+    accessory: {
+      glasses,
+      goggles,
+      headphones,
+      hairclip,
+      mask,
+      lanyard,
+      blanket,
+      gradcap,
+      headband,
+      catears,
+      armband: sash,
+      wreath,
+      tortoise,
+    },
     book: { textbook },
   }),
   frames,

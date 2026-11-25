@@ -6,7 +6,8 @@ import { gridRows } from "../grid.ts";
  * bends over a desk or bows to the floor with no extra art:
  *
  * - `crown`, down: the part's back view, for a head bowed toward the camera.
- * - `slump`, down: the back view's top rows and bottom edge: shoulders seen over a desk.
+ * - `slump`, down and up: the back view's top rows and bottom edge: a back bent low, seen over a
+ *   desk or from behind a bow.
  * - `prone`, side: the side view (or its `doze` pose) turned a quarter clockwise about the hips,
  *   so the body lies forward with the face to the floor, crown first: the 절.
  * - `hide`, every direction: nothing.
@@ -76,7 +77,10 @@ export function withDerived(def: PartDef): PartDef {
         slump: upRest ? { at: upRest.at, grid: shoulders(upRest.grid) } : ".",
         hide: ".",
       }),
-      up: add(up, { hide: "." }),
+      up: add(up, {
+        slump: upRest ? { at: upRest.at, grid: shoulders(upRest.grid) } : ".",
+        hide: ".",
+      }),
       side: add(side, {
         prone: sideSrc ? prone(placed(sideSrc, atOf(piece, "side"))) : ".",
         hide: ".",

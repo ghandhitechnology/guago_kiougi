@@ -772,7 +772,8 @@ const armR: Piece = {
   },
 };
 
-const armL: Piece = {
+/** The left arm, exported for parts that follow its poses, like the 층장 armband. */
+export const armL: Piece = {
   ...armLBase,
   down: {
     ...(armLBase.down as Record<string, PoseGrid>),

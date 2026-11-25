@@ -1,5 +1,6 @@
-import { part } from "../format.ts";
-import { ink, lone, withKo } from "./base.ts";
+import { type Dir, type PartDef, part, type Vec } from "../format.ts";
+import { gridRows } from "../grid.ts";
+import { armL, ink, lone, mirror, withKo } from "./base.ts";
 
 // Accessories -------------------------------------------------------------------------------
 
@@ -181,6 +182,267 @@ export const lanyard = withKo(
           G^
           GG
         `,
+      },
+    },
+  }),
+);
+
+// The 코스튬 진열장's first stock and two Page 1 rewards ---------------------------------------
+
+/** 담요: a pink fleece blanket round the shoulders, for the 자습실 after the heating goes off. */
+export const blanket = withKo(
+  part({
+    palette: gear,
+    lone,
+    under: "hair",
+    pieces: {
+      torso: {
+        at: { down: [5, 12], up: [5, 12], side: [6, 12] },
+        down: `
+          .KKKK....KKKK.
+          KBBQQK..KQQPPK
+          KBQQQK..KQQPPK
+          KBQQQK..KQQPPK
+          KBQQQK..KQQPPK
+          KBQQQK..KQQPPK
+          KBQQQK..KQPPPK
+          KQQQQK..KQPPPK
+          KQQPPK..KPPPPK
+          .KKKK....KKKK.
+        `,
+        up: `
+          .KKKKKKKKKKKK.
+          KBBBBQQQQQQPPK
+          KBQQQQQQQQQPPK
+          KBQQQQQQQQQPPK
+          KBQQQQQQQQPPPK
+          KBQQQQQQQQPPPK
+          KQQQQQQQQQPPPK
+          KQQQQQQQQPPPPK
+          KQQQQQQQPPPPPK
+          .KKKKKKKKKKKK.
+        `,
+        side: `
+          .KKKKK.
+          KBBQQPK
+          KBQQQPK
+          KBQQQPK
+          KBQQQPK
+          KQQQQPK
+          KQQQPPK
+          KQQQPPK
+          KQQPPPK
+          .KKKKK.
+        `,
+      },
+    },
+  }),
+);
+
+/** 학사모: a mortarboard, tassel to the right. Bought by first-years three years early. */
+export const gradcap = withKo(
+  part({
+    palette: gear,
+    lone,
+    pieces: {
+      head: {
+        at: { down: [3, 1], up: [3, 1], side: [2, 1] },
+        down: `
+          ........ee........
+          .....eeeIIeee.....
+          ..eeeIIIIiiiieee..
+          eeiiiiiiiiiiiiiiee
+          ..eeeiiiiiizzeeD..
+          ....eezzzzzzeeDaD.
+          ..............DaD.
+          ...............D..
+        `,
+        up: `
+          ........ee........
+          .....eeeIIeee.....
+          ..eeeIIiiiiiieee..
+          eeiiiiiiiiiiiiiiee
+          ..Deeiiiiiizzeee..
+          .DaDeezzzzzzee....
+          .DaD..............
+          ..D...............
+        `,
+        side: `
+          .....eeeeeeeeeeee..
+          ...eeIIiiiiiiiiiiee
+          ..D..eezzzzzzzzee..
+          .DaD..eezzzzzzee...
+          .DaD...............
+          ..D................
+        `,
+      },
+    },
+  }),
+);
+
+/** 해솔제 머리띠: the festival band, white with the school's red sun, knot at the back. */
+export const headband = withKo(
+  part({
+    palette: gear,
+    lone,
+    pieces: {
+      head: {
+        at: { down: [4, 4], up: [4, 4], side: [1, 4] },
+        down: `
+          GGGGGGGGGGGGGGGG
+          GwwwwwwmmwwwwwwG
+          GqqqqqqrrqqqqqqG
+        `,
+        up: `
+          GGGGGGGGGGGGGGGG
+          GwwwwwwwwwwwwwwG
+          GqqqqqqGGqqqqqqG
+          ......GwwG......
+          .....GwqqG......
+          .....GGGGG......
+        `,
+        side: `
+          ....GGGGGGGGGGGGG
+          GG..GwwwwwwwwwwwG
+          GwGGGqqqqqqqqqqqG
+          GwwG.............
+          GqqG.............
+          GGG..............
+        `,
+      },
+    },
+  }),
+);
+
+/** 엔트로피 팬클럽 고양이 귀: one black ear and one orange, as on the cat. */
+export const catears = withKo(
+  part({
+    palette: gear,
+    lone,
+    pieces: {
+      head: {
+        at: { down: [5, 1], up: [5, 1], side: [6, 1] },
+        down: `
+          ..e........T..
+          .eze......TuT.
+          .eze......TuT.
+          .eee......TTT.
+        `,
+        up: `
+          ..T........e..
+          .TuT......eze.
+          .TuT......eze.
+          .TTT......eee.
+        `,
+        side: `
+          .T..e...
+          TuTeze..
+          TuTeze..
+          TTTeee..
+        `,
+      },
+    },
+  }),
+);
+
+/** 층장 완장: a red band round the left arm, worn for the week the floor elected you. */
+function armband(): PartDef {
+  const dirs = ["down", "up"] as const;
+  const band = (grid: string): string => {
+    const rows = gridRows(grid).map((r) => [...r]);
+    const fill = rows
+      .map((r, y) => (r.some((c) => c === "2" || c === "3") ? y : -1))
+      .filter((y) => y >= 0);
+    const pick = fill[Math.floor((fill.length - 1) / 2)] ?? -1;
+    const paint = (c: string, y: number): string => {
+      if (y === pick) return c === "1" ? "R" : c === "2" ? "m" : c === "3" ? "r" : ".";
+      if (y === pick + 1) return c === "1" ? "D" : c === "2" ? "A" : c === "3" ? "a" : ".";
+      return ".";
+    };
+    return rows.map((r, y) => r.map((c) => paint(c, y)).join("")).join("\n");
+  };
+  const arm = armL;
+  const poses = (dir: (typeof dirs)[number]) => {
+    const src = arm[dir];
+    const map = typeof src === "string" ? { rest: src } : (src ?? {});
+    return Object.fromEntries(
+      Object.entries(map).map(([pose, g]) => {
+        if (typeof g === "string") return [pose, g === "." ? "." : band(g)];
+        return [pose, { at: g.at, grid: band(g.grid) }];
+      }),
+    );
+  };
+  return withKo(
+    part({
+      palette: gear,
+      lone: "RmrDAa",
+      under: "hair",
+      pieces: {
+        armL: {
+          at: (arm.at as Partial<Record<Dir, Vec>>) ?? [0, 0],
+          down: { ...poses("down"), fold: ".", floor: "." },
+          up: poses("up"),
+          side: null,
+        },
+      },
+    }),
+  );
+}
+export const sash = armband();
+
+/** 올리브 관: Page 1's 탐구 상점 prize, cut from the grove behind the Lyceum. */
+export const wreath = withKo(
+  part({
+    palette: gear,
+    lone,
+    pieces: {
+      head: {
+        at: { down: [4, 3], up: [4, 3], side: [3, 3] },
+        down: `
+          ..FFFF....FFFF..
+          .FZZooF..FooooF.
+          FZZooF....FoooFF
+          FooF........FooF
+          .FF..........FF.
+        `,
+        up: `
+          ..FFFFFFFFFFFF..
+          .FZZooZZooZZooF.
+          FZZooZZooZZooooF
+          FooF........FooF
+          .FF..........FF.
+        `,
+        side: `
+          ..FFFFFFFFF....
+          .FZZooZZoooF...
+          FZZooZZoooFF...
+          FooF.....FooF..
+          .FF.......FF...
+        `,
+      },
+    },
+  }),
+);
+
+const tortoiseGrid = `
+  ...WWWW....
+  ..WUUuuW.FF
+  .WUuuuttWo*
+  WWWWWWWWWoF
+  .FF...FF.F.
+`;
+
+/** 제논의 거북이: the tortoise nobody could catch, now riding on your head. Zeno's prize. */
+export const tortoise = withKo(
+  part({
+    palette: { ...gear, o: "olive.mid", Z: "olive.light", F: "olive.deep", f: "olive.dark" },
+    lone,
+    pieces: {
+      head: {
+        at: { down: [7, 1], up: [6, 1], side: [6, 1] },
+        down: tortoiseGrid,
+        up: mirror(tortoiseGrid),
+        side: tortoiseGrid,
       },
     },
   }),
