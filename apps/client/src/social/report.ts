@@ -90,7 +90,10 @@ export function openReport(
         sending = false;
         if (!r.ok) {
           sound("error");
-          toast(refusal(r.code));
+          {
+            const said = refusal(r.code);
+            if (said) toast(said);
+          }
           return;
         }
         const said = line("social.report.received");

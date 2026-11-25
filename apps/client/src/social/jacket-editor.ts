@@ -339,7 +339,10 @@ export function openJacketEditor(
           // A lost answer is retried under the same id; any real answer starts a fresh attempt.
           if (r.code !== "offline" && r.code !== "timeout") op = newOpId();
           sound("error");
-          toast(refusal(r.code));
+          {
+            const said = refusal(r.code);
+            if (said) toast(said);
+          }
           if (r.code === "name_taken" || r.code === "name_invalid" || r.code === "name_banned") {
             field?.reject();
           }

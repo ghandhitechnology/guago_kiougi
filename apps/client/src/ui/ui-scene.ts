@@ -11,10 +11,12 @@ import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { type SocialUi, startSocialUi } from "../social/social-ui.ts";
 import { session } from "../world/session.ts";
+import { AnnounceBanner } from "./announce.ts";
 import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
 import { setIdleKeys } from "./focus.ts";
 import { setToaster, Toaster } from "./overlay.ts";
+import { onScreen } from "./screen.ts";
 import { setWorldUiHost, worldUi } from "./world-ui.ts";
 
 /**
@@ -35,6 +37,7 @@ export class UiScene extends Phaser.Scene {
     | undefined;
   private dialogue!: DialogueBox;
   private banner!: PlaceBanner;
+  private announce!: AnnounceBanner;
 
   constructor() {
     super(UI_SCENE);
@@ -47,6 +50,7 @@ export class UiScene extends Phaser.Scene {
     onSignOut(() => void this.signOut());
     this.dialogue = new DialogueBox(this);
     this.banner = new PlaceBanner(this);
+    this.announce = new AnnounceBanner(this);
     setWorldUiHost({
       say: (lines) => this.dialogue.say(lines),
       placeBanner: (name) => this.banner.show(name),
@@ -69,7 +73,6 @@ export class UiScene extends Phaser.Scene {
     const link = session.link;
     const touch = touchScreen();
     const chat = link ? new ChatPanel(this, link, { top: touch, rows: touch ? 5 : 7 }) : undefined;
-    chat?.setFoldedButton(!touch);
     let social: SocialUi | undefined;
     const notebook = new Notebook(this, () => {
       hudView.setVisible(true);
@@ -93,6 +96,7 @@ export class UiScene extends Phaser.Scene {
       touch,
     );
     if (chat && touch) chat.onShownChange = (shown) => hudView.setChatOpen(shown);
+    chat?.log.onAnnounce((line) => this.announce.show(line));
     social = link
       ? startSocialUi(this, link, { chat, hud: hudView, toTitle: () => void this.signOut() })
       : undefined;
@@ -108,13 +112,18 @@ export class UiScene extends Phaser.Scene {
       move?.setEnabled(!talking);
       aim?.setEnabled(!talking && fighting);
     };
-    if (move && aim) {
-      sticks.push(move, aim);
-      unfight = watchFight((live) => {
-        fighting = live;
-        enableSticks();
-      });
-    }
+    if (move && aim) sticks.push(move, aim);
+    unfight = watchFight((live) => {
+      fighting = live;
+      enableSticks();
+      chat?.setFight(live);
+    });
+    // A rotated phone or a resized window: everything finds the screen's edges again.
+    const unscreen = onScreen(() => {
+      hudView.layout();
+      chat?.relayout();
+      for (const s of sticks) s.layout();
+    });
     setIdleKeys((e) => {
       if (e.key === "Enter" && chat) {
         chat.open();
@@ -154,6 +163,7 @@ export class UiScene extends Phaser.Scene {
       stop: () => {
         unplace();
         unfight();
+        unscreen();
         stopFeed();
       },
     };

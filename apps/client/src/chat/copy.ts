@@ -1,51 +1,40 @@
-import { narrative } from "@guago/content";
 import type { SystemLine } from "@guago/shared";
-import { t, tMaybe } from "../i18n/index.ts";
+import { clock, refusal, type Spoken, spoken } from "../copy/lines.ts";
 import type { SendResult } from "../world-link.ts";
 
 /**
- * What chat says back. Refusals come from the dorm supervisor's ledger voice, in 합니다체 like
- * every other line she files; system lines are worded from the narrative's system messages.
+ * What chat says back, in the narrative's words: each refusal in its speaker's voice, and system
+ * lines and server announcements by their narrative id.
  */
 
-/** `HH:MM`, for when a mute ends. */
-function clock(ms: number): string {
-  const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+/**
+ * A refused message as one line. The client's own `offline` and `timeout` have no line in the
+ * narrative yet; they answer with the shake and the error sound alone.
+ */
+export function refusalText(r: Extract<SendResult, { ok: false }>): string | undefined {
+  if (r.code === "offline" || r.code === "timeout") return undefined;
+  return refusal("world", r.code, {
+    ...(r.until === undefined ? {} : { until: r.until }),
+    ...(r.need === undefined ? {} : { need: r.need }),
+  })?.text;
 }
 
-/** A refused message, as one short line. */
-export function refusalText(r: Extract<SendResult, { ok: false }>): string {
-  switch (r.code) {
-    case "muted":
-      return r.until
-        ? t("chat.refused.muted_until", { time: clock(r.until) })
-        : t("chat.refused.muted");
-    case "rate_limited": {
-      const s = Math.max(1, Math.ceil((r.retryMs ?? 1000) / 1000));
-      return t("chat.refused.rate_limited", { s });
-    }
-    case "level":
-      return t("chat.refused.level", { need: r.need ?? 5 });
-    default:
-      // Chat answers with a handful of codes; anything else gets the plain line.
-      return tMaybe(`chat.refused.${r.code}`) ?? t("chat.refused.other");
+/** A system line in words: an operator's own text, or the narrative line its key names. */
+export function systemLine(line: SystemLine): Spoken | undefined {
+  if (line.text) {
+    return {
+      id: line.key,
+      text: line.text,
+      voice: "office",
+      channel: "system",
+      announcement: false,
+    };
   }
-}
-
-const SYSTEM = new Map(narrative.NARRATIVE.system.map((m) => [m.id, m]));
-
-/** A system line in words, or undefined for a key the client has no words for yet. */
-export function systemText(line: SystemLine): string | undefined {
-  if (line.text) return line.text;
-  if (line.key === "muted" && typeof line.params?.until === "number") {
-    return t("chat.system.muted", { time: clock(line.params.until) });
-  }
-  const msg = SYSTEM.get(line.key);
-  if (!msg) return undefined;
-  const text = narrative.NARRATIVE.ko[msg.text];
-  // An end time arrives as server ms (`until`); lines name it as {time}.
   const params: Record<string, string | number> = { ...(line.params ?? {}) };
-  if (typeof params.until === "number") params.time = clock(params.until);
-  return text ? narrative.fill(text, params) : undefined;
+  // Times arrive as server ms; lines name them as HH:MM.
+  for (const k of ["until", "time"]) {
+    const v = params[k];
+    if (typeof v === "number" && v > 1e11) params.time = clock(v);
+  }
+  return spoken(line.key, params);
 }

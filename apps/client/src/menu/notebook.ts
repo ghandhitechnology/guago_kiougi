@@ -2,6 +2,7 @@ import type * as Phaser from "phaser";
 import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { turnPage } from "../ui/motion.ts";
 import { Panel } from "../ui/panel.ts";
+import { screen } from "../ui/screen.ts";
 import { TabRow } from "../ui/tabs.ts";
 import type { Ctx } from "../ui/widget.ts";
 
@@ -79,8 +80,8 @@ export class Notebook {
     const titled = tabs.length === 1;
     const panel = new Panel(
       ctx,
-      Math.round((480 - PW) / 2),
-      Math.round((270 - PH) / 2) + 6,
+      Math.round((screen.w - PW) / 2),
+      Math.round((screen.h - PH) / 2) + 6,
       PW,
       PH,
       {

@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { screen } from "../ui/screen.ts";
 import { stick } from "./move.ts";
 
 /** How far the knob travels from the base's centre, in game pixels. */
@@ -23,6 +24,7 @@ export class Joystick {
   private readonly root: Phaser.GameObjects.Container;
   private readonly knob: Phaser.GameObjects.Image;
   private readonly zone: Phaser.GameObjects.Zone;
+  private readonly area: () => Area;
   private readonly onChange: (v: { x: number; y: number } | undefined) => void;
   private pointerId: number | undefined;
   private origin = { x: 0, y: 0 };
@@ -30,7 +32,7 @@ export class Joystick {
   /** `onChange` gets the push past the deadzone, 0 to 1 in length, and `undefined` on release. */
   constructor(
     scene: Phaser.Scene,
-    area: Area,
+    area: () => Area,
     onChange: (v: { x: number; y: number } | undefined) => void,
   ) {
     this.scene = scene;
@@ -41,12 +43,20 @@ export class Joystick {
     const base = scene.add.image(0, 0, "ui", "stick-base/idle").setOrigin(0.5);
     this.knob = scene.add.image(0, 0, "ui", "stick-knob/idle").setOrigin(0.5);
     this.root.add([base, this.knob]);
-    this.zone = scene.add.zone(area.x, area.y, area.w, area.h).setOrigin(0).setDepth(0);
+    this.area = area;
+    const a = area();
+    this.zone = scene.add.zone(a.x, a.y, a.w, a.h).setOrigin(0).setDepth(0);
     this.zone.setInteractive();
     this.zone.on("pointerdown", (p: Phaser.Input.Pointer) => this.start(p));
     scene.input.on(Phaser.Input.Events.POINTER_MOVE, this.move, this);
     scene.input.on(Phaser.Input.Events.POINTER_UP, this.end, this);
     scene.input.on(Phaser.Input.Events.POINTER_UP_OUTSIDE, this.end, this);
+  }
+
+  /** Fits the touch area to the screen again, after it changed size. */
+  layout(): void {
+    const a = this.area();
+    this.zone.setPosition(a.x, a.y).setSize(a.w, a.h);
   }
 
   /** Off, the area takes no touches and a held stick lets go. */
@@ -69,8 +79,8 @@ export class Joystick {
     this.pointerId = p.id;
     const half = BASE / 2;
     this.origin = {
-      x: Phaser.Math.Clamp(Math.round(p.x), half + 2, 480 - half - 2),
-      y: Phaser.Math.Clamp(Math.round(p.y), half + 2, 270 - half - 2),
+      x: Phaser.Math.Clamp(Math.round(p.x), half + 2, screen.w - half - 2),
+      y: Phaser.Math.Clamp(Math.round(p.y), half + 2, screen.h - half - 2),
     };
     this.root.setPosition(this.origin.x, this.origin.y).setVisible(true);
     this.scene.tweens.killTweensOf(this.root);
@@ -120,7 +130,8 @@ export class Joystick {
 
 /** The left thumb's stick: it writes the same move the keys do. */
 export function moveStick(scene: Phaser.Scene): Joystick {
-  return new Joystick(scene, { x: 0, y: 40, w: 230, h: 230 }, (v) => {
+  const area = () => ({ x: 0, y: 40, w: Math.round(screen.w * 0.48), h: screen.h - 40 });
+  return new Joystick(scene, area, (v) => {
     stick.active = v !== undefined;
     stick.x = v?.x ?? 0;
     stick.y = v?.y ?? 0;
@@ -135,9 +146,11 @@ export function aimStick(
   scene: Phaser.Scene,
   aim: (dir: { x: number; y: number } | undefined) => void,
 ): Joystick {
-  return new Joystick(scene, { x: 250, y: 90, w: 230, h: 180 }, (v) =>
-    aim(v && (v.x !== 0 || v.y !== 0) ? v : undefined),
-  );
+  const area = () => {
+    const x = Math.round(screen.w * 0.52);
+    return { x, y: 90, w: screen.w - x, h: screen.h - 90 };
+  };
+  return new Joystick(scene, area, (v) => aim(v && (v.x !== 0 || v.y !== 0) ? v : undefined));
 }
 
 /** Whether this screen is driven by thumbs. */

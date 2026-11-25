@@ -1,5 +1,6 @@
 import { MAP_SOURCES, narrative } from "@guago/content";
-import { t, tMaybe } from "../i18n/index.ts";
+import { refusal as lineRefusal, spoken } from "../copy/lines.ts";
+import { t } from "../i18n/index.ts";
 
 /**
  * Words for the social screens. In-character lines (toasts, refusals, empty boards) come from the
@@ -8,7 +9,6 @@ import { t, tMaybe } from "../i18n/index.ts";
  */
 
 const KO = narrative.NARRATIVE.ko;
-const SYSTEM = new Map(narrative.NARRATIVE.system.map((m) => [m.id, m]));
 
 type Params = Readonly<Record<string, string | number>>;
 
@@ -22,25 +22,25 @@ export function term(kind: string, id: string): string {
 
 /** A narrative line by its system message id (or text key), filled; undefined until written. */
 export function line(id: string, params: Params = {}): string | undefined {
-  const msg = SYSTEM.get(id);
-  const text = msg ? KO[msg.text] : KO[id];
-  return text ? narrative.fill(text, params) : undefined;
+  const said = spoken(id, { ...params });
+  if (said) return said.text;
+  const raw = KO[id];
+  return raw ? narrative.fill(raw, params) : undefined;
 }
 
 /**
  * Why a request was not carried out, in the voice the narrative gives the code: the world's
- * refusals (`refusal.world.<code>`), then trading's (`refusal.trade.<code>`), then chat's own.
+ * refusals, then trading's, then item operations'. Undefined for a code with no line (the
+ * client's own `offline` and `timeout`): the shake and the error sound say it alone.
  */
-export function refusal(code: string, extra: { need?: number; until?: number } = {}): string {
-  const params: Record<string, string | number> = {};
-  if (extra.need !== undefined) params.level = extra.need;
-  if (extra.until !== undefined) params.time = clock(extra.until);
+export function refusal(
+  code: string,
+  extra: { need?: number; until?: number } = {},
+): string | undefined {
   return (
-    line(`refusal.world.${code}`, params) ??
-    line(`refusal.trade.${code}`, params) ??
-    line(`refusal.op.${code}`, params) ??
-    tMaybe(`chat.refused.${code}`) ??
-    t("chat.refused.other")
+    lineRefusal("world", code, extra)?.text ??
+    spoken(`refusal.trade.${code}`)?.text ??
+    lineRefusal("op", code, extra)?.text
   );
 }
 

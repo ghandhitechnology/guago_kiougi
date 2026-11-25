@@ -1,4 +1,4 @@
-import { Facing, INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
+import { Facing } from "@guago/shared";
 import type * as Phaser from "phaser";
 
 /**
@@ -77,10 +77,17 @@ export class CameraRig {
   private apply(x: number, y: number): void {
     const cx = Math.round(x) + Math.round(this.ox + this.leanX);
     const cy = Math.round(y) + Math.round(this.oy + this.leanY);
+    // The view's own size: as wide as the device shows (ui/screen.ts), 270 tall.
+    const W = this.cam.width;
+    const H = this.cam.height;
     const sx =
-      this.mapW <= W ? Math.round((this.mapW - W) / 2) : clamp(cx - W / 2, 0, this.mapW - W);
+      this.mapW <= W
+        ? Math.round((this.mapW - W) / 2)
+        : clamp(cx - Math.round(W / 2), 0, this.mapW - W);
     const sy =
-      this.mapH <= H ? Math.round((this.mapH - H) / 2) : clamp(cy - H / 2, 0, this.mapH - H);
+      this.mapH <= H
+        ? Math.round((this.mapH - H) / 2)
+        : clamp(cy - Math.round(H / 2), 0, this.mapH - H);
     this.cam.setScroll(sx, sy);
   }
 }

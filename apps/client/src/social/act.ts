@@ -28,7 +28,10 @@ export async function ask<K extends SocialType>(
   const r = await link.request(type, req);
   if (!r.ok) {
     sound("error");
-    toast(refusal(r.code, r.need === undefined ? {} : { need: r.need }));
+    {
+      const said = refusal(r.code, r.need === undefined ? {} : { need: r.need });
+      if (said) toast(said);
+    }
     return r;
   }
   sound("confirm");

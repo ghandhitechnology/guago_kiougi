@@ -213,7 +213,10 @@ export class Board {
     });
     if (this.closing || cat !== this.cat) return;
     if (!r.ok) {
-      toast(refusal(r.code));
+      {
+        const said = refusal(r.code);
+        if (said) toast(said);
+      }
       return;
     }
     if (before === undefined) {
@@ -411,7 +414,10 @@ export class Board {
           const r = await this.link.request("board.post", { cat, text });
           if (!r.ok) {
             sound("error");
-            toast(refusal(r.code));
+            {
+              const said = refusal(r.code);
+              if (said) toast(said);
+            }
             field.reject();
             return;
           }

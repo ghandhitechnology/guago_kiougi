@@ -7,6 +7,7 @@ import { t } from "../i18n/index.ts";
 import { titleMusic } from "../sound/audio.ts";
 import { fade, slide, stamp } from "../ui/motion.ts";
 import { toast } from "../ui/overlay.ts";
+import { onScreen, screen } from "../ui/screen.ts";
 import { NightBackdrop } from "./backdrop.ts";
 import { CreatorScreen } from "./creator.ts";
 import {
@@ -48,7 +49,18 @@ export class FrontScene extends Phaser.Scene implements Flow {
   async create(): Promise<void> {
     this.meta = artMeta(this);
     titleMusic();
+    // Development checks wait on the title from the console; never in a production build.
+    if (import.meta.env.DEV) (window as unknown as { __guagoFront?: unknown }).__guagoFront = this;
     this.backdrop = new NightBackdrop(this, this.meta);
+    // Composed on 480 × 270; on a wider screen the camera keeps it in the middle.
+    const centre = () =>
+      this.cameras.main.setScroll(
+        -Math.floor((screen.w - W) / 2),
+        -Math.floor((screen.h - 270) / 2),
+      );
+    centre();
+    const unscreen = onScreen(centre);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unscreen);
     this.logo = this.add.image(0, 0, "ui", "logo/idle").setOrigin(0);
     this.logoRest = { x: Math.round((W - this.logo.width) / 2) + 24, y: 40 };
     this.logo.setPosition(this.logoRest.x, this.logoRest.y).setVisible(false);
@@ -112,6 +124,15 @@ export class FrontScene extends Phaser.Scene implements Flow {
     });
     this.showLogo("form");
     this.go("code");
+  }
+
+  get returning(): boolean {
+    return this.session?.character !== null && this.session?.character !== undefined;
+  }
+
+  resume(): void {
+    const s = this.session;
+    if (s?.character) this.enterWorld({ account: s.account, character: s.character });
   }
 
   signedIn(session: Session): void {
