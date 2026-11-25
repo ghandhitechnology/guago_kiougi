@@ -6,7 +6,7 @@
  * URL: `fight` map id, `cls` math|physics|chemistry|biology|earth (each class plays its own
  * account), `as` stage|pre|evo (a fresh student, one a step from evolving, one wearing evolved
  * books), `mode` 0 to 3, `tier` low|medium|high, `bots` fighting bots the dev server starts
- * around the student. V evolves the first worn book that can, through the real operation.
+ * around the student (`botmode=0`: in 완전 자동, hunting the field on their own). V evolves the first worn book that can, through the real operation.
  */
 import type { ArtMetadata } from "@guago/art";
 import { audio } from "@guago/audio";
@@ -101,8 +101,9 @@ export async function seatTestCharacter(meta: ArtMetadata): Promise<void> {
   }
   const bots = Number(params.get("bots") ?? 0);
   const map = params.get("fight") ?? "";
+  const botMode = params.get("botmode") === "0" ? "0" : "1";
   await fetch(
-    `/__fight/bots?n=${bots}&follow=${encodeURIComponent(name)}&map=${encodeURIComponent(map)}`,
+    `/__fight/bots?n=${bots}&follow=${encodeURIComponent(name)}&map=${encodeURIComponent(map)}&mode=${botMode}`,
   ).catch(() => undefined);
   const t = params.get("tier") as Tier | null;
   if (t && TIERS.includes(t)) setQualityTier(t, false);

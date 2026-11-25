@@ -33,6 +33,7 @@ export function fightBots(gameServer: string): Plugin {
         const n = Math.max(0, Math.min(120, Number(q.get("n")) || 0));
         const follow = q.get("follow") ?? "";
         const map = q.get("map") ?? "";
+        const mode = q.get("mode") === "0" ? "0" : "1";
         stop();
         if (n > 0) {
           mkdirSync(path.join(root, ".local"), { recursive: true });
@@ -42,7 +43,18 @@ export function fightBots(gameServer: string): Plugin {
             process.execPath,
             [
               "tools/loadtest/src/crowd.ts",
-              ...["--bots", String(n), "--url", ws, "--follow", follow, "--map", map],
+              ...[
+                "--bots",
+                String(n),
+                "--url",
+                ws,
+                "--follow",
+                follow,
+                "--map",
+                map,
+                "--mode",
+                mode,
+              ],
             ],
             { cwd: root, stdio: ["ignore", log, log] },
           );

@@ -35,7 +35,8 @@ import { signIn } from "./account.ts";
  *   node tools/loadtest/src/crowd.ts --bots 40 --url ws://localhost:2573 --follow 무대수학 --map p1-colonnade
  *
  * Bots enter through `POST /api/enter` like the browser; `--map` seats them on that map when the
- * server runs with ALLOW_MAP_OPTION=1.
+ * server runs with ALLOW_MAP_OPTION=1. `--mode 0` puts them in 완전 자동, where the server walks
+ * them to the monsters: a field that keeps fighting with nobody to follow.
  */
 
 const { values } = parseArgs({
@@ -46,6 +47,7 @@ const { values } = parseArgs({
     accounts: { type: "string", default: "cw" },
     revive: { type: "string", default: "1" },
     map: { type: "string", default: "" },
+    mode: { type: "string", default: "1" },
   },
 });
 
@@ -75,8 +77,15 @@ class CrowdBot {
   private readonly angle: number;
   readonly room: Room<unknown, MapState>;
 
-  constructor(room: Room<unknown, MapState>, index: number) {
+  constructor(room: Room<unknown, MapState>, index: number, mapId: string) {
     this.room = room;
+    // Sized before the first snapshot: every message is a delta against the one before.
+    this.map = mapById(mapId);
+    if (this.map) {
+      const cell = SNAP_CELL_TILES * TILE_SIZE;
+      this.reader.cols = Math.ceil((this.map.collision.w * TILE_SIZE) / cell);
+      this.reader.rows = Math.ceil((this.map.collision.h * TILE_SIZE) / cell);
+    }
     this.ring = 50 + ((index * 37) % 100);
     this.side = index % 2 === 0 ? 1 : -1;
     this.angle = index * 2.399963;
@@ -85,18 +94,10 @@ class CrowdBot {
     const sink = { ...NULL_SINK, self: (me: WireSelf) => this.onSelf(me) };
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => this.reader.read(bytes, sink));
     room.onStateChange((state) => this.onPatch(state));
-    room.send(MODE_MESSAGE, [1]);
+    room.send(MODE_MESSAGE, [Number(values.mode)]);
   }
 
   private onPatch(state: MapState): void {
-    if (this.reader.cols === 1 && state.map) {
-      this.map = mapById(state.map);
-      if (this.map) {
-        const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((this.map.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((this.map.collision.h * TILE_SIZE) / cell);
-      }
-    }
     this.follow = -1;
     for (const [slot, p] of state.players) {
       if (p.sid === this.room.sessionId) {
@@ -203,7 +204,8 @@ class CrowdBot {
   }
 
   tick(n: number, now: number): void {
-    if (!this.predictor || this.down) return;
+    // In 완전 자동 the server walks the bot.
+    if (!this.predictor || this.down || values.mode === "0") return;
     if (n % 4 === 0) this.think(n, now);
     const input = this.predictor.tick(this.dir[0], this.dir[1]);
     if (input) this.room.send(INPUT_MESSAGE, encodeInput(input));
@@ -220,10 +222,10 @@ for (let i = 0; i < BOTS; i++) {
     body: JSON.stringify(values.map ? { map: values.map } : {}),
   });
   if (!res.ok) throw new Error(`enter answered ${res.status}`);
-  const { seat } = (await res.json()) as Seating;
+  const seating = (await res.json()) as Seating;
   const client = new Client(values.url, { headers: { cookie } });
-  const room = await client.consumeSeatReservation(seat, MapState);
-  bots.push(new CrowdBot(room, i));
+  const room = await client.consumeSeatReservation(seating.seat, MapState);
+  bots.push(new CrowdBot(room, i, seating.map));
 }
 
 let n = 0;
