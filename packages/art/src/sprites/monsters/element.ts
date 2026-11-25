@@ -2,8 +2,9 @@ import { sprite, variant } from "../../format.ts";
 
 /**
  * 4원소 정령: Aristotle's elements, each sure it is the one true substance. Haughty: the eyes look
- * down the nose. Between bobs each shows off: the flame flares, the water drips, the air curls,
- * the earth drops a pebble. One body; the crown and the tail give each its own silhouette.
+ * down the nose. Between bobs each shows off: the flame flickers, the water drips, the air
+ * swings its tail, the earth drops a pebble. Each has its own silhouette: a flame of three
+ * tongues, a droplet, a funnel of wind, a lopsided boulder with moss on top.
  */
 const fire = sprite({
   name: "element-fire",
@@ -26,19 +27,21 @@ const fire = sprite({
   lone: "*~",
   parts: {
     body: {
-      at: [3, 5],
+      at: [0, 6],
       grid: `
-        ..oooooo..
-        .oPPrrrro.
-        oPPRrrrrdo
-        oRRrrrrrdo
-        orrrrrrddo
-        .orrrrddo.
-        ..oooooo..
+        .oRooRrrrooRro.
+        .oRrRrraArrRro.
+        oRrrrraAAarrrro
+        oRrraaYYYAarrdo
+        oRrrAYYYYYAardo
+        oRrrAYYYYYAardo
+        .oRraAYYYAaardo
+        ..oddaaaaadddo.
+        ...oooooooooo..
       `,
     },
     face: {
-      at: [5, 6],
+      at: [4, 9],
       grid: `
         **..**
         .*..*.
@@ -47,7 +50,7 @@ const fire = sprite({
       `,
     },
     blink: {
-      at: [5, 6],
+      at: [4, 9],
       grid: `
         ......
         **..**
@@ -55,40 +58,42 @@ const fire = sprite({
         ..**..
       `,
     },
+    // Three tongues that trade heights on every flicker.
     crown: {
-      at: [3, 1],
+      at: [0, 1],
       grid: `
-        ....o...o.
-        ...oAo.oAo
-        .o.oAAooAo
-        oaooAAoAAo
-        .oaaaaaaao
+        ........o......
+        .......oRo.....
+        ......oRRo..o..
+        ..o...oRro.oRo.
+        .oRo.oRrro.oRo.
       `,
     },
     crown2: {
-      at: [3, 1],
+      at: [0, 1],
       grid: `
-        ...oo..oo.
-        ..oAAo.oAo
-        oooAAAoAAo
-        oaoAAAoAAo
-        .oaaaaaaao
+        .......o.......
+        ......oRo......
+        ..o...oRRo.....
+        .oRo..oRro..o..
+        .oRo.oRrro.oRo.
       `,
     },
+    // Embers drifting off the sides.
     skirt: {
-      at: [4, 11],
+      at: [0, 11],
       grid: `
-        .oddddo.
-        ..oddo..
-        ...oo...
+        ~..............
+        ...............
+        .............~.
       `,
     },
     skirt2: {
-      at: [4, 11],
+      at: [0, 11],
       grid: `
-        .oddddo.
-        ..oddo..
-        ..ooo...
+        ...............
+        ~..............
+        ..............~
       `,
     },
     puff: {
@@ -172,12 +177,42 @@ const fire = sprite({
   },
 });
 
-/** Water: a smooth droplet peak, a rippled hem, and the flourish is one drip falling. */
+/** Water: a smooth droplet peak over a round body, a rippled hem, one drip falling. */
 const water = variant(fire, {
   name: "element-water",
   recolor: { "red.*": "sea.*", "gold.*": "navy.*" },
   palette: { "~": "sea.pale" },
   parts: {
+    body: {
+      at: [3, 5],
+      grid: `
+        ..oooooo..
+        .oPPrrrro.
+        oPPRrrrrdo
+        oRRrrrrrdo
+        orrrrrrddo
+        .orrrrddo.
+        ..oooooo..
+      `,
+    },
+    face: {
+      at: [5, 6],
+      grid: `
+        **..**
+        .*..*.
+        ......
+        ..**..
+      `,
+    },
+    blink: {
+      at: [5, 6],
+      grid: `
+        ......
+        **..**
+        ......
+        ..**..
+      `,
+    },
     crown: {
       at: [3, 1],
       grid: `
@@ -217,91 +252,161 @@ const water = variant(fire, {
   },
 });
 
-/** Air: a curl that hooks to one side and two thin trailing wisps. */
+/** Air: a funnel of wind, widest at the top, its tail swinging a beat behind the bob. */
 const air = variant(fire, {
   name: "element-air",
   recolor: { "red.*": "plum.*", "gold.*": "stone.*" },
   palette: { "~": "stone.bright" },
   parts: {
-    crown: {
-      at: [3, 1],
+    body: {
+      at: [0, 1],
       grid: `
-        ...ooooo..
-        ..oPPPPPo.
-        ..oPoooPo.
-        ...o..oPo.
-        .ooooooPo.
+        ..ooooooooooo..
+        .oYYYYYYYYYYYo.
+        oYYYYYYYYYYYAAo
+        oYYYYYYYYYYYAAo
+        oYYYYYYYYYYYAAo
+        .oRRRRRRRRRRRo.
+        ..oYYYYYYYYAAo.
+        ...oRRRRRRRRo..
+        ....oYYYYYYo...
+        .....oRRRRo....
+      `,
+    },
+    face: {
+      at: [5, 3],
+      grid: `
+        **..**
+        .*..*.
+        ......
+        ..**..
+      `,
+    },
+    blink: {
+      at: [5, 3],
+      grid: `
+        ......
+        **..**
+        ......
+        ..**..
+      `,
+    },
+    // Gusts curling off the rim.
+    crown: {
+      at: [0, 0],
+      grid: `
+        ~..............
+        ...............
+        ...............
+        ..............~
       `,
     },
     crown2: {
-      at: [3, 1],
+      at: [0, 0],
       grid: `
-        ..oooooo..
-        .oPPPPPPo.
-        .oPoooooPo
-        ..o...oPPo
-        .ooooooPPo
+        ...............
+        ~..............
+        ..............~
+        ...............
       `,
     },
     skirt: {
-      at: [3, 11],
+      at: [5, 11],
       grid: `
-        .oddddddo.
-        ..oddoddo.
-        ...oo.oo..
+        oYYYYo..
+        .oRRRo..
+        ..oYYo..
+        ...ooo..
+        ....o...
       `,
     },
     skirt2: {
-      at: [3, 11],
+      at: [5, 11],
       grid: `
-        .oddddddo.
-        .oddoddo..
-        ..oo.oo...
+        .oYYYYo.
+        .oRRRo..
+        .oYYo...
+        .ooo....
+        o.......
       `,
     },
   },
 });
 
-/** Earth: angular stone points on top, a flat heavy base, a pebble that drops off. */
+/** Earth: a lopsided boulder with a moss cap, and a pebble that keeps rolling off its slope. */
 const earth = variant(fire, {
   name: "element-earth",
   recolor: { "red.*": "clay.*", "gold.*": "grass.*" },
   palette: { "~": "clay.pale" },
   parts: {
+    body: {
+      at: [0, 2],
+      grid: `
+        .....ooo.......
+        ....oRRRoo.....
+        ...oRRRRrro....
+        ..oRRRRrrrroo..
+        ..oRRRrrrrrrdo.
+        .oRRRrrrrrrrdo.
+        .oRRrrrrrrrrddo
+        oRRrrrrrrrrrddo
+        oRrrrrrrrrrdddo
+        oRrrrrrrrrrdddo
+        orrrrrrrrrddddo
+        oddddrrrrdddddo
+        ooooooooooooooo
+      `,
+    },
+    face: {
+      at: [3, 8],
+      grid: `
+        **..**
+        .*..*.
+        ......
+        ..**..
+      `,
+    },
+    blink: {
+      at: [3, 8],
+      grid: `
+        ......
+        **..**
+        ......
+        ..**..
+      `,
+    },
     crown: {
       at: [3, 1],
       grid: `
-        ..o....o..
-        .oAo..oAo.
-        .oAaooaAo.
-        oaaaaaaaao
-        .oaaaaaaao
+        ..DDD..
+        .DAAaD.
+        DAaaaaD
+        DgggggD
       `,
     },
     crown2: {
       at: [3, 1],
       grid: `
-        .o....oo..
-        oAo..oAAo.
-        oAaooaaAo.
-        oaaaaaaaao
-        .oaaaaaaao
+        ..DDD..
+        .DaAAD.
+        DaaaAAD
+        DgggggD
       `,
     },
     skirt: {
-      at: [2, 11],
+      at: [11, 2],
       grid: `
-        .oooooooooo.
-        oddddddddddo
-        oooooooooooo
+        .oo.
+        oRRo
+        .oo.
       `,
     },
     skirt2: {
-      at: [2, 11],
+      at: [12, 1],
       grid: `
-        .oooooooooo.
-        oddddddddddo
-        oooooooooooo
+        .oo.
+        oRRo
+        .oo.
       `,
     },
   },

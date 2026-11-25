@@ -117,7 +117,7 @@ export default sprite({
     pawsA: {
       at: [4, 12],
       grid: `
-        GwGGGGqG
+        GwGGGGGG
         GwG..GGG
         GGG.....
       `,
@@ -234,6 +234,29 @@ export default sprite({
         ..ee
       `,
     },
+    // The spine stretches on the long stride; the rump goes back a pixel.
+    trunkLong: {
+      at: [0, 8],
+      grid: `
+        ..GzzzzzwwwwG..
+        .GzzzzwwwwwwqG.
+        .GuuzwwwwwwwqG.
+        .GuuwwwwwwwqqG.
+        ..GGGGGGGGGGG..
+      `,
+    },
+    // The tail droops behind while the body is still on its way up.
+    tailDown: {
+      at: [0, 4],
+      grid: `
+        ...ee
+        ..eze
+        .eze.
+        .eze.
+        eze..
+        ee...
+      `,
+    },
     legs0: {
       at: [2, 12],
       grid: `
@@ -311,36 +334,31 @@ export default sprite({
     look: ["seated", "tail", "away"],
     sleep0: ["loaf"],
     sleep1: ["breathe"],
-    down0: ["chest", "pawsA", "face"],
+    down0: ["chest", "pawsA", ["face", 0, 1]],
     down1: [
       ["chest", 0, -1],
       ["pawsC", 0, -1],
       ["face", 0, -1],
     ],
-    down2: ["chest", "pawsB", "face"],
+    down2: ["chest", "pawsB", ["face", 0, 1]],
     down3: [
       ["chest", 0, -1],
       ["pawsC", 0, -1],
       ["face", 0, -1],
     ],
-    up0: ["upTail", "rump", "hindA", "back"],
-    up1: [
-      ["upTail", 1, -1],
-      ["rump", 0, -1],
-      ["pawsC", 0, -1],
-      ["back", 0, -1],
-    ],
-    up2: [["upTail", 2, 0], "rump", "hindB", "back"],
+    up0: [["upTail", 1, -1], "rump", "hindA", "back"],
+    up1: ["upTail", ["rump", 0, -1], ["pawsC", 0, -1], ["back", 0, -1]],
+    up2: [["upTail", 1, -1], "rump", "hindB", "back"],
     up3: [
-      ["upTail", 1, -1],
+      ["upTail", 2, 0],
       ["rump", 0, -1],
       ["pawsC", 0, -1],
       ["back", 0, -1],
     ],
-    side0: ["sideTail", "trunk", "legs0", "profile"],
-    side1: [["sideTailUp", 0, -1], ["trunk", 0, -1], "legs1", ["profile", 0, -1]],
-    side2: ["sideTail", "trunk", "legs2", "profile"],
-    side3: [["sideTailUp", 0, -1], ["trunk", 0, -1], "legs3", ["profile", 0, -1]],
+    side0: ["tailDown", "trunkLong", "legs3", "profile"],
+    side1: ["sideTail", ["trunk", 0, -1], "legs2", ["profile", 0, -1]],
+    side2: [["sideTailUp", 0, -1], "trunk", "legs0", "profile"],
+    side3: ["sideTailUp", ["trunk", 0, -1], "legs1", ["profile", 0, -1]],
   },
   anim: {
     idle: {

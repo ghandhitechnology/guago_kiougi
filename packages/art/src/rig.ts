@@ -1,4 +1,4 @@
-import type { Anim, BonePose, Dir, PartDef, Poses, RigDef, Vec } from "./format.ts";
+import type { Anim, BonePose, Dir, Look, PartDef, Poses, RigDef, Vec } from "./format.ts";
 import { ArtError, checkLegend, parseGrid } from "./grid.ts";
 import { type Indexed, indexed, stamp } from "./raster.ts";
 import { checkAnims, defaultOrigin } from "./sprite.ts";
@@ -31,6 +31,11 @@ export interface CompiledRig {
   readonly anim: Readonly<Record<string, Anim>>;
   readonly parts: readonly RigPart[];
   readonly looks: readonly RigLook[];
+  /**
+   * Every part option worn on the first look in place of that look's own: a check-only set, so
+   * whatever a player combines in the character creator has been checked on a neutral base.
+   */
+  readonly probes: readonly RigLook[];
 }
 
 interface ParsedPose {
@@ -176,7 +181,7 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
     }
   }
 
-  const looks: RigLook[] = Object.entries(def.looks).map(([lookName, look]) => {
+  const compose = (lookName: string, look: Look): RigLook => {
     const lw = `${where} › look ${lookName}`;
     for (const [layer, partName] of Object.entries(look.parts)) {
       if (!parts.some((p) => p.layer === layer && p.name === partName)) {
@@ -199,7 +204,19 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
       checked.set(key, some);
     }
     return { name: lookName, parts: look.parts, slots: look.slots ?? {}, frames, checked };
-  });
+  };
+  const looks = Object.entries(def.looks).map(([lookName, look]) => compose(lookName, look));
+
+  const base = Object.values(def.looks)[0];
+  const probes: RigLook[] = [];
+  if (base) {
+    for (const p of parts) {
+      if (base.parts[p.layer] === p.name || def.unchecked?.includes(p.layer)) continue;
+      probes.push(
+        compose(`${p.layer}.${p.name}`, { ...base, parts: { ...base.parts, [p.layer]: p.name } }),
+      );
+    }
+  }
 
   checkAnims(def.anim, new Set(Object.keys(def.frames)), where);
   return {
@@ -214,5 +231,6 @@ export function compileRig(def: RigDef, name: string, where: string): CompiledRi
     anim: def.anim,
     parts,
     looks,
+    probes,
   };
 }

@@ -116,7 +116,7 @@ export function checkArt(art: Compiled, where: string): string[] {
       for (const [key, img] of part.frames)
         out.push(...checkPalette(img, `${where} › ${part.layer}.${part.name} › ${key}`));
     }
-    for (const look of art.looks) {
+    for (const look of [...art.looks, ...art.probes]) {
       for (const [key, img] of look.checked) {
         const fw = `${where} › look ${look.name} › ${key}`;
         out.push(...checkOrphans(img, fw), ...checkOutline(img, fw));

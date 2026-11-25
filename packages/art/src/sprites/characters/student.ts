@@ -71,9 +71,10 @@ export const ink: Legend = {
   "&": "skin.dark",
   "~": "stone.pale",
   "!": "red.dark",
+  "@": "skin.deep",
 };
 
-export const lone = "^'-,*%&~!";
+export const lone = "^'-,*%&~!@";
 
 // Knocked out ---------------------------------------------------------------------------------
 
@@ -157,7 +158,7 @@ export const skin = part({
   palette: ink,
   pieces: {
     head: {
-      at: { down: [5, 3], up: [5, 3], side: [3, 3] },
+      at: { down: [5, 3], up: [4, 3], side: [0, 4] },
       down: `
         ....OOOOOO....
         ..OOssssssOO..
@@ -171,30 +172,28 @@ export const skin = part({
         ....OOOOOO....
       `,
       up: `
-        ....OOOOOO....
-        ..OOssssssOO..
-        .OssssssssssO.
-        OssssssssssssO
-        OssssssssssssO
-        OssssssssssssO
-        OssssssssssssO
-        OssssssssssssO
-        ..OOssssskOO..
-        ....OssssO....
-        ....OssssO....
+        .....OOOOOO.....
+        ...OOssssssOO...
+        ..OssssssssssO..
+        .OssssssssssssO.
+        .OssssssssssssO.
+        OOssssssssssssOO
+        OOssssssssssssOO
+        .OssssssssssssO.
+        ...OOsssssskOO..
+        .....OssssO.....
+        .....OssssO.....
       `,
       side: `
-        ....OOOOOOO....
-        ..OOsssssssOO..
-        .OsssssssssssO.
-        OsssssssssssssO
-        OsssssssssssssO
-        OsssssssssssssO
-        OsssssOsssssssO
-        OsssssOOssssssO
-        ......OssssssO.
-        ......OOOssOO..
-        .......OOOO....
+        .........OOOO.......
+        .......OOssssOO.....
+        ......OsssssssssO...
+        ......OssssssssssO..
+        ......OssssssssssO..
+        ......OssOkssssssO..
+        ......OssOksssssssO.
+        .......OOOOOsssssO..
+        ...........OsssOO...
       `,
     },
   },
@@ -210,10 +209,10 @@ const hurt = {
     ......--......
   `,
   side: `
-    .............*.
     ............*..
+    ...........*...
     ...............
-    ............-..
+    .............-.
   `,
 };
 
@@ -227,8 +226,8 @@ const yawn = {
   side: `
     ...............
     ...........**..
-    ...........'!..
-    ............!..
+    ...........'...
+    ............!!.
   `,
 };
 
@@ -237,7 +236,7 @@ const koSide = `
   ...............
   ...........**..
   ...............
-  ............!..
+  .............!.
 `;
 
 function face(own: {
@@ -282,22 +281,22 @@ const bright = face({
   },
   side: {
     rest: `
-      ............^e.
+      ...........^e..
       ...........ee..
       ...........'...
-      ............-..
+      .............-.
     `,
     shout: `
-      ............^e.
+      ...........^e..
       ...........ee..
-      ...........'!..
-      ............!..
+      ...........'...
+      ............!!.
     `,
     read: `
       ...............
       ...........ee..
       ...........'...
-      ............-..
+      .............-.
     `,
   },
 });
@@ -323,22 +322,22 @@ const sleepy = face({
   },
   side: {
     rest: `
-      ............**.
-      ...........*...
+      ...........**..
+      ...........*,..
       ...........,,..
-      ............-..
+      .............-.
     `,
     shout: `
-      ............**.
+      ...........**..
       ...........ee..
-      ...........,!..
-      ............!..
+      ...........,,..
+      ............!!.
     `,
     read: `
       ...............
       ...........**..
       ...........,,..
-      ............-..
+      .............-.
     `,
   },
 });
@@ -365,22 +364,22 @@ const sharp = face({
   },
   side: {
     rest: `
-      ...........e...
+      ...........e,..
       ...........ee..
       ...............
-      ...........--..
+      ............--.
     `,
     shout: `
-      ...........e...
+      ...........e,..
       ...........ee..
-      ............^!.
-      ............!..
+      ............^..
+      ............!!.
     `,
     read: `
       ...............
       ...........ee..
       ...............
-      ...........--..
+      ............--.
     `,
   },
 });
@@ -397,14 +396,15 @@ const none = { down: null, up: null, side: null } as const;
 /** Neat and short, one tuft that will not lie down. */
 const crop = hair({
   head: {
-    at: { down: [5, 2], up: [5, 2], side: [3, 2] },
+    at: { down: [5, 2], up: [5, 2], side: [0, 2] },
     down: `
       ........XX....
       ....XXXXXXX...
       ..XXHHHHhhXX..
       .XHHhhhhhhhxX.
       XHHhhhhhhhhhxX
-      XxhxxhhhhxxhxX
+      XxxxxhhhhxxhxX
+      Xx..........xX
       Xx..........xX
     `,
     up: `
@@ -412,26 +412,26 @@ const crop = hair({
       ....XXXXXXX...
       ..XXHHHHhhXX..
       .XHHHHhhhhhxX.
-      XHHhhhhhhhhhxX
-      XHhhhhhhhhhxxX
-      XhhhhhhhhhxxxX
-      .XhhhhhhhhxxX.
-      .XhxhhxhhxhxX.
-      ..XxhhxhhxxX..
-      ...XX....XX...
+      XHHhhhhxhhhhxX
+      XHhhhhxhhhhhxX
+      XhhhhxhhhxhxxX
+      XhhhhxhhhxhxxX
+      .XhhxhhhxhhxX.
+      ..XhxhhhxhxX..
+      ...XXX..XXX...
     `,
     side: `
-      ........XX.....
-      ....XXXXXXX....
-      ..XXHHHHhhhXX..
-      .XHHhhhhhhhhhX.
-      XHHhhhhhhhhhhxX
-      XHhhhhhhhxhhxxX
-      Xhhhhhhhx......
-      Xhhhhh.x.......
-      Xxhhhh.........
-      .Xxhhxx........
-      ..XXXX.........
+      .........XXX........
+      .......XXHHHXX......
+      ......XHHHhhhhX.....
+      .....XHHhhhhhhhX....
+      .....XHhhhhhhhxxX...
+      .....Xhhhhhhhxx.....
+      .....Xhhhhhx........
+      .....Xhhh..x........
+      .....Xhhh...........
+      ......XhhX..........
+      .......XX...........
     `,
   },
   tail: none,
@@ -440,7 +440,7 @@ const crop = hair({
 /** Slept on it wrong. Spikes everywhere and one strand that points at the sky. */
 const spiky = hair({
   head: {
-    at: { down: [4, 1], up: [4, 1], side: [2, 1] },
+    at: { down: [4, 1], up: [4, 1], side: [0, 1] },
     down: `
       .........XX.....
       ..X...XXXhhX.X..
@@ -454,31 +454,31 @@ const spiky = hair({
     `,
     up: `
       .........XX.....
-      ..X...XXXhhX.X..
-      .XHX.XHHhhXXXhX.
-      .XHHXHHhhhhhhhX.
-      XHHHhhhhhhhhhhxX
-      XHhhhhhhhhhhhxxX
-      XhhhhhhhhhhhxxxX
-      XhhhhhhhhhhxxxxX
-      .XhhhhhhhhxxxxX.
-      .XhhhhhhhhhhxxX.
-      ..XXhhXXXXhxXX..
-      ....XX....XX....
+      ......X.XhhX....
+      ..X..XhXXXXXX...
+      .XXXXHHhhhXXXX..
+      .XHHHhhhhhhhhhX.
+      XHHhhhhhxhhhhhxX
+      XHhhhhhxhhhhhxxX
+      XhhhhhxhhhxhhxxX
+      XhhhhxhhhxhhxxxX
+      .XhhxhhhxhhhxxX.
+      .XhxhhXhhxhxxXX.
+      ..XXXXXXXXXXX...
     `,
     side: `
-      ..........XX.....
-      ...X...XXXhhX.X..
-      ..XHXXXHHhhXXXhX.
-      .XHHHXHhhhhhhhhX.
-      XHHhhhhhhhhhhhhhX
-      XHhhhhhhhhhhhhxxX
-      XhhhhhhhhxhxxXXXX
-      Xhhhhhhhx........
-      XhhhhhX..........
-      XhhhhxX..........
-      .XhhxX...........
-      ..XXX............
+      ..........XX........
+      .....X...XhX........
+      .....XX.XXhXX.X.....
+      ....XHHXHHhhhXhX....
+      ....XHHHhhhhhhhhX...
+      ...XHHhhhhhhhhxxX...
+      ....Xhhhhhhhhxxx....
+      ...Xhhhhhhhx........
+      ....Xhhhh..x........
+      ...Xhhhhh...........
+      ....XhXhX...........
+      .....X.X............
     `,
   },
   tail: none,
@@ -487,13 +487,13 @@ const spiky = hair({
 /** Chin-length bob with a blunt fringe, cut in the dorm bathroom. */
 const bob = hair({
   head: {
-    at: { down: [4, 2], up: [4, 2], side: [2, 2] },
+    at: { down: [4, 2], up: [4, 2], side: [0, 2] },
     down: `
       ....XXXXXXXX....
       ..XXHHHHhhhhXX..
       .XHHHhhhhhhhhhX.
       XHHhhhhhhhhhhhxX
-      XHhhhhhhhhhhhxxX
+      XhhhhhhhhhhhhxxX
       XhhhhhhhhhhhhxxX
       Xhx..........xxX
       Xhx..........xxX
@@ -502,30 +502,30 @@ const bob = hair({
       .XXX........XXX.
     `,
     up: `
-      ....XXXXXXXX....
-      ..XXHHHHhhhhXX..
-      .XHHHhhhhhhhhhX.
-      XHHhhhhhhhhhhhxX
-      XhhhhhhhhhhhhxxX
-      XhhhhhhhhhhhhxxX
-      XhhhhhhhhhhhxxxX
-      XhhhhhhhhhhhxxxX
-      XhhhxhhxhhhxxxxX
-      XhhhxhhxhhxxxxxX
+      .....XXXXXX.....
+      ...XXHHHxHHXX...
+      ..XHHHHHxhhhhX..
+      .XHHhhhhxhhhhxX.
+      .XHhhhhhxhhhhxX.
+      XHhhhhhxhxhhhxxX
+      XhhhhhxhhhxhhxxX
+      XhhhhxhhhhhxhxxX
+      XhhhxhhhhhhxxxxX
+      XhhxhhhhhhhhxxxX
       .XXXXXXXXXXXXXX.
     `,
     side: `
-      ....XXXXXXXX.....
-      ..XXHHHHHhhhXX...
-      .XHHhhhhhhhhhhX..
-      XHHhhhhhhhhhhhhX.
-      XhhhhhhhhhhhhhhxX
-      XhhhhhhhhhhhhhxxX
-      Xhhhhhhhhhx......
-      Xhhhhhhhhx.......
-      Xhhhhhhhhx.......
-      XhhhhhhhxX.......
-      .XXXXXXXXX.......
+      ........XXXX........
+      ......XXHHHHXX......
+      .....XHHHhhhhhX.....
+      ....XHHhhhhhhhhX....
+      ....XHhhhhhhhhhhX...
+      ....Xhhhhhhhhhhxx...
+      ....Xhhhhhhhx.......
+      ....Xhhhhhhhx.......
+      ...Xhhhhhhhhx.......
+      ...Xhhhhhhhxx.......
+      ...XXXXXXXXXX.......
     `,
   },
   tail: none,
@@ -534,7 +534,7 @@ const bob = hair({
 /** Straight and long, centre parting, falls over the shoulders and down the back. */
 const long = hair({
   head: {
-    at: { down: [4, 2], up: [4, 2], side: [2, 2] },
+    at: { down: [4, 2], up: [4, 2], side: [0, 2] },
     down: `
       ....XXXXXXXX....
       ..XXHHHxhHHhXX..
@@ -553,47 +553,48 @@ const long = hair({
       .XX..........XX.
     `,
     up: `
-      ....XXXXXXXX....
-      ..XXHHHHhhhhXX..
-      .XHHHhhhhhhhhhX.
-      XHHHhhhhhhhhhhxX
-      XHHhhhhhhhhhhhxX
-      XhHhhhhhhhhhhxxX
-      XhHhhhhhhhhhhxxX
-      XhhhhhhhhhhhxxxX
-      XhhhhhhhhhhhxxxX
-      XhhhhhhhhhhxxxxX
-      XhhhhhhhhhhxxxxX
-      XhhhxhhhhxhxxxxX
-      XhhhxhhhhxhxxxxX
-      .XhhhhhhhhhxxxX.
-      ..XXXXXXXXXXXX..
+      .....XXXXXX.....
+      ...XXHHHxHHXX...
+      ..XHHHHhxhHHhX..
+      .XHHhhhhxhhHhxX.
+      .XHhhhhhxhhhhxX.
+      XHhhhhhhxhhhhxxX
+      XhHhhhhhxhhhhxxX
+      XhHhhhhxhxhhhxxX
+      XhhhhhhxhxhhhxxX
+      XhhhhhxhhhxhxxxX
+      XhhhhhxhhhxhxxxX
+      XhhhxhhhhhhxxxxX
+      .XhhxhhhhhxhxxX.
+      ..XhXhhhhXhxXX..
+      ...X.XXXX.XX....
     `,
     side: `
-      ....XXXXXXXX.....
-      ..XXHHHHHhhhXX...
-      .XHHhhhhhhhhhhX..
-      XHHhhhhhhhhhhhhX.
-      XHhhhhhhhhhhhhhxX
-      XhhhhhhhhhhhhhxxX
-      Xhhhhhhhhhx......
-      Xhhhhhhhhx.......
-      Xhhhhhhhhx.......
-      Xhhhhhhhx........
+      ........XXXX........
+      ......XXHHHHXX......
+      .....XHHHhhhhhX.....
+      ....XHHhhhhhhhhX....
+      ....XHhhhhhhhhxxX...
+      ....Xhhhhhhhhxx.....
+      ....Xhhhhhhhx.......
+      ....Xhhhhhhhx.......
+      ....Xhhhhhhhx.......
+      ....Xhhhhhhxx.......
+      ....Xhhhhhhx........
     `,
   },
   tail: {
-    at: { down: [4, 11], up: [4, 11], side: [2, 11] },
+    at: { down: [4, 11], up: [4, 11], side: [4, 12] },
     down: null,
     up: null,
     side: `
-      Xhhhhhhx.
-      XhhhhhxX.
-      XhhhhhxX.
-      XhhhhxX..
-      XhhhxX...
-      .XhxX....
-      ..XX.....
+      XhhhhX
+      XhhhhX
+      XhhhxX
+      XhhhxX
+      XhhxX.
+      .XxX..
+      ..X...
     `,
   },
 });
@@ -601,7 +602,7 @@ const long = hair({
 /** High ponytail and side-swept bangs. The tail swings a beat behind every step. */
 const ponytail = hair({
   head: {
-    at: { down: [5, 2], up: [5, 2], side: [3, 2] },
+    at: { down: [5, 2], up: [5, 2], side: [0, 2] },
     down: `
       ....XXXXXX....
       ..XXHHHHhhXX..
@@ -615,32 +616,32 @@ const ponytail = hair({
     up: `
       ....XXXXXX....
       ..XXHHHHhhXX..
-      .XHHhhhhhhhxX.
-      XHHhhhXXhhhhxX
-      XHhhhXmmXhhxxX
-      XhhhhXrrXhhxxX
-      XhhhhhXXhhhxxX
-      .XhhhhxhhhxxX.
-      .XhhhhxhhxxxX.
-      ..XXhhxhhxXX..
-      ....XhhhhX....
+      .XHHhhXXhhhxX.
+      XHHhhXmmXhhxxX
+      XHhhhXrrXhhxxX
+      XhhhxXhhXxhxxX
+      XhhxhXhhXhxxxX
+      XhhhhXhhXhhxxX
+      .XhhhXhhXhxxX.
+      ..XhhXhhXhxX..
+      ...XXXhhXXX...
     `,
     side: `
-      ....XXXXXX.....
-      ..XXHHHHhhXX...
-      .XHHhhhhhhhhX..
-      XHHhhhhhhhhhhX.
-      XHhhhhhhhhhxhxX
-      XhhhhhhhhhxxhxX
-      Xhhhhhhhx..xxX.
-      Xhhhhh.x.......
-      Xxhhhh.........
-      .XxhhX.........
-      ..XXXX.........
+      .........XXXX.......
+      ........XHHHHXX.....
+      .......XHHhhhhhX....
+      .......XHhhhhhhhX...
+      ......XhhhhhhhhxX...
+      ......Xhhhhhhxx.....
+      ......Xhhhhhx.......
+      .......Xhh..x.......
+      .......Xhh..........
+      ........XX..........
+      .........XX.........
     `,
   },
   tail: {
-    at: { down: [17, 5], up: [9, 12], side: [1, 4] },
+    at: { down: [17, 5], up: [9, 12], side: [1, 3] },
     down: `
       XX..
       XhX.
@@ -658,14 +659,16 @@ const ponytail = hair({
       ..XX..
     `,
     side: `
-      .XX.
-      XhhX
-      XhxX
-      XhxX
-      XhxX
-      XhxX
-      .XxX
-      .XX.
+      ...XX..
+      ..XmmX.
+      .XhrrX.
+      .XhhX..
+      XhhxX..
+      XhxX...
+      XhxX...
+      XhX....
+      XhX....
+      .X.....
     `,
   },
 });
@@ -673,7 +676,7 @@ const ponytail = hair({
 /** Tight curls with a lot of volume. Will not fit under the 기숙사 shower cap. */
 const curly = hair({
   head: {
-    at: { down: [3, 1], up: [3, 1], side: [1, 1] },
+    at: { down: [3, 1], up: [3, 1], side: [0, 1] },
     down: `
       .....XX.XX.XX.....
       ...XXHHXHHXhhXX...
@@ -681,39 +684,40 @@ const curly = hair({
       .XHHHhhHHhhhhxhhX.
       XHHhhhhhhhhhxxhhxX
       XhhhhhhhhhhhhhhxxX
-      XhhxxhhxxhhxxhhxxX
+      XhhhxhhxxhhxxhhxxX
       Xhhx..........xxxX
       XhhX..........XxxX
       XhhX..........XxxX
       .XXX..........XXX.
     `,
     up: `
-      .....XX.XX.XX.....
-      ...XXHHXHHXhhXX...
-      ..XHHHHhHHhhhhhX..
-      .XHHHhhHHhhhhxhhX.
-      XHHhhhhhhhhhxxhhxX
-      XhhhhhHHhhhhhhhxxX
-      XhhhhhhhhhhhxxhxxX
-      XhhhhhhhhhhhhhxxxX
-      XhhhxxhhhhxxhhxxxX
-      .XhhhhhhhhhhhxxxX.
+      .....XX.XXX.XX....
+      ...XXHHXHHhXhhXX..
+      ..XHHhHHhhhhhhhxX.
+      .XHHhhhHHhhhhxxhxX
+      XHHhhhhhhhHHhxxhxX
+      XHhhHHhhhhhhhhhxxX
+      XhhhhhhhHHhhxxhxxX
+      XhhHHhhhhhhhhhxxxX
+      XhhhhhxxhhxxhhhxxX
+      .XhhxxhhhhhhhxxxX.
+      .XhhhhxxhxxhhxxxX.
       ..XXXXXXXXXXXXXX..
       ......X....X......
     `,
     side: `
-      .....XX.XX.XX.....
-      ...XXHHXHHXhhXX...
-      ..XHHHHhHHhhhhhX..
-      .XHHHhhHHhhhhxhhX.
-      XHHhhhhhhhhhxxhhxX
-      XhhhhhhhhhhhhxxhxX
-      XhhhhhhhhhhhxxxxxX
-      XhhhhHHhhhx.......
-      XhhhhhhhhX........
-      XhhhhhhhhX........
-      .XhhhhhhX.........
-      ..XXXXXX..........
+      ......XX.XX.XX......
+      ....XXHHXHHXhhXX....
+      ...XHHHhHHhhhhhhX...
+      ..XHHhhhhhhhhhhhhX..
+      ..XHhhHHhhhhhxhhxX..
+      .XhhhhhhhhhhhxhxxX..
+      .XhhxxhhhhhhxXX.....
+      .Xhhhhhhhxxx........
+      ..Xhhhxxhhhx........
+      ..Xhhhhhhhh.........
+      ...Xhhxxhhh.........
+      ....XXXXXXX.........
     `,
   },
   tail: none,
@@ -772,7 +776,7 @@ const armShade = {
 
 const armSide = {
   rest: `
-    .11..
+    .111.
     .121.
     .121.
     .454.
@@ -781,7 +785,7 @@ const armSide = {
     ..O..
   `,
   fwd: `
-    .11..
+    .111.
     .121.
     .121.
     ..454
@@ -790,7 +794,7 @@ const armSide = {
     ...O.
   `,
   back: `
-    .11..
+    .111.
     .121.
     .121.
     454..
@@ -802,7 +806,7 @@ const armSide = {
 const shaded = (g: string) => g.replaceAll("2", "3").replaceAll("5", "6").replaceAll("%", "&");
 const armSideFar = {
   rest: `
-    .11..
+    .111.
     .131.
     .131.
     .464.
@@ -823,6 +827,16 @@ const raise = `
   ...121.
   ....111
 `;
+/** The raise turned over: an arm flung out low and wide when a hit lands. */
+const fling = `
+  ....111
+  ...121.
+  ..121..
+  .454...
+  454....
+  O%O....
+  .O.....
+`;
 /** Upper arm pointing away from the camera, forearm hidden. */
 export const away = `
   11.
@@ -832,10 +846,11 @@ export const away = `
 `;
 
 const armR: Piece = {
-  at: { down: [6, 14], up: [15, 14], side: [9, 14] },
+  at: { down: [6, 14], up: [15, 14], side: [8, 14] },
   down: {
     ...armLit,
     raise: { at: [1, 8], grid: raise },
+    fling: { at: [1, 14], grid: fling },
     strike: {
       at: [6, 14],
       grid: `
@@ -874,6 +889,7 @@ const armR: Piece = {
   up: {
     ...armShade,
     raise: { at: [16, 8], grid: mirror(raise) },
+    fling: { at: [16, 14], grid: mirror(fling) },
     strike: { at: [15, 14], grid: away },
     follow: { at: [15, 14], grid: away },
     read: { at: [15, 14], grid: away },
@@ -881,42 +897,43 @@ const armR: Piece = {
   side: {
     ...armSide,
     raise: {
-      at: [6, 14],
+      at: [3, 14],
       grid: `
-        .OO441..
-        O%%55221
-        O%%55221
-        .OO4411.
+        .@@44111
+        @%%55221
+        @%%55221
+        .@@4411.
       `,
     },
     strike: {
-      at: [10, 13],
+      at: [9, 13],
       grid: `
-        111444O.
-        122555%O
-        .11444O.
+        .111444444
+        1222555555
+        .111444444
       `,
     },
-    follow: {
-      at: [10, 14],
+    follow: { at: [8, 14], grid: armSide.fwd },
+    mouth: {
+      at: [9, 10],
       grid: `
-        11...
-        121..
-        121..
-        .454.
-        .454.
-        .O%O.
-        ..O..
+        .........O.
+        ........O%O
+        ......4454.
+        111111454..
+        12222254...
+        1111114....
       `,
     },
     read: {
-      at: [10, 14],
+      at: [9, 14],
       grid: `
-        .11...
-        .121..
-        ..1454
-        ...O%O
-        ....O.
+        1111......
+        1211......
+        1214444O%O
+        12555555O.
+        11444444..
+        111111....
       `,
     },
   },
@@ -927,6 +944,7 @@ const armL: Piece = {
   down: {
     ...armShade,
     raise: { at: [16, 8], grid: mirror(raise) },
+    fling: { at: [16, 14], grid: mirror(fling) },
     mouth: {
       at: [13, 10],
       grid: `
@@ -952,6 +970,7 @@ const armL: Piece = {
   up: {
     ...armLit,
     raise: { at: [1, 8], grid: raise },
+    fling: { at: [1, 14], grid: fling },
     read: { at: [6, 14], grid: mirror(away) },
     mouth: { at: [6, 14], grid: mirror(away) },
   },
@@ -1038,11 +1057,14 @@ const legs = {
 
 export type Torso = Record<Dir, string>;
 
+/** Sleeves and trousers are one pixel thick: a limb is allowed to show a single pixel. */
+const limb = "123456Iize";
+
 export function garment(sleeve: Legend, torso: Torso, withLegs: boolean): PartDef {
   return withKo(
     part({
       palette: { ...ink, ...sleeve },
-      lone,
+      lone: lone + limb,
       pieces: {
         armL,
         ...(withLegs ? legs : {}),
@@ -1078,17 +1100,17 @@ const blazer = garment(
       NVvvvvnN
       NVvvvvnN
       NVvvvvnN
-      NvvvnvnN
-      NvvvnvnN
+      NvvvvvnN
+      NvvvvvnN
       NNNNNNNN
     `,
     side: `
-      NNNwmN
+      NNwwmN
       NVvwmN
-      NVvvvN
-      NVvvvN
-      NvvvvN
-      NvvvvN
+      NVvVmN
+      NvvVrN
+      NvvVrN
+      NvvVrN
       NNNNNN
     `,
   },
@@ -1125,12 +1147,12 @@ const shirt = garment(
       GGGGGGGG
     `,
     side: `
-      GGGwmG
+      GGwwmG
       GwpwmG
-      GwpppG
-      GwpppG
-      GpppqG
-      GpppqG
+      GwppmG
+      GwpprG
+      GwpprG
+      GwpprG
       GGGGGG
     `,
   },
@@ -1167,12 +1189,12 @@ const varsity = garment(
       JJJJJJJJ
     `,
     side: `
-      JjjjJ.
-      JjjjJ.
+      JJJJJ.
       JcccJ.
       JcccJ.
-      JjjjJ.
-      JjjjJ.
+      JcccJ.
+      JcccJ.
+      JJJJJ.
       JJJJJ.
     `,
   },
@@ -1190,15 +1212,15 @@ const glasses = withKo(
         at: { down: [5, 7], up: [5, 7], side: [3, 7] },
         down: `
           ...DD....DD...
-          .DD..DDDD..DD.
+          ..D..DDDD..D..
           ..D..D..D..D..
           ..DDD....DDD..
         `,
         up: null,
         side: `
-          ...........DDD.
-          .......DDDD...D
-          ..............D
+          ..........DDDD.
+          .............D.
+          .............D.
         `,
       },
     },
@@ -1211,7 +1233,7 @@ const goggles = withKo(
     palette: ink,
     pieces: {
       head: {
-        at: { down: [5, 4], up: [5, 5], side: [3, 4] },
+        at: { down: [5, 3], up: [5, 5], side: [3, 5] },
         down: `
           eGGGGGGGGGGGGe
           eGLLllGGLLllGe
@@ -1221,9 +1243,9 @@ const goggles = withKo(
           eeeeeeeeeeeeee
         `,
         side: `
-          ...........GGGG
-          eeeeeeeeeeeGLLG
-          ...........GGGG
+          ..........GGGG.
+          ..eeeeeeeeGLLG.
+          ..........GGGG.
         `,
       },
     },
@@ -1247,7 +1269,7 @@ const textbook = withKo(
     lone,
     pieces: {
       hand: {
-        at: { down: [2, 17], up: [18, 17], side: [11, 15] },
+        at: { down: [2, 17], up: [18, 17], side: [5, 18] },
         down: {
           rest: closed,
           raise: {
@@ -1278,6 +1300,16 @@ const textbook = withKo(
               TUuT
               TUuT
               TTTT
+            `,
+          },
+          fly: {
+            at: [1, 1],
+            grid: `
+              ..TT..
+              .TUuT.
+              TUuuuT
+              TyyuT.
+              .TTT..
             `,
           },
           read0: {
@@ -1335,14 +1367,24 @@ const textbook = withKo(
             `,
           },
           strike: {
-            at: [15, 0],
+            at: [17, 0],
             grid: `
-              ~.TTTTTT
-              .~TttttT
-              ..TTTTTT
+              ~.TTTT
+              .~TttT
+              ..TTTT
             `,
           },
           follow: ".",
+          fly: {
+            at: [18, 1],
+            grid: `
+              ..TT..
+              .TttT.
+              TttttT
+              .TttT.
+              ..TT..
+            `,
+          },
           read0: ".",
           read1: ".",
           read2: ".",
@@ -1351,7 +1393,7 @@ const textbook = withKo(
           rest: closed,
           ko: { at: [15, 15], grid: closed },
           raise: {
-            at: [2, 12],
+            at: [0, 12],
             grid: `
               TTTT
               TUuT
@@ -1362,24 +1404,60 @@ const textbook = withKo(
             `,
           },
           strike: {
-            at: [19, 10],
+            at: [18, 10],
             grid: `
-              TTTTT
-              TUuuT
-              TUuuT
-              TuuuT
-              TuuuT
-              TyyyT
-              TTTTT
+              .TTTT
+              .TUuT
+              .TUuT
+              OTUuT
+              OTuuT
+              OTuuT
+              .TyyT
+              .TTTT
             `,
           },
           follow: {
-            at: [13, 19],
+            at: [12, 19],
             grid: `
-              .TTTTT
-              TUuuuT
-              TUyyyT
-              TTTTT.
+              ..TTTTT
+              .TUuuuT
+              OTUyyyT
+              .TTTTT.
+            `,
+          },
+          read0: {
+            at: [18, 10],
+            grid: `
+              ..TT
+              .TwT
+              TwwT
+              TUuT
+              TUuT
+              TTTT
+            `,
+          },
+          read1: {
+            at: [18, 8],
+            grid: `
+              ..T.
+              .TwT
+              .TwT
+              .TTT
+              TwwT
+              TUuT
+              TUuT
+              TTTT
+            `,
+          },
+          read2: {
+            at: [18, 10],
+            grid: `
+              TT..
+              TwT.
+              TwwT
+              TUuT
+              TUuT
+              TTTT
             `,
           },
         },
@@ -1401,9 +1479,13 @@ export const walkArms = (d: Dir, lead: "R" | "L") => {
     : { legR: "lift", armR: "fwd", armL: "back", hand: [0, 1] };
 };
 
-/** Only the front view shows the book held up and a page turning; elsewhere the head dips. */
+/** The book held up and a page turning; from behind only the head dips. */
 const page = (d: Dir, book: string) =>
-  d === "down" ? { armR: "read", armL: "read", hand: book, head: "read" } : { head: "read" };
+  d === "down"
+    ? { armR: "read", armL: "read", hand: book, head: "read" }
+    : d === "side"
+      ? { armR: "read", hand: book, head: "read" }
+      : { head: "read" };
 
 const lean = (d: Dir): Vec => (d === "side" ? [1, 0] : d === "down" ? [0, 1] : [0, -1]);
 
@@ -1455,7 +1537,14 @@ export default rig({
     hit: (d) =>
       d === "side"
         ? { torso: [-1, 0], hand: [-1, 0], head: "hurt" }
-        : { torso: [0, -1], hand: [0, -1], head: "hurt" },
+        : {
+            torso: [0, -1],
+            armR: "fling",
+            armL: "raise",
+            [d === "down" ? "legR" : "legL"]: "lift",
+            hand: "fly",
+            head: "hurt",
+          },
     ko: {
       ground: "ko",
       armL: "ko",
@@ -1469,11 +1558,11 @@ export default rig({
     },
     yawn0: (d) =>
       d === "side"
-        ? { head: "yawn" }
+        ? { armR: "mouth", head: "yawn" }
         : { armR: "raise", armL: "raise", hand: "raise", head: "yawn" },
     yawn1: (d) =>
       d === "side"
-        ? { torso: [0, -1], head: "yawn", tail: [0, 1], hand: [0, -1] }
+        ? { torso: [0, -1], armR: "mouth", head: "yawn", tail: [0, 1], hand: [0, -1] }
         : {
             torso: [0, -1],
             armR: "raise",

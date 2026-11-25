@@ -23,7 +23,7 @@ const perm = part({
   palette: cast,
   pieces: {
     head: {
-      at: { down: [4, 1], up: [4, 1], side: [2, 1] },
+      at: { down: [4, 1], up: [4, 1], side: [0, 2] },
       down: `
         ....XX.XX.XX....
         ..XXHHXHHXhhXX..
@@ -39,29 +39,29 @@ const perm = part({
       up: `
         ....XX.XX.XX....
         ..XXHHXHHXhhXX..
-        .XHHHhhhhhhhhhX.
-        XHHhhhhhhhhhhxxX
-        XHhhhhhhhhhhxxxX
-        XhhhhhhhhhhhxxxX
-        XhhxxhhxxhhxxxxX
-        XhhhhhhhhhhhxxxX
-        XxxhhxxhhxxhhxxX
-        .XhhhhhhhhhxxxX.
-        ..XXXXXXXXXXXX..
+        .XHHHHhHHhhhhhX.
+        XHHhhhHHhhhhhxxX
+        XhhxxhhhhxxhhxxX
+        XHHhhxxhhhhhxxxX
+        XhhhhhhhxxhhhxxX
+        .XxxhhhhhhhxxxX.
+        .XhhhxxhhhhhxxX.
+        ..XhhhhhxxhhxX..
+        ...XXXXXXXXXX...
         .....X....X.....
       `,
       side: `
-        ....XX.XX.XX.....
-        ..XXHHXHHXhhXX...
-        .XHHHhhhhhhhhhX..
-        XHHhhhhhhhhhhxxX.
-        XHhhhhhhhhhhhxxxX
-        XhhxxhhxxhhxxhxxX
-        Xhhhhhhhhhx......
-        XxxhhxxhX........
-        XhhhhhhhX........
-        XxxhhxxX.........
-        .XXXXXX..........
+        ........XX.XX.XX....
+        ......XXHHXHHXhhX...
+        .....XHHhHHhhhhhhX..
+        ....XHhhhhhhhhhhhX..
+        ....XhHHhhhhhhhxxX..
+        ....Xhhhhhhhhxxx....
+        ...Xhhxxhhhx........
+        ...Xhhhhhhhx........
+        ...Xhhxxhhhh........
+        ....XhhhhhX.........
+        .....XXXXX..........
       `,
     },
   },
@@ -88,13 +88,13 @@ const stern = part({
       up: null,
       side: {
         rest: `
-          ...........***.
-          ............*..
+          ..........***..
+          ...........*^..
           ...............
-          ...........--..
+          ............--.
         `,
         blow: `
-          ...........***.
+          ..........***..
           ...........**..
           ...........''..
         `,
@@ -140,8 +140,8 @@ const tracksuit = garment(
       KKKKKKKK
     `,
     side: `
-      KKKKgK
-      KYQKgK
+      KKKKKK
+      KYQQgK
       KYQQgK
       KQQQgK
       KQQQgK
@@ -158,7 +158,7 @@ const whistle = part({
   lone,
   pieces: {
     torso: {
-      at: { down: [9, 13], up: [9, 13], side: [12, 13] },
+      at: { down: [9, 13], up: [9, 13], side: [13, 14] },
       down: {
         rest: `
           m....m
@@ -171,11 +171,11 @@ const whistle = part({
       up: null,
       side: {
         rest: `
-          .m
-          .m
+          m.
+          m.
           GG
         `,
-        blow: { at: [16, 11], grid: "GGG\nG~G\nGGG" },
+        blow: { at: [16, 10], grid: "GGG\nG~G" },
       },
     },
   },
@@ -185,7 +185,7 @@ const clipboard = part({
   palette: cast,
   pieces: {
     hand: {
-      at: { down: [2, 17], up: [18, 17], side: [11, 15] },
+      at: { down: [2, 17], up: [18, 17], side: [5, 18] },
       down: `
         .GG.
         WwwW
@@ -284,7 +284,7 @@ const mop = part({
   palette: cast,
   pieces: {
     head: {
-      at: { down: [4, 1], up: [4, 1], side: [2, 1] },
+      at: { down: [4, 1], up: [4, 1], side: [0, 2] },
       down: `
         .....XXXXXX.....
         ...XXHHhhhhXX...
@@ -298,31 +298,32 @@ const mop = part({
         .XX..........XX.
       `,
       up: `
-        .....XXXXXX.....
-        ...XXHHhhhhXX...
-        ..XHHhhhhhhhhX..
-        .XHHhhhhhhhhhxX.
-        .XHhhhhhhhhhhxX.
-        XhhhhhhhhhhhhxxX
-        XhhhhhhhhhhhxxxX
-        XhhhxhhhxhhhxxxX
-        XhhhxhhhxhhxxxxX
-        .XhhhhhhhhhxxxX.
-        ..XXXXXXXXXXXX..
-        .....X....X.....
+        .....X..XX.X....
+        ...XXHXXhhXhX...
+        ..XHHHHhhhhhhX..
+        .XHHHhhhxxhhhxX.
+        .XHhhhhxhhxhhxX.
+        XHhhhhhxhhhhhxxX
+        XhhhhhhhxxhhxxxX
+        .XhxhhhhhhhhxhX.
+        .XhxhhhxhhhxhxX.
+        .XhhxhhxhhxhhxX.
+        ..XhXhhXhXhhxX..
+        ...X.XXXhXXXX...
       `,
       side: `
-        .....XXXXXX......
-        ...XXHHhhhhXX....
-        ..XHHhhhhhhhhX...
-        .XHHhhhhhhhhhhX..
-        XHhhhhhhhhhhhhxX.
-        XhhhhhhhhhhhhhhxX
-        XhhhhhhhxxhhxxhX.
-        Xhhhhhhx.........
-        XhhhhhX..........
-        .XhhxxX..........
-        ..XXXX...........
+        .........XX.........
+        .......XXHHXXX......
+        ......XHHhhhhhX.....
+        .....XHHhhhhhhhX....
+        .....XHhhhhhhhhxX...
+        .....XhhhhhhhhxxxX..
+        .....Xhhhhhx........
+        ....Xhhhh..x........
+        ....Xhhhh...........
+        .....XhhhX..........
+        ......XhhX..........
+        .......XX...........
       `,
     },
   },
@@ -351,16 +352,16 @@ const tired = part({
       up: null,
       side: {
         rest: `
-          ............--.
-          ...........^*..
+          ...........--..
+          ...........*^..
           ...........,...
-          ............-..
+          .............-.
         `,
         look: `
           ...............
           ...........--..
           ...........,...
-          ............-..
+          .............-.
         `,
       },
     },
@@ -400,9 +401,9 @@ const loose = garment(
       NNNwwN
       NVvwmN
       NVvwmN
-      NVvwwN
-      NvvvwN
-      NvvvwN
+      NvvwrN
+      NvvwrN
+      NvvwwN
       NNNNwN
     `,
   },
@@ -415,7 +416,7 @@ const notebook = part({
   lone: "~",
   pieces: {
     hand: {
-      at: { down: [10, 14], up: [10, 14], side: [11, 13] },
+      at: { down: [10, 14], up: [10, 14], side: [5, 17] },
       down: {
         rest: `
           ZZZZZZ
