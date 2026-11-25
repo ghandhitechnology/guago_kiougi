@@ -22,6 +22,22 @@ const palette: Legend = {
 
 const P = (src: string): Pic => Pic.of(src);
 
+/**
+ * Themes interior floors and wall tops are baked into: the campus's own light, never the field
+ * at night or an era. A room lit by a rift through its windows needs that theme added here.
+ */
+const INDOOR = [
+  "campus",
+  "campus-night",
+  "campus-lamp",
+  "campus-dusk",
+  "campus-glow",
+  "campus-golden",
+  "golden-sun",
+  "golden-warm",
+  "golden-shade",
+];
+
 // Tones ---------------------------------------------------------------------------------------
 
 const TONE_SHAPE: Shape = {
@@ -416,6 +432,7 @@ const mats = (floor: string, shade: string) => ({
 });
 
 const wood = terrain({
+  bake: INDOOR,
   name: "rug-wood",
   upper: "rug",
   lower: "wood",
@@ -440,6 +457,7 @@ const wood = terrain({
 });
 
 const lino = terrain({
+  bake: INDOOR,
   ...mats("lino", "V"),
   themes: ["campus", "campus-night", "campus-dusk"],
   base: LINO_BASES,
@@ -451,6 +469,7 @@ const lino = terrain({
 });
 
 const terrazzoFloor = terrain({
+  bake: INDOOR,
   ...mats("terrazzo", "K"),
   themes: ["campus", "campus-night", "campus-dusk"],
   base: TERRAZZO_BASES,
@@ -465,12 +484,14 @@ const terrazzoFloor = terrain({
 });
 
 const tileFloor = terrain({
+  bake: INDOOR,
   ...mats("tile", "t"),
   themes: ["campus", "campus-dusk"],
   base: TILE_BASES,
 });
 
 const vinyl = terrain({
+  bake: INDOOR,
   ...mats("vinyl", "u"),
   themes: ["campus", "campus-night"],
   base: VINYL_BASES,
@@ -528,6 +549,7 @@ function wallTop(kind: "outer" | "inner", size: number): string {
 }
 
 const wallTops = overlay({
+  bake: INDOOR,
   name: "wall-top",
   palette,
   themes: ["campus", "campus-night", "campus-dusk"],
@@ -537,6 +559,7 @@ const wallTops = overlay({
 
 /** The mat on boards: the 메이커실's anti-fatigue mats in front of its stations. */
 const matWood = terrain({
+  bake: INDOOR,
   ...mats("wood", "u"),
   themes: ["campus", "campus-dusk"],
   base: WOOD_BASES.slice(0, 3),

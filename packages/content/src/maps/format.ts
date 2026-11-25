@@ -191,7 +191,7 @@ export interface Stamped {
   readonly id?: string;
 }
 
-export interface MapSource extends Layers {
+export interface MapSource extends Layers, StageSource {
   readonly id: string;
   /** Shown on entering, in Korean. */
   readonly name: string;
@@ -239,7 +239,7 @@ export interface MapSource extends Layers {
 
 // Built ----------------------------------------------------------------------------------------
 
-export interface BuiltMap {
+export interface BuiltMap extends BuiltStage {
   readonly id: string;
   readonly name: string;
   /** Size in tiles. */
@@ -257,4 +257,46 @@ export interface BuiltMap {
   readonly portals: readonly Portal[];
   readonly interactables: readonly Interactable[];
   readonly zones: readonly Zone[];
+}
+
+// Cast, cutscene marks and arenas ---------------------------------------------------------------
+
+/** Where a speaker stands, by their narrative id, so the cast can be placed there. */
+export interface NpcSpot {
+  readonly speaker: string;
+  /** Feet, in world pixels. */
+  readonly x: number;
+  readonly y: number;
+  readonly facing: Spawn["facing"];
+}
+
+/** A dueling ground (PLAN §14): its floor, and which fights it hosts. */
+export interface Arena {
+  readonly id: string;
+  readonly rect: TileRect;
+  readonly modes: readonly ("1v1" | "3v3")[];
+}
+
+/** What a map source declares for the people in it. */
+export interface StageSource {
+  /** NPC spots by narrative speaker id. */
+  readonly npcs?: readonly {
+    readonly speaker: string;
+    readonly tile: Vec;
+    readonly facing?: Spawn["facing"];
+  }[];
+  /** Named spots a cutscene's steps refer to (its `marks`), at a tile. */
+  readonly marks?: Readonly<Record<string, { readonly tile: Vec }>>;
+  readonly arenas?: readonly {
+    readonly id: string;
+    readonly rect: TileRect | string;
+    readonly modes: Arena["modes"];
+  }[];
+}
+
+export interface BuiltStage {
+  readonly npcs: readonly NpcSpot[];
+  /** Feet, in world pixels. */
+  readonly marks: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
+  readonly arenas: readonly Arena[];
 }

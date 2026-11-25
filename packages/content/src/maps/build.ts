@@ -10,6 +10,7 @@ import type {
   TileRect,
   Zone,
 } from "./format.ts";
+import { buildStage } from "./indoor.ts";
 import type { Cell, Light, Prop, SceneDef } from "./layers.ts";
 import { fractal } from "./noise.ts";
 import { gridLines, parseStamp } from "./stamp.ts";
@@ -300,6 +301,7 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
       portals,
       interactables,
       zones,
+      ...buildStage(src, rect),
     },
     footprints,
   };
