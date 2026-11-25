@@ -5,6 +5,7 @@ import type { SongSource } from "../tracker/format.ts";
 import { BEDS_SOURCE } from "./beds.ts";
 import { EFFECTS as ALL_EFFECTS } from "./effects/index.ts";
 import { agora } from "./music/agora.ts";
+import { bossEra } from "./music/boss-era.ts";
 import { bossMid } from "./music/boss-mid.ts";
 import { fieldNight } from "./music/field-night.ts";
 import { hub } from "./music/hub.ts";
@@ -18,6 +19,7 @@ export const SONGS: Record<SongId, SongSource> = {
   wakeup,
   agora,
   "boss-mid": bossMid,
+  "boss-era": bossEra,
 };
 export const EFFECTS = ALL_EFFECTS as Readonly<Record<string, EffectSource>> &
   Readonly<Record<EffectId, EffectSource>>;

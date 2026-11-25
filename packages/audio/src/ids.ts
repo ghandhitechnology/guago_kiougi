@@ -1,6 +1,14 @@
 /** Every id the game can ask for. The content registries are checked against these lists. */
 
-export const SONG_IDS = ["title", "hub", "field-night", "wakeup", "agora", "boss-mid"] as const;
+export const SONG_IDS = [
+  "title",
+  "hub",
+  "field-night",
+  "wakeup",
+  "agora",
+  "boss-mid",
+  "boss-era",
+] as const;
 export type SongId = (typeof SONG_IDS)[number];
 
 export const AMBIENT_IDS = ["campus-afternoon", "field-night", "school-interior"] as const;
