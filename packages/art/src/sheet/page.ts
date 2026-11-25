@@ -6,6 +6,7 @@ import { dualMask, pickTiles, pickTone, scatterDecals } from "../dualgrid.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
 import { sampleGrid } from "./sample-grid.ts";
+import { uiSections } from "./ui-page.ts";
 
 interface Rect {
   x: number;
@@ -362,6 +363,7 @@ for (const theme of meta.themes) {
 {
   const s = section("sprites", "sprites");
   for (const [name, sp] of Object.entries(meta.sprites)) {
+    if (sp.atlas === "ui") continue;
     const box = el("article");
     box.id = name;
     box.append(el("h3", "name", name));
@@ -537,5 +539,6 @@ function composite(
   }
 }
 
+await uiSections();
 requestAnimationFrame(tick);
 document.body.dataset.ready = "1";

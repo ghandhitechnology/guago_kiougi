@@ -2,7 +2,7 @@
  * Build-time art checks (PLAN §16 "Reviewing art without an artist"). Each returns readable
  * problems naming the art, frame and pixel; the build fails if any are found.
  */
-import type { Anim } from "./format.ts";
+import type { Anim, Slice } from "./format.ts";
 import { INDEX_RGB, nameOf, RAMP_LIST, SLOT_STEPS, slotOf } from "./palette.ts";
 import { CLEAR, type Indexed, opaqueCount } from "./raster.ts";
 
@@ -123,6 +123,33 @@ export function checkJumps(
       out.push(
         `${where} › anim ${name}: ${a} → ${b} changes ${ca} → ${cb} pixels (${Math.round(change * 100)}%, limit ${Math.round(limit * 100)}%)`,
       );
+    }
+  }
+  return out;
+}
+
+/**
+ * A nine-slice frame stretches its middle column and middle row, so every column between the
+ * left and right insets must be the same, and every row between the top and bottom insets.
+ */
+export function checkSlice(img: Indexed, [l, r, t, b]: Slice, where: string): string[] {
+  if (l + r >= img.w || t + b >= img.h) {
+    return [`${where}: slice ${l},${r},${t},${b} leaves no middle in ${img.w}×${img.h}`];
+  }
+  const out: string[] = [];
+  const px = (x: number, y: number) => img.px[y * img.w + x];
+  for (let x = l + 1; x < img.w - r; x++) {
+    const y = [...Array(img.h).keys()].find((yy) => px(x, yy) !== px(l, yy));
+    if (y !== undefined) {
+      out.push(`${where} (${x},${y}): column ${x} differs from column ${l}, the stretched middle`);
+      break;
+    }
+  }
+  for (let y = t + 1; y < img.h - b; y++) {
+    const x = [...Array(img.w).keys()].find((xx) => px(xx, y) !== px(xx, t));
+    if (x !== undefined) {
+      out.push(`${where} (${x},${y}): row ${y} differs from row ${t}, the stretched middle`);
+      break;
     }
   }
   return out;

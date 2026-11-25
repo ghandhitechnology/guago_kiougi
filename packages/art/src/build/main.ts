@@ -10,7 +10,13 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-const atlases = writeOutput(DIST, art);
+const { atlases, fonts } = writeOutput(DIST, art);
 for (const a of atlases) {
   console.log(`${a.name.padEnd(16)} ${a.png.w}×${a.png.h}  ${Object.keys(a.frames).length} frames`);
+}
+for (const f of fonts) {
+  const kb = (n: number) => `${(n / 1024).toFixed(0)} kB`;
+  console.log(
+    `${f.name.padEnd(16)} ${f.meta.chars} chars  png ${kb(f.png.length)}  xml ${kb(Buffer.byteLength(f.xml))}`,
+  );
 }

@@ -198,7 +198,7 @@ export function spriteSheet(f: Fonts, art: readonly Compiled[]): Rgba {
   const s = new Sheet(1200);
   let y = 20;
   for (const a of art) {
-    if (a.kind !== "sprite") continue;
+    if (a.kind !== "sprite" || a.group === "ui") continue;
     drawText(s.c, f.head, a.name, 20, y, UI.head);
     y += 26;
     y = frameStrip(s, f, [...a.frames], INDEX_RGB, y, backdrops);

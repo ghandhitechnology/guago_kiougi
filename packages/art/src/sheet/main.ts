@@ -21,6 +21,7 @@ import {
   spriteSheet,
   terrainSheet,
 } from "./static.ts";
+import { uiSheets } from "./ui-static.ts";
 
 const { values } = parseArgs({
   options: { png: { type: "string" }, port: { type: "string", default: "4310" } },
@@ -35,13 +36,13 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
-const atlases = writeOutput(DIST, art);
+const { atlases, fonts: built } = writeOutput(DIST, art);
 
 if (values.png) {
   const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.png);
   mkdirSync(dir, { recursive: true });
   const fonts = loadFonts();
-  const meta = metadata(art, atlases) as SceneMeta;
+  const meta = metadata(art, atlases, built) as SceneMeta;
   const sheets = {
     scenes: sceneSheet(fonts, meta, atlases),
     ...Object.fromEntries(
@@ -51,6 +52,7 @@ if (values.png) {
     sprites: spriteSheet(fonts, art),
     rigs: rigSheet(fonts, art),
     terrain: terrainSheet(fonts, art),
+    ...uiSheets(art, built, meta, atlases),
   };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);

@@ -2,13 +2,16 @@
  * The sprite source format (PLAN §16 "Sprite source format").
  *
  * Art is written as text grids, one character per pixel, with a legend that maps characters to
- * 해솔 64 names (`red.mid`) or swap-slot names (`hair.mid`). Five kinds of art exist:
+ * 해솔 64 names (`red.mid`) or swap-slot names (`hair.mid`). Six kinds of art exist:
  *
  * - `sprite`: monsters, effects, props. Frames are grids, or stacks of named parts.
  * - `variant`: a sprite recoloured or with some parts swapped, without copying grids.
  * - `rig`: a layered paper-doll character. Parts hang on bones, frames move bones.
  * - `terrain`: a dual-grid terrain pair drawn as two pictures, plus fills, tones and decals.
  * - `overlay`: a dual-grid edge drawn over other terrain, like a rift's torn border.
+ * - `glyphs`: a hand-drawn bitmap font, one grid per character.
+ *
+ * UI pieces are sprites in the `ui` group with a top-left origin; stretchable ones set `slice`.
  */
 import type { ColorName, Remap, SlotColorName } from "./palette.ts";
 
@@ -68,7 +71,14 @@ export interface SpriteDef extends Common {
   readonly shadow?: string;
   /** Palette remap applied after parsing. Usually set through `variant`. */
   readonly recolor?: Remap;
+  /**
+   * Nine-slice insets in pixels, `[left, right, top, bottom]`, shared by every frame. The frames
+   * pack untrimmed, and the middle column and row must repeat exactly so stretching never smears.
+   */
+  readonly slice?: Slice;
 }
+
+export type Slice = readonly [left: number, right: number, top: number, bottom: number];
 
 export function sprite(def: Omit<SpriteDef, "kind">): SpriteDef {
   return { kind: "sprite", ...def };
@@ -258,4 +268,28 @@ export function overlay(def: Omit<OverlayDef, "kind">): OverlayDef {
   return { kind: "overlay", ...def };
 }
 
-export type Art = SpriteDef | RigDef | TerrainDef | OverlayDef;
+// Glyph fonts ---------------------------------------------------------------------------------
+
+/**
+ * A bitmap font drawn by hand, like the damage numerals. Every glyph grid is `height` rows tall
+ * and as wide as it is drawn. A key may list several characters that share one drawing: `'-−'`.
+ * The build writes it beside the Galmuri faces as a BMFont atlas.
+ */
+export interface GlyphFontDef extends Common {
+  readonly kind: "glyphs";
+  readonly height: number;
+  /** Rows from the top to the baseline. Defaults to `height`. */
+  readonly base?: number;
+  /** Added to every advance. −1 lets neighbouring outlines share a column. */
+  readonly spacing?: number;
+  /** Advance of a space. Defaults to half the height. */
+  readonly space?: number;
+  readonly glyphs: Readonly<Record<string, string>>;
+  readonly recolor?: Remap;
+}
+
+export function glyphs(def: Omit<GlyphFontDef, "kind">): GlyphFontDef {
+  return { kind: "glyphs", ...def };
+}
+
+export type Art = SpriteDef | RigDef | TerrainDef | OverlayDef | GlyphFontDef;

@@ -1,5 +1,13 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  type BuiltFont,
+  buildFace,
+  buildGlyphFont,
+  FACES,
+  FONT_DIR,
+  writeFonts,
+} from "../fonts.ts";
 import type { Anim } from "../format.ts";
 import type { ArtMetadata } from "../meta.ts";
 import { pack } from "../pack.ts";
@@ -58,14 +66,21 @@ function signature(img: Indexed): string {
   return `${img.w}x${img.h}:${Buffer.from(img.px).toString("base64")}`;
 }
 
+interface Entry {
+  key: string;
+  img: Indexed;
+  pivot?: readonly [number, number];
+  /** Nine-slice frames keep their full size: Phaser's NineSlice cannot use trimmed frames. */
+  whole?: boolean;
+}
+
 /** Trims, dedupes and shelf-packs sprite frames into one atlas. */
-export function packSprites(
-  name: string,
-  entries: readonly { key: string; img: Indexed; pivot?: readonly [number, number] }[],
-): Atlas {
+export function packSprites(name: string, entries: readonly Entry[]): Atlas {
   const unique = new Map<string, Indexed>();
-  const placed = entries.map(({ key, img, pivot }) => {
-    const b = bounds(img) ?? { x: 0, y: 0, w: 1, h: 1 };
+  const placed = entries.map(({ key, img, pivot, whole }) => {
+    const b = whole
+      ? { x: 0, y: 0, w: img.w, h: img.h }
+      : (bounds(img) ?? { x: 0, y: 0, w: 1, h: 1 });
     const trimmed = crop(img, b.x, b.y, b.w, b.h);
     const sig = signature(trimmed);
     if (!unique.has(sig)) unique.set(sig, trimmed);
@@ -189,7 +204,11 @@ export function rigFrameKey(rig: string, layer: string, part: string, key: strin
 }
 
 /** Everything a consumer needs besides the atlases. */
-export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): ArtMetadata {
+export function metadata(
+  art: readonly Compiled[],
+  atlases: readonly Atlas[],
+  fonts: readonly BuiltFont[] = [],
+): ArtMetadata {
   const sets = art.filter(isTileArt);
   const terrains = sets.filter((a): a is CompiledTerrain => a.kind === "terrain");
   const layout = tileLayout(sets);
@@ -259,6 +278,16 @@ export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): A
             shadow: s.shadow ? `${s.name}/shadow` : null,
             frames: [...s.frames.keys()].map((f) => `${s.name}/${f}`),
             anims: anims(s.name, s.anim),
+            ...(s.slice
+              ? {
+                  slice: {
+                    left: s.slice[0],
+                    right: s.slice[1],
+                    top: s.slice[2],
+                    bottom: s.slice[3],
+                  },
+                }
+              : {}),
           },
         ]),
     ),
@@ -342,27 +371,27 @@ export function metadata(art: readonly Compiled[], atlases: readonly Atlas[]): A
           return [o.name, { themes: o.themes, masks: shift(o.masks, first), shapes }];
         }),
     ),
+    fonts: Object.fromEntries(fonts.map((f) => [f.name, f.meta])),
   };
 }
 
 export function buildAtlases(art: readonly Compiled[]): Atlas[] {
-  const groups = new Map<
-    string,
-    { key: string; img: Indexed; pivot?: readonly [number, number] }[]
-  >();
+  const groups = new Map<string, Entry[]>();
   const add = (
     group: string,
     key: string,
     img: Indexed,
     pivot?: readonly [number, number],
+    whole?: boolean,
   ): void => {
     const list = groups.get(group) ?? [];
-    list.push(pivot ? { key, img, pivot } : { key, img });
+    list.push({ key, img, ...(pivot ? { pivot } : {}), ...(whole ? { whole } : {}) });
     groups.set(group, list);
   };
   for (const a of art) {
     if (a.kind === "sprite") {
-      for (const [f, img] of a.frames) add(a.group, `${a.name}/${f}`, img, a.origin);
+      for (const [f, img] of a.frames)
+        add(a.group, `${a.name}/${f}`, img, a.origin, a.slice !== undefined);
     } else if (a.kind === "rig") {
       for (const p of a.parts) {
         for (const [key, img] of p.frames)
@@ -376,14 +405,30 @@ export function buildAtlases(art: readonly Compiled[]): Atlas[] {
   return atlases;
 }
 
-export function writeOutput(dir: string, art: readonly Compiled[]): Atlas[] {
+/** The Galmuri faces, then every hand-drawn glyph font. */
+export function buildFonts(art: readonly Compiled[]): BuiltFont[] {
+  return [
+    ...FACES.map((f) => buildFace(f)),
+    ...art.filter((a) => a.kind === "glyphs").map(buildGlyphFont),
+  ];
+}
+
+export function writeOutput(
+  dir: string,
+  art: readonly Compiled[],
+): { atlases: Atlas[]; fonts: BuiltFont[] } {
   const atlases = buildAtlases(art);
+  const fonts = buildFonts(art);
   rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(dir, FONT_DIR), { recursive: true });
   for (const a of atlases) {
     writeFileSync(join(dir, `${a.name}.png`), a.png.png());
     writeFileSync(join(dir, `${a.name}.json`), phaserJson(a));
   }
-  writeFileSync(join(dir, "art.json"), `${JSON.stringify(metadata(art, atlases), null, 1)}\n`);
-  return atlases;
+  writeFonts(dir, fonts);
+  writeFileSync(
+    join(dir, "art.json"),
+    `${JSON.stringify(metadata(art, atlases, fonts), null, 1)}\n`,
+  );
+  return { atlases, fonts };
 }
