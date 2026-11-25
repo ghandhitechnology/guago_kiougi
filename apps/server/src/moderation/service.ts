@@ -230,8 +230,8 @@ export function createModeration(deps: ModerationDeps) {
       insert into mutes (character_id, reason, ends_at, admin_id)
       select id, ${o.reason}, ${endsAt(o.minutes)}, ${adminId} from characters
       where id = ${characterId}
-      returning id, extract(epoch from ends_at)::float8 * 1000 as end_ms`);
-    const mute = rows[0] as { id: string; end_ms: number | null } | undefined;
+      returning id`);
+    const mute = rows[0] as { id: string } | undefined;
     if (!mute) return fail("not_found");
     await record(tx, {
       adminId,

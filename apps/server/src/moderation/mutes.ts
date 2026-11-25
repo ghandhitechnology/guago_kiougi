@@ -25,7 +25,7 @@ class AdminMutes {
   /** Re-reads one character's mutes in force, after a commit that changed them. */
   async refresh(q: Queryable, characterId: string): Promise<void> {
     const { rows } = await q.execute(sql`
-      select extract(epoch from max(coalesce(ends_at, 'infinity'::timestamptz)))::float8 * 1000 as end_ms
+      select floor(extract(epoch from max(coalesce(ends_at, 'infinity'::timestamptz)))::float8 * 1000) as end_ms
       from mutes
       where character_id = ${characterId} and lifted_at is null
         and (ends_at is null or ends_at > now())`);
@@ -36,7 +36,7 @@ class AdminMutes {
   async load(q: Queryable): Promise<void> {
     const { rows } = await q.execute(sql`
       select character_id,
-        extract(epoch from max(coalesce(ends_at, 'infinity'::timestamptz)))::float8 * 1000 as end_ms
+        floor(extract(epoch from max(coalesce(ends_at, 'infinity'::timestamptz)))::float8 * 1000) as end_ms
       from mutes
       where lifted_at is null and (ends_at is null or ends_at > now())
       group by character_id`);

@@ -30,9 +30,10 @@ function askHidden(prompt: string): Promise<string> {
   if (!input.isTTY) {
     return new Promise((resolve) => {
       const rl = createInterface({ input });
+      // Resolve first: closing emits `close` at once, which would resolve the empty string.
       rl.once("line", (line) => {
-        rl.close();
         resolve(line);
+        rl.close();
       });
       rl.once("close", () => resolve(""));
     });
