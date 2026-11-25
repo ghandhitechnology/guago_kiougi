@@ -335,8 +335,14 @@ describe("자습 pool", () => {
     await w.live.joined(c, "world", "a");
     await w.live.left(c.id, "world", "a", false);
     expect((await row(c.id)).pool_place).toBe("dorm");
-    w.clock.step(HOUR_MS);
+    // Straight back in: no sleep, no 숙면.
+    w.clock.step(5 * MINUTE_MS);
     await w.live.joined(c, "world", "b");
+    expect((await row(c.id)).rested_until).toBeNull();
+    await w.live.left(c.id, "world", "b", false);
+    // A night's sleep: the full thirty minutes.
+    w.clock.step(7 * HOUR_MS);
+    await w.live.joined(c, "world", "c");
     const r = await row(c.id);
     expect(new Date(r.rested_until).getTime()).toBe(w.clock.now() + 30 * MINUTE_MS);
   });

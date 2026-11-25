@@ -19,6 +19,7 @@ import {
   repeatShare,
   resetStats,
   restedMult,
+  restedSeconds,
   statResetCost,
   tierAt,
 } from "./progress.ts";
@@ -118,6 +119,15 @@ describe("EXP modifiers", () => {
     expect(restedMult(false, 0)).toBe(1);
     expect(drowsyMult(7199)).toBe(1);
     expect(drowsyMult(7200)).toBe(0.9);
+  });
+
+  it("earns 숙면 by sleep: nothing under an hour, all thirty minutes from six", () => {
+    expect(restedSeconds(0)).toBe(0);
+    expect(restedSeconds(3599)).toBe(0);
+    expect(restedSeconds(3600)).toBe(0);
+    expect(restedSeconds(3.5 * 3600)).toBe(900);
+    expect(restedSeconds(6 * 3600)).toBe(1800);
+    expect(restedSeconds(20 * 3600)).toBe(1800);
   });
 });
 

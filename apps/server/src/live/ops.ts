@@ -27,7 +27,7 @@ import {
   type Purse,
   pay,
   type Rate,
-  RESTED,
+  restedSeconds,
   SECOND_MS,
   sheet,
 } from "@guago/shared";
@@ -374,9 +374,13 @@ export function liveOps(h: Helpers): Defs {
         const ch: LiveCharacter = {};
         const away = c.poolStartedAt !== null && c.poolStoppedAt === null;
         if (away) ch.poolStoppedAt = env.now;
-        // 숙면: the first 30 minutes after logging out in the 기숙사.
-        const rested = away && c.poolPlace === "dorm";
-        if (rested) ch.restedUntil = at(env.now.getTime() + RESTED.seconds * SECOND_MS);
+        // 숙면, earned by how long the player actually slept in the 기숙사.
+        const slept =
+          away && c.poolPlace === "dorm" && c.poolStartedAt
+            ? restedSeconds((env.now.getTime() - c.poolStartedAt.getTime()) / SECOND_MS)
+            : 0;
+        const rested = slept > 0;
+        if (rested) ch.restedUntil = at(env.now.getTime() + slept * SECOND_MS);
         return ok({ character: {}, live: { character: ch }, outcome: { rested } });
       },
     },

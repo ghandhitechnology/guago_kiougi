@@ -203,8 +203,17 @@ export function catchUp(level: number, frontierPage: number): number {
   return Math.min(CATCH_UP_MAX, 1 + ((CATCH_UP_MAX - 1) * below) / CATCH_UP_FADE);
 }
 
-/** 숙면: logging out in the 기숙사 gives +50% EXP for the first 30 minutes of the next session. */
-export const RESTED = { bonus: 0.5, seconds: 1800 } as const;
+/**
+ * 숙면: logging out in the 기숙사 gives +50% EXP for the first 30 minutes of the next session,
+ * earned by sleep: nothing for less than an hour away, the full 30 minutes from six hours.
+ */
+export const RESTED = { bonus: 0.5, seconds: 1800, minAway: 3600, fullAway: 6 * 3600 } as const;
+
+/** Seconds of 숙면 a night of `awaySeconds` in the 기숙사 earns: linear from one hour to six. */
+export function restedSeconds(awaySeconds: number): number {
+  const share = (awaySeconds - RESTED.minAway) / (RESTED.fullAway - RESTED.minAway);
+  return Math.floor(RESTED.seconds * Math.min(1, Math.max(0, share)));
+}
 /** 졸음: two hours of unbroken full-auto hunting costs 10% EXP until cleared. */
 export const DROWSY = { afterSeconds: 7200, penalty: 0.1 } as const;
 
