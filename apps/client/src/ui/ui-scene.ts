@@ -8,9 +8,11 @@ import { fight, watchFight } from "../hud/fight.ts";
 import { Hud } from "../hud/hud.ts";
 import { hud } from "../hud/store.ts";
 import { registerBag } from "../menu/bag.ts";
+import { registerBoard } from "../menu/board.ts";
 import { registerCharacter } from "../menu/character.ts";
 import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
+import { VendingMachine } from "../menu/vending.ts";
 import { session } from "../world/session.ts";
 import { worldView } from "../world/view.ts";
 import { onWorld } from "../world-events.ts";
@@ -50,6 +52,7 @@ export class UiScene extends Phaser.Scene {
     this.scene.bringToTop();
     registerBag();
     registerCharacter();
+    registerBoard();
     registerSettings();
     onSignOut(() => void this.signOut());
     this.dialogue = new DialogueBox(this);
@@ -156,10 +159,16 @@ export class UiScene extends Phaser.Scene {
     });
     // Things in the world that own a screen open it: the 메이커실's stations, the 자판기, the
     // 수행평가 board, the 도감 shelf and the 0조 연구노트.
+    const vending = new VendingMachine(
+      this,
+      () => hudView.setVisible(false),
+      () => hudView.setVisible(true),
+    );
     const unopen = onWorld((e) => {
       if (e.t !== "open") return;
       const arg = worldPanel(e.id, e.kind);
-      if (arg) notebook.open(arg.tab, arg.arg);
+      if (arg?.tab === "vending") vending.open();
+      else if (arg) notebook.open(arg.tab, arg.arg);
     });
     let stopFeed = () => {};
     this.world = {

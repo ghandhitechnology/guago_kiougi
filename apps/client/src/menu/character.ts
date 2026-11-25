@@ -99,21 +99,48 @@ class CharacterPage {
       return o;
     };
     // Who: name, level, class and tier, the EXP to the next level.
-    const name = new Label(s, 8, 4, entry.character.name, { font: "galmuri11-bold", color: "ink.dark" });
+    const name = new Label(s, 8, 4, entry.character.name, {
+      font: "galmuri11-bold",
+      color: "ink.dark",
+    });
     add(name.obj);
-    const lv = new Label(s, 8 + name.width + 8, 5, `Lv ${prog.level}`, { font: "galmuri11", color: "red.dark" });
+    const lv = new Label(s, 8 + name.width + 8, 5, `Lv ${prog.level}`, {
+      font: "galmuri11",
+      color: "red.dark",
+    });
     add(lv.obj);
     const tier = TIERS[prog.tier];
     add(
-      new Label(s, 8, 20, `${termName("class", entry.character.major)} · ${tier ? termName("tier", tier.id) : ""}`, {
-        font: "galmuri9",
-        color: "ink.mid",
-      }).obj,
+      new Label(
+        s,
+        8,
+        20,
+        `${termName("class", entry.character.major)} · ${tier ? termName("tier", tier.id) : ""}`,
+        {
+          font: "galmuri9",
+          color: "ink.mid",
+        },
+      ).obj,
     );
     const W = 196;
     add(s.add.rectangle(8, 34, W, 5, paint("stone.light")).setOrigin(0));
-    add(s.add.rectangle(8, 34, Math.round((W * prog.exp) / Math.max(1, prog.expToNext)), 5, paint("sea.mid")).setOrigin(0));
-    add(new Label(s, 8, 42, `${amount(prog.exp)} / ${amount(prog.expToNext)}`, { font: "galmuri9", color: "stone.dark" }).obj);
+    add(
+      s.add
+        .rectangle(
+          8,
+          34,
+          Math.round((W * prog.exp) / Math.max(1, prog.expToNext)),
+          5,
+          paint("sea.mid"),
+        )
+        .setOrigin(0),
+    );
+    add(
+      new Label(s, 8, 42, `${amount(prog.exp)} / ${amount(prog.expToNext)}`, {
+        font: "galmuri9",
+        color: "stone.dark",
+      }).obj,
+    );
 
     // The stats: the points placed, the draft on top in red pen, and + while points remain.
     const drafted = STAT_IDS.reduce((n, id) => n + this.draft[id], 0);
@@ -121,11 +148,21 @@ class CharacterPage {
     STAT_IDS.forEach((id, i) => {
       const y = 58 + i * 17;
       add(s.add.image(8, y, "ui", STAT_ICONS[id]).setOrigin(0));
-      add(new Label(s, 24, y + 2, termName("stat", id), { font: "galmuri9", color: "ink.dark" }).obj);
-      const v = new Label(s, 100, y + 2, String(prog.stats[id]), { font: "galmuri11", color: "ink.dark" });
+      add(
+        new Label(s, 24, y + 2, termName("stat", id), { font: "galmuri9", color: "ink.dark" }).obj,
+      );
+      const v = new Label(s, 100, y + 2, String(prog.stats[id]), {
+        font: "galmuri11",
+        color: "ink.dark",
+      });
       add(v.obj);
       if (this.draft[id] > 0) {
-        add(new Label(s, 100 + v.width + 4, y + 2, `+${this.draft[id]}`, { font: "galmuri11", color: "red.mid" }).obj);
+        add(
+          new Label(s, 100 + v.width + 4, y + 2, `+${this.draft[id]}`, {
+            font: "galmuri11",
+            color: "red.mid",
+          }).obj,
+        );
       }
       if (left > 0) {
         add(
@@ -148,7 +185,10 @@ class CharacterPage {
       color: left > 0 ? "red.dark" : "stone.dark",
     });
     add(pts.obj);
-    this.apply.setPosition(150, 159).setVisible(drafted > 0).setEnabled(drafted > 0 && !this.pending);
+    this.apply
+      .setPosition(150, 159)
+      .setVisible(drafted > 0)
+      .setEnabled(drafted > 0 && !this.pending);
     const cost = statResetCost(prog.level);
     this.reset.setCosts([
       { icon: "icon/pinecone", need: cost, have: inventory.money("pinecone"), text: amount(cost) },
@@ -160,12 +200,27 @@ class CharacterPage {
     const rules = live.rules;
     add(s.add.rectangle(rx - 10, 4, 1, this.size.h - 12, paint("stone.light")).setOrigin(0));
     add(s.add.image(rx, 4, "ui", "icon/whistle").setOrigin(0));
-    add(new Label(s, rx + 16, 6, `${t("character.demerits")} ${rules?.demerits ?? prog.demerits}`, { font: "galmuri11", color: "red.dark" }).obj);
+    add(
+      new Label(s, rx + 16, 6, `${t("character.demerits")} ${rules?.demerits ?? prog.demerits}`, {
+        font: "galmuri11",
+        color: "red.dark",
+      }).obj,
+    );
     add(s.add.image(rx + 90, 4, "ui", "icon/merit").setOrigin(0));
-    add(new Label(s, rx + 106, 6, `${t("character.merits")} ${rules?.merits ?? prog.merits}`, { font: "galmuri11", color: "ink.dark" }).obj);
+    add(
+      new Label(s, rx + 106, 6, `${t("character.merits")} ${rules?.merits ?? prog.merits}`, {
+        font: "galmuri11",
+        color: "ink.dark",
+      }).obj,
+    );
     let y = 26;
     if (rules?.floorLeader) {
-      add(new Label(s, rx, y, termName("badge", "floor-leader"), { font: "galmuri9", color: "gold.deep" }).obj);
+      add(
+        new Label(s, rx, y, termName("badge", "floor-leader"), {
+          font: "galmuri9",
+          color: "gold.deep",
+        }).obj,
+      );
       y += 14;
     }
     // Titles: each a little 상장, gold-edged.
@@ -174,7 +229,12 @@ class CharacterPage {
       if (!a) continue;
       const title = N.ko[a.title] ?? id;
       const l = new Label(s, rx + 4, y + 3, title, { font: "galmuri9", color: "ink.dark" });
-      add(s.add.rectangle(rx, y, l.width + 9, 14, paint("gold.pale")).setOrigin(0).setStrokeStyle(1, paint("gold.dark")));
+      add(
+        s.add
+          .rectangle(rx, y, l.width + 9, 14, paint("gold.pale"))
+          .setOrigin(0)
+          .setStrokeStyle(1, paint("gold.dark")),
+      );
       add(l.obj);
       y += 18;
     }
@@ -183,7 +243,11 @@ class CharacterPage {
     if (rules?.meal) {
       const m = mealById(rules.meal.id);
       const d = N.descriptions.find((x) => x.id === `meal:${rules.meal?.id}`);
-      buffs.push({ icon: "icon/stamina", name: d ? (N.ko[d.name] ?? "") : (m?.id ?? ""), until: rules.meal.until });
+      buffs.push({
+        icon: "icon/stamina",
+        name: d ? (N.ko[d.name] ?? "") : (m?.id ?? ""),
+        until: rules.meal.until,
+      });
     }
     if (rules?.restedUntil && live.realMsUntil(rules.restedUntil) > 0) {
       buffs.push({ icon: "icon/pool", name: t("character.rested"), until: rules.restedUntil });
@@ -192,17 +256,27 @@ class CharacterPage {
     y = Math.max(y + 6, 96);
     for (const b of buffs) {
       add(s.add.image(rx, y, "ui", b.icon).setOrigin(0));
-      add(new Label(s, rx + 16, y + 2, b.name, { font: "galmuri9", color: b.until === null ? "red.dark" : "ink.dark" }).obj);
+      add(
+        new Label(s, rx + 16, y + 2, b.name, {
+          font: "galmuri9",
+          color: b.until === null ? "red.dark" : "ink.dark",
+        }).obj,
+      );
       if (b.until !== null) {
         const ms = Math.max(0, live.realMsUntil(b.until));
-        add(new Label(s, rx + 150, y + 2, clockLeft(ms), { font: "galmuri9", color: "stone.dark" }).obj);
+        add(
+          new Label(s, rx + 150, y + 2, clockLeft(ms), { font: "galmuri9", color: "stone.dark" })
+            .obj,
+        );
       }
       y += 16;
     }
   }
 
   private async allocate(): Promise<void> {
-    const add = Object.fromEntries(STAT_IDS.filter((id) => this.draft[id] > 0).map((id) => [id, this.draft[id]]));
+    const add = Object.fromEntries(
+      STAT_IDS.filter((id) => this.draft[id] > 0).map((id) => [id, this.draft[id]]),
+    );
     if (Object.keys(add).length === 0 || this.pending) return;
     this.pending = true;
     this.draw();
@@ -258,4 +332,3 @@ export function registerCharacter(): void {
     },
   });
 }
-
