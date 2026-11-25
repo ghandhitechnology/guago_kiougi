@@ -225,6 +225,6 @@ export const KIT: readonly KitGroup[] = [
   {
     title: "icons",
     paper: true,
-    sprites: ["icon", "menu", "emblem", "book", "book-dim"],
+    sprites: ["icon", "menu", "emblem", "book", "book-dim", "tool"],
   },
 ];
