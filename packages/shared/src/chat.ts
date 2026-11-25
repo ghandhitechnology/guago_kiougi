@@ -19,10 +19,13 @@ const SPEAK_CHANNELS: readonly string[] = CHAT_CHANNELS.filter((c) => c !== "sys
 
 /** User-perceived characters per message, counted after trimming. */
 export const CHAT_MAX_LENGTH = 120;
-/** UTF-16 units per message after trimming: stops one "character" made of hundreds of marks. */
+/** UTF-16 units per message after cleaning: 120 characters of up to four units each. */
 export const CHAT_MAX_UNITS = 480;
-/** Longest raw string the validator accepts; anything longer is garbage and drops the client. */
-export const CHAT_MAX_RAW = 2048;
+/**
+ * Longest raw string the validator accepts; anything longer is garbage and drops the client. It
+ * leaves room for spaces and invisible characters that cleaning removes.
+ */
+export const CHAT_MAX_RAW = 1024;
 /** Rate limit: a burst of 5, then one more each second. */
 export const CHAT_BURST = 5;
 export const CHAT_PER_SECOND = 1;
@@ -57,6 +60,8 @@ export const REFUSAL_CODES = [
   "target_self",
   "no_map",
   "no_channel",
+  /** The filter could not read the message in its time budget. */
+  "unreadable",
 ] as const;
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 
@@ -139,9 +144,23 @@ export type PresenceMessage =
 
 // Text rules ---------------------------------------------------------------------------------
 
+/** Hangul jamo as the compatibility letters a keyboard types. */
+export const JAMO_INITIALS = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+export const JAMO_VOWELS = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ";
+/** Index 0 is "no final". */
+export const JAMO_FINALS = " ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ";
+
+/** A conjoining jamo (what NFD gives for a syllable) as its compatibility letter. */
+export function compatJamo(code: number): string | undefined {
+  if (code >= 0x1100 && code <= 0x1112) return JAMO_INITIALS[code - 0x1100];
+  if (code >= 0x1161 && code <= 0x1175) return JAMO_VOWELS[code - 0x1161];
+  if (code >= 0x11a8 && code <= 0x11c2) return JAMO_FINALS[code - 0x11a8 + 1];
+  return undefined;
+}
+
 const graphemes = new Intl.Segmenter("ko", { granularity: "grapheme" });
 
-/** User-perceived characters: a Hangul syllable typed as conjoining jamo counts once. */
+/** User-perceived characters. */
 export function chatLength(text: string): number {
   let n = 0;
   for (const _ of graphemes.segment(text)) n++;
@@ -153,21 +172,67 @@ export function chatGraphemes(text: string): { segment: string; index: number }[
   return Array.from(graphemes.segment(text), ({ segment, index }) => ({ segment, index }));
 }
 
-// Controls, line and paragraph separators, bidi overrides and isolates, and the BOM. Zero-width
-// joiners stay: emoji sequences need them.
-const STRIP = /[\p{Cc}\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/gu;
+/** UTF-16 units one character may take: the longest emoji sequences need about 15. */
+export const CHAT_MAX_CHARACTER_UNITS = 20;
+
+// Controls, line and paragraph separators and the braille blank become spaces.
+const BREAKS = /[\p{Cc}\u2028\u2029\u2800]/gu;
+// Conjoining jamo that NFC could not join into a syllable.
+const CONJOINING = /[\u1100-\u11ff\ua960-\ua97f\ud7b0-\ud7ff]/gu;
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
+const PICTOGRAPH = /\p{Extended_Pictographic}|\p{Emoji_Modifier}|\ufe0f/u;
+const ZWJ = "\u200d";
+const BLACK_FLAG = "\u{1f3f4}";
 
 /**
- * The text as it is delivered and logged: NFC, one line, runs of spaces collapsed, trimmed.
- * Checks the length rules; the result is never longer than `CHAT_MAX_LENGTH` characters.
+ * Drops invisible characters (zero-width spaces and joiners, the soft hyphen, word joiners,
+ * bidi controls, Hangul fillers), keeping only what emoji need: a joiner between pictographs,
+ * variation selectors, and the tag letters of a subdivision flag.
+ */
+function dropInvisible(text: string): string {
+  const cps = Array.from(text);
+  let out = "";
+  let keptTag = false;
+  cps.forEach((cp, i) => {
+    const code = cp.codePointAt(0) ?? 0;
+    const prev = cps[i - 1] ?? "";
+    const next = cps[i + 1] ?? "";
+    const tag = code >= 0xe0020 && code <= 0xe007f;
+    const keep =
+      !INVISIBLE.test(cp) ||
+      (cp === ZWJ && PICTOGRAPH.test(prev) && PICTOGRAPH.test(next)) ||
+      (code >= 0xfe00 && code <= 0xfe0f && prev !== "" && !INVISIBLE.test(prev)) ||
+      (tag && (prev === BLACK_FLAG || keptTag));
+    keptTag = tag && keep;
+    if (keep) out += cp;
+  });
+  return out;
+}
+
+/**
+ * The text as it is delivered and logged: NFC, one line, no invisible characters, stray
+ * conjoining jamo as the letters they show, runs of spaces collapsed, trimmed. Checks the length
+ * rules; the result is at most `CHAT_MAX_LENGTH` characters and `CHAT_MAX_UNITS` units.
  */
 export function cleanChatText(
   raw: string,
 ): { ok: true; text: string } | { ok: false; code: "empty" | "too_long" } {
-  const text = raw.normalize("NFC").replace(STRIP, " ").replace(/\s+/gu, " ").trim();
+  if (raw.length > CHAT_MAX_RAW) return { ok: false, code: "too_long" };
+  const text = dropInvisible(
+    raw
+      .normalize("NFC")
+      .replace(CONJOINING, (c) => compatJamo(c.codePointAt(0) ?? 0) ?? "")
+      .replace(BREAKS, " "),
+  )
+    .replace(/\s+/gu, " ")
+    .trim();
   if (text === "") return { ok: false, code: "empty" };
-  if (text.length > CHAT_MAX_UNITS || chatLength(text) > CHAT_MAX_LENGTH) {
-    return { ok: false, code: "too_long" };
+  if (text.length > CHAT_MAX_UNITS) return { ok: false, code: "too_long" };
+  let n = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    if (++n > CHAT_MAX_LENGTH || segment.length > CHAT_MAX_CHARACTER_UNITS) {
+      return { ok: false, code: "too_long" };
+    }
   }
   return { ok: true, text };
 }
