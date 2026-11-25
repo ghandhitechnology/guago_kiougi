@@ -67,9 +67,12 @@ export function createEconomy(db: Db, options: EconomyOptions = {}) {
       return [economyRoutes(auth, ops)];
     },
 
-    /** Forgets old operation ids; see `pruneOperations`. Run every few minutes. */
-    prune(): Promise<number> {
-      return pruneOperations(db, grants.inflightIds());
+    /**
+     * Forgets old operation ids; see `pruneOperations`. Run every few minutes. `keep` adds the
+     * in-flight ids of other batching buffers (the living world's quest progress).
+     */
+    prune(keep: readonly string[] = []): Promise<number> {
+      return pruneOperations(db, [...grants.inflightIds(), ...keep]);
     },
   };
 }

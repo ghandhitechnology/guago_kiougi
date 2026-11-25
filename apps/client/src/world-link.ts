@@ -27,7 +27,6 @@ import {
   type ChangeNotice,
   type ChatLine,
   type ChatSend,
-  CLOSE_SESSION_REPLACED,
   CLUB_NOTICE_LENGTH,
   type ClubApplication,
   type ClubInvite,
@@ -35,6 +34,7 @@ import {
   CONTROL_MODES,
   cleanChatText,
   cleanText,
+  closeEnd,
   type Done,
   type FriendEntry,
   type FriendRequest,
@@ -77,6 +77,10 @@ export type WorldStatus =
   | "reconnecting"
   /** The account joined somewhere else. Final: show it and offer a fresh start. */
   | "replaced"
+  /** An admin closed the session (`CLOSE_KICKED`). Final; logging in again works. */
+  | "kicked"
+  /** The account was banned (`CLOSE_BANNED`). Final; logging in answers `account_banned`. */
+  | "banned"
   /** No session or no character. Final. */
   | "signedOut"
   /** `close()` was called. Final. */
@@ -175,11 +179,11 @@ export interface WorldLink {
   /** One living-world view (`live.read`): the Page, the board, the 도감, the 연구노트, the rules. */
   read<K extends LiveReadKind>(what: K): Promise<LiveCall<LiveView<K>>>;
   /**
-   * A 도움 notice: post one, take one, or take yours down. Resolves once the server sends the
+   * A 도움 notice: post one, take one, give a taken one back, or take yours down. Resolves once the server sends the
    * notice's new state, or with the refusal.
    */
   help(
-    action: "post" | "take" | "cancel",
+    action: "post" | "take" | "cancel" | "drop",
     body: { template?: HelpTemplate; quest?: string; notice?: string },
   ): Promise<LiveCall<null>>;
   close(): Promise<void>;
@@ -542,8 +546,9 @@ export function connectWorld(
       for (const n of [...requests.keys()]) settleRequest(n, { ok: false, code: "offline" });
       for (const [id, p] of [...ops]) settleOp(id, { id, op: p.op, ok: false, error: "offline" });
       for (const n of [...reads.keys()]) settleRead(n, { ok: false, code: "offline" });
-      if (code === CLOSE_SESSION_REPLACED) {
-        setStatus("replaced");
+      const end = closeEnd(code);
+      if (end) {
+        setStatus(end);
         return;
       }
       if (!stopped) await sleep(wait);
@@ -660,7 +665,9 @@ export function connectWorld(
           ? LIVE_MESSAGES.helpPost
           : action === "take"
             ? LIVE_MESSAGES.helpTake
-            : LIVE_MESSAGES.helpCancel;
+            : action === "drop"
+              ? LIVE_MESSAGES.helpDrop
+              : LIVE_MESSAGES.helpCancel;
       const message =
         action === "post"
           ? { template: body.template, ...(body.quest ? { quest: body.quest } : {}), n }

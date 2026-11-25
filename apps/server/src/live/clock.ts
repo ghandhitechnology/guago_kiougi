@@ -3,7 +3,7 @@
  * runs from an anchor at a rate, so a test server can play a 13-week Page in 90 minutes and an
  * admin can step it. The anchor is stored with the server state and survives a restart.
  */
-import { type ClockAnchor, clockAt, reanchor } from "@guago/shared";
+import { type ClockAnchor, checkAnchor, clockAt, reanchor } from "@guago/shared";
 
 export class LiveClock {
   private anchor: ClockAnchor;
@@ -41,9 +41,9 @@ export class LiveClock {
     return this.set(reanchor(this.anchor, this.wall(), { rate }));
   }
 
-  /** Replaces the anchor (loading the stored one). */
+  /** Replaces the anchor (loading the stored one). Refuses one that cannot run a clock. */
   set(anchor: ClockAnchor): ClockAnchor {
-    this.anchor = anchor;
+    this.anchor = checkAnchor(anchor);
     for (const l of this.listeners) l(anchor);
     return anchor;
   }

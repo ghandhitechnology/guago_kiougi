@@ -18,6 +18,8 @@ export const LIVE_MESSAGES = {
   helpTake: "quest.help.take",
   /** Client to server: `HelpCancel`, by the poster, while nobody has taken the notice. */
   helpCancel: "quest.help.cancel",
+  /** Client to server: `HelpDrop`, by the helper, giving a taken notice back. */
+  helpDrop: "quest.help.drop",
   /** Server to client: `LivePush`. */
   push: "live",
 } as const;
@@ -47,6 +49,7 @@ export interface HelpTake {
 }
 
 export type HelpCancel = HelpTake;
+export type HelpDrop = HelpTake;
 
 /** Why a living-world request was refused. The client owns the copy for each. */
 export const LIVE_REFUSAL_CODES = [
@@ -110,7 +113,7 @@ export interface PageView {
   nextWeekly: number;
 }
 
-export type NoticeCadence = "daily" | "weekly" | "repeat" | "story" | "help";
+export type NoticeCadence = "daily" | "weekly" | "repeat" | "story" | "help" | "chore";
 
 /** A notice on a player's board: the quest row and what it was drawn as. */
 export interface NoticeView extends QuestView {
@@ -152,6 +155,8 @@ export interface BoardView {
   /** Repeatables claimed today, for the step-down. */
   repeatsToday: number;
   story: NoticeView[];
+  /** Today's chores (청소 당번): finished in place, they pay their 상점 at once. */
+  chores: NoticeView[];
   help: {
     /** The notice this player posted, while it is up. */
     mine: HelpNoticeView | null;
@@ -232,7 +237,9 @@ export type LivePush =
   /** 명령퇴사: home until then (game ms). */
   | { t: "home"; until: number }
   /** An award was given (`narrative.awards` id). */
-  | { t: "award"; award: string };
+  | { t: "award"; award: string }
+  /** A scene's `play` condition the server met (`home-minute:3` in the home scene). */
+  | { t: "scene"; until: string };
 
 // Validators --------------------------------------------------------------------------------
 
@@ -285,6 +292,7 @@ export const helpTakeSchema = schema<HelpTake>((v) => {
 });
 
 export const helpCancelSchema: WorldMessageSchema<HelpCancel> = helpTakeSchema;
+export const helpDropSchema: WorldMessageSchema<HelpDrop> = helpTakeSchema;
 
 /** Reads a player may make: a burst, then so many a second. */
 export const LIVE_RATE = { burst: 6, perSecond: 1 } as const;
