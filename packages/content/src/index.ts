@@ -7,4 +7,5 @@ export * from "./fields.ts";
 export * from "./maps.ts";
 export * from "./modes.ts";
 export * from "./monsters.ts";
+export * as narrative from "./narrative/index.ts";
 export * from "./statuses.ts";
