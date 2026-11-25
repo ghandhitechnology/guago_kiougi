@@ -373,3 +373,15 @@ describe("the founding fee through the item executor", () => {
     expect(audit.violations).toEqual([]);
   });
 });
+
+describe("a well-formed id of no character", () => {
+  it("is answered no_player, never a server error", async () => {
+    const me = await character();
+    const ghost = "00000000-0000-4000-8000-00000000dead";
+    const answers = [
+      await social.friends.accept(me, ghost).catch((e: unknown) => e),
+      await social.friends.remove(me, ghost).catch((e: unknown) => e),
+    ];
+    expect(answers.map(codeOf)).toEqual(["no_player", "no_player"]);
+  });
+});

@@ -35,6 +35,8 @@ const CONSTRAINTS: Readonly<Record<string, RefusalCode>> = {
   clubs_application_count_check: "applications_full",
   clubs_invite_count_check: "invites_full",
   board_posts_author_key: "post_active",
+  // A well-formed id of no character: its counter row cannot be made.
+  social_counts_character_id_characters_id_fk: "no_player",
   // A club disbanded under a join or an invite: the foreign key into `clubs` fails.
   club_members_club_id_clubs_id_fk: "no_club",
   club_applications_club_id_clubs_id_fk: "no_club",
