@@ -7,6 +7,7 @@ import { type ApiRoute, createApiHandler, type HttpSettings } from "./auth/http.
 import type { AuthService } from "./auth/service.ts";
 import type { ChatFilter } from "./chat/filter.ts";
 import type { ChatSink } from "./chat/log.ts";
+import { type GrantBuffer, provideGrants } from "./economy/grants.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { MapRoom } from "./map-room.ts";
 import { allRooms } from "./metrics.ts";
@@ -37,9 +38,17 @@ export function createGameServer(
   settings: HttpSettings,
   looks: () => LookOptions,
   chat: { filter?: ChatFilter; log?: ChatSink } = {},
-  economy: { ops?: OpHandler; routes?: readonly ApiRoute[] } = {},
+  economy: { ops?: OpHandler; routes?: readonly ApiRoute[]; grants?: GrantBuffer } = {},
 ) {
-  provideSeatServices({ auth, ...settings });
+  const { grants } = economy;
+  provideGrants(grants);
+  // A character's pending combat credit lands before their seat is freed, so the next login
+  // reads it.
+  provideSeatServices({
+    auth,
+    ...settings,
+    ...(grants ? { onLeave: (id: string) => grants.flush(id) } : {}),
+  });
   provideWorldServices({ ...chat, ...(economy.ops ? { ops: economy.ops } : {}) });
   const api = createApiHandler(auth, settings, looks, economy.routes);
 

@@ -16,6 +16,7 @@
  */
 import { Client, type Room } from "@colyseus/sdk";
 import {
+  type ChangeNotice,
   type ChatLine,
   type ChatSend,
   CLOSE_SESSION_REPLACED,
@@ -27,6 +28,7 @@ import {
   type PresenceMessage,
   type Refusal,
   type RefusalCode,
+  ResultLog,
   ROOMS_PATH,
   type SpeakChannel,
   type SystemLine,
@@ -73,7 +75,9 @@ export type WorldEvent =
   | { type: "chat"; line: ChatLine; mine: boolean }
   | { type: "system"; line: SystemLine }
   /** Every operation result once, including those of calls made before a reconnect. */
-  | { type: "result"; result: OpResult };
+  | { type: "result"; result: OpResult }
+  /** A change the player did not ask for (a combat grant), applied like a result's, by `rev`. */
+  | { type: "change"; change: ChangeNotice };
 
 export interface WorldLink {
   readonly status: WorldStatus;
@@ -129,7 +133,7 @@ export function connectWorld(
     string,
     { op: OpName; resolve: (r: OpCall) => void; timer: ReturnType<typeof setTimeout> | undefined }
   >();
-  const seenResults = new Set<string>();
+  const results = new ResultLog(SEEN_RESULTS);
   let status: WorldStatus = "connecting";
   let me: string | undefined;
   let room: Room | undefined;
@@ -207,14 +211,11 @@ export function connectWorld(
       if (fresh(line.id)) emit({ type: "system", line });
     });
     joined.onMessage(WORLD_MESSAGES.result, (result: OpResult) => {
-      if (!seenResults.has(result.id)) {
-        seenResults.add(result.id);
-        if (seenResults.size > SEEN_RESULTS) {
-          seenResults.delete(seenResults.values().next().value as string);
-        }
-        emit({ type: "result", result });
-      }
+      if (results.admit(result)) emit({ type: "result", result });
       settleOp(result.id, result);
+    });
+    joined.onMessage(WORLD_MESSAGES.change, (change: ChangeNotice) => {
+      emit({ type: "change", change });
     });
     joined.onMessage(WORLD_MESSAGES.refused, (r: Refusal) => {
       if (r.type !== WORLD_MESSAGES.chat || r.n === undefined) return;

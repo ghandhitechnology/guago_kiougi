@@ -7,6 +7,7 @@ import { type AuthContext, type Client, CloseCode, Room, ServerError } from "@co
 import {
   CHAT_BURST,
   CHAT_PER_SECOND,
+  type ChangeNotice,
   type Character,
   type ChatLine,
   type ChatSend,
@@ -228,6 +229,11 @@ export class WorldRoom extends Room {
       masked: false,
       at: new Date(sent.at),
     });
+  }
+
+  /** A change the player did not ask for (a combat grant), sent to them if they are online. */
+  notify(characterId: string, change: ChangeNotice): void {
+    this.byCharacter.get(characterId)?.client.send(WORLD_MESSAGES.change, change);
   }
 
   /** Called when a character's level changes, for presence and the 전체 level gate. */

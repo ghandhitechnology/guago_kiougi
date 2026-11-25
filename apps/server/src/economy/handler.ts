@@ -5,28 +5,27 @@
  * session belongs to. Every request gets exactly one `OpResult` with its id.
  */
 import {
+  INVENTORY_RATE,
   type InventorySnapshot,
+  isFinalResult,
   OP_RATE,
+  OP_REFUSAL_RATE,
+  OP_TOTAL_RATE,
   type OpMessage,
-  type OpName,
   type OpResult,
   parseOpMessage,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
-import type { Executor } from "./executor.ts";
+import { Buckets } from "./buckets.ts";
+import { type Executor, livePage } from "./executor.ts";
 import { readInventory } from "./reads.ts";
-
-interface Bucket {
-  tokens: number;
-  at: number;
-}
 
 export interface OpHandlerOptions {
   db: Db;
   executor: Executor;
   now?: () => number;
-  /** The live Page (see `ExecutorOptions.page`). */
+  /** The live Page; the executor's `page` must be the same function. */
   page?: () => number;
 }
 
@@ -36,46 +35,48 @@ export function createOpHandler({
   db,
   executor,
   now = Date.now,
-  page = () => 1,
+  page = livePage,
 }: OpHandlerOptions) {
-  const buckets = new Map<string, Bucket>();
-  let sweptAt = 0;
+  const buckets = new Buckets();
 
-  /** Token bucket per character and operation: 0 when it may go ahead, else ms to wait. */
-  function take(characterId: string, op: OpName, at: number): number {
-    const { burst, perSecond } = OP_RATE[op] ?? OP_RATE.default;
-    const key = `${characterId}\u0000${op}`;
-    const bucket = buckets.get(key) ?? { tokens: burst, at };
-    bucket.tokens = Math.min(burst, bucket.tokens + ((at - bucket.at) / 1000) * perSecond);
-    bucket.at = at;
-    buckets.set(key, bucket);
-    if (at - sweptAt > 60_000) sweep(at);
-    if (bucket.tokens >= 1) {
-      bucket.tokens -= 1;
-      return 0;
-    }
-    return Math.ceil(((1 - bucket.tokens) / perSecond) * 1000);
-  }
-
-  /** Drops buckets that have refilled: they hold nothing a fresh one would not. */
-  function sweep(at: number): void {
-    sweptAt = at;
-    for (const [key, b] of buckets) if (at - b.at > 60_000) buckets.delete(key);
-  }
-
-  /** A message that already passed its schema. */
+  /**
+   * A message that already passed its schema. It waits for three budgets of its character: its
+   * type's, all types' together, and recorded refusals'. Over any of them it is answered
+   * `rate_limited` and neither run nor recorded.
+   */
   async function run(characterId: string, message: OpMessage): Promise<OpResult> {
-    const retryMs = take(characterId, message.op, now());
+    const at = now();
+    const rate = OP_RATE[message.op] ?? OP_RATE.default;
+    const keys = {
+      type: `${characterId}\u0000${message.op}`,
+      all: `${characterId}\u0000*`,
+      refused: `${characterId}\u0000refused`,
+    };
+    const retryMs = Math.max(
+      buckets.wait(keys.type, rate, at),
+      buckets.wait(keys.all, OP_TOTAL_RATE, at),
+      buckets.wait(keys.refused, OP_REFUSAL_RATE, at),
+    );
     if (retryMs > 0) {
       return { id: message.id, op: message.op, ok: false, error: "rate_limited", retryMs };
     }
+    buckets.spend(keys.type, rate, at);
+    buckets.spend(keys.all, OP_TOTAL_RATE, at);
+    let result: OpResult;
     try {
       // Only client operations parse, so the result names one.
-      return (await executor.execute(characterId, message.id, message.op, message.req)) as OpResult;
+      result = (await executor.execute(
+        characterId,
+        message.id,
+        message.op,
+        message.req,
+      )) as OpResult;
     } catch {
       // Logged by the executor. Nothing was recorded, so a retry of the same id may still land.
       return { id: message.id, op: message.op, ok: false, error: "server_error" };
     }
+    if (!result.ok && isFinalResult(result)) buckets.spend(keys.refused, OP_REFUSAL_RATE, now());
+    return result;
   }
 
   return {
@@ -92,6 +93,11 @@ export function createOpHandler({
         ok: false,
         error: "bad_request",
       };
+    },
+
+    /** Milliseconds until the character may read its inventory again; 0 now, and it counts. */
+    inventoryWait(characterId: string): number {
+      return buckets.take(`${characterId}\u0000inventory`, INVENTORY_RATE, now());
     },
 
     /**

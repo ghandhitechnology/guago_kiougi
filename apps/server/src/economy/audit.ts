@@ -4,7 +4,7 @@
  */
 import { TIERS } from "@guago/shared";
 import { sql } from "drizzle-orm";
-import { OPERATION_DAYS, type Queryable } from "./executor.ts";
+import { OPERATION_RETENTION_MINUTES, type Queryable } from "./executor.ts";
 
 export interface Violation {
   check: string;
@@ -98,7 +98,7 @@ const CHECKS: Record<string, ReturnType<typeof sql>> = {
     select distinct l.character_id, 'entry of unrecorded operation ' || l.operation_id as detail
     from economy_ledger l
     left join operations o on o.character_id = l.character_id and o.op_id = l.operation_id
-    where o.op_id is null and l.at > now() - make_interval(days => ${OPERATION_DAYS - 1})`,
+    where o.op_id is null and l.at > now() - make_interval(mins => ${OPERATION_RETENTION_MINUTES - 10})`,
 };
 
 export async function checkInvariants(q: Queryable): Promise<AuditReport> {

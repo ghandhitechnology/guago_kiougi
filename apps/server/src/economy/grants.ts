@@ -1,17 +1,24 @@
 /**
- * Batched kill credit. Combat calls `add` once per credited kill, with no I/O; every few seconds
- * each character's pending credit goes to the executor as one `grant` operation, and the map
- * room calls `flush(characterId)` when a character leaves and `flush()` before the process
- * exits. A horde's kills cost one transaction per player per flush, never one per monster.
+ * Batched kill credit. Combat calls `grants()?.add(characterId, credit)` once per credited kill,
+ * with no I/O; every few seconds each character's pending credit goes to the executor as one
+ * `grant` operation. A character's credit is also flushed when they leave a room (the seats do
+ * it) and everyone's at shutdown (`shutdown.ts`). A horde's kills cost one transaction per player
+ * per flush, never one per monster.
  *
- * A batch takes its operation id when it leaves the buffer and keeps it until it lands. A flush
- * that failed or whose answer was lost is retried under the same id, so it applies exactly once.
- * What is still in memory when the process dies is lost, like an unsaved position (PLAN §19).
+ * A batch takes its operation id when it leaves the buffer and keeps it until it lands: a flush
+ * that failed on the connection, or whose answer was lost, is retried under the same id and
+ * applies exactly once. A batch the database or the rules refuse would fail the same way forever;
+ * it is written to the log whole, so it can be put back by hand, and dropped, so the character's
+ * later credit keeps flowing. Credit that is malformed (NaN EXP, a fraction, an unknown item) is
+ * refused at `add` and never joins a batch. What is still in memory when the process dies is lost,
+ * like an unsaved position (PLAN §19).
  */
 import { randomUUID } from "node:crypto";
 import { type Drop, ledgerKey } from "@guago/content";
-import type { Executor } from "./executor.ts";
-import type { GrantRequest } from "./ops.ts";
+import type { ChangeNotice } from "@guago/shared";
+import { describeError } from "../db/index.ts";
+import { type Executor, isTransient } from "./executor.ts";
+import { checkDrop, checkGrant, type GrantRequest } from "./ops.ts";
 
 export const GRANT_FLUSH_MS = 5000;
 
@@ -48,20 +55,37 @@ interface Pending {
   tools: Drop[];
 }
 
+export interface GrantBufferOptions {
+  /** A batch landed: its change notice, for the player's client. */
+  onLanded?(characterId: string, change: ChangeNotice): void;
+  /** Where refused credit and dropped batches are written; `console.error` by default. */
+  log?(line: string): void;
+}
+
 export class GrantBuffer {
   private readonly executor: Pick<Executor, "execute">;
+  private readonly options: GrantBufferOptions;
   private readonly prefix = `grant:${randomUUID()}`;
   private seq = 0;
   private pending = new Map<string, Pending>();
   private inflight = new Map<string, Batch>();
   private running = new Map<string, Promise<void>>();
 
-  constructor(executor: Pick<Executor, "execute">) {
+  constructor(executor: Pick<Executor, "execute">, options: GrantBufferOptions = {}) {
     this.executor = executor;
+    this.options = options;
   }
 
-  /** One credited kill (or any credit combat makes): EXP after multipliers and the drops. */
-  add(characterId: string, credit: { exp: number; drops: readonly Drop[] }): void {
+  /**
+   * One credited kill (or any credit combat makes): EXP after multipliers and the drops. Returns
+   * false, and keeps nothing, when the credit is malformed.
+   */
+  add(characterId: string, credit: { exp: number; drops: readonly Drop[] }): boolean {
+    const bad = checkGrant({ exp: credit.exp, drops: [...credit.drops] });
+    if (bad) {
+      this.log(`grant credit refused (${bad}): ${JSON.stringify({ characterId, credit })}`);
+      return false;
+    }
     let p = this.pending.get(characterId);
     if (!p) {
       p = { exp: 0, stacks: new Map(), tools: [] };
@@ -70,13 +94,13 @@ export class GrantBuffer {
     p.exp += credit.exp;
     for (const drop of credit.drops) {
       const key = stackKey(drop);
-      if (key === null) {
-        p.tools.push(drop);
-        continue;
-      }
-      const held = p.stacks.get(key);
-      p.stacks.set(key, held ? stack(held, drop) : drop);
+      const held = key === null ? undefined : p.stacks.get(key);
+      const stacked = held ? stack(held, drop) : drop;
+      // A stack that would pass its bound starts a new entry instead of overflowing.
+      if (key === null || checkDrop(stacked) !== null) p.tools.push(drop);
+      else p.stacks.set(key, stacked);
     }
+    return true;
   }
 
   /** Sends one character's credit, or everyone's. Resolves once each batch landed or failed. */
@@ -98,6 +122,15 @@ export class GrantBuffer {
   /** Characters with credit not yet written. */
   get waiting(): number {
     return new Set([...this.pending.keys(), ...this.inflight.keys()]).size;
+  }
+
+  /** Operation ids sent but not yet known to have landed; pruning must keep their records. */
+  inflightIds(): string[] {
+    return [...this.inflight.values()].map((b) => b.opId);
+  }
+
+  private log(line: string): void {
+    (this.options.log ?? console.error)(line);
   }
 
   private serial(characterId: string): Promise<void> {
@@ -122,12 +155,40 @@ export class GrantBuffer {
       };
       this.inflight.set(characterId, batch);
     }
+    let result: Awaited<ReturnType<Executor["execute"]>>;
     try {
-      await this.executor.execute(characterId, batch.opId, "grant", batch.request);
-      // Landed, or refused for good (the character is gone): either way it is done.
+      result = await this.executor.execute(characterId, batch.opId, "grant", batch.request);
+    } catch (error) {
+      // The connection failed: the batch stays in flight under its id for the next flush.
+      if (isTransient(error)) return;
       this.inflight.delete(characterId);
-    } catch {
-      // Logged by the executor; the batch stays in flight under its id for the next flush.
+      return this.drop(characterId, batch, describeError(error));
+    }
+    this.inflight.delete(characterId);
+    if (!result.ok) return this.drop(characterId, batch, result.error);
+    try {
+      this.options.onLanded?.(characterId, result.change);
+    } catch (error) {
+      this.log(`grant notice failed: ${describeError(error)}`);
     }
   }
+
+  /** A batch that would fail the same way forever: logged whole, then let go. */
+  private drop(characterId: string, batch: Batch, reason: string): void {
+    this.log(
+      `grant dropped (${reason}): ${JSON.stringify({ characterId, opId: batch.opId, request: batch.request })}`,
+    );
+  }
+}
+
+let current: GrantBuffer | undefined;
+
+/** Called once at server start. */
+export function provideGrants(buffer: GrantBuffer | undefined): void {
+  current = buffer;
+}
+
+/** The process's grant buffer, for combat: `grants()?.add(characterId, credit)`. */
+export function grants(): GrantBuffer | undefined {
+  return current;
 }

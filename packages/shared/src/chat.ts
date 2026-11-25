@@ -52,6 +52,11 @@ export const WORLD_MESSAGES = {
    * operation. Each operation is sent under its own name (`OPS`) with `{ id, req }`.
    */
   result: "result",
+  /**
+   * Server to client: `ChangeNotice` (inventory.ts) for a change the player did not ask for, such
+   * as a combat grant landing. Applied like an operation's change, by `rev`.
+   */
+  change: "change",
 } as const;
 
 /** Why a request was not carried out. The client owns the copy for each. */

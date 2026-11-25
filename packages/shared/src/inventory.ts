@@ -99,6 +99,16 @@ export interface OpRate {
   readonly perSecond: number;
 }
 
+/** All operations of one character together: well under the sum of the per-type limits. */
+export const OP_TOTAL_RATE: OpRate = { burst: 20, perSecond: 8 };
+/**
+ * Refusals the server records under their id (a 필기 on an item that does not exist). Past
+ * this, requests are answered `rate_limited` without being run or recorded.
+ */
+export const OP_REFUSAL_RATE: OpRate = { burst: 10, perSecond: 0.5 };
+/** Full inventory reads per character; after login, change notices keep a client current. */
+export const INVENTORY_RATE: OpRate = { burst: 4, perSecond: 0.5 };
+
 /** How fast each operation may be sent, per character: a burst, then so many a second. */
 export const OP_RATE: { readonly default: OpRate } & Readonly<Partial<Record<OpName, OpRate>>> = {
   default: { burst: 10, perSecond: 5 },
@@ -195,6 +205,8 @@ export interface ChangeNotice {
   wallet?: Partial<WalletView>;
   materials?: Record<string, number>;
   items?: ItemView[];
+  /** Items whose EXP alone moved (equipped books sharing their owner's EXP): id to new EXP. */
+  exp?: Record<string, number>;
   removed?: string[];
   progression?: ProgressionView;
   codex?: string[];
@@ -203,6 +215,46 @@ export interface ChangeNotice {
 
 /** Per-operation details beyond the change: whether 필기 landed, what a claim paid. */
 export type OpOutcome = Readonly<Record<string, string | number | boolean | readonly string[]>>;
+
+/**
+ * Answers the server does not record under the id, because nothing was decided: a retry of the
+ * same id may still land. Every other result is the id's one result.
+ */
+export const UNRECORDED_ERRORS: readonly OpError[] = [
+  "bad_request",
+  "rate_limited",
+  "server_error",
+  "op_id_reused",
+  "no_character",
+  "insufficient",
+];
+
+export function isFinalResult(result: OpResult): boolean {
+  return result.ok || !UNRECORDED_ERRORS.includes(result.error);
+}
+
+/**
+ * Results already handled, by id, to drop the repeats a reconnect replays. Only final results
+ * are remembered, so the result of a retried id (after `rate_limited`, say) still gets through.
+ */
+export class ResultLog {
+  private readonly seen = new Set<string>();
+  private readonly size: number;
+
+  constructor(size = 64) {
+    this.size = size;
+  }
+
+  /** True when `result` is new and should be handled. */
+  admit(result: OpResult): boolean {
+    if (this.seen.has(result.id)) return false;
+    if (isFinalResult(result)) {
+      this.seen.add(result.id);
+      if (this.seen.size > this.size) this.seen.delete(this.seen.values().next().value as string);
+    }
+    return true;
+  }
+}
 
 /** The one result an operation id gets. A retry of the same id gets the same result. */
 export type OpResult =

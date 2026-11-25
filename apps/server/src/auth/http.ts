@@ -67,6 +67,8 @@ class BodyError extends Error {}
 export interface RouteContext {
   method: string;
   path: string;
+  /** HMAC of the client IP, for per-address limits. */
+  ip: string;
   query: URLSearchParams;
   /** The account behind the session cookie, or null. */
   account(): Promise<AuthedAccount | null>;
@@ -254,6 +256,7 @@ export function createApiHandler(
     const ctx: RouteContext = {
       method,
       path,
+      ip,
       query,
       account: () => auth.authenticate(token),
       readJson: () => readJson(req),

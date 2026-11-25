@@ -501,38 +501,40 @@ export function isClientOp(name: string): name is OpName {
 
 const KEY_PART = /^[a-z0-9-]{1,40}$/;
 const TOOL_IDS = new Set(TOOLS.map((t) => t.id));
-/** Whole and above zero. Coin late in a Theme passes 2^53; the ledger stores it exactly. */
-const positive = (n: unknown): n is number =>
-  Number.isInteger(n) && (n as number) > 0 && (n as number) < 1e30;
+/** Most of one material a stack holds: `materials_qty_check`, exact in a JS number. */
+export const MAX_STACK = Number.MAX_SAFE_INTEGER;
+/** Most 솔방울 one drop carries. Late-Theme coin passes 2^53; the ledger stores it exactly. */
+const MAX_COIN = 1e30;
+const whole = (n: unknown, max: number): n is number =>
+  Number.isInteger(n) && (n as number) > 0 && (n as number) <= max;
 
-/**
- * Checks a grant before it reaches the executor. Combat is server code, but a bug there must not
- * mint fractions, negative amounts or items that do not exist.
- */
+/** What is wrong with one drop, or null. Combat is server code, but a bug there must not mint. */
+export function checkDrop({ item, source }: Drop): string | null {
+  if (source?.kind !== "monster" || !["normal", "elite", "boss"].includes(source.rank)) {
+    return "source";
+  }
+  if (!KEY_PART.test(source.fieldId) || !KEY_PART.test(source.monsterId)) return "source";
+  switch (item?.kind) {
+    case "coin":
+      return whole(item.amount, MAX_COIN) ? null : "coin";
+    case "page":
+      return whole(item.qty, MAX_STACK) && isBook(item.book) ? null : "page";
+    case "ink":
+    case "binding":
+      return whole(item.qty, MAX_STACK) ? null : item.kind;
+    case "tool":
+      return TOOL_IDS.has(item.tool) ? null : "tool";
+    default:
+      return "kind";
+  }
+}
+
+/** What is wrong with a grant, or null: no fractions, negatives, NaN, overflows or unknown items. */
 export function checkGrant(req: GrantRequest): string | null {
   if (!Number.isFinite(req.exp) || req.exp < 0) return "exp";
-  for (const { item, source } of req.drops) {
-    if (source.kind !== "monster" || !["normal", "elite", "boss"].includes(source.rank)) {
-      return "source";
-    }
-    if (!KEY_PART.test(source.fieldId) || !KEY_PART.test(source.monsterId)) return "source";
-    switch (item.kind) {
-      case "coin":
-        if (!positive(item.amount)) return "coin";
-        break;
-      case "page":
-        if (!positive(item.qty) || !isBook(item.book)) return "page";
-        break;
-      case "ink":
-      case "binding":
-        if (!positive(item.qty)) return item.kind;
-        break;
-      case "tool":
-        if (!TOOL_IDS.has(item.tool)) return "tool";
-        break;
-      default:
-        return "kind";
-    }
+  for (const drop of req.drops) {
+    const bad = checkDrop(drop);
+    if (bad) return bad;
   }
   return null;
 }

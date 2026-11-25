@@ -2,6 +2,7 @@
  * The persistent inventory and wallet (PLAN §8, §13, §19 to §22): one executor every change
  * goes through, the client request handler on top of it, batched combat grants and the reads.
  */
+import type { ChangeNotice } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import type { ApiRoute } from "../auth/http.ts";
 import type { AuthService } from "../auth/service.ts";
@@ -9,22 +10,45 @@ import type { Db } from "../db/index.ts";
 import {
   createExecutor,
   type ExecutorOptions,
-  OPERATION_DAYS,
+  livePage,
+  OPERATION_RETENTION_MINUTES,
   type Queryable,
 } from "./executor.ts";
 import { GrantBuffer } from "./grants.ts";
 import { createOpHandler, KIT_OPERATION_ID } from "./handler.ts";
 import { economyRoutes } from "./routes.ts";
 
-export function createEconomy(db: Db, options: ExecutorOptions = {}) {
-  const executor = createExecutor(db, options);
+/**
+ * Forgets operation ids past `OPERATION_RETENTION_MINUTES`, except the kit's and `keep` (grant
+ * batches still in flight). Returns how many were forgotten.
+ */
+export async function pruneOperations(db: Db, keep: readonly string[]): Promise<number> {
+  const { rowCount } = await db.execute(sql`
+    delete from operations
+    where at < now() - make_interval(mins => ${OPERATION_RETENTION_MINUTES})
+      and op_id <> ${KIT_OPERATION_ID}
+      and not (op_id = any(${sql.param([...keep])}::text[]))`);
+  return rowCount ?? 0;
+}
+
+export interface EconomyOptions extends ExecutorOptions {
+  /** A change the player did not ask for landed (a combat grant): its notice, for the client. */
+  onChange?(characterId: string, change: ChangeNotice): void;
+}
+
+export function createEconomy(db: Db, options: EconomyOptions = {}) {
+  // One live Page for the rules and the reads.
+  const page = options.page ?? livePage;
+  const executor = createExecutor(db, { ...options, page });
   const ops = createOpHandler({
     db,
     executor,
-    ...(options.page ? { page: options.page } : {}),
+    page,
     ...(options.now ? { now: () => (options.now as () => Date)().getTime() } : {}),
   });
-  const grants = new GrantBuffer(executor);
+  const grants = new GrantBuffer(executor, {
+    ...(options.onChange ? { onLanded: options.onChange } : {}),
+  });
   return {
     executor,
     ops,
@@ -40,11 +64,9 @@ export function createEconomy(db: Db, options: ExecutorOptions = {}) {
       return [economyRoutes(auth, ops)];
     },
 
-    /** Forgets operation ids past `OPERATION_DAYS`. The kit's id is kept for good. */
-    async prune(): Promise<void> {
-      await db.execute(sql`
-        delete from operations
-        where at < now() - make_interval(days => ${OPERATION_DAYS}) and op_id <> ${KIT_OPERATION_ID}`);
+    /** Forgets old operation ids; see `pruneOperations`. Run every few minutes. */
+    prune(): Promise<number> {
+      return pruneOperations(db, grants.inflightIds());
     },
   };
 }

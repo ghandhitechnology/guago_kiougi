@@ -22,7 +22,7 @@
  * two slots or share one, and the operation id is a primary key.
  */
 import { createHash, getRandomValues, randomUUID } from "node:crypto";
-import type { LedgerEntry, OpError, OpOutcome, OpResult, Purse } from "@guago/shared";
+import type { ChangeNotice, LedgerEntry, OpError, OpOutcome, OpResult, Purse } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import { CURRENT_COHORT } from "../auth/service.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
@@ -51,8 +51,12 @@ import {
   questView,
 } from "./rows.ts";
 
-/** Operation ids are kept this long (`Economy.prune`); a retry comes within seconds. */
-export const OPERATION_DAYS = 30;
+/**
+ * Operation ids are kept this long (`Economy.prune`), the kit's for good. A client retries within
+ * seconds (its call times out after 8 s; a dropped socket has 30 s to come back), and a grant
+ * batch still in flight keeps its record however old it is.
+ */
+export const OPERATION_RETENTION_MINUTES = 60;
 
 /** `db` itself or an open transaction on it: anything that can run a statement. */
 export type Queryable = Pick<Db, "execute">;
@@ -213,16 +217,55 @@ function plan(loaded: Loaded, applied: Applied, touched: ReadonlySet<string>, ma
   return { deltas, ledger, inserts, updates, removes } satisfies Plan;
 }
 
+/** True when the only thing that moved on an item is its EXP. */
+function onlyExp(before: ItemRow, after: ItemRow): boolean {
+  return (
+    before.exp !== after.exp &&
+    before.level === after.level &&
+    before.grade === after.grade &&
+    before.pilgi === after.pilgi &&
+    before.pilgiFails === after.pilgiFails &&
+    before.evolved === after.evolved &&
+    before.slot === after.slot
+  );
+}
+
+/**
+ * Items in a change notice: whole views for items that changed, and for books whose EXP alone
+ * moved (equipped books sharing their owner's EXP, every grant) just the new EXP.
+ */
+function notices(loaded: Loaded, p: Plan): Pick<ChangeNotice, "items" | "exp"> {
+  const exp: Record<string, number> = {};
+  const items = [...p.inserts];
+  for (const row of p.updates) {
+    const before = loaded.items.get(row.id) as ItemRow;
+    if (onlyExp(before, row)) exp[row.id] = row.exp;
+    else items.push(row);
+  }
+  return {
+    ...(items.length > 0 ? { items: items.map(itemView) } : {}),
+    ...(Object.keys(exp).length > 0 ? { exp } : {}),
+  };
+}
+
 // Loading -------------------------------------------------------------------------------------
 
+/**
+ * Steps 1 and 2. The lookup is its own statement on purpose: a transaction that waited for the
+ * lock re-reads only the locked row, so a join in the locking statement would miss the record
+ * the transaction it waited for just committed. A new statement sees it (READ COMMITTED).
+ */
 async function lockCharacter(q: Queryable, characterId: string, opId: string) {
-  const { rows } = await q.execute(sql`
-    select ${sql.raw(CHARACTER_COLUMNS)}, o.request_hash, o.result
-    from characters c
-    left join operations o on o.character_id = c.id and o.op_id = ${opId}
+  const locked = await q.execute(sql`
+    select ${sql.raw(CHARACTER_COLUMNS)} from characters c
     where c.id = ${characterId}
-    for no key update of c`);
-  return rows[0];
+    for no key update`);
+  const character = locked.rows[0];
+  if (!character) return undefined;
+  const recorded = await q.execute(sql`
+    select request_hash, result from operations
+    where character_id = ${characterId} and op_id = ${opId}`);
+  return { character, recorded: recorded.rows[0] };
 }
 
 async function loadItems(
@@ -448,11 +491,47 @@ async function record(
 
 // The executor --------------------------------------------------------------------------------
 
+/** The live Page until server state owns it (PLAN §10): the cohort new characters join. */
+export const livePage = (): number => CURRENT_COHORT;
+
+/**
+ * Errors worth retrying unchanged: the connection or the database server failed, not the
+ * request. Anything else (a broken rule, a refused constraint, a bug) fails the same way again.
+ */
+export function isTransient(error: unknown): boolean {
+  if (error instanceof ContractError) return false;
+  const { code } = pgErrorCode(error);
+  if (code) return /^(08|40|53|57|58)/.test(code) || code === "55P03" || /^E[A-Z]+$/.test(code);
+  const message = error instanceof Error ? error.message : "";
+  return /Connection terminated|timeout exceeded when trying to connect/.test(message);
+}
+
 export function createExecutor(db: Db, options: ExecutorOptions = {}) {
   const roll = options.random ?? cryptoRoll;
   const now = options.now ?? (() => new Date());
-  const page = options.page ?? (() => CURRENT_COHORT);
+  const page = options.page ?? livePage;
   const hooks = options.hooks ?? {};
+  const lanes = new Map<string, Promise<void>>();
+
+  /**
+   * One operation per character at a time in this process, queued before it takes a database
+   * connection, so a player flooding requests waits on their own queue and never parks the
+   * pool's connections on their character lock. The lock still orders operations from anywhere
+   * else (another process, a tool).
+   */
+  function inLane<T>(characterId: string, work: () => Promise<T>): Promise<T> {
+    const before = lanes.get(characterId) ?? Promise.resolve();
+    const result = before.then(work);
+    const done = result.then(
+      () => {},
+      () => {},
+    );
+    lanes.set(characterId, done);
+    void done.then(() => {
+      if (lanes.get(characterId) === done) lanes.delete(characterId);
+    });
+    return result;
+  }
 
   /** Steps 1 to 6 on an open transaction. Returns the result and, if applied, the new level. */
   async function run<K extends AnyOp>(
@@ -468,11 +547,11 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
 
     const found = await lockCharacter(q, op.characterId, op.opId);
     if (!found) return refuse("no_character");
-    if (found.request_hash !== null) {
-      if (found.request_hash !== hash) return refuse("op_id_reused");
-      return { result: found.result as ExecResult };
+    if (found.recorded) {
+      if (found.recorded.request_hash !== hash) return refuse("op_id_reused");
+      return { result: found.recorded.result as ExecResult };
     }
-    const character = characterFromDb(found);
+    const character = characterFromDb(found.character);
     const ctx: Ctx = { now: now(), page: page() };
     const made = new Set<string>();
     const env: Env = {
@@ -512,9 +591,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
           rev: written.character.rev,
           ...(written.wallet ? { wallet: written.wallet } : {}),
           ...(written.materials ? { materials: written.materials } : {}),
-          ...(p.inserts.length + p.updates.length > 0
-            ? { items: [...p.updates, ...p.inserts].map(itemView) }
-            : {}),
+          ...notices(loaded, p),
           ...(p.removes.length > 0 ? { removed: p.removes } : {}),
           ...(applied.character
             ? { progression: progressionView(written.character, ctx.now, ctx.page) }
@@ -548,6 +625,15 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     const op = { characterId, opId, name };
     const hash = requestHash(name, request);
     if (on.tx) return (await run(on.tx, op, request, hash)).result;
+    return inLane(characterId, () => transact(op, request, hash));
+  }
+
+  async function transact<K extends AnyOp>(
+    op: OpContext & { name: K },
+    request: Requests[K],
+    hash: string,
+  ): Promise<ExecResult> {
+    const { characterId, opId, name } = op;
     for (let attempt = 0; ; attempt++) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash));
