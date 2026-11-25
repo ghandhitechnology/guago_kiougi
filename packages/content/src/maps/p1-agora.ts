@@ -768,7 +768,7 @@ const map: MapSource = {
     main: { tile: [WOUND[0] + 8, WOUND[1]], facing: "right" },
     "campus-field": { tile: [WOUND[0] + 8, WOUND[1]], facing: "right" },
     "p1-colonnade": { tile: [69, 28], facing: "left" },
-    "p1-agora-edge": { tile: [2, 45], facing: "right" },
+    "p1-agora-edge": { tile: [3, 44], facing: "right" },
   },
   landmark: { name: "채색 주랑", tile: [STOA.x + STOA.bays, STOA.steps - 2] },
   blocks: [{ x: STOA.x - 1, y: STOA.steps - 4, w: STOA.bays * 2 + 2, h: 4 }],

@@ -1,4 +1,4 @@
-import { isSolidTile, type TileCollision } from "@guago/shared";
+import { isSolidTile, overlapsSolid, PLAYER_RADIUS, type TileCollision } from "@guago/shared";
 import { CUTSCENES } from "../narrative/cutscenes.ts";
 import { OPENING } from "../narrative/opening.ts";
 import type { Cutscene } from "../narrative/schema.ts";
@@ -221,6 +221,13 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
   for (const [name, s] of Object.entries(map.spawns)) {
     const [tx, ty] = tileOf(s);
     if (solid(tx, ty)) say(`spawn ${name} at tile ${tx},${ty} is not walkable`);
+    // A body set down here must fit, and must not be standing in a door it would walk straight
+    // back through.
+    else if (overlapsSolid(map, s.x, s.y, PLAYER_RADIUS))
+      say(`spawn ${name} at tile ${tx},${ty} puts a body into a wall`);
+    for (const p of map.portals)
+      if (tx >= p.rect.x && tx < p.rect.x + p.rect.w && ty >= p.rect.y && ty < p.rect.y + p.rect.h)
+        say(`spawn ${name} stands in portal ${p.id}`);
   }
   const reached = main ? reach(grid, tileOf(main)) : new Uint8Array(map.w * map.h);
   const lost: [number, number][] = [];
