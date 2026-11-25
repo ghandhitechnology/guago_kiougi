@@ -154,6 +154,11 @@ export interface SceneDef {
   readonly theme: string;
   /** Palette name filling the canvas before anything else. */
   readonly sky?: string;
+  /**
+   * Theme ground shadows are painted in on the contact sheet. Without it a shadow darkens the
+   * ground one ramp step; with it (cool violet under a golden sun) it reads as shade.
+   */
+  readonly shade?: string;
   /** Cells across and down. Without it the scene is one 480×270 screen (30×17 cells). */
   readonly size?: Vec;
   readonly legend: Readonly<Record<string, Cell>>;

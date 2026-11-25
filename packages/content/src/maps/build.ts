@@ -265,6 +265,7 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
     seed: src.seed,
     theme: src.theme,
     ...(src.sky ? { sky: src.sky } : {}),
+    ...(src.shade ? { shade: src.shade } : {}),
     size: [w, h],
     legend,
     ground: rows(draft.ground),

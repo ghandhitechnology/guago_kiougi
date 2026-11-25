@@ -536,6 +536,79 @@ const RIFT_EMBER = theme("rift-ember", {
   "ink.mid": "ink.dark",
 });
 
+/**
+ * Campus at 16:50, the sun low in the west: whites and highlights turn to gold, pale stone and
+ * dust warm up, and lawn tips catch the light. Mid and dark steps stay, so shadows keep their
+ * cool and the long shadows of the buildings read against warm ground.
+ */
+const CAMPUS_GOLDEN = theme("campus-golden", {
+  "stone.bright": "gold.pale",
+  "stone.pale": "clay.pale",
+  "stone.lamp": "clay.dust",
+  "stone.light": "stone.lamp",
+  "stone.vein": "stone.mid",
+  "stone.mid": "stone.vein",
+  "grass.bright": "gold.pale",
+  "grass.pale": "grass.bright",
+  "grass.soft": "grass.light",
+  "wood.pale": "clay.pale",
+  "wood.light": "clay.dust",
+  "clay.pale": "gold.pale",
+  "olive.light": "gold.light",
+  "navy.pale": "rose.pale",
+});
+
+/**
+ * Sun let through a gap between buildings onto golden ground, in two bands: the core turns lawn
+ * and stone a step brighter and warmer, the rim one step.
+ */
+const GOLDEN_SUN = theme("golden-sun", {
+  ...CAMPUS_GOLDEN.remap,
+  "stone.pale": "gold.pale",
+  "stone.light": "stone.lamp",
+  "stone.mid": "stone.vein",
+  "grass.light": "grass.pale",
+  "grass.soft": "grass.light",
+  "grass.mid": "grass.soft",
+  "wood.pale": "clay.pale",
+  "wood.light": "clay.dust",
+});
+
+const GOLDEN_WARM = theme("golden-warm", {
+  ...CAMPUS_GOLDEN.remap,
+  "stone.light": "stone.lamp",
+  "grass.light": "grass.soft",
+  "grass.mid": "grass.mid",
+  "wood.pale": "clay.dust",
+  "wood.light": "clay.light",
+});
+
+/**
+ * Shade at golden hour: what the low sun does not reach turns cool and a step or two darker,
+ * lawn to teal, warm stone to violet grey, dust to umber.
+ */
+const GOLDEN_SHADE = theme("golden-shade", {
+  "stone.bright": "stone.light",
+  "stone.pale": "stone.mid",
+  "stone.lamp": "stone.mid",
+  "stone.light": "stone.vein",
+  "stone.vein": "stone.dark",
+  "stone.mid": "stone.dark",
+  "stone.dark": "ink.mid",
+  "grass.bright": "grass.light",
+  "grass.pale": "grass.soft",
+  "grass.light": "board.light",
+  "grass.soft": "board.light",
+  "grass.mid": "board.mid",
+  "wood.pale": "wood.light",
+  "wood.light": "wood.mid",
+  "wood.mid": "wood.dark",
+  "clay.pale": "wood.light",
+  "clay.light": "clay.mid",
+  "gold.pale": "stone.light",
+  "gold.light": "gold.mid",
+});
+
 /** Page 1, Greece: the lawn dries to olive grass and the earth to warm, sunlit dust. */
 const GREECE = theme("greece", {
   "grass.bright": "stone.bright",
@@ -564,6 +637,10 @@ export const THEMES: readonly Theme[] = [
   RIFT_WARM,
   RIFT_EMBER,
   GREECE,
+  CAMPUS_GOLDEN,
+  GOLDEN_SUN,
+  GOLDEN_WARM,
+  GOLDEN_SHADE,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */

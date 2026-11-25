@@ -199,6 +199,8 @@ export interface MapSource extends Layers {
   readonly time: MapTime;
   /** Palette theme terrain and props are painted in on the contact sheet. */
   readonly theme: string;
+  /** Theme ground shadows are painted in on the contact sheet. */
+  readonly shade?: string;
   readonly sky?: string;
   readonly ambient: Ambient;
   /** One plan character per tile, every row the same width. */

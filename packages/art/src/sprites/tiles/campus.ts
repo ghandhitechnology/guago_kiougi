@@ -7,6 +7,7 @@ import {
   paint,
   type Rim,
   type Shape,
+  smooth,
   texture,
   tileOf,
 } from "../../paint.ts";
@@ -542,6 +543,51 @@ const lawnWalk = terrain({
   decals: LAWN_DECALS,
 });
 
+/**
+ * 보도블록 edged with a kerb where it meets bare dirt: worn shortcuts across the lawn end at the
+ * paving's kerb, not at a seam. The kerb's top is lit, its face drops two pixels to the dirt, and
+ * the dirt beside it lies in its shadow.
+ */
+function kerbPictures(): { outer: string[]; inner: string[] } {
+  const paver = Pic.of(pavers([], []));
+  const outer: string[] = [];
+  const inner: string[] = [];
+  SHAPES.forEach((shape) => {
+    for (const [kind, list, size] of [
+      ["outer", outer, 48],
+      ["inner", inner, 32],
+    ] as const) {
+      const isIn = inside(kind, { ...shape, radius: 2, holeRadius: 2 });
+      const pic = paint(size, size, isIn, {
+        fill: "K",
+        band: ["w", "k"],
+        lip: ["M", "S"],
+        under: "n",
+        beside: "n",
+      });
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (pic.at(x, y) === "K") pic.set(x, y, paver.at(x % 16, y % 16) as string);
+        }
+      }
+      list.push(smooth(despeckle(pic, isIn, "K"), "n").toString());
+    }
+  });
+  return { outer, inner };
+}
+
+const walkDirt = terrain({
+  name: "walk-dirt",
+  upper: "walk",
+  lower: "dirt",
+  themes: ["campus", "campus-golden", "golden-sun", "golden-warm", "campus-night"],
+  palette,
+  lone,
+  ...kerbPictures(),
+  base: DIRT_BASES.map((marks) => tileOf("b", marks)),
+  fill: [pavers([[1, 0]], []), pavers([], [[2, 1]]), pavers([[3, 1]], [])],
+});
+
 // 운동장 sand: decomposed granite, its grit lit from the top left. Every mark pairs a lit top
 // with a shaded underside, so the field reads as ground in any light and never as glints.
 
@@ -661,4 +707,4 @@ const lawnField = terrain({
   },
 });
 
-export default [lawnPath, lawnWalk, lawnField];
+export default [lawnPath, lawnWalk, lawnField, walkDirt];

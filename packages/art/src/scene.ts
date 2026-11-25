@@ -707,7 +707,7 @@ function fillPoly(target: Canvas, shape: ShadowShape): void {
   }
 }
 
-function renderPass(ctx: Ctx, passTheme: string, view: Rect): Canvas {
+function renderPass(ctx: Ctx, passTheme: string, view: Rect, groundOnly = false): Canvas {
   const { def, meta, warnings } = ctx;
   const out = new Canvas(view.w, view.h, view.x, view.y);
   const [W, H] = ctx.cells.size;
@@ -927,8 +927,10 @@ function renderPass(ctx: Ctx, passTheme: string, view: Rect): Canvas {
     }
   }
 
+  if (groundOnly) return out;
+
   // 5. Shadows: one mask from the shadow layer and every object's own shadow, then the ground
-  // under it one ramp step darker.
+  // under it one ramp step darker, or painted in the scene's shade theme.
   const mask = new Canvas(out.w, out.h, out.ox, out.oy);
   for (const s of def.shadows ?? []) {
     if ("poly" in s) fillPoly(mask, s);
@@ -965,8 +967,13 @@ function renderPass(ctx: Ctx, passTheme: string, view: Rect): Canvas {
     });
   }
   const shade = toMap(meta.shade);
+  const shaded = def.shade ? renderPass({ ...ctx, warnings: [] }, def.shade, view, true) : null;
   for (let i = 0; i < mask.data.length; i += 4) {
     if (mask.data[i + 3] === 0) continue;
+    if (shaded && (shaded.data[i + 3] as number) > 0) {
+      out.data.set(shaded.data.subarray(i, i + 4), i);
+      continue;
+    }
     const rgb =
       ((out.data[i] as number) << 16) |
       ((out.data[i + 1] as number) << 8) |

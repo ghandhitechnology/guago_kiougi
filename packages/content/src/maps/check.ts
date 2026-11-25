@@ -128,6 +128,7 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
   const decals = new Set(Object.values(art.tilesets).flatMap((t) => t.decals.map((d) => d.frame)));
   if (!themes.has(scene.theme)) say(`theme ${scene.theme} is not built`);
   if (scene.sky && !colour(scene.sky)) say(`sky ${scene.sky} is not a palette colour`);
+  if (scene.shade && !themes.has(scene.shade)) say(`shade theme ${scene.shade} is not built`);
   for (const [ch, cell] of Object.entries(scene.legend)) {
     if (cell.terrain !== null && !terrains.has(cell.terrain))
       say(`legend "${ch}": no terrain pair has ${cell.terrain}`);

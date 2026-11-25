@@ -26,7 +26,12 @@ import {
 import { uiSheets } from "./ui-static.ts";
 
 const { values } = parseArgs({
-  options: { png: { type: "string" }, port: { type: "string", default: "4310" } },
+  options: {
+    png: { type: "string" },
+    port: { type: "string", default: "4310" },
+    /** With --png, write the map sheets only. */
+    maps: { type: "boolean", default: false },
+  },
 });
 
 const DIST = join(ART_ROOT, "dist");
@@ -53,18 +58,20 @@ if (values.png) {
   mkdirSync(dir, { recursive: true });
   const fonts = loadFonts();
   const sceneMeta = meta as SceneMeta;
-  const sheets = {
-    ...mapSheets(fonts, sceneMeta, atlases, maps),
-    scenes: sceneSheet(fonts, sceneMeta, atlases),
-    ...Object.fromEntries(
-      [...sceneScreens(sceneMeta, atlases)].map(([name, png]) => [`scene-${name}`, png]),
-    ),
-    palette: paletteSheet(fonts),
-    sprites: spriteSheet(fonts, art),
-    rigs: rigSheet(fonts, art),
-    terrain: terrainSheet(fonts, art),
-    ...uiSheets(art, built, sceneMeta, atlases),
-  };
+  const sheets = values.maps
+    ? mapSheets(fonts, sceneMeta, atlases, maps)
+    : {
+        ...mapSheets(fonts, sceneMeta, atlases, maps),
+        scenes: sceneSheet(fonts, sceneMeta, atlases),
+        ...Object.fromEntries(
+          [...sceneScreens(sceneMeta, atlases)].map(([name, png]) => [`scene-${name}`, png]),
+        ),
+        palette: paletteSheet(fonts),
+        sprites: spriteSheet(fonts, art),
+        rigs: rigSheet(fonts, art),
+        terrain: terrainSheet(fonts, art),
+        ...uiSheets(art, built, sceneMeta, atlases),
+      };
   for (const [name, png] of Object.entries(sheets)) {
     const file = join(dir, `${name}.png`);
     writeFileSync(file, png.png());
