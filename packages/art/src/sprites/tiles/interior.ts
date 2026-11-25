@@ -547,4 +547,11 @@ const wallTops = overlay({
   inner: wallTop("inner", 32),
 });
 
-export default [wood, lino, terrazzoFloor, tileFloor, vinyl, wallTops];
+/** The mat on boards: the 메이커실's anti-fatigue mats in front of its stations. */
+const matWood = terrain({
+  ...mats("wood", "u"),
+  themes: ["campus", "campus-dusk"],
+  base: WOOD_BASES.slice(0, 3),
+});
+
+export default [wood, matWood, lino, terrazzoFloor, tileFloor, vinyl, wallTops];
