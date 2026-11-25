@@ -312,6 +312,11 @@ export function buildMap(src: MapSource, built: ReadonlySet<string>): BuildResul
         y: n.tile[1] * TILE_SIZE + TILE_SIZE - 4,
         facing: n.facing ?? "down",
       })),
+      arenas: (src.arenas ?? []).map((a) => ({
+        id: a.id,
+        rect: rect(a.rect, `arena ${a.id}`),
+        modes: a.modes,
+      })),
     },
     footprints,
   };
