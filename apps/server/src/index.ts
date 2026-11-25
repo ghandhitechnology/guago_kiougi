@@ -2,7 +2,7 @@ import { matchMaker } from "@colyseus/core";
 import { WORLD_ROOM } from "@guago/shared";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
-import { ChatLog } from "./chat/log.ts";
+import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { studentLooks } from "./looks.ts";
@@ -17,7 +17,8 @@ const auth = createAuthService({
   onSessionsRevoked: evictAccount,
   limits: { signupsPerIpPerDay: config.signupsPerIpPerDay },
 });
-const chatLog = new ChatLog(db);
+startChatLogMaintenance(db);
+const chatLog = new ChatLog(db, { onMissingPartition: () => maintainChatLog(db) });
 const server = createGameServer(auth, config, studentLooks, { log: chatLog });
 
 await server.listen(config.port);

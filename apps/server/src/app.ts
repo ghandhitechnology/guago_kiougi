@@ -23,6 +23,9 @@ export function createGameServer(
   provideWorldServices(chat);
   const api = createApiHandler(auth, settings, looks);
 
+  // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays
+  // the one the server made, and map rooms open only through `joinOrCreate`, when none has room.
+  matchMaker.controller.exposedMethods = ["joinOrCreate", "join", "joinById", "reconnect"];
   // Colyseus echoes any Origin with credentials by default; only the client's origin may call us.
   matchMaker.controller.getCorsHeaders = () => ({
     "Access-Control-Allow-Origin": settings.clientOrigin,

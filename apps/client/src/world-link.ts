@@ -25,6 +25,7 @@ import {
   type SystemLine,
   WORLD_MESSAGES,
   WORLD_ROOM,
+  whisperTarget,
 } from "@guago/shared";
 
 export type WorldStatus =
@@ -78,6 +79,8 @@ export interface WorldLink {
 /** How long `send` waits for the server before answering `timeout`. */
 const SEND_TIMEOUT_MS = 8000;
 const FIRST_RETRY_MS = 1000;
+/** Line ids remembered to drop the repeats the server replays after a reconnect. */
+const SEEN_LINES = 256;
 const MAX_RETRY_MS = 8000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -100,8 +103,9 @@ export function connectWorld(
   const presence = new Map<string, PresenceEntry>();
   const pending = new Map<
     number,
-    { resolve: (r: SendResult) => void; timer: ReturnType<typeof setTimeout> }
+    { resolve: (r: SendResult) => void; timer: ReturnType<typeof setTimeout> | undefined }
   >();
+  const seen = new Set<number>();
   let status: WorldStatus = "connecting";
   let me: string | undefined;
   let room: Room | undefined;
@@ -115,6 +119,15 @@ export function connectWorld(
     if (status === next) return;
     status = next;
     emit({ type: "status", status });
+  };
+  const arm = (n: number) =>
+    setTimeout(() => settle(n, { ok: false, code: "timeout" }), SEND_TIMEOUT_MS);
+  /** False for a line already shown: the server replays answers after a reconnect. */
+  const fresh = (id: number) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    if (seen.size > SEEN_LINES) seen.delete(seen.values().next().value as number);
+    return true;
   };
   const settle = (n: number, result: SendResult) => {
     const p = pending.get(n);
@@ -151,10 +164,12 @@ export function connectWorld(
     joined.onMessage(WORLD_MESSAGES.presence, onPresence);
     joined.onMessage(WORLD_MESSAGES.chat, (line: ChatLine) => {
       const mine = line.from.id === me;
-      emit({ type: "chat", line, mine });
+      if (fresh(line.id)) emit({ type: "chat", line, mine });
       if (mine && line.n !== undefined) settle(line.n, { ok: true, line });
     });
-    joined.onMessage(WORLD_MESSAGES.system, (line: SystemLine) => emit({ type: "system", line }));
+    joined.onMessage(WORLD_MESSAGES.system, (line: SystemLine) => {
+      if (fresh(line.id)) emit({ type: "system", line });
+    });
     joined.onMessage(WORLD_MESSAGES.refused, (r: Refusal) => {
       if (r.type !== WORLD_MESSAGES.chat || r.n === undefined) return;
       const { code, until, retryMs, need } = r;
@@ -166,8 +181,16 @@ export function connectWorld(
         ...(need === undefined ? {} : { need }),
       });
     });
-    joined.onDrop(() => setStatus("reconnecting"));
-    joined.onReconnect(() => setStatus("online"));
+    // While the socket is down an answer cannot arrive; the clock restarts once it is back, and
+    // the server then replays the answers the drop swallowed.
+    joined.onDrop(() => {
+      for (const p of pending.values()) clearTimeout(p.timer);
+      setStatus("reconnecting");
+    });
+    joined.onReconnect(() => {
+      for (const [n, p] of pending) p.timer = arm(n);
+      setStatus("online");
+    });
   }
 
   async function run(): Promise<void> {
@@ -193,6 +216,8 @@ export function connectWorld(
         break;
       }
       wait = FIRST_RETRY_MS;
+      // A fresh room numbers its lines from the start again.
+      seen.clear();
       room = joined;
       attach(joined);
       setStatus("online");
@@ -225,7 +250,8 @@ export function connectWorld(
     send(channel, text, target) {
       const cleaned = cleanChatText(text);
       if (!cleaned.ok) return Promise.resolve({ ok: false, code: cleaned.code });
-      if (channel === "whisper" && !target) {
+      const to = channel === "whisper" ? whisperTarget(target ?? "") : undefined;
+      if (channel === "whisper" && to === undefined) {
         return Promise.resolve({ ok: false, code: "target_offline" });
       }
       const open = room;
@@ -235,11 +261,10 @@ export function connectWorld(
         ch: channel,
         text: cleaned.text,
         n,
-        ...(channel === "whisper" && target ? { to: target } : {}),
+        ...(to === undefined ? {} : { to }),
       };
       return new Promise<SendResult>((resolve) => {
-        const timer = setTimeout(() => settle(n, { ok: false, code: "timeout" }), SEND_TIMEOUT_MS);
-        pending.set(n, { resolve, timer });
+        pending.set(n, { resolve, timer: arm(n) });
         open.send(WORLD_MESSAGES.chat, message);
       });
     },

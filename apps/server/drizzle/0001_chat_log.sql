@@ -10,18 +10,15 @@ CREATE TABLE "chat_log" (
 ) PARTITION BY RANGE ("at");
 --> statement-breakpoint
 CREATE INDEX "chat_log_sender_idx" ON "chat_log" USING btree ("sender_id","at");--> statement-breakpoint
--- Day partitions in UTC, named chat_log_YYYYMMDD. Creates today through `ahead_days` ahead and
--- drops every partition whose day is more than `keep_days` before today. Idempotent; the server
--- runs it at start and every hour. `today` is a parameter so retention can be exercised.
-CREATE FUNCTION "chat_log_maintain"(
-	"keep_days" integer,
+-- Day partitions in UTC, named chat_log_YYYYMMDD: creates today through `ahead_days` ahead when
+-- missing. The server runs it hourly with a short lock timeout and drops old partitions itself
+-- (DETACH ... CONCURRENTLY cannot run inside a function).
+CREATE FUNCTION "chat_log_add_partitions"(
 	"ahead_days" integer,
 	"today" date DEFAULT (now() AT TIME ZONE 'UTC')::date
-) RETURNS integer LANGUAGE plpgsql AS $$
+) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
 	"day" date;
-	"part" record;
-	"dropped" integer := 0;
 BEGIN
 	FOR "i" IN 0.."ahead_days" LOOP
 		"day" := "today" + "i";
@@ -33,18 +30,7 @@ BEGIN
 			("day" + 1)::timestamp AT TIME ZONE 'UTC'
 		);
 	END LOOP;
-	FOR "part" IN
-		SELECT c.oid::regclass AS "name"
-		FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
-		WHERE i.inhparent = '"chat_log"'::regclass
-			AND c.relname ~ '^chat_log_[0-9]{8}$'
-			AND to_date(substring(c.relname FROM 10), 'YYYYMMDD') < "today" - "keep_days"
-	LOOP
-		EXECUTE format('DROP TABLE %s', "part"."name");
-		"dropped" := "dropped" + 1;
-	END LOOP;
-	RETURN "dropped";
 END;
 $$;
 --> statement-breakpoint
-SELECT "chat_log_maintain"(90, 3);
+SELECT "chat_log_add_partitions"(3);

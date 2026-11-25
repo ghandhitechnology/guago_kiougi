@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHAT_MAX_LENGTH, cleanChatText } from "./chat.ts";
+import { CHAT_MAX_LENGTH, chatSendSchema, cleanChatText, whisperTarget } from "./chat.ts";
 
 const clean = (raw: string) => {
   const r = cleanChatText(raw);
@@ -43,5 +43,23 @@ describe("cleanChatText", () => {
 
   it("refuses one character piled with marks", () => {
     expect(clean(`a${"\u0301".repeat(30)}`)).toBe("too_long");
+  });
+});
+
+describe("whisperTarget", () => {
+  it("keeps names and turns away anything the schema would drop the sender for", () => {
+    expect(whisperTarget(" 하나 ")).toBe("하나");
+    const long = "가".repeat(40);
+    expect(whisperTarget(long)).toBeUndefined();
+    expect(whisperTarget("")).toBeUndefined();
+    // Every target it lets through passes the schema.
+    for (const name of ["하나", "Abc12345", "두리"]) {
+      const to = whisperTarget(name) as string;
+      const checked = chatSendSchema["~standard"].validate({ ch: "whisper", text: "hi", to, n: 1 });
+      expect(checked.issues).toBeUndefined();
+    }
+    expect(
+      chatSendSchema["~standard"].validate({ ch: "whisper", text: "hi", to: long, n: 1 }).issues,
+    ).toBeDefined();
   });
 });

@@ -2,7 +2,7 @@
  * The WorldRoom protocol (PLAN §12 chat, §21): channel ids, limits, message shapes and the
  * validators both sides run. The client renders every chat string as plain text (PLAN §22).
  */
-import type { Major } from "./api.ts";
+import { checkName, type Major, normalizeName } from "./api.ts";
 
 /** The room every client holds for the whole session, beside its map room (PLAN §19). */
 export const WORLD_ROOM = "world";
@@ -235,6 +235,16 @@ export function cleanChatText(
     }
   }
   return { ok: true, text };
+}
+
+/**
+ * A whisper target as sent: the name normalised, or undefined when it breaks the name rule. No
+ * character has such a name, so the client answers `target_offline` without sending (a target
+ * the schema rejects would drop the connection).
+ */
+export function whisperTarget(raw: string): string | undefined {
+  const name = normalizeName(raw);
+  return checkName(name) === null ? name : undefined;
 }
 
 // Validators ---------------------------------------------------------------------------------
