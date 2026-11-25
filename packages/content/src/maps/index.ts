@@ -2,10 +2,10 @@ import { type BuildResult, buildMap } from "./build.ts";
 import campusField from "./campus-field.ts";
 import campusYard from "./campus-yard.ts";
 import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
+import ecoPark from "./eco-park.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 import p1AgoraEdge from "./p1-agora-edge.ts";
 import p1CaveMouth from "./p1-cave-mouth.ts";
-// Page 1 hunting fields and the 생태공원.
 import p1Colonnade from "./p1-colonnade.ts";
 import p1OliveRoad from "./p1-olive-road.ts";
 
@@ -27,6 +27,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   p1OliveRoad,
   p1CaveMouth,
   p1AgoraEdge,
+  ecoPark,
 ];
 
 /**
@@ -42,8 +43,6 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "cafeteria",
   "lounge",
   "saebyeok",
-  "agora",
-  "eco-park",
   // Page 1: the era town, the 위험 구역, the two lairs and the arena (narrative place ids).
   "p1-agora",
   "p1-shadow-cave",

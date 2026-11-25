@@ -769,6 +769,24 @@ const GREECE_NOON = theme("greece-noon", {
   "stone.dark": "stone.mid",
 });
 
+// 생태공원 ----------------------------------------------------------------------------------------
+
+/**
+ * The 생태공원 at 07:10 after a night of rain: mist lifts the lawn's shadows a step, the dirt is
+ * dark and wet, and the water is algae green right through.
+ */
+const ECO_MORNING = theme("eco-morning", {
+  "grass.dark": "grass.mid",
+  "grass.mid": "grass.soft",
+  "wood.pale": "wood.light",
+  "wood.light": "wood.mid",
+  "sea.pale": "grass.pale",
+  "sea.light": "grass.light",
+  "sea.mid": "board.light",
+  "sea.dark": "board.mid",
+  "sea.deep": "board.dark",
+});
+
 /** Every theme baked by the compiler. Each Page adds one; campus also has a night version. */
 export const THEMES: readonly Theme[] = [
   theme("campus", {}),
@@ -791,6 +809,8 @@ export const THEMES: readonly Theme[] = [
   GREECE_DUSK,
   DUSK_FIRE,
   GREECE_NOON,
+  // 생태공원
+  ECO_MORNING,
 ];
 
 /** Readable name of an index for error messages, like `red.deep` or `hair.mid`. */

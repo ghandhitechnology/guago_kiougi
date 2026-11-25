@@ -1,15 +1,5 @@
 import type { LightSource, MapSource, Thing } from "./format.ts";
-import {
-  blob,
-  cellOf,
-  GREEK_LEGEND,
-  merge,
-  type Placed,
-  px,
-  scatter,
-  settle,
-  trees,
-} from "./greek.ts";
+import { blob, cellOf, GREEK_LEGEND, merge, type Placed, px, settle, trees } from "./greek.ts";
 import type { Decal, Prop, Vec } from "./layers.ts";
 import { fractal } from "./noise.ts";
 import { PlanGrid } from "./plan.ts";
