@@ -111,6 +111,10 @@ class Bot {
   private dir: readonly [number, number] = [0, 0];
   private until = 0;
   private wasDown = false;
+  private goal: [number, number] = [0, 0];
+  private goalUntil = 0;
+  private lastX = 0;
+  private lastY = 0;
   private down = false;
   measuring = false;
   readonly room: Room<unknown, MapState>;
@@ -237,16 +241,35 @@ class Bot {
       this.until = n + 6;
       return;
     }
+    // Nothing near: walk to a destination anywhere on the field, deep regions included.
+    const map = this.map;
+    if (!map) return;
+    const gx = this.goal[0] - px;
+    const gy = this.goal[1] - py;
+    const gd = Math.sqrt(gx * gx + gy * gy);
+    if (gd < 24 || n >= this.goalUntil) {
+      const { w, h, rows } = map.collision;
+      for (let tries = 0; tries < 40; tries++) {
+        const tx = Math.floor(Math.random() * w);
+        const ty = Math.floor(Math.random() * h);
+        if (rows[ty]?.[tx] !== ".") continue;
+        this.goal = [(tx + 0.5) * TILE_SIZE, (ty + 0.5) * TILE_SIZE];
+        break;
+      }
+      this.goalUntil = n + 400;
+      return;
+    }
+    // Blocked by something: step aside for a moment.
     if (n >= this.until) {
-      const walking = this.dir[0] !== 0 || this.dir[1] !== 0;
-      if (walking && Math.random() < 0.3) {
-        this.dir = [0, 0];
-        this.until = n + between(6, 30);
-      } else {
+      this.dir = [Math.round((gx / gd) * MOVE_MAX), Math.round((gy / gd) * MOVE_MAX)];
+      const stuck = Math.hypot(px - this.lastX, py - this.lastY) < 1;
+      if (stuck) {
         const a = Math.random() * Math.PI * 2;
         this.dir = [Math.round(Math.cos(a) * MOVE_MAX), Math.round(Math.sin(a) * MOVE_MAX)];
-        this.until = n + between(20, 70);
+        this.until = n + 20;
       }
+      this.lastX = px;
+      this.lastY = py;
     }
   }
 

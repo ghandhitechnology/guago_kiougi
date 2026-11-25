@@ -143,6 +143,15 @@ export function fightLoadoutChanged(characterId: string, change: ChangeNotice): 
 }
 
 /**
+ * Seats per room: `MAP_SEATS`, or more for a load test (`GUAGO_SEATS`, up to 127 so every body
+ * keeps a one-byte schema id).
+ */
+function seatsPerRoom(): number {
+  const n = Number(process.env.GUAGO_SEATS);
+  return Number.isInteger(n) && n > 0 ? Math.min(127, n) : MAP_SEATS;
+}
+
+/**
  * The map a room runs: `GUAGO_MAP` names it (the lawn by default); a load test or a developer may
  * name another in the create options where `ALLOW_MAP_OPTION=1`.
  */
@@ -162,7 +171,7 @@ function mapToRun(options?: { map?: unknown }): string {
 export class MapRoom extends Room<{ state: MapState }> {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
-  override maxClients = MAP_SEATS;
+  override maxClients = seatsPerRoom();
 
   private mapId = LAWN.id;
   private map!: FightMap;
@@ -202,7 +211,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.seats = new RoomSeats(this.mapId, (id) => this.placeOf(id));
     this.state.map = this.mapId;
     // Bodies before anything else, so their ref ids are the smallest the room will ever hand out.
-    for (let i = 0; i < MAP_SEATS; i++) {
+    for (let i = 0; i < this.maxClients; i++) {
       const slot = String(i);
       this.state.players.set(slot, new PlayerState());
       this.free.push(slot);
