@@ -1,6 +1,6 @@
 import { narrative } from "@guago/content";
 import type { SystemLine } from "@guago/shared";
-import { type TextKey, t } from "../i18n/index.ts";
+import { t, tMaybe } from "../i18n/index.ts";
 import type { SendResult } from "../world-link.ts";
 
 /**
@@ -28,7 +28,8 @@ export function refusalText(r: Extract<SendResult, { ok: false }>): string {
     case "level":
       return t("chat.refused.level", { need: r.need ?? 5 });
     default:
-      return t(`chat.refused.${r.code}` as TextKey);
+      // Chat answers with a handful of codes; anything else gets the plain line.
+      return tMaybe(`chat.refused.${r.code}`) ?? t("chat.refused.other");
   }
 }
 

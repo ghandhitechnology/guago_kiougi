@@ -31,6 +31,8 @@ const NAME_COLOR: Readonly<Record<Tone, string>> = {
   world: "navy.pale",
   near: "stone.bright",
   whisper: "plum.pale",
+  party: "sea.pale",
+  club: "grass.pale",
   system: "gold.light",
   refusal: "red.light",
 };
@@ -38,6 +40,8 @@ const TEXT_COLOR: Readonly<Record<Tone, string>> = {
   world: "stone.pale",
   near: "stone.pale",
   whisper: "plum.pale",
+  party: "sea.pale",
+  club: "grass.pale",
   system: "gold.light",
   refusal: "red.light",
 };
@@ -114,24 +118,19 @@ export class ChatPanel {
     this.root.add(this.card);
 
     // Channel tabs: words on the card, the open one underlined, an unread mark on the others.
-    let tx = PAD + 1;
     for (const tab of TABS) {
-      const label = new Label(scene, tx, 0, t(`chat.tab.${tab}`), {
+      const label = new Label(scene, 0, 0, t(`chat.tab.${tab}`), {
         font: FONT,
         color: "stone.dark",
       });
-      const mark = scene.add
-        .image(tx + label.width + 2, 0, "ui", "pin/unread")
-        .setOrigin(0)
-        .setVisible(false);
+      const mark = scene.add.image(0, 0, "ui", "pin/unread").setOrigin(0).setVisible(false);
       const zone = scene.add
-        .zone(tx - 3, 0, label.width + 10, TAB_H)
+        .zone(0, 0, label.width + 10, TAB_H)
         .setOrigin(0)
         .setInteractive({ useHandCursor: true });
       zone.on("pointerup", () => this.pickTab(tab));
       this.root.add([label.obj, mark, zone]);
       this.tabs.push({ tab, label, mark, zone });
-      tx += label.width + 16;
     }
     this.underline = scene.add.rectangle(0, 0, 10, 1, paint("gold.mid")).setOrigin(0);
     this.root.add(this.underline);
@@ -172,8 +171,9 @@ export class ChatPanel {
     // Tab while typing moves to the next channel instead of out of the box.
     (this.field as unknown as { nav: (k: string) => boolean }).nav = (k) => {
       if (k !== "next" && k !== "prev") return false;
-      const i = TABS.indexOf(this.log.active);
-      this.pickTab(TABS[(i + (k === "next" ? 1 : TABS.length - 1)) % TABS.length] as Tab);
+      const open = this.openTabs();
+      const i = open.indexOf(this.log.active);
+      this.pickTab(open[(i + (k === "next" ? 1 : open.length - 1)) % open.length] as Tab);
       return true;
     };
     this.inputRow.add([this.prefix.obj, this.field]);
@@ -207,6 +207,7 @@ export class ChatPanel {
           this.refreshPrefix();
         }
       }
+      if (e.type === "social") this.layoutTabs();
       if (e.type === "status" && e.status === "reconnecting")
         this.log.note(t("chat.status.reconnecting"), "system");
       if (e.type === "status" && e.status === "replaced")
@@ -225,7 +226,7 @@ export class ChatPanel {
       popScope(this.scope);
     });
     this.place(false);
-    this.redraw();
+    this.layoutTabs();
     if (layout.top) {
       this.shown = false;
       this.root.setVisible(false).setAlpha(0);
@@ -293,9 +294,7 @@ export class ChatPanel {
     const pw = Math.min(70, this.prefix.width + 6);
     this.field.setX(PAD + pw);
     this.field.setBoxWidth(W - PAD * 2 - pw);
-    this.prefix.color(
-      tab === "whisper" ? "plum.pale" : tab === "world" ? "navy.pale" : "stone.light",
-    );
+    this.prefix.color(tab === "near" ? "stone.light" : NAME_COLOR[tab]);
   }
 
   /** Stacks tabs, scrollback and the input inside the card, and puts the card in its corner. */
@@ -344,6 +343,38 @@ export class ChatPanel {
     fade(this.root, 1, 140);
     fade(this.collapsed, 0, 100);
     this.collapsedMark.setVisible(false);
+  }
+
+  /** The tabs the player can use now: 파티 and 동아리 only while in one. */
+  private openTabs(): Tab[] {
+    const social = this.link.social;
+    return TABS.filter(
+      (tab) =>
+        (tab !== "party" || social.party !== null) && (tab !== "club" || social.club !== null),
+    );
+  }
+
+  /** Lays the open tabs along the card, closer together when all five are there. */
+  private layoutTabs(): void {
+    const open = this.openTabs();
+    if (!open.includes(this.log.active)) this.pickTab("near");
+    const gap = open.length > 3 ? 10 : 16;
+    let tx = PAD + 1;
+    for (const tab of this.tabs) {
+      const on = open.includes(tab.tab);
+      tab.label.obj.setVisible(on);
+      tab.zone.setVisible(on);
+      if (tab.zone.input) tab.zone.input.enabled = on;
+      if (!on) {
+        tab.mark.setVisible(false);
+        continue;
+      }
+      tab.label.at(tx, tab.label.obj.y);
+      tab.mark.setX(tx + tab.label.width + 2);
+      tab.zone.setX(tx - 3);
+      tx += tab.label.width + gap;
+    }
+    this.redraw();
   }
 
   /** Steps out of sight while something else holds the screen, keeping its state. */
@@ -411,7 +442,7 @@ export class ChatPanel {
     for (const tab of this.tabs) {
       const open = tab.tab === this.log.active;
       tab.label.color(open ? "stone.bright" : "stone.dark");
-      tab.mark.setVisible(!open && this.log.unread.has(tab.tab));
+      tab.mark.setVisible(tab.label.obj.visible && !open && this.log.unread.has(tab.tab));
       if (open) {
         this.underline
           .setPosition(tab.label.obj.x - 1, tab.label.obj.y + 11)

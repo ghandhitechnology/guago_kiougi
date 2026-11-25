@@ -2,8 +2,8 @@ import type { ChatLine, SpeakChannel, SystemLine } from "@guago/shared";
 import type { WorldLink } from "../world-link.ts";
 import { systemText } from "./copy.ts";
 
-/** The channels a player has a tab for. 파티 and 동아리 get theirs when those exist. */
-export const TABS = ["world", "near", "whisper"] as const;
+/** The channels a player has a tab for. 파티 and 동아리 show only while the player is in one. */
+export const TABS = ["world", "near", "whisper", "party", "club"] as const;
 export type Tab = (typeof TABS)[number];
 
 export type Tone = Tab | "system" | "refusal";
