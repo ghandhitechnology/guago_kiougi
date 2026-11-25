@@ -7,10 +7,12 @@
  * characters and listings from the tables themselves.
  */
 import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import { type Drop, VENDING } from "@guago/content";
+import { bookById, type Drop, VENDING } from "@guago/content";
 import {
   bindCost,
+  boardFloors,
   directTax,
   forgeFee,
   koreanDay,
@@ -31,8 +33,9 @@ import type { ExecResult, ExecutorOptions } from "../economy/executor.ts";
 import { createEconomy, type Economy } from "../economy/index.ts";
 import { compactLedger, rollUpDays } from "../economy/ledger.ts";
 import { ITEM_COLUMNS, itemFromDb } from "../economy/rows.ts";
+import { TEST_DATABASE_URL } from "../test/db-setup.ts";
 import { sweepListings } from "./board.ts";
-import { searchTrades } from "./log.ts";
+import { pruneTradeLog, searchTrades, tradePartners } from "./log.ts";
 import { type CommitOffer, printOf, type TradeCommitRequest } from "./ops.ts";
 import { createTrades, type TradeLink } from "./session.ts";
 
@@ -40,16 +43,22 @@ const PAGE = 1;
 /** Repetitions of each racing scenario. */
 const REPS = 20;
 
+/**
+ * Which way each race went, appended to the file `RACE_TALLY` names when set: the order a race
+ * lands in is not up to the test, so it is counted, not asserted.
+ */
+function tally(line: string): void {
+  if (process.env.RACE_TALLY) appendFileSync(process.env.RACE_TALLY, `${line}\n`);
+}
+
 let db: Db;
 /** One pool per racer, as one per server process. */
 let pools: Db[] = [];
 let seq = 0;
 
 beforeAll(() => {
-  db = createDb(
-    process.env.TEST_DATABASE_URL ?? "postgres://guago:guago@127.0.0.1:54329/guago_test",
-  );
-  pools = [0, 1, 2].map(() => createDb(process.env.TEST_DATABASE_URL as string));
+  db = createDb(TEST_DATABASE_URL);
+  pools = [0, 1, 2].map(() => createDb(TEST_DATABASE_URL));
 });
 afterAll(async () => {
   await Promise.all([db, ...pools].map((d) => d.pool.end()));
@@ -272,7 +281,7 @@ async function commitOf(offers: Record<string, Offer>): Promise<TradeCommitReque
 const tradeId = () => `trade:${randomUUID()}:0`;
 
 function trade(eco: Economy, as: string, req: TradeCommitRequest, opId = tradeId()) {
-  return eco.executor.executeAll(as, opId, "trade.commit", req);
+  return eco.executor.executeAll(as, opId, "trade.commit", req).then((o) => o.results);
 }
 
 function list(
@@ -317,6 +326,7 @@ describe("매점 게시판 under racing requests", () => {
       expect(oks(results)).toBe(1);
       for (const r of results) if (!r.ok) expect(r.error).toBe("listing_closed");
       const winner = buyers[results.findIndex((r) => r.ok)];
+      tally(`6 buyers: buyer ${results.findIndex((r) => r.ok)} won`);
       expect(await ownerOf(item)).toBe(winner);
       expect(await pinecones(seller)).toBe(sellerBefore + price - saleTax(price));
       expectConserved(before, await census(), true);
@@ -328,13 +338,13 @@ describe("매점 게시판 under racing requests", () => {
     for (let rep = 0; rep < REPS; rep++) {
       const seller = await student(eco);
       await fund(eco, seller, { ink: 10, pinecone: 100 });
-      const listing = await listed(eco, seller, { stack: "ink", qty: 10, unitPrice: "7" });
+      const listing = await listed(eco, seller, { stack: "ink", qty: 10, unitPrice: "50" });
       const buyers = await Promise.all(Array.from({ length: 5 }, () => student(eco)));
-      for (const b of buyers) await fund(eco, b, { pinecone: 100 });
+      for (const b of buyers) await fund(eco, b, { pinecone: 1000 });
       const before = await census();
-      const wants = buyers.map(() => 1 + Math.floor(Math.random() * 4));
+      const wants = buyers.map(() => 2 + Math.floor(Math.random() * 4));
       const results = await Promise.all(
-        racers(5).map((r, i) => buy(r, buyers[i] as string, listing, "7", wants[i])),
+        racers(5).map((r, i) => buy(r, buyers[i] as string, listing, "50", wants[i])),
       );
       let sold = 0;
       for (const [i, r] of results.entries()) {
@@ -343,7 +353,7 @@ describe("매점 게시판 under racing requests", () => {
           sold += wants[i] as number;
           expect(await stack(b, "ink")).toBe(wants[i]);
         } else {
-          expect(["listing_qty", "listing_closed"]).toContain(r.error);
+          expect(["listing_qty", "listing_closed", "listing_small"]).toContain(r.error);
           expect(await stack(b, "ink")).toBe(0);
         }
       }
@@ -373,6 +383,7 @@ describe("매점 게시판 under racing requests", () => {
       ]);
       expect(oks([bought, cancelled])).toBe(1);
       expect(fail(bought) ?? fail(cancelled)).toBe("listing_closed");
+      tally(`buy vs cancel: ${bought.ok ? "buy" : "cancel"} first`);
       expect(await ownerOf(item)).toBe(bought.ok ? buyer : seller);
       expect((await ids(seller)).includes(item)).toBe(!bought.ok);
       expectConserved(before, await census(), true);
@@ -416,8 +427,7 @@ describe("매점 게시판 under racing requests", () => {
       }
       expectConserved(before, await census(), true);
     }
-    // Both orders should have come up; if not the test still checked whichever did.
-    expect(sold).toBeGreaterThanOrEqual(0);
+    tally(`buy vs expiry: sold ${sold}, expired ${REPS - sold}`);
   });
 
   it(`cancel racing expiry: returned once (${REPS} rounds)`, async () => {
@@ -427,7 +437,7 @@ describe("매점 게시판 under racing requests", () => {
       const item = await book(eco, seller);
       await fund(eco, seller, { pinecone: 100, ink: 3 });
       const one = await listed(eco, seller, { item, unitPrice: "300" });
-      const two = await listed(eco, seller, { stack: "ink", qty: 3, unitPrice: "20" });
+      const two = await listed(eco, seller, { stack: "ink", qty: 3, unitPrice: "40" });
       await db.pool.query(
         "update listings set expires_at = now() - interval '1 second' where id = any($1)",
         [[one, two]],
@@ -526,8 +536,99 @@ describe("매점 게시판 under racing requests", () => {
         error: "item_missing",
       });
     }
+    const copies = [item, await book(eco, seller), await book(eco, seller)] as [
+      string,
+      string,
+      string,
+    ];
+    expect(
+      await eco.executor.execute(seller, randomUUID(), "forge", { items: copies }),
+    ).toMatchObject({ error: "item_missing" });
     const snapshot = await eco.ops.snapshot(seller);
     expect(snapshot?.items.some((i) => i.id === item)).toBe(false);
+  });
+
+  it("a buyer's split cannot raise the seller's tax: ten small purchases pay what one would", async () => {
+    const eco = economy();
+    const [seller, buyer] = [await student(eco), await student(eco)];
+    await fund(eco, seller, { ink: 100, pinecone: 100 });
+    await fund(eco, buyer, { pinecone: 2000 });
+    const price = 11n;
+    const listing = await listed(eco, seller, { stack: "ink", qty: 100, unitPrice: String(price) });
+    const before = await pinecones(seller);
+    for (let i = 0; i < 10; i++)
+      expect((await buy(eco, buyer, listing, String(price), 10)).ok).toBe(true);
+    const whole = price * 100n;
+    expect((await pinecones(seller)) - before).toBe(whole - saleTax(whole));
+  });
+
+  it("nothing sells for less than the board's floors, except the last of a listing", async () => {
+    const eco = economy();
+    const [seller, buyer] = [await student(eco), await student(eco)];
+    await fund(eco, seller, { ink: 30, pinecone: 100 });
+    await fund(eco, buyer, { pinecone: 1000 });
+    const floors = boardFloors(PAGE);
+    const below = String(floors.unit - 1n);
+    expect(await list(eco, seller, { stack: "ink", qty: 30, unitPrice: below })).toMatchObject({
+      error: "listing_small",
+    });
+    // Nine at the lowest unit price is a listing worth less than one purchase may be.
+    expect(
+      await list(eco, seller, { stack: "ink", qty: 9, unitPrice: String(floors.unit) }),
+    ).toMatchObject({ error: "listing_small" });
+    const listing = await listed(eco, seller, { stack: "ink", qty: 15, unitPrice: "10" });
+    expect(await buy(eco, buyer, listing, "10", 1)).toMatchObject({ error: "listing_small" });
+    expect((await buy(eco, buyer, listing, "10", 10)).ok).toBe(true);
+    // Five left, worth 50: taking all of them is allowed.
+    expect(await buy(eco, buyer, listing, "10", 4)).toMatchObject({ error: "listing_small" });
+    expect((await buy(eco, buyer, listing, "10", 5)).ok).toBe(true);
+  });
+
+  it(`a character makes at most ${TRADE.board.dailyOps} board operations a day, cancels included`, async () => {
+    const eco = economy();
+    const [seller, busy] = [await student(eco), await student(eco)];
+    await fund(eco, seller, { ink: 20, pinecone: 1000 });
+    await fund(eco, busy, { ink: 20, pinecone: 1000 });
+    const listing = await listed(eco, seller, { stack: "ink", qty: 20, unitPrice: "10" });
+    const own = await listed(eco, busy, { stack: "ink", qty: 10, unitPrice: "10" });
+    // Today's purchases, as the trade log holds them (one listing created already counts).
+    await db.pool.query(
+      `insert into trade_log (kind, op_id, from_id, to_id, item_ids, defs, tax, payload,
+         listing_id, def_id, grade, qty, unit_price)
+       select 'board', 'op-' || g, $1, $2, '{}', '{ink}', 1, '{}', $3, 'ink', 0, 10, 10
+       from generate_series(1, $4::int) g`,
+      [seller, busy, listing, TRADE.board.dailyOps - 1],
+    );
+    expect(await buy(eco, busy, listing, "10", 10)).toMatchObject({ error: "listing_daily" });
+    expect(await list(eco, busy, { stack: "ink", qty: 10, unitPrice: "10" })).toMatchObject({
+      error: "listing_daily",
+    });
+    const cancel = await eco.executor.execute(busy, randomUUID(), "listing.cancel", {
+      listing: own,
+    });
+    expect(cancel).toMatchObject({ error: "listing_daily" });
+    // Someone else's day is their own.
+    expect(
+      (await eco.executor.execute(seller, randomUUID(), "listing.cancel", { listing })).ok,
+    ).toBe(true);
+  });
+
+  it("an expired listing stops counting toward the ten at its expiry, before any sweep", async () => {
+    const eco = economy();
+    const seller = await student(eco);
+    await fund(eco, seller, { ink: 20, pinecone: 1000 });
+    const made: string[] = [];
+    for (let i = 0; i < TRADE.board.listings; i++) {
+      made.push(await listed(eco, seller, { stack: "ink", qty: 1, unitPrice: "100" }));
+    }
+    expect(await list(eco, seller, { stack: "ink", qty: 1, unitPrice: "100" })).toMatchObject({
+      error: "listing_limit",
+    });
+    await db.pool.query(
+      "update listings set expires_at = now() - interval '1 second' where id = $1",
+      [made[0]],
+    );
+    expect((await list(eco, seller, { stack: "ink", qty: 1, unitPrice: "100" })).ok).toBe(true);
   });
 
   it("ten listings at most, the fee is never refunded, an expired listing cannot be bought", async () => {
@@ -538,13 +639,13 @@ describe("매점 게시판 under racing requests", () => {
     await fund(eco, buyer, { pinecone: 1000 });
     const made: string[] = [];
     for (let i = 0; i < TRADE.board.listings; i++) {
-      made.push(await listed(eco, seller, { stack: "ink", qty: 1, unitPrice: "50" }));
+      made.push(await listed(eco, seller, { stack: "ink", qty: 1, unitPrice: "100" }));
     }
-    expect(await list(eco, seller, { stack: "ink", qty: 1, unitPrice: "50" })).toMatchObject({
+    expect(await list(eco, seller, { stack: "ink", qty: 1, unitPrice: "100" })).toMatchObject({
       error: "listing_limit",
     });
     const paid = 1000n - (await pinecones(seller));
-    expect(paid).toBe(listingFee(50n) * BigInt(TRADE.board.listings));
+    expect(paid).toBe(listingFee(100n) * BigInt(TRADE.board.listings));
     const cancel = await eco.executor.execute(seller, randomUUID(), "listing.cancel", {
       listing: made[0] as string,
     });
@@ -554,7 +655,7 @@ describe("매점 게시판 under racing requests", () => {
       "update listings set expires_at = now() - interval '1 minute' where id = $1",
       [made[1]],
     );
-    expect(await buy(eco, buyer, made[1] as string, "50")).toMatchObject({
+    expect(await buy(eco, buyer, made[1] as string, "100")).toMatchObject({
       error: "listing_expired",
     });
     expect(await sweepListings(db, eco.executor)).toBe(1);
@@ -567,7 +668,7 @@ describe("매점 게시판 under racing requests", () => {
     const seller = await student(eco);
     await fund(eco, seller, { ink: 30, pinecone: 1000 });
     for (let i = 0; i < 3; i++)
-      await listed(eco, seller, { stack: "ink", qty: 10, unitPrice: "5" });
+      await listed(eco, seller, { stack: "ink", qty: 10, unitPrice: "10" });
     await db.pool.query(
       "update listings set expires_at = now() - interval '3 days' where seller_id = $1",
       [seller],
@@ -576,11 +677,14 @@ describe("매점 게시판 under racing requests", () => {
     const [a, b] = racers(2);
     // Two sweepers see the same three; each expiry runs under one id, so the second reads the
     // first one's result back instead of returning anything again.
+    const told: string[] = [];
+    const tell = (id: string) => told.push(id);
     const swept = await Promise.all([
-      sweepListings(db, (a as Economy).executor),
-      sweepListings(db, (b as Economy).executor),
+      sweepListings(db, (a as Economy).executor, undefined, tell),
+      sweepListings(db, (b as Economy).executor, undefined, tell),
     ]);
-    expect(swept[0] + swept[1]).toBeGreaterThanOrEqual(3);
+    expect(swept[0] + swept[1]).toBe(3);
+    expect(told).toEqual([seller, seller, seller]);
     expect(await stack(seller, "ink")).toBe(30);
     expectConserved(before, await census(), true);
   });
@@ -591,7 +695,7 @@ describe("매점 게시판 under racing requests", () => {
     const [seller, buyer] = [await student(eco), await student(eco)];
     await fund(eco, seller, { ink: 4, pinecone: 100 });
     await fund(eco, buyer, { pinecone: 100 });
-    const listing = await listed(eco, seller, { stack: "ink", qty: 4, unitPrice: "5" });
+    const listing = await listed(eco, seller, { stack: "ink", qty: 4, unitPrice: "30" });
     const days = await db.pool.query(
       "select distinct day::text as day from economy_ledger where character_id = $1",
       [seller],
@@ -600,7 +704,7 @@ describe("매점 게시판 under racing requests", () => {
     // Real time has not moved; the server clock has.
     expect(await sweepListings(db, eco.executor, () => new Date(at))).toBe(0);
     at += (TRADE.board.hours + 1) * 3600_000;
-    expect(await buy(eco, buyer, listing, "5", 1)).toMatchObject({ error: "listing_expired" });
+    expect(await buy(eco, buyer, listing, "30", 4)).toMatchObject({ error: "listing_expired" });
     expect(await sweepListings(db, eco.executor)).toBe(0);
     expect(await sweepListings(db, eco.executor, () => new Date(at))).toBe(1);
     expect(await stack(seller, "ink")).toBe(4);
@@ -611,7 +715,7 @@ describe("매점 게시판 under racing requests", () => {
     const [seller, buyer, other] = [await student(eco), await student(eco), await student(eco)];
     await fund(eco, seller, { ink: 5, pinecone: 100 });
     await fund(eco, buyer, { pinecone: 100 });
-    const listing = await listed(eco, seller, { stack: "ink", qty: 5, unitPrice: "3" });
+    const listing = await listed(eco, seller, { stack: "ink", qty: 5, unitPrice: "30" });
     await db.pool.query("insert into blocks (character_id, other_id) values ($1, $2)", [
       buyer,
       seller,
@@ -621,7 +725,7 @@ describe("매점 게시판 under racing requests", () => {
     expect((await browseListings(db, { def: "ink", sort: "price" }, other)).listings).toHaveLength(
       1,
     );
-    expect(await buy(eco, buyer, listing, "3", 1)).toMatchObject({ error: "listing_missing" });
+    expect(await buy(eco, buyer, listing, "30", 5)).toMatchObject({ error: "listing_missing" });
     expect(await stack(seller, "ink")).toBe(0);
     // Someone else's listing cannot be cancelled, and is not even locked by the attempt.
     const cancel = await eco.executor.execute(other, randomUUID(), "listing.cancel", { listing });
@@ -636,11 +740,11 @@ describe("매점 게시판 under racing requests", () => {
     await fund(eco, buyer, { pinecone: 10_000 });
     const ids: string[] = [];
     for (const [n, s] of sellers.entries()) {
-      await fund(eco, s, { ink: 20, pinecone: 10_000 });
+      await fund(eco, s, { ink: 100, pinecone: 10_000 });
       for (let i = 0; i < 10; i++) {
         // Repeated prices on purpose: the cursor carries the id past them.
         const price = String(10 + ((i * 7 + n) % 6));
-        ids.push(await listed(eco, s, { stack: "ink", qty: 2, unitPrice: price }));
+        ids.push(await listed(eco, s, { stack: "ink", qty: 10, unitPrice: price }));
       }
     }
     const { browseListings, priceHistory } = await import("./board.ts");
@@ -662,12 +766,12 @@ describe("매점 게시판 under racing requests", () => {
     const first = (await browseListings(db, { def: "ink", sort: "price" })).listings.find(
       (l) => l.seller.id === seller,
     );
-    expect((await buy(eco, buyer, first?.id as string, first?.unitPrice as string, 2)).ok).toBe(
+    expect((await buy(eco, buyer, first?.id as string, first?.unitPrice as string, 10)).ok).toBe(
       true,
     );
     const history = await priceHistory(db, { def: "ink" });
     expect(history).toHaveLength(1);
-    expect(history[0]).toMatchObject({ volume: 2, low: first?.unitPrice, high: first?.unitPrice });
+    expect(history[0]).toMatchObject({ volume: 10, low: first?.unitPrice, high: first?.unitPrice });
     const logged = await searchTrades(db, { player: seller, def: "ink" });
     expect(logged).toHaveLength(1);
     expect(logged[0]).toMatchObject({ kind: "board", fromId: seller, toId: buyer });
@@ -691,6 +795,7 @@ describe("direct trade commits under racing requests", () => {
       const mine = results.map((r) => r.get(a) as ExecResult);
       expect(oks(mine)).toBe(1);
       expect(mine.find((r) => !r.ok)).toMatchObject({ error: "trade_item_gone" });
+      tally(`same item in two trades: ${mine[0]?.ok ? "first" : "second"} won`);
       expect([b, c]).toContain(await ownerOf(item));
       expectConserved(before, await census(), true);
     }
@@ -798,7 +903,7 @@ describe("direct trade commits under racing requests", () => {
         }
         expectConserved(before, await census());
       }
-      expect(traded).toBeLessThanOrEqual(REPS);
+      tally(`offered while ${s.name}: trade first ${traded}, other first ${REPS - traded}`);
     });
   }
 
@@ -918,12 +1023,12 @@ describe("direct trade commits under racing requests", () => {
     expectConserved(before, await census(), true);
 
     heard.length = 0;
-    const listing = await listed(eco, a, { stack: "ink", qty: 5, unitPrice: "10" });
+    const listing = await listed(eco, a, { stack: "ink", qty: 5, unitPrice: "40" });
     await fund(eco, c, { pinecone: 1000 });
     const ledger = async () =>
       Number((await db.pool.query("select count(*) from economy_ledger")).rows[0].count);
     const buyId = randomUUID();
-    const once = { listing, qty: 2, unitPrice: "10" };
+    const once = { listing, qty: 3, unitPrice: "40" };
     const first = await rs[0]?.executor.execute(c, buyId, "listing.buy", once);
     expect(first?.ok).toBe(true);
     const rows = await ledger();
@@ -935,9 +1040,9 @@ describe("direct trade commits under racing requests", () => {
     for (const r of again) expect(r).toEqual(first);
     expect(await ledger()).toBe(rows);
     expect(await tradeLogs()).toBe(2);
-    expect(await stack(c, "ink")).toBe(2);
+    expect(await stack(c, "ink")).toBe(3);
     const history = await (await import("./board.ts")).priceHistory(db, { def: "ink" });
-    expect(history[0]?.volume).toBe(2);
+    expect(history[0]?.volume).toBe(3);
     expect(heard.map((h) => h.split(" ").slice(1).join(" ")).sort()).toEqual(
       [`applied listing.buy ${a}`, `applied listing.buy ${c}`, `change ${a}`].sort(),
     );
@@ -1005,14 +1110,14 @@ describe("direct trade commits under racing requests", () => {
       error: "trade_item_cooldown",
     });
     await fund(eco, b, { pinecone: 100 });
-    expect(await list(eco, b, { item, unitPrice: "10" })).toMatchObject({
+    expect(await list(eco, b, { item, unitPrice: "100" })).toMatchObject({
       error: "trade_item_cooldown",
     });
     await db.pool.query(
       "update items set tradable_at = now() - interval '1 second' where id = $1",
       [item],
     );
-    expect((await list(eco, b, { item, unitPrice: "10" })).ok).toBe(true);
+    expect((await list(eco, b, { item, unitPrice: "100" })).ok).toBe(true);
     // An era boss's drop is bound where it is made.
     const era = await eco.executor.execute(a, randomUUID(), "grant", {
       exp: 0,
@@ -1106,6 +1211,102 @@ async function opened(
   return asked.session;
 }
 
+// Binding and the cooldown follow value ------------------------------------------------------
+
+describe("binding and the re-trade cooldown travel with the value", () => {
+  const flags = async (item: string) =>
+    (await db.pool.query("select bound, tradable_at from items where id = $1", [item])).rows[0] as {
+      bound: boolean;
+      tradable_at: Date | null;
+    };
+  /** Hands `items` from `from` to `to` in a trade, which starts their cooldown. */
+  async function receive(eco: Economy, from: string, to: string, items: string[]) {
+    const r = await trade(eco, from, await commitOf({ [from]: { items }, [to]: {} }));
+    expect(r.get(from)?.ok).toBe(true);
+  }
+  const eraTool = async (eco: Economy, id: string, tool: string): Promise<string> => {
+    const before = new Set(await ids(id, "tool"));
+    const r = await eco.executor.execute(id, randomUUID(), "grant", {
+      exp: 0,
+      drops: [{ item: { kind: "tool", tool }, source: { ...SOURCE, rank: "boss", era: true } }],
+    });
+    expect(r.ok).toBe(true);
+    return (await ids(id, "tool")).find((t) => !before.has(t)) as string;
+  };
+
+  it("제련 with a bound kit copy makes a bound copy, whichever copy survives", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const kit = (
+      await db.pool.query("select id from items where owner_id = $1 and def_id = 'wangdo'", [a])
+    ).rows[0].id as string;
+    expect((await eco.executor.execute(a, randomUUID(), "unequip", { item: kit })).ok).toBe(true);
+    const [c1, c2] = [await book(eco, a, "wangdo"), await book(eco, a, "wangdo")];
+    await fund(eco, a, { pinecone: forgeFee(0, PAGE) });
+    // Equal copies: the first named survives, an unbound one.
+    const forged = await eco.executor.execute(a, randomUUID(), "forge", { items: [c1, kit, c2] });
+    expect(forged).toMatchObject({ ok: true, outcome: { item: c1 } });
+    expect((await flags(c1)).bound).toBe(true);
+    const out = await trade(eco, a, await commitOf({ [a]: { items: [c1] }, [b]: {} }));
+    expect(out.get(a)).toMatchObject({ error: "trade_item_bound" });
+  });
+
+  it("제련 with copies still cooling down makes a copy that cools down as long", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const [r1, r2] = [await book(eco, a), await book(eco, a)];
+    await receive(eco, a, b, [r1, r2]);
+    const own = await book(eco, b);
+    await fund(eco, b, { pinecone: forgeFee(0, PAGE) + 100 });
+    const cooling = (await flags(r2)).tradable_at;
+    expect(cooling).not.toBeNull();
+    const forged = await eco.executor.execute(b, randomUUID(), "forge", { items: [own, r1, r2] });
+    expect(forged).toMatchObject({ ok: true, outcome: { item: own } });
+    expect((await flags(own)).tradable_at).toEqual(cooling);
+    expect(await list(eco, b, { item: own, unitPrice: "100" })).toMatchObject({
+      error: "trade_item_cooldown",
+    });
+  });
+
+  it("merging a bound or cooling tool into a free one carries the binding and the cooldown", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const [free] = (await tools(eco, a, 1)) as [string];
+    const era = await eraTool(eco, a, "compass");
+    expect((await flags(era)).bound).toBe(true);
+    const merged = await eco.executor.execute(a, randomUUID(), "merge", { into: free, from: era });
+    expect(merged.ok).toBe(true);
+    expect((await flags(free)).bound).toBe(true);
+    // A received tool merged into an own one: the own one now waits out the cooldown.
+    const [given] = (await tools(eco, a, 1)) as [string];
+    await receive(eco, a, b, [given]);
+    const [mine] = (await tools(eco, b, 1)) as [string];
+    const cooling = (await flags(given)).tradable_at;
+    expect(cooling).not.toBeNull();
+    expect(
+      (await eco.executor.execute(b, randomUUID(), "merge", { into: mine, from: given })).ok,
+    ).toBe(true);
+    expect((await flags(mine)).tradable_at).toEqual(cooling);
+    const out = await trade(eco, b, await commitOf({ [b]: { items: [mine] }, [a]: {} }));
+    expect(out.get(b)).toMatchObject({ error: "trade_item_cooldown" });
+  });
+
+  it("an evolution made with a bound tool is bound", async () => {
+    const eco = economy();
+    const a = await student(eco);
+    const def = "sequence";
+    const item = await book(eco, a, def);
+    const tool = await eraTool(eco, a, bookById(def).tool);
+    // A veteran's state, set directly: 3학년, a 심화서 at level 100, its tool at level 5.
+    await db.pool.query("update characters set level = 250, tier = 4 where id = $1", [a]);
+    await db.pool.query("update items set grade = 2, level = 100 where id = $1", [item]);
+    await db.pool.query("update items set level = 5 where id = $1", [tool]);
+    const evolved = await eco.executor.execute(a, randomUUID(), "evolve", { item, tool });
+    expect(evolved.ok).toBe(true);
+    expect((await flags(item)).bound).toBe(true);
+  });
+});
+
 describe("direct trade windows", () => {
   it(`both confirming at the same instant commits once (${REPS} rounds)`, async () => {
     const eco = economy();
@@ -1180,6 +1381,7 @@ describe("direct trade windows", () => {
       if (rep % 2) racing.reverse();
       await Promise.all(racing.map((start) => start()));
       const done = w.last(b, "done");
+      tally(`offer vs confirm: ${done ? "confirm" : "change"} first`);
       if (done) {
         // The confirm went first: both copies, as confirmed, for the 1000.
         expect(await ownerOf(cheap)).toBe(b);
@@ -1271,6 +1473,29 @@ describe("direct trade windows", () => {
     expect(await ownerOf(item)).toBe(a);
   });
 
+  it("a request to a busy player who blocked you reads busy, as it does for anyone", async () => {
+    const eco = economy();
+    const w = world();
+    const [a, b, c, alt] = [
+      await student(eco),
+      await student(eco),
+      await student(eco),
+      await student(eco),
+    ];
+    for (const id of [a, b, c, alt]) w.join(id);
+    const trades = createTrades({
+      db,
+      executor: eco.executor,
+      link: w.link,
+      isBlocked: (x, y) => x === b && y === a,
+    });
+    await opened(trades, b, c);
+    const asked = await trades.handle(a, msg("trade.request", { to: b }));
+    const control = await trades.handle(alt, msg("trade.request", { to: b }));
+    expect(asked).toEqual(control);
+    expect(asked).toMatchObject({ ok: false, code: "trade_busy" });
+  });
+
   it("a side that leaves while the commit is in flight still gets a whole trade, not half of one", async () => {
     let release!: () => void;
     const held = new Promise<void>((r) => {
@@ -1307,6 +1532,49 @@ describe("direct trade windows", () => {
     expect(await ownerOf(item)).toBe(b);
     expect(trades.open).toBe(0);
     expectConserved(before, await census(), true);
+  });
+
+  it("a commit whose every answer was lost tells both sides what the database holds", async () => {
+    const eco = economy();
+    const lost = () => new Error("Connection terminated unexpectedly");
+    for (const landed of [true, false]) {
+      const w = world();
+      // Lands (or not) and then loses the answer, every time.
+      const flaky: Pick<Economy["executor"], "executeAll"> = {
+        async executeAll(...args: Parameters<Economy["executor"]["executeAll"]>) {
+          if (landed) await eco.executor.executeAll(...args);
+          throw lost();
+        },
+      };
+      const trades = createTrades({
+        db,
+        executor: flaky,
+        link: w.link,
+        commitRetriesMs: [1, 1, 1],
+      });
+      const [a, b] = [await student(eco), await student(eco)];
+      w.join(a);
+      w.join(b, 16);
+      const item = await book(eco, a);
+      const session = await opened(trades, a, b);
+      await trades.handle(
+        a,
+        msg("trade.offer", { session, items: [item], stacks: {}, pinecone: "0" }),
+      );
+      await trades.handle(a, msg("trade.confirm", { session, version: 1 }));
+      await trades.handle(b, msg("trade.confirm", { session, version: 1 }));
+      if (landed) {
+        expect(w.last(a, "done")).toBeDefined();
+        expect(w.last(b, "done")).toBeDefined();
+        expect(w.last(a, "failed")).toBeUndefined();
+        expect(await ownerOf(item)).toBe(b);
+      } else {
+        expect(w.last(a, "failed")).toMatchObject({ error: "server_error" });
+        expect(w.last(a, "closed")).toBeDefined();
+        expect(await ownerOf(item)).toBe(a);
+      }
+      expect(trades.open).toBe(0);
+    }
   });
 
   it("a refused commit reopens the window with fresh offers and cleared confirmations", async () => {
@@ -1392,5 +1660,98 @@ describe("ledger growth", () => {
     expect(await daily()).toEqual(live);
     expectConserved(before, await census());
     expect((await checkInvariants(db)).violations).toEqual([]);
+  });
+
+  it("compaction goes by when a row was written, not by its day on a fast server clock", async () => {
+    const eco = economy();
+    const a = await student(eco);
+    await fund(eco, a, { pinecone: 1000 });
+    const water = VENDING.fixed[0];
+    for (let i = 0; i < 3; i++) {
+      expect(
+        (await eco.executor.execute(a, randomUUID(), "shop.buy", { item: water.id, qty: 1 })).ok,
+      ).toBe(true);
+    }
+    // A clock 120 days ahead booked these on a day long past retention, a minute ago.
+    await db.pool.query("update economy_ledger set day = day - 120");
+    expect(await compactLedger(db)).toBe(0);
+    // Written 100 days ago by the wall clock: now it goes.
+    await db.pool.query("update economy_ledger set at = at - interval '100 days'");
+    expect(await compactLedger(db)).toBeGreaterThan(0);
+  });
+
+  it("the trade log past retention folds into pair totals that tradePartners still reads", async () => {
+    const eco = economy();
+    const [a, b] = [await student(eco), await student(eco)];
+    const item = await book(eco, a);
+    await fund(eco, b, { pinecone: 2000 });
+    await fund(eco, a, { ink: 10, pinecone: 100 });
+    expect(
+      (await trade(eco, a, await commitOf({ [a]: { items: [item] }, [b]: { pinecone: 700 } }))).get(
+        a,
+      )?.ok,
+    ).toBe(true);
+    const listing = await listed(eco, a, { stack: "ink", qty: 10, unitPrice: "30" });
+    expect((await buy(eco, b, listing, "30", 10)).ok).toBe(true);
+    const window = [new Date(Date.now() - 86_400_000), new Date(Date.now() + 86_400_000)] as const;
+    const before = await tradePartners(db, a, ...window);
+    expect(before).toEqual([{ partner: b, trades: 2, sent: "0", received: "1000" }]);
+    expect(await pruneTradeLog(db, Date.now, 90)).toBe(0);
+    await db.pool.query("update trade_log set recorded_at = now() - interval '100 days'");
+    expect(await pruneTradeLog(db, Date.now, 90)).toBe(2);
+    expect(await tradeLogs()).toBe(0);
+    expect(await tradePartners(db, a, ...window)).toEqual(before);
+    expect(await tradePartners(db, b, ...window)).toEqual([
+      { partner: a, trades: 2, sent: "1000", received: "0" },
+    ]);
+  });
+
+  it(`roll-up and compaction racing writes across midnight keep every day's sum (${REPS} rounds)`, async () => {
+    for (let rep = 0; rep < REPS; rep++) {
+      await db.pool.query("truncate economy_daily_totals");
+      // The server clock starts a few milliseconds before a Korean midnight and runs fast.
+      const midnight = new Date(
+        `${koreanDay(Date.now() + 2 * 86_400_000)}T00:00:00+09:00`,
+      ).getTime();
+      const start = Date.now();
+      const clock = () => midnight - 40 + (Date.now() - start) * 20;
+      const eco = economy({ now: () => new Date(clock()) });
+      const a = await student(eco);
+      await fund(eco, a, { pinecone: 100_000, ink: 50 });
+      // Old rows for compaction to take while it all runs.
+      await db.pool.query(
+        "update economy_ledger set at = at - interval '100 days' where character_id = $1",
+        [a],
+      );
+      const writer = racers(1)[0] as Economy;
+      const water = VENDING.fixed[0];
+      const writes = Array.from({ length: 12 }, (_, i) =>
+        i % 2
+          ? fund(writer, a, { pinecone: 10 + i })
+          : writer.executor.execute(a, randomUUID(), "shop.buy", { item: water.id, qty: 1 }),
+      );
+      const upkeep = [0, 1, 2, 3].map(async (i) => {
+        await sleep(i * 2);
+        await rollUpDays(pools[i % 3] as Db, clock);
+        await compactLedger(pools[(i + 1) % 3] as Db);
+      });
+      await Promise.all([...writes, ...upkeep]);
+      const days = await db.pool.query(
+        "select count(distinct day)::int as n from economy_ledger where character_id = $1",
+        [a],
+      );
+      expect(days.rows[0].n).toBeGreaterThanOrEqual(2);
+      await rollUpDays(db, clock);
+      const daily = await db.pool.query(
+        `select day::text, currency, source_or_sink, amount::text from economy_daily
+         where amount <> 0 order by 1, 2, 3`,
+      );
+      const direct = await db.pool.query(
+        `select day::text, currency, source_or_sink, sum(amount)::text as amount from economy_ledger
+         group by 1, 2, 3 having sum(amount) <> 0 order by 1, 2, 3`,
+      );
+      expect(daily.rows).toEqual(direct.rows);
+      expect((await checkInvariants(db)).violations).toEqual([]);
+    }
   });
 });

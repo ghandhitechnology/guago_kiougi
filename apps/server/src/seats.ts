@@ -64,6 +64,21 @@ export async function authenticateJoin(ctx: AuthContext): Promise<RoomAuth> {
   return { accountId: me.account.id, characterId: character.id, tokenHash };
 }
 
+/** Writes of a character's new place after a door, in flight, by character id. */
+const moves = new Map<string, Promise<unknown>>();
+
+/**
+ * The character as saved, read only after any walk through a door it is making has been
+ * written, so an entry right after a drop mid-transfer lands on the far side of the door.
+ */
+export async function characterAfterMoves(
+  accountId: string,
+  characterId: string,
+): Promise<Character | null> {
+  await moves.get(characterId)?.catch(() => {});
+  return use().auth.characterOf(accountId);
+}
+
 // One seat per account and slot, across rooms ------------------------------------------------
 
 /** A client holds one map seat and one world seat at a time (PLAN §19 runtime topology). */
@@ -138,6 +153,10 @@ interface Seat {
   characterId: string;
   saved: { x: number; y: number };
   evicted: boolean;
+  /** Walking out to another map: its place is written there, never here again. */
+  moving: boolean;
+  /** The last write of its place; writes run one after another, never two at once. */
+  writes: Promise<void>;
   /** The code the seat was closed with once evicted. */
   closeCode: number;
   release: () => void;
@@ -181,6 +200,8 @@ export class RoomSeats {
       characterId: "",
       saved: { x: 0, y: 0 },
       evicted: false,
+      moving: false,
+      writes: Promise.resolve(),
       closeCode: CLOSE_SESSION_REPLACED,
       release: () => {},
       current: () => true,
@@ -214,10 +235,13 @@ export class RoomSeats {
     }
   }
 
-  /** False once the seat was taken by a newer session: there is nothing to come back to. */
+  /**
+   * False once the seat was taken by a newer session, or while it walks out to another map:
+   * there is nothing to come back to here.
+   */
   mayReconnect(client: Client): boolean {
     const seat = this.seats.get(client.sessionId);
-    return seat !== undefined && !seat.evicted;
+    return seat !== undefined && !seat.evicted && !seat.moving;
   }
 
   hold(client: Client, reconnection: Reconnection): void {
@@ -251,20 +275,60 @@ export class RoomSeats {
     }
   }
 
+  /**
+   * Moves the seat's character to (x, y) on another map, for a walk through a door. The place is
+   * written there first, after any write of this room still in flight, so a reconnect or a new
+   * login from then on loads the character on the other side. Then the account's map seat is
+   * freed and the seat forgotten here; its socket stays open until the client leaves. Returns
+   * the auth to reserve the seat on the other side with.
+   *
+   * Throws when the write fails, with the seat left as it was, or when a newer session took the
+   * account meanwhile.
+   */
+  async moveOut(client: Client, mapId: string, x: number, y: number): Promise<RoomAuth> {
+    const seat = this.seats.get(client.sessionId);
+    if (!seat || seat.evicted) throw new ServerError(409, "session_replaced");
+    seat.moving = true;
+    const write = seat.writes.then(() =>
+      use().auth.saveCharacterPlace(seat.characterId, mapId, x, y),
+    );
+    seat.writes = write.catch(() => {});
+    moves.set(seat.characterId, write);
+    try {
+      await write;
+    } catch (error) {
+      seat.moving = false;
+      throw error;
+    } finally {
+      if (moves.get(seat.characterId) === write) moves.delete(seat.characterId);
+    }
+    if (seat.evicted || this.seats.get(client.sessionId) !== seat) {
+      throw new ServerError(409, "session_replaced");
+    }
+    this.seats.delete(client.sessionId);
+    seat.release();
+    return client.auth as RoomAuth;
+  }
+
   /** Periodic save: only seats that moved since their last write. */
   async saveAll(): Promise<void> {
     await Promise.all([...this.seats].map(([sessionId, seat]) => this.save(sessionId, seat)));
   }
 
-  private async save(sessionId: string, seat: Seat): Promise<void> {
-    const at = this.place(sessionId);
-    if (!at || (at.x === seat.saved.x && at.y === seat.saved.y)) return;
-    try {
-      await use().auth.saveCharacterPlace(seat.characterId, this.mapId, at.x, at.y);
-      seat.saved = { x: at.x, y: at.y };
-    } catch (error) {
-      console.error(`saving character ${seat.characterId} failed: ${describeError(error)}`);
-    }
+  /** Queues a write of the place, unless the seat is walking out; resolves when written. */
+  private save(sessionId: string, seat: Seat): Promise<void> {
+    seat.writes = seat.writes.then(async () => {
+      if (seat.moving) return;
+      const at = this.place(sessionId);
+      if (!at || (at.x === seat.saved.x && at.y === seat.saved.y)) return;
+      try {
+        await use().auth.saveCharacterPlace(seat.characterId, this.mapId, at.x, at.y);
+        seat.saved = { x: at.x, y: at.y };
+      } catch (error) {
+        console.error(`saving character ${seat.characterId} failed: ${describeError(error)}`);
+      }
+    });
+    return seat.writes;
   }
 
   private evict(seat: Seat, code = CLOSE_SESSION_REPLACED): void {

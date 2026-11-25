@@ -44,6 +44,8 @@ class WorldView {
   selfSid: string | undefined;
   /** Nameplates, bubbles and the prompt, while the world scene runs. */
   overlays: WorldOverlays | undefined;
+  /** The interact action: the E key and the phone's context button call it while the world runs. */
+  interact: (() => void) | undefined;
   /**
    * Someone's nameplate or body tapped, clicked or long-pressed, by session or speaker id; the
    * player card opens for players.
@@ -72,6 +74,7 @@ class WorldView {
     this.self = undefined;
     this.selfSid = undefined;
     this.overlays = undefined;
+    this.interact = undefined;
     this.others.clear();
     for (const l of this.listeners) l(undefined);
   }

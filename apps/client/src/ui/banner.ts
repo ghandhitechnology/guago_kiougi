@@ -33,7 +33,10 @@ export class PlaceBanner {
     this.root = root;
     sound("page");
     slide(root, rest, 200);
-    fade(root, 1, 200, () => mark.show(240));
+    // A newer banner may have taken this one down before it finished landing.
+    fade(root, 1, 200, () => {
+      if (root.active) mark.show(240);
+    });
     this.timer = scene.time.delayedCall(2600, () => this.hide());
   }
 

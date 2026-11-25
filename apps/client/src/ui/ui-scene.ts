@@ -11,6 +11,7 @@ import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { type SocialUi, startSocialUi } from "../social/social-ui.ts";
 import { session } from "../world/session.ts";
+import { worldView } from "../world/view.ts";
 import { AnnounceBanner } from "./announce.ts";
 import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
@@ -92,6 +93,7 @@ export class UiScene extends Phaser.Scene {
         dodge: () => fight()?.dodge(),
         cast: (slot) => fight()?.cast(slot),
         mentor: () => fight()?.mentor(),
+        interact: () => worldView.interact?.(),
       },
       touch,
     );
@@ -134,6 +136,11 @@ export class UiScene extends Phaser.Scene {
         hudView.setVisible(false);
         social?.setHudVisible(false);
         notebook.open();
+        return true;
+      }
+      // The world's interact key (PLAN §6), by its place on the keyboard under any layout.
+      if (e.code === "KeyE") {
+        worldView.interact?.();
         return true;
       }
       return false;

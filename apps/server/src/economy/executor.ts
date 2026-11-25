@@ -254,6 +254,11 @@ function plan(
       if (before.def !== row.def || before.kind !== row.kind) {
         throw new ContractError(`item ${row.id} changed what it is`);
       }
+      // Binding and the re-trade cooldown only ever tighten (PLAN §13).
+      const sooner = (row.tradableAt?.getTime() ?? 0) < (before.tradableAt?.getTime() ?? 0);
+      if ((before.bound && !row.bound) || sooner) {
+        throw new ContractError(`item ${row.id} would come free to trade`);
+      }
       updates.push(row);
     } else if (made.has(row.id)) {
       inserts.push(row);
@@ -408,9 +413,11 @@ async function loadItems(
   return new Map(rows.map((r) => [r.id as string, itemFromDb(r)]));
 }
 
-async function countListings(q: Queryable, sellerId: string): Promise<number> {
+/** Live listings not yet past their time: an expired one stops counting before it is swept. */
+async function countListings(q: Queryable, sellerId: string, now: Date): Promise<number> {
   const { rows } = await q.execute(sql`
-    select count(*)::int as n from listings where seller_id = ${sellerId} and state = 'live'`);
+    select count(*)::int as n from listings
+    where seller_id = ${sellerId} and state = 'live' and expires_at > ${now.toISOString()}::timestamptz`);
   return (rows[0]?.n as number | undefined) ?? 0;
 }
 
@@ -543,7 +550,7 @@ async function write(
       update items i set
         grade = u.grade, level = u.level, exp = u.exp, pilgi = u.pilgi,
         pilgi_fail_streak = u.fails, evolved = u.evolved, slot = u.slot,
-        listing_id = u.listing, updated_at = now()
+        listing_id = u.listing, bound = u.bound, tradable_at = u.tradable, updated_at = now()
       from unnest(
         ${sql.param(u.map((r) => r.id))}::uuid[],
         ${sql.param(u.map((r) => r.grade))}::smallint[],
@@ -553,8 +560,10 @@ async function write(
         ${sql.param(u.map((r) => r.pilgiFails))}::integer[],
         ${sql.param(u.map((r) => r.evolved))}::boolean[],
         ${sql.param(u.map((r) => r.slot))}::smallint[],
-        ${sql.param(u.map((r) => r.listing))}::uuid[]
-      ) as u(id, grade, level, exp, pilgi, fails, evolved, slot, listing)
+        ${sql.param(u.map((r) => r.listing))}::uuid[],
+        ${sql.param(u.map((r) => r.bound))}::boolean[],
+        ${sql.param(u.map((r) => r.tradableAt?.toISOString() ?? null))}::timestamptz[]
+      ) as u(id, grade, level, exp, pilgi, fails, evolved, slot, listing, bound, tradable)
       where i.id = u.id and i.owner_id = ${c}`);
     if (done.rowCount !== u.length) throw new ContractError("updated items went missing");
   }
@@ -770,6 +779,12 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     return result;
   }
 
+  /** Every party's result, and whether it was read back from the id's record. */
+  interface Outcome {
+    results: Map<string, ExecResult>;
+    replayed: boolean;
+  }
+
   interface Ran {
     /** Each recorded party's result. Only the initiator's on an unrecorded refusal. */
     results: Map<string, ExecResult>;
@@ -847,7 +862,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
       );
       const { purse, exact } = await loadPurse(q, id, [...touched].sort());
       const worn = want.worn ? [...items.values()].filter((r) => r.slot !== null) : [];
-      const listingCount = want.listingCount ? await countListings(q, id) : 0;
+      const listingCount = want.listingCount ? await countListings(q, id, ctx.now) : 0;
       const live = await loadLive(q, id, want.live);
       touchedBy.set(id, touched);
       loaded.set(id, {
@@ -861,7 +876,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
         live,
       });
     }
-    const facts = (await def.facts?.(q, request, locked)) ?? {};
+    const facts = (await def.facts?.(q, request, locked, ctx)) ?? {};
     await hooks.afterLoad?.(op);
 
     const world: World = { initiator, parties: loaded, listings, facts };
@@ -952,7 +967,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     name: K,
     request: Requests[K],
     on: { tx?: Queryable } = {},
-  ): Promise<Map<string, ExecResult>> {
+  ): Promise<Outcome> {
     if (name === "grant") {
       const bad = checkGrant(request as GrantRequest);
       if (bad) throw new ContractError(`grant has a bad ${bad}`);
@@ -963,7 +978,10 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     const others = (await def.others(on.tx ?? db, request, characterId)).filter(
       (id) => id !== characterId,
     );
-    if (on.tx) return (await run(on.tx, op, request, hash, others)).results;
+    if (on.tx) {
+      const out = await run(on.tx, op, request, hash, others);
+      return { results: out.results, replayed: out.replayed };
+    }
     return inLanes([characterId, ...others], () => transact(op, request, hash, others));
   }
 
@@ -979,7 +997,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     request: Requests[K],
     on: { tx?: Queryable } = {},
   ): Promise<ExecResult> {
-    const results = await runAll(characterId, opId, name, request, on);
+    const { results } = await runAll(characterId, opId, name, request, on);
     return results.get(characterId) as ExecResult;
   }
 
@@ -988,10 +1006,12 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
     request: Requests[K],
     hash: string,
     others: readonly string[],
-  ): Promise<Map<string, ExecResult>> {
+  ): Promise<Outcome> {
     const { characterId, opId, name } = op;
-    const alone = (error: OpError) =>
-      new Map<string, ExecResult>([[characterId, { id: opId, op: name, ok: false, error }]]);
+    const alone = (error: OpError): Outcome => ({
+      results: new Map([[characterId, { id: opId, op: name, ok: false, error }]]),
+      replayed: false,
+    });
     for (let attempt = 0; ; attempt++) {
       try {
         const out = await db.transaction((tx) => run(tx, op, request, hash, others));
@@ -1004,7 +1024,7 @@ export function createExecutor(db: Db, options: ExecutorOptions = {}) {
             if (id !== characterId && !DEFS[name].quiet) notifyChange(id, result.change);
           }
         }
-        return out.results;
+        return { results: out.results, replayed: out.replayed };
       } catch (error) {
         const { code, constraint } = pgErrorCode(error);
         // Reachable past the character lock only if a double above 2^53 rounded an
