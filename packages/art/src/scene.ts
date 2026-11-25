@@ -110,6 +110,12 @@ export interface Light {
   readonly reach?: readonly number[];
   /** Pixels of edge noise. Defaults to 3. */
   readonly ragged?: number;
+  /**
+   * Shafts for a `region` light: seen from `at`, its reach swells by up to `amount` (a
+   * fraction) in some directions and shrinks in others, about `count` times around, so the light
+   * falls in tongues instead of rings.
+   */
+  readonly rays?: { readonly at: Vec; readonly count: number; readonly amount: number };
   readonly pulse?: { readonly amount: number; readonly period: number };
 }
 
@@ -298,6 +304,15 @@ function ragged(x: number, y: number, amount: number, seed: number): number {
   return (n - 0.5) * 2 * amount;
 }
 
+/** Reach multiplier of a light's shafts at a pixel: two seeded waves around the circle. */
+function shaft(rays: NonNullable<Light["rays"]>, x: number, y: number, seed: number): number {
+  const a = Math.atan2(y + 0.5 - rays.at[1], x + 0.5 - rays.at[0]);
+  const p = (seed % 97) * 0.37;
+  const wave =
+    0.6 * Math.sin(rays.count * a + p) + 0.4 * Math.sin(Math.round(rays.count * 1.618) * a + p * 2.3);
+  return 1 + rays.amount * wave;
+}
+
 /**
  * Band per pixel for one light: 0 is the brightest band, `bands.length` is unlit. `field` is
  * the region's distance field when the light has a region.
@@ -319,7 +334,8 @@ function bandAt(
     // Each band's edge has its own noise, so the bands interleave instead of nesting as contours.
     const d = field[y * SCREEN.w + x] as number;
     const amount = light.ragged ?? 3;
-    const k = light.reach.findIndex((r, i) => d + ragged(x, y, amount, seed + i * 31) < r * swell);
+    const reach = swell * (light.rays ? shaft(light.rays, x, y, seed) : 1);
+    const k = light.reach.findIndex((r, i) => d + ragged(x, y, amount, seed + i * 31) < r * reach);
     return k < 0 ? n : k;
   }
   let f: number;

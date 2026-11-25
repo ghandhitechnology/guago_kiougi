@@ -174,6 +174,7 @@ export default scene({
       region: "dm",
       reach: [18, 46, 84],
       ragged: 7,
+      rays: { at: [330, 120], count: 9, amount: 0.38 },
       pulse: { amount: 0.04, period: 2.2 },
     },
   ],

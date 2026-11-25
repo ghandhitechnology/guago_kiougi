@@ -542,30 +542,74 @@ const lawnWalk = terrain({
   decals: LAWN_DECALS,
 });
 
-const speck = P(`
-  K.
-  .K
-`);
-const shine = P(`
+// 운동장 sand: decomposed granite, its sandGrit lit from the top left. Every mark pairs a lit top
+// with a shaded underside, so the field reads as ground in any light and never as glints.
+
+/** A grain: lit on top, its shadow underneath. */
+const grain = P(`
   ww
-`);
-const warm = P(`
-  .c
-  cc
-`);
-const scuff = P(`
-  KK..
-  .KKK
-`);
-/** Dents and grit that stay darker than the sand at night. */
-const dent = P(`
-  MM.
-  .MM
-`);
-const grit2 = P(`
-  .M
   MM
 `);
+/** A larger rock with a body between its light and its shadow. */
+const rock = P(`
+  .ww.
+  wKKM
+  .MM.
+`);
+/** A hollow kicked into the sand: shadow on its upper lip, light on the lower. */
+const hollow = P(`
+  MMM.
+  .www
+`);
+const sandGrit = P(`
+  M.M
+  .M.
+`);
+/** Warm grains, browner than the rest. */
+const fleck = P(`
+  cc
+`);
+
+/** A gravelly patch: stones and sandGrit gathered where the sand has blown off. */
+const GRAVEL_CORE: readonly (readonly Mark[])[] = [
+  [
+    [2, 2, grain],
+    [8, 1, sandGrit],
+    [12, 5, grain],
+    [4, 7, rock],
+    [11, 11, grain],
+    [1, 13, sandGrit],
+  ],
+  [
+    [5, 2, rock],
+    [12, 2, grain],
+    [1, 7, grain],
+    [9, 8, sandGrit],
+    [4, 12, grain],
+    [11, 12, rock],
+  ],
+];
+const GRAVEL_FRINGE: readonly (readonly Mark[])[] = [
+  [
+    [3, 3, grain],
+    [10, 10, sandGrit],
+  ],
+  [[8, 6, grain]],
+];
+/** Scuffed ground: hollows where feet dug in. */
+const SCUFF_CORE: readonly (readonly Mark[])[] = [
+  [
+    [2, 2, hollow],
+    [10, 6, hollow],
+    [4, 11, hollow],
+  ],
+  [
+    [8, 2, hollow],
+    [1, 8, hollow],
+    [11, 12, hollow],
+  ],
+];
+const SCUFF_FRINGE: readonly (readonly Mark[])[] = [[[6, 7, hollow]], []];
 
 const lawnField = terrain({
   name: "lawn-field",
@@ -577,33 +621,30 @@ const lawnField = terrain({
   ...lawnPictures(LAWN_RIM("K", ["e", "E"]), 2),
   base: [
     tileOf("s", [
-      [2, 2, speck],
-      [10, 5, shine],
-      [5, 10, dent],
-      [12, 12, speck],
+      [3, 3, grain],
+      [11, 9, sandGrit],
     ]),
     tileOf("s", [
-      [8, 2, scuff],
-      [2, 9, grit2],
-      [11, 11, shine],
+      [9, 2, rock],
+      [2, 11, grain],
     ]),
     tileOf("s", [
-      [3, 4, dent],
-      [10, 8, speck],
-      [4, 13, scuff],
+      [5, 6, hollow],
+      [12, 12, fleck],
     ]),
     tileOf("s", [
-      [12, 2, warm],
-      [6, 7, grit2],
-      [1, 13, shine],
+      [2, 2, sandGrit],
+      [10, 6, grain],
+      [6, 12, grain],
     ]),
-    tileOf("s", [
-      [7, 3, speck],
-      [2, 11, dent],
-    ]),
+    tileOf("s", [[7, 8, fleck]]),
   ],
   fill: LAWN_MARKS.slice(1).map(lawnTile),
-  tones: LAWN_TONES,
+  tones: [
+    ...LAWN_TONES,
+    { name: "gravel", on: "lower", band: [0, 0.34], ...tonePictures(GRAVEL_CORE, GRAVEL_FRINGE) },
+    { name: "scuffed", on: "lower", band: [0.68, 1], ...tonePictures(SCUFF_CORE, SCUFF_FRINGE) },
+  ],
   decals: {
     ...LAWN_DECALS,
     prints: {

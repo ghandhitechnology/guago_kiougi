@@ -450,8 +450,9 @@ const CAMPUS_DUSK = theme("campus-dusk", {
 });
 
 /**
- * The field at night: the campus night, with the open field's sand carried by its grain. Specks
- * sit a step lighter than the ground and dents a step darker; nothing reads as a streak.
+ * The field at night: the campus night, with the open field's sand carried by its grain. Every
+ * grain is lit a step above the ground and shaded a step below it, and the warm grains turn
+ * umber, so the field reads as earth.
  */
 const FIELD_NIGHT = theme("field-night", {
   ...CAMPUS_NIGHT.remap,
@@ -461,6 +462,7 @@ const FIELD_NIGHT = theme("field-night", {
   "stone.mid": "ink.dark",
   "stone.vein": "ink.dark",
   "stone.dark": "ink.deep",
+  "clay.pale": "wood.dark",
 });
 
 /**
