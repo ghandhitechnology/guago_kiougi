@@ -1,12 +1,13 @@
 import { part } from "../format.ts";
-import { ink, withKo } from "./base.ts";
+import { ink, lone, withKo } from "./base.ts";
 
 // Accessories -------------------------------------------------------------------------------
 
-/** Round gold frames. */
+/** Round gold frames. Fringes and side hair fall over them. */
 export const glasses = withKo(
   part({
     palette: ink,
+    under: "hair",
     pieces: {
       head: {
         at: { down: [5, 7], up: [5, 7], side: [3, 7] },
@@ -31,20 +32,19 @@ export const glasses = withKo(
 export const goggles = withKo(
   part({
     palette: ink,
+    lone,
     pieces: {
       head: {
         at: { down: [5, 3], up: [5, 5], side: [3, 5] },
         down: `
-          eGGGGGGGGGGGGe
-          eGLLllGGLLllGe
-          eGGGGGGGGGGGGe
+          ..GGGGGGGGGG..
+          ..G~LLGG~LLG..
+          ..GGGGGGGGGG..
         `,
-        up: `
-          eeeeeeeeeeeeee
-        `,
+        up: null,
         side: `
           ..........GGGG.
-          ..eeeeeeeeGLLG.
+          ........eeGLLG.
           ..........GGGG.
         `,
       },

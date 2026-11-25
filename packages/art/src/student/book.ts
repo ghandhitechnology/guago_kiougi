@@ -44,7 +44,7 @@ export const textbook = withKo(
             `,
           },
           fly: {
-            at: [1, 1],
+            at: [1, 0],
             grid: `
               ..TT..
               .TUuT.
