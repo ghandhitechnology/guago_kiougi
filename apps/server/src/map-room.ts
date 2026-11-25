@@ -1102,7 +1102,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const target = builtMap(to);
     if (!target) return;
     // The Page clock can close a map between the door check and the step.
-    if (this.closed.has(via)) {
+    if (this.closed.has(via) || live()?.isOpen(target.id) === false) {
       this.rattle(via, "portal", pawn.client.sessionId, "door_closed");
       return;
     }
