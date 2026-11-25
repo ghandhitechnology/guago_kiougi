@@ -525,7 +525,14 @@ export class Feedback {
   }
 
   /** A public burst. */
-  burst(kind: number, x: number, y: number, _radius: number, owner: number): void {
+  burst(
+    kind: number,
+    x: number,
+    y: number,
+    _radius: number,
+    owner: number,
+    chain: readonly number[] = [],
+  ): void {
     const cat = this.ctx.cat;
     const mine = owner === this.ctx.selfId && owner !== 0;
     const near = Math.hypot(x - this.ctx.selfX, y - this.ctx.selfY) < 260;
@@ -565,6 +572,9 @@ export class Feedback {
         );
         if (mine) this.ctx.lights.strike(x, y - 10, cat.color("stone.bright"), 24, 0.6, 200);
         else if (near) this.ctx.sound.cue("sfx.signature.qed", x, y, false);
+        // 완전한 증명: the proof carries on to its neighbours along dashed chalk links, and each
+        // is stamped where it stands.
+        if (chain.length > 0 && cat.has("evo-complete-proof")) this.proofLinks(x, y, chain, mine);
         return;
       }
       case 17: {
@@ -602,6 +612,35 @@ export class Feedback {
         if (near) this.ctx.sound.cue("combat.revive", x, y, mine);
         return;
       }
+    }
+  }
+
+  /** Links from a Q.E.D. to the neighbours it carried to: link pieces every 9 px, a stamp on each. */
+  private proofLinks(x: number, y: number, chain: readonly number[], mine: boolean): void {
+    const alpha = mine ? 1 : this.ctx.restraint.others + 0.3;
+    for (const id of chain) {
+      const b = this.bodies.get(id);
+      if (!b) continue;
+      const tx = b.x;
+      const ty = (b.headY + b.y) / 2;
+      const dx = tx - x;
+      const dy = ty - (y - 10);
+      const len = Math.hypot(dx, dy);
+      const ang = Math.atan2(dy, dx);
+      const n = Math.min(10, Math.floor(len / 9));
+      for (let i = 1; i < n; i++) {
+        const f = i / n;
+        this.effects
+          .oneShot(
+            "evo-complete-proof",
+            "evo-complete-proof/link",
+            x + dx * f,
+            y - 10 + dy * f,
+            alpha,
+          )
+          ?.setRotation(ang);
+      }
+      this.effects.oneShot("evo-complete-proof", "evo-complete-proof/stamp", tx, ty - 6, alpha);
     }
   }
 

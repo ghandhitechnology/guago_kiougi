@@ -85,7 +85,15 @@ export class HudFeed implements FightSource {
     const books: (BookSlot | null)[] = [];
     for (let i = 0; i < SLOTS; i++) {
       const b = f.books[i];
-      books.push(b ? { book: b.icon.replace(/^book\//, ""), cooldown: q(b.cooldown) / 32 } : null);
+      books.push(
+        b
+          ? {
+              book: b.icon.replace(/^book\//, ""),
+              cooldown: q(b.cooldown) / 32,
+              ...(b.readyAt > 0 ? { readyAt: b.readyAt, span: b.seconds * 1000 } : {}),
+            }
+          : null,
+      );
     }
     this.emit(
       Object.freeze({

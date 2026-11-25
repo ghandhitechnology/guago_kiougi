@@ -14,6 +14,8 @@ export interface BookState {
   cooldown: number;
   /** Seconds the cooldown runs, as last measured. */
   seconds: number;
+  /** `performance.now()` the slot is ready again, from the owner's `ready` tick; 0 if ready. */
+  readyAt: number;
 }
 
 export interface StatusState {

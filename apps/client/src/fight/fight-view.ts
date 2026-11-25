@@ -277,7 +277,7 @@ export class FightView {
     this.effects = new Effects(this.ctx, this.bodies, {
       body: (id) => this.bodies.get(id),
       impact: (a, x, y) => this.feedback.impact(a, x, y),
-      burst: (kind, x, y, r, owner) => this.feedback.burst(kind, x, y, r, owner),
+      burst: (kind, x, y, r, owner, chain) => this.feedback.burst(kind, x, y, r, owner, chain),
       fired: (a) => this.feedback.fired(a),
       fighter: (id) => this.isFighter(id),
     });
@@ -1085,12 +1085,15 @@ export class FightView {
       let book = s.books[i];
       if (!book || book.id !== art.id) {
         const icon = BOOKS.find((b) => b.id === art.id)?.cues.icon ?? `book/${art.id}`;
-        book = { id: art.id, icon, cls: art.cls, ready: true, cooldown: 0, seconds };
+        book = { id: art.id, icon, cls: art.cls, ready: true, cooldown: 0, seconds, readyAt: 0 };
         s.books[i] = book;
       }
       book.ready = left <= 0;
       book.cooldown = left;
       book.seconds = seconds;
+      // The HUD sweeps exactly from the server's ready tick, on this page's clock.
+      book.readyAt =
+        left <= 0 ? 0 : performance.now() + ((own.ready[i] ?? 0) - this.ctx.ownTick) * TICK_MS;
     }
     const ticksLeft = Math.max(0, own.dodgeReady - this.serverTick());
     const cd = DODGE.cooldownSeconds / (TICK_MS / 1000);

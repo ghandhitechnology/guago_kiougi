@@ -18,7 +18,7 @@
  */
 import type { ArtMetadata } from "@guago/art";
 import { BOOKS } from "@guago/content";
-import { BurstKind, FxKind, type WireFx } from "@guago/shared";
+import { BurstKind, FxKind, type WireFx, ZONE_FOLLOW_UP } from "@guago/shared";
 import * as Phaser from "phaser";
 import type { TelegraphOptions } from "../render/index.ts";
 import type { Bodies, Body } from "./bodies.ts";
@@ -269,7 +269,14 @@ export interface EffectHooks {
   /** An effect's impact landed where it ended (own impacts shake and light). */
   impact(a: Active, x: number, y: number): void;
   /** A burst record: reactions, Q.E.D., heals, level ups, elites, revives. */
-  burst(kind: number, x: number, y: number, radius: number, owner: number): void;
+  burst(
+    kind: number,
+    x: number,
+    y: number,
+    radius: number,
+    owner: number,
+    chain: readonly number[],
+  ): void;
   /** A tell fired. */
   fired(a: Active): void;
   /** Whether an entity fights on this map's duel floor: its effects are never dimmed. */
@@ -438,7 +445,7 @@ export class Effects {
     const own = this.ctx.selfId !== 0 && f.owner === this.ctx.selfId;
     const enemy = f.kind === FxKind.Danger || f.kind === FxKind.EnemyShot;
     if (f.kind === FxKind.Burst) {
-      this.hooks.burst(f.def, f.x, f.y, f.radius, f.owner);
+      this.hooks.burst(f.def, f.x, f.y, f.radius, f.owner, f.chain);
       return;
     }
     // The other side of a duel is drawn as fully as the player's own: it is the fight.
@@ -1726,27 +1733,7 @@ export class Effects {
         null,
       );
     } else this.hideRange(a, LINE_SLOTS, 2 * LINE_SLOTS);
-    const r = Math.max(8, a.art?.trailRadius ?? 24);
-    const left = ((this.markTicks(a) - t) * TICK_MS) / 1000;
-    const alpha = a.alpha * clamp01(left / 1.2) * clamp01(secs / 0.15);
-    const ux = Math.cos(a.angle);
-    const uy = Math.sin(a.angle);
-    this.layLine(
-      a,
-      2 * LINE_SLOTS,
-      fault,
-      grind,
-      a.x - ux * r,
-      a.y - uy * r,
-      2 * r,
-      1,
-      idx,
-      Layer.Ground,
-      true,
-      1,
-      alpha,
-      null,
-    );
+    // The plates that lie on after the beat are the trail record's (see `area`).
   }
 
   /** Ticks a mark lives from its spawn: the delay, its repeats and what lies after the last. */
@@ -2037,6 +2024,34 @@ export class Effects {
     const secs = (t * TICK_MS) / 1000;
     const leftSecs = ((life - t) * TICK_MS) / 1000;
     if (art?.kind === "telegraph") {
+      // 판 구조론's plates grind where the trail really lies: round the fault's start, along its
+      // line (the trail record's angle), for the trail's time, fading out over its last stretch.
+      const fault = art.body ? this.lines.get(art.body) : undefined;
+      const grind = fault?.anims.get("grind");
+      if (fault && grind) {
+        const r = Math.max(8, a.radius);
+        const idx = Math.floor(secs * grind.fps);
+        const alpha = a.alpha * clamp01(leftSecs / 1.2) * clamp01(secs / 0.15);
+        const ux = Math.cos(a.angle);
+        const uy = Math.sin(a.angle);
+        this.layLine(
+          a,
+          0,
+          fault,
+          grind,
+          cx - ux * r,
+          cy - uy * r,
+          2 * r,
+          1,
+          idx,
+          Layer.Ground,
+          true,
+          1,
+          alpha,
+          null,
+        );
+        return false;
+      }
       const body = art.body && cat.meta.sprites[art.body]?.anims.flow ? art.body : null;
       if (!body) {
         this.hideFrom(a, 0);
@@ -2047,6 +2062,11 @@ export class Effects {
       place(p, cx, cy);
       p.s.setVisible(true).setAlpha(a.alpha * Math.min(1, leftSecs / 0.3));
       return false;
+    }
+    // 일기도's lightning lands once, at the follow-up, on what stands inside.
+    if ((a.flags & ZONE_FOLLOW_UP) !== 0 && a.pulses === 0 && t >= a.a) {
+      a.pulses = 1;
+      this.followUp(a, cx, cy);
     }
     const r = a.radius + a.speed * t;
     const name = art?.area && cat.has(art.area) ? art.area : null;
@@ -2120,6 +2140,26 @@ export class Effects {
     }
     this.hideFrom(a, from + n);
     return false;
+  }
+
+  /** A zone's follow-up strike: the cloud flashes and lightning stands on what is inside. */
+  private followUp(a: Active, cx: number, cy: number): void {
+    const body = a.art?.body;
+    const cloud = body && this.ctx.cat.meta.sprites[body]?.anims.flash ? body : null;
+    if (cloud) this.oneShot(cloud, this.key(cloud, "flash"), cx, cy - 30, a.alpha);
+    const r = a.radius + 4;
+    let n = 0;
+    for (const b of this.bodies.byId.values()) {
+      if (b.cat !== 0 || b.dying) continue;
+      const dx = b.x - cx;
+      const dy = b.y - cy;
+      if (dx * dx + dy * dy > r * r) continue;
+      this.oneShot("fx-thunder", "fx-thunder/strike", b.x, b.y, a.alpha);
+      if (a.mine)
+        this.ctx.lights.glow(b.x, b.y - 20, this.ctx.cat.color("gold.pale"), 28, 0.6, 180);
+      if (++n >= 4) break;
+    }
+    if (a.mine && n > 0) this.ctx.sound.self("hit.earth.crit");
   }
 
   private dash(a: Active, t: number): boolean {
