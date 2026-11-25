@@ -47,6 +47,16 @@ export const WORLD_MESSAGES = {
   presence: "presence",
   /** Server to client: `Refusal`, for any request the server would not carry out. */
   refused: "refused",
+  /**
+   * Server to client: `OpResult` (inventory.ts), the one answer to an item or currency
+   * operation. Each operation is sent under its own name (`OPS`) with `{ id, req }`.
+   */
+  result: "result",
+  /**
+   * Server to client: `ChangeNotice` (inventory.ts) for a change the player did not ask for, such
+   * as a combat grant landing. Applied like an operation's change, by `rev`.
+   */
+  change: "change",
 } as const;
 
 /** Why a request was not carried out. The client owns the copy for each. */
