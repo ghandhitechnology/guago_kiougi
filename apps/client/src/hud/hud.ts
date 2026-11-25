@@ -133,6 +133,20 @@ export class Hud {
     cd: Phaser.GameObjects.Image;
     lock: Phaser.GameObjects.Image;
   }[] = [];
+  /**
+   * Each slot's cooldown as last told and how fast it is coming back, so the sweep moves every
+   * frame between the fight's updates instead of stepping when they arrive.
+   */
+  private readonly sweeps: {
+    book: string;
+    value: number;
+    at: number;
+    start: { value: number; at: number } | undefined;
+    rate: number;
+    readyAt?: number;
+    span?: number;
+    shown: number;
+  }[] = [];
   private readonly dodge: Piece;
   private readonly mentor: Piece;
   private readonly mentorIcon: Phaser.GameObjects.Image;
@@ -398,6 +412,37 @@ export class Hud {
 
   private tick(): void {
     if (this.minimapPiece.live) this.minimap.update();
+    if (this.books.live) this.runSweeps(performance.now());
+  }
+
+  /** Moves every cooling slot's sweep on to where it is now. */
+  private runSweeps(now: number): void {
+    this.sweeps.forEach((w, i) => {
+      if (!w.book) return;
+      let cd = 0;
+      if (w.readyAt !== undefined && w.span)
+        cd = Math.max(0, Math.min(1, (w.readyAt - now) / w.span));
+      else if (w.value > 0)
+        // On from the last value at the rate it has been falling, never far past the next one.
+        cd = Math.max(0, w.value - w.rate * Math.min(250, now - w.at));
+      if (Math.abs(cd - w.shown) < 1 / 64 && !(cd === 0 && w.shown > 0)) return;
+      w.shown = cd;
+      const s = this.bookSlots[i];
+      if (s) this.paintSlot(s, w.book, cd);
+    });
+  }
+
+  private paintSlot(s: (typeof this.bookSlots)[number], book: string, cooldown: number): void {
+    s.back.setFrame(cooldown <= 0 ? "book-slot/ready" : "book-slot/idle");
+    s.dim.setVisible(cooldown > 0);
+    s.cd.setVisible(cooldown > 0);
+    s.book.setFrame(`book/${book}`);
+    s.dim.setFrame(`book-dim/${book}`);
+    // The cooldown sweeps back clockwise; the bright book is cropped to what has come back.
+    const step = Math.min(15, Math.max(0, Math.round(cooldown * 15)));
+    s.cd.setFrame(`cooldown/cd${String(step).padStart(2, "0")}`);
+    const shown = Math.round(16 * (1 - cooldown));
+    s.book.setCrop(0, 16 - shown, 16, shown);
   }
 
   /** A hit area that never lets a tap through to the world, with a press dip. */
@@ -564,24 +609,47 @@ export class Hud {
   }
 
   private applyBooks(books: readonly (BookSlot | null)[] | undefined): void {
+    const now = performance.now();
     this.bookSlots.forEach((s, i) => {
       const b = books?.[i];
       const has = b !== undefined && b !== null;
-      s.back.setFrame(
-        !has ? "book-slot/locked" : b.cooldown <= 0 ? "book-slot/ready" : "book-slot/idle",
-      );
       s.lock.setVisible(!has);
       s.book.setVisible(has);
-      s.dim.setVisible(has && b.cooldown > 0);
-      s.cd.setVisible(has && b.cooldown > 0);
-      if (!has) return;
-      s.book.setFrame(`book/${b.book}`);
-      s.dim.setFrame(`book-dim/${b.book}`);
-      // The cooldown sweeps back clockwise; the bright book is cropped to what has come back.
-      const step = Math.min(15, Math.max(0, Math.round(b.cooldown * 15)));
-      s.cd.setFrame(`cooldown/cd${String(step).padStart(2, "0")}`);
-      const shown = Math.round(16 * (1 - b.cooldown));
-      s.book.setCrop(0, 16 - shown, 16, shown);
+      const prev = this.sweeps[i];
+      if (!has) {
+        s.back.setFrame("book-slot/locked");
+        s.dim.setVisible(false);
+        s.cd.setVisible(false);
+        this.sweeps[i] = { book: "", value: 0, at: now, start: undefined, rate: 0, shown: 0 };
+        return;
+      }
+      // A cast, or another book in the slot, starts a new sweep; its rate is measured from there.
+      const fresh =
+        !prev || prev.book !== b.book || prev.value <= 0 || b.cooldown > prev.value + 1 / 16;
+      const start =
+        b.cooldown <= 0 ? undefined : fresh ? { value: b.cooldown, at: now } : prev.start;
+      const rate =
+        start && now - start.at > 30 && start.value > b.cooldown
+          ? (start.value - b.cooldown) / (now - start.at)
+          : fresh
+            ? 0
+            : (prev?.rate ?? 0);
+      // A value a little behind where the sweep has run to is the feed's rounding: never sweep back.
+      const v =
+        !fresh && prev && prev.shown < b.cooldown && b.cooldown - prev.shown < 1 / 16
+          ? prev.shown
+          : b.cooldown;
+      this.sweeps[i] = {
+        book: b.book,
+        value: v,
+        at: now,
+        start,
+        rate,
+        ...(b.readyAt !== undefined ? { readyAt: b.readyAt } : {}),
+        ...(b.span !== undefined ? { span: b.span } : {}),
+        shown: v,
+      };
+      this.paintSlot(s, b.book, v);
     });
     this.books.show(books !== undefined);
   }
