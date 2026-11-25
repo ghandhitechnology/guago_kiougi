@@ -3,6 +3,7 @@
  * validators both sides run. The client renders every chat string as plain text (PLAN §22).
  */
 import { checkName, type Major, normalizeName } from "./api.ts";
+import { DUEL_ERRORS } from "./duel-errors.ts";
 import { TRADE_ERRORS } from "./trade.ts";
 
 /** The room every client holds for the whole session, beside its map room (PLAN §19). */
@@ -135,6 +136,8 @@ export const REFUSAL_CODES = [
   "unknown_emote",
   // Direct trades and 매점 게시판 reads (trade.ts).
   ...TRADE_ERRORS,
+  // The 콜로세움 (duel.ts).
+  ...DUEL_ERRORS,
 ] as const;
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 

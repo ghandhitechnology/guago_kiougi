@@ -127,6 +127,11 @@ export const MapState = schema(
     npcs: t.map(NpcState),
     /** Ids of built portals whose map the Page clock has not opened yet: shut like unbuilt ones. */
     closed: t.array("string"),
+    /**
+     * Ids of the map's dueling floors with a match on them: the ring round each is walled while
+     * listed (`fenceFloor`), for fighters and everyone else alike.
+     */
+    fenced: t.array("string"),
   },
   "MapState",
 );
