@@ -67,6 +67,8 @@ export interface Destination {
   readonly via: string;
   /** The channel to seat them in when it has room (a dueling floor and back). */
   readonly roomId?: string;
+  /** 복습: the boss a private copy is made to fight (raid/replay.ts). */
+  readonly boss?: string;
 }
 
 /** What the story needs from a map room; `MapRoom` is one. */
@@ -75,6 +77,8 @@ export interface StoryRoom {
   readonly mapId: string;
   /** The character a private copy was made for. */
   readonly owner: string | undefined;
+  /** 복습: the boss a private copy was made to fight, alone. */
+  readonly boss: string | undefined;
   readonly mapDef: BuiltMap;
   tell(sessionId: string, type: string, body: unknown): void;
   bodyOf(sessionId: string): { x: number; y: number } | undefined;
@@ -209,6 +213,8 @@ class Director {
     const where = await this.whereBelongs(c);
     if (!room.owner) return !where.instance && where.map === room.mapId;
     if (room.owner !== c.id) return false;
+    // A 복습 of a freed boss (raid/replay.ts) is its owner's until they leave it.
+    if (room.boss) return true;
     if (where.instance && where.map === room.mapId) return true;
     return this.replays.get(c.id)?.map === room.mapId;
   }

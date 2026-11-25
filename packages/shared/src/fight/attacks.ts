@@ -408,7 +408,7 @@ export function cast(w: FightWorld, p: Player, s: number, wp: Weapon, a: Aim): v
       if (wp.trail) {
         const tx = p.x + a.dx * e.length * 0.6;
         const ty = p.y + a.dy * e.length * 0.6;
-        area(
+        const tr = area(
           w,
           p,
           s,
@@ -425,6 +425,7 @@ export function cast(w: FightWorld, p: Player, s: number, wp: Weapon, a: Aim): v
           wp.trail.pull,
           wp.trail.spin,
         );
+        if (tr) tr.angle = e.angle;
       }
       break;
     }
@@ -922,7 +923,7 @@ function dash(
     e.ty = p.y;
     e.until = w.tick + FLASH_TICKS;
     e.range = 0;
-    if (wp.trail) trailAt(w, p, s, wp, c, p.x, p.y);
+    if (wp.trail) trailAt(w, p, s, wp, c, p.x, p.y, Math.atan2(a.dy, a.dx));
   } else {
     e.range = Math.max(1, Math.round(wp.duration));
     e.speed = wp.distance / e.range;
@@ -932,6 +933,7 @@ function dash(
   }
 }
 
+/** A book's trail left at (x, y), laid along `angle` (the client draws it on that line). */
 function trailAt(
   w: FightWorld,
   p: Player,
@@ -940,10 +942,11 @@ function trailAt(
   c: number,
   x: number,
   y: number,
+  angle: number,
 ): void {
   const t = wp.trail;
   if (!t) return;
-  area(
+  const e = area(
     w,
     p,
     s,
@@ -960,6 +963,7 @@ function trailAt(
     t.pull,
     t.spin,
   );
+  if (e) e.angle = angle;
 }
 
 /** Hits every monster within the dash's width of a segment, once per dash. */
@@ -1137,7 +1141,7 @@ export function stepEffects(w: FightWorld): void {
       case FxKind.Mark: {
         if (tick === e.fireAt) {
           strikeMark(w, p, wp, e);
-          if (wp.trail) trailAt(w, p, e.slot, wp, e.cast, e.x, e.y);
+          if (wp.trail) trailAt(w, p, e.slot, wp, e.cast, e.x, e.y, e.angle);
           if (e.repeats > 0) {
             e.repeats--;
             e.fireAt += e.interval;
@@ -1526,7 +1530,7 @@ function stepDash(w: FightWorld, p: Player, wp: Weapon, e: Effect): void {
     m.chain = 0;
     m.chainMax = wp.elastic ? 6 : 3;
   }
-  if (wp.trail) trailAt(w, p, e.slot, wp, e.cast, p.x, p.y);
+  if (wp.trail) trailAt(w, p, e.slot, wp, e.cast, p.x, p.y, Math.atan2(e.vy, e.vx));
   w.endFx(e);
 }
 

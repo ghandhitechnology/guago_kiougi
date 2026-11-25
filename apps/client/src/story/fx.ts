@@ -230,52 +230,22 @@ export async function playFx(
       return instant ? undefined : sleep(scene, 700);
     }
     case "odap-surge": {
-      // 오답 pour up from below the mark and mill on it until the landing is cleared.
-      const swarm: Phaser.GameObjects.Sprite[] = [];
-      for (let i = 0; i < 12; i++) {
-        const tx = p.x + Phaser.Math.Between(-70, 70);
-        const ty = p.y + Phaser.Math.Between(-12, 40);
-        const s = sprite(stage, i % 3 === 0 ? "odap-pencil" : "odap", "hop", tx, ty, "entity");
-        if (!s) continue;
-        swarm.push(s);
-        s.setData("mark", mark);
-        if (instant) continue;
-        s.setPosition(tx, ty + 140).setAlpha(0);
-        scene.tweens.add({
-          targets: s,
-          y: ty,
-          alpha: 1,
-          delay: i * 70,
-          duration: 700,
-          ease: "Quad.Out",
-        });
+      // The 오답 themselves are the fight's (opening/ on the server, drawn by the fight view):
+      // the scene gives their arrival its rumble and dust.
+      if (instant) return;
+      cam.shake(320, 0.004);
+      for (let i = 0; i < 6; i++) {
+        scene.time.delayedCall(i * 70, () =>
+          once(
+            stage,
+            "fx-dust",
+            "kick",
+            p.x + Phaser.Math.Between(-60, 60),
+            p.y + Phaser.Math.Between(0, 30),
+          ),
+        );
       }
-      const mill = scene.time.addEvent({
-        delay: 500,
-        loop: true,
-        callback: () => {
-          for (const s of swarm) {
-            if (!s.active || Math.random() < 0.6) continue;
-            scene.tweens.add({
-              targets: s,
-              x: s.x + Phaser.Math.Between(-12, 12),
-              y: s.y + Phaser.Math.Between(-8, 8),
-              duration: 380,
-            });
-          }
-        },
-      });
-      lasting(stage, key, () => {
-        mill.remove();
-        for (const s of swarm) {
-          if (!s.active) continue;
-          once(stage, "fx-death-paper", "die", s.x, s.y - 6);
-          view.removeEntity(s);
-          s.destroy();
-        }
-      });
-      if (!instant) cam.shake(300, 0.003);
-      return instant ? undefined : sleep(scene, 500);
+      return sleep(scene, 500);
     }
     case "fault-crack":
       if (instant) return;
@@ -284,52 +254,22 @@ export async function playFx(
       view.flash(p.x, p.y, { radius: 90, color: color("gold.light"), intensity: 1.2, ms: 400 });
       return sleep(scene, 500);
     case "golem-rise": {
-      const golem = stage.actor("opening", "odap-golem", p.x, p.y, "down");
-      if (!golem) return;
-      if (!instant) {
-        const restY = golem.y;
-        golem.body.setY(restY + 14).setAlpha(0);
-        scene.tweens.add({
-          targets: golem.body,
-          y: restY,
-          alpha: 1,
-          duration: 1100,
-          ease: "Quad.Out",
-        });
-        cam.shake(1100, 0.007);
-        for (let i = 0; i < 4; i++) {
-          scene.time.delayedCall(i * 220, () =>
-            once(stage, "fx-dust", "kick", p.x + Phaser.Math.Between(-18, 18), p.y),
-          );
-        }
-        await sleep(scene, 1200);
+      // The 골렘 is the fight's; the ground heaves where it climbs out.
+      if (instant) return;
+      cam.shake(1100, 0.007);
+      for (let i = 0; i < 4; i++) {
+        scene.time.delayedCall(i * 220, () =>
+          once(stage, "fx-dust", "kick", p.x + Phaser.Math.Between(-18, 18), p.y),
+        );
       }
-      return;
+      return sleep(scene, 1200);
     }
-    case "drop-pop": {
-      const page = sprite(stage, "drop-page-math", "idle", p.x, p.y, "entity");
-      const glint = sprite(stage, "drop-glint", "shine", p.x, p.y - 4, "glow");
-      if (page && !instant) {
-        page.setY(p.y - 2);
-        scene.tweens.add({
-          targets: page,
-          y: p.y - 22,
-          duration: 220,
-          yoyo: true,
-          ease: "Quad.Out",
-        });
-        once(stage, "fx-pop", "die", p.x, p.y);
-      }
-      lasting(stage, key, () => {
-        if (page) {
-          once(stage, "fx-pickup", "twinkle", page.x, page.y - 4);
-          view.removeEntity(page);
-          page.destroy();
-        }
-        glint?.destroy();
-      });
-      return instant ? undefined : sleep(scene, 500);
-    }
+    case "drop-pop":
+      // The drop is the fight's pickup; the scene points at it with a glint.
+      if (instant) return;
+      once(stage, "fx-pickup", "twinkle", p.x, p.y - 6);
+      view.flash(p.x, p.y, { radius: 60, color: color("gold.light"), intensity: 1, ms: 500 });
+      return sleep(scene, 400);
     case "freeze-field": {
       view.drain(color("stone.light"), instant ? 0 : 700);
       for (const a of stage.actors.values()) a.body.anims.pause();
@@ -477,19 +417,4 @@ export async function playFx(
     }
   }
   void meta;
-}
-
-/** A landing cleared: its 오답 burst into paper. */
-export function clearSwarm(stage: Stage, mark: string | undefined): void {
-  for (const [key, l] of stage.lasting) {
-    if (!key.startsWith("odap-surge@")) continue;
-    if (mark && key !== `odap-surge@${mark}`) continue;
-    l.destroy();
-    stage.lasting.delete(key);
-  }
-}
-
-/** The first drop picked up. */
-export function pickUp(stage: Stage): void {
-  drop(stage, "drop-pop");
 }

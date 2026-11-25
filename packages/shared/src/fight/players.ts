@@ -183,8 +183,9 @@ function knockedOut(w: FightWorld, p: Player): void {
     // Nobody came: wake at the map's arrival point (the 보건실 until it exists).
     p.downAt = -1;
     p.reviver = -1;
-    p.x = snap(w.map.spawn.x);
-    p.y = snap(w.map.spawn.y);
+    const at = w.map.wake ?? w.map.spawn;
+    p.x = snap(at.x);
+    p.y = snap(at.y);
     p.hp = p.kit.maxHp;
     p.invulnerableUntil = tick + REVIVE_SAFE;
     p.forceTicks = 0;

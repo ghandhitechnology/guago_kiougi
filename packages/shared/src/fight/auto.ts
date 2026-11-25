@@ -109,9 +109,16 @@ export function autoPlay(w: FightWorld, p: Player, drive: boolean, dodge: boolea
   const rules = w.rules.autoPlay;
   const soon = inDanger(w, p, rules.dodgeLead, away);
   const ready = w.tick >= p.dodgeReadyAt && p.rollLeft === 0 && p.forceTicks === 0;
-  if (dodge && ready && soon <= rules.dodgeLead + 1) {
+  // Late enough that the roll's invulnerability still covers the tick the hit lands, so a tell
+  // too wide to roll out of is rolled through.
+  if (dodge && ready && soon <= Math.min(rules.dodgeLead + 1, ROLL_STEPS - 1)) {
     let best = -1;
     let bestScore = -2;
+    if (away.x * away.x + away.y * away.y < 0.04) {
+      // Two tells pull opposite ways (a boulder and its feather): roll on the way it was going.
+      away.x = p.aiX !== 0 || p.aiY !== 0 ? p.aiX : 1;
+      away.y = p.aiX !== 0 || p.aiY !== 0 ? p.aiY : 0;
+    }
     const len = Math.sqrt(away.x * away.x + away.y * away.y) || 1;
     for (let i = 0; i < HEADINGS; i++) {
       const hx = HX[i] as number;

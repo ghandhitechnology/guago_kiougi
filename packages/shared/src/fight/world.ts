@@ -32,7 +32,57 @@ export interface FightMap extends Collidable {
   }[];
   /** Where elites appear; empty: near the busiest players. */
   readonly eliteZones: readonly TileRect[];
+  /** Where a knocked-out player wakes, when not at `spawn` (a boss arena's entrance). */
+  readonly wake?: { readonly x: number; readonly y: number };
+  /** The map's named spots, which boss fights are laid out on. */
+  readonly marks?: Readonly<Record<string, { readonly x: number; readonly y: number }>>;
 }
+
+/**
+ * What the step asks of a boss fight (`fight/boss.ts`). A field has none; a boss map runs one,
+ * and the step calls it at fixed points so the boss's own module holds every rule of the fight.
+ */
+export interface BossHooks {
+  /** After players moved, before monsters think: the boss acts, tells, summons. */
+  step(w: FightWorld): void;
+  /** A hit on one of its parts: the damage its pool takes after the gimmick's gate and shield. */
+  take(w: FightWorld, p: Player | null, part: Monster, amount: number): number;
+  /** Whether a hit's knockback moves this part. */
+  pushable(part: Monster): boolean;
+  /** An objective entity was destroyed, by `by` if a player. */
+  objective(w: FightWorld, m: Monster, by: Player | null): void;
+  /** The boss record's numbers as `viewer` sees them (`Priv.Boss`), in a shared scratch object. */
+  view(viewer: Player): BossView;
+  /** A body left between ticks: its per-player numbers are cleared for the next one. */
+  leave(index: number): void;
+}
+
+/** One boss record: the bar, the phase, the shield, and what the gimmick shows this viewer. */
+export interface BossView {
+  entity: number;
+  /** `SimRules.bosses` index. */
+  boss: number;
+  phase: number;
+  /** `BossFlag` bits. */
+  flags: number;
+  /** The boss's own state byte (rings filled, zone lit, stunned…). */
+  mode: number;
+  hp: number;
+  max: number;
+  /** Shield left, 0 to 1. */
+  shield: number;
+}
+
+/** Bits of a boss record's flags. */
+export const BossFlag = {
+  /** 토론 시간. */
+  Debate: 1,
+  /** The pool emptied: the next phase is coming. */
+  Emptied: 2,
+  /** This viewer's hits get through the gimmick now (the weak point is open to them). */
+  Open: 4,
+  Freed: 8,
+} as const;
 
 /** Control modes in `CONTROL_MODES` order. */
 export const Mode = { Auto: 0, Semi: 1, Skill: 2, Manual: 3 } as const;
@@ -179,6 +229,8 @@ export class Player {
 export class Monster {
   readonly index: number;
   alive = false;
+  /** A boss body or part: hits go to `FightWorld.boss`, never to its own health. */
+  part = false;
   entity = 0;
   kind!: MonsterKind;
   level = 1;
@@ -414,7 +466,7 @@ export const Ev = {
   Collect: 9,
   /** c healer entity, x, y, d radius. */
   Heal: 10,
-  /** a player, c target entity, x, y. */
+  /** a player, c target entity, x, y; d, e, f the entities it carried to (완전한 증명), or 0. */
   Qed: 11,
   /** d 1 surge, 0 lull. */
   Phase: 12,
@@ -428,6 +480,12 @@ export const Ev = {
   Cast: 16,
   /** a credited player, c monster entity, d kind index, e level, f 1 elite / 2 boss / 0. */
   Credit: 17,
+  /** d boss fight cue (`BOSS_CUES` index), a player or -1, x, y. */
+  Cue: 18,
+  /** a player who completed it or -1, c objective entity, d objective kind. */
+  Objective: 19,
+  /** d the phase that began (1-based), or 0 when the boss was freed. */
+  BossPhase: 20,
 } as const;
 
 /** Bits of a Hit event's flags. */
@@ -560,6 +618,8 @@ export class FightWorld {
   spawned = 0;
   /** Monsters killed this tick, handled after every hit has landed. */
   readonly dead: Monster[] = [];
+  /** The boss fight this map runs, if any. */
+  boss: BossHooks | null = null;
   /** What bodies removed between ticks left behind, ended at the next tick (`endDeparted`). */
   readonly departed: { effects: Effect[]; minions: Minion[] } = { effects: [], minions: [] };
   private nextEntity = 1;
@@ -907,6 +967,7 @@ export class FightWorld {
       if (m.launchBy === i) m.launchBy = -1;
       if (m.target === i) m.target = -1;
     }
+    this.boss?.leave(i);
     resetPlayer(p);
   }
 

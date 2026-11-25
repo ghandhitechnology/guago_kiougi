@@ -25,7 +25,7 @@ import type { DialogueLine } from "../ui/dialogue.ts";
 import { FocusScope, popScope, pushScope } from "../ui/focus.ts";
 import { worldUi } from "../ui/world-ui.ts";
 import { dirToward } from "./actors.ts";
-import { clearSwarm, pickUp, playFx } from "./fx.ts";
+import { playFx } from "./fx.ts";
 import { showDoc, showTitle, WorldPrompt } from "./page.ts";
 import type { Stage } from "./stage.ts";
 
@@ -140,9 +140,6 @@ export class SceneRunner {
       return;
     }
     this.cues.push(until);
-    // A landing cleared or the first drop picked up shows at once.
-    if (until.startsWith("clear:")) clearSwarm(this.stage, landingOf(until));
-    if (until.startsWith("pickup:")) pickUp(this.stage);
   }
 
   /** The condition the scene waits on now, if it waits. */
@@ -425,12 +422,6 @@ export class SceneRunner {
       this.offers = [];
       return;
     }
-    // A landing's fight waits here: its 오답 stand on it until the fight is over.
-    if (step.until.startsWith("clear:")) {
-      const landing = landingOf(step.until);
-      if (landing && !this.stage.lasting.has(`odap-surge@${landing}`))
-        await playFx(this.fxContext(), "odap-surge", landing);
-    }
     this.host.takeCamera(false);
     this.host.followServer(false);
     this.host.facePlayer(undefined);
@@ -555,10 +546,4 @@ export class SceneRunner {
     this.host.facePlayer(undefined);
     this.host.takeCamera(false);
   }
-}
-
-/** The landing a `clear:` condition names. */
-function landingOf(until: string): string | undefined {
-  const m = until.slice(6).replace(/-first$/, "");
-  return m || undefined;
 }

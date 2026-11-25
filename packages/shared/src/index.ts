@@ -20,6 +20,7 @@ export * from "./navigation.ts";
 export * from "./numbers.ts";
 export * from "./prediction.ts";
 export * from "./progress.ts";
+export * from "./raid.ts";
 export * from "./random.ts";
 export * from "./rng.ts";
 export * from "./schema.ts";

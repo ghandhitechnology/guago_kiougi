@@ -170,11 +170,6 @@ export class StoryLink {
     return true;
   }
 
-  /** Development: tells the server the fight the scene waits on is over. */
-  signal(until: string): void {
-    this.send({ t: "signal", until });
-  }
-
   /** The scene being shown, for development checks. */
   get sceneId(): string | undefined {
     return this.runner?.scene.id;

@@ -241,17 +241,9 @@ export class WorldScene extends Phaser.Scene {
     });
     if (import.meta.env.DEV) {
       exposeDevStats(this);
-      // Development: F9 tells the server the fight a scene waits on is over (until combat does).
-      this.input.keyboard?.on("keydown-F9", () => {
-        const until = this.story.waitingOn;
-        if (until) this.story.signal(until);
-      });
+      // Development: what the story waits on, and a scene replayed from the story log by id.
       (window as unknown as { __guagoStory?: unknown }).__guagoStory = {
         waitingOn: () => this.story.waitingOn,
-        signal: (until?: string) => {
-          const u = until ?? this.story.waitingOn;
-          if (u) this.story.signal(u);
-        },
         replay: (scene: string) => this.story.replay(scene),
       };
       // The test shortcut's hooks for recordings and measurements (`fight/dev.ts`).

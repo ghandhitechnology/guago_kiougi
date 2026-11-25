@@ -1,5 +1,5 @@
 {
-  "id": "d0e7028d-3972-4beb-b05c-138e1c7515a8",
+  "id": "924b0959-a162-476d-ae0d-3c0342dee26d",
   "prevId": "5e495895-c466-4187-8e9f-8bfe5e09b834",
   "version": "7",
   "dialect": "postgresql",
@@ -64,13 +64,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "entry_generation": {
-          "name": "entry_generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         }
       },
       "indexes": {
@@ -335,6 +328,53 @@
       },
       "isRLSEnabled": false
     },
+    "public.boss_clears": {
+      "name": "boss_clears",
+      "schema": "",
+      "columns": {
+        "character_id": {
+          "name": "character_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "boss_id": {
+          "name": "boss_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cleared_at": {
+          "name": "cleared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "boss_clears_character_id_characters_id_fk": {
+          "name": "boss_clears_character_id_characters_id_fk",
+          "tableFrom": "boss_clears",
+          "tableTo": "characters",
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "boss_clears_character_id_boss_id_pk": {
+          "name": "boss_clears_character_id_boss_id_pk",
+          "columns": ["character_id", "boss_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.characters": {
       "name": "characters",
       "schema": "",
@@ -590,27 +630,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
-        },
-        "opening_beat": {
-          "name": "opening_beat",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "opening_play": {
-          "name": "opening_play",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "story_seen": {
-          "name": "story_seen",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
         },
         "live_session": {
           "name": "live_session",
@@ -3356,6 +3375,344 @@
         "quest_progress_count_check": {
           "name": "quest_progress_count_check",
           "value": "\"quest_progress\".\"target\" >= 1 and \"quest_progress\".\"progress\" >= 0 and (\"quest_progress\".\"state\" = 'active' or \"quest_progress\".\"progress\" >= \"quest_progress\".\"target\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.raid_damage": {
+      "name": "raid_damage",
+      "schema": "",
+      "columns": {
+        "hour": {
+          "name": "hour",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "boss": {
+          "name": "boss",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "standing_ms": {
+          "name": "standing_ms",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.raid_participants": {
+      "name": "raid_participants",
+      "schema": "",
+      "columns": {
+        "raid_id": {
+          "name": "raid_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "character_id": {
+          "name": "character_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "damage": {
+          "name": "damage",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "active_ms": {
+          "name": "active_ms",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "objectives": {
+          "name": "objectives",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "support": {
+          "name": "support",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "tier": {
+          "name": "tier",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paid": {
+          "name": "paid",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "raid_participants_unpaid_idx": {
+          "name": "raid_participants_unpaid_idx",
+          "columns": [
+            {
+              "expression": "raid_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "phase",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "not \"raid_participants\".\"paid\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "raid_participants_raid_id_raids_id_fk": {
+          "name": "raid_participants_raid_id_raids_id_fk",
+          "tableFrom": "raid_participants",
+          "tableTo": "raids",
+          "columnsFrom": ["raid_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "raid_participants_character_id_characters_id_fk": {
+          "name": "raid_participants_character_id_characters_id_fk",
+          "tableFrom": "raid_participants",
+          "tableTo": "characters",
+          "columnsFrom": ["character_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "raid_participants_raid_id_phase_character_id_pk": {
+          "name": "raid_participants_raid_id_phase_character_id_pk",
+          "columns": ["raid_id", "phase", "character_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.raid_phases": {
+      "name": "raid_phases",
+      "schema": "",
+      "columns": {
+        "raid_id": {
+          "name": "raid_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_hp": {
+          "name": "max_hp",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "calibration": {
+          "name": "calibration",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "raid_phases_raid_id_raids_id_fk": {
+          "name": "raid_phases_raid_id_raids_id_fk",
+          "tableFrom": "raid_phases",
+          "tableTo": "raids",
+          "columnsFrom": ["raid_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "raid_phases_raid_id_phase_pk": {
+          "name": "raid_phases_raid_id_phase_pk",
+          "columns": ["raid_id", "phase"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.raids": {
+      "name": "raids",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "page": {
+          "name": "page",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "boss_id": {
+          "name": "boss_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hp": {
+          "name": "hp",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_hp": {
+          "name": "max_hp",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shield": {
+          "name": "shield",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase_started_at": {
+          "name": "phase_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "freed_at": {
+          "name": "freed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_hit_by": {
+          "name": "final_hit_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_hit_name": {
+          "name": "final_hit_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "raids_final_hit_by_characters_id_fk": {
+          "name": "raids_final_hit_by_characters_id_fk",
+          "tableFrom": "raids",
+          "tableTo": "characters",
+          "columnsFrom": ["final_hit_by"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "raids_phase_check": {
+          "name": "raids_phase_check",
+          "value": "\"raids\".\"phase\" >= 1"
+        },
+        "raids_hp_check": {
+          "name": "raids_hp_check",
+          "value": "\"raids\".\"hp\" >= 0 and \"raids\".\"hp\" <= \"raids\".\"max_hp\""
+        },
+        "raids_shield_check": {
+          "name": "raids_shield_check",
+          "value": "\"raids\".\"shield\" >= 0 and \"raids\".\"shield\" <= 1"
         }
       },
       "isRLSEnabled": false

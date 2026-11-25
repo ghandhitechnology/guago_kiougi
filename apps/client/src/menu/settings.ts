@@ -79,7 +79,7 @@ export function registerSettings(): void {
         });
         page.add(button);
         choices.push({ tier, button });
-        bx += button.bounds().w + 6;
+        bx += button.size().w + 6;
       }
       page.add(pen.gfx);
       const ring = (tier: Tier | null, draw: boolean) => {
@@ -88,7 +88,7 @@ export function registerSettings(): void {
           pen.hide(0);
           return;
         }
-        pen.box(c.button.x - 2, c.button.y - 2, c.button.bounds().w + 4, 17 + 3);
+        pen.box(c.button.x - 2, c.button.y - 2, c.button.size().w + 4, 17 + 3);
         if (draw) {
           pen.hide(0);
           pen.show(140);
@@ -166,7 +166,7 @@ export function registerSettings(): void {
           });
         },
       });
-      out.setX(x + w - out.bounds().w);
+      out.setX(x + w - out.size().w);
       page.add(out);
     },
   });

@@ -11,6 +11,7 @@
  * returns them all on its first sweep; until then they cannot be bought (`listing_expired`),
  * and cancelling one returns it the same way.
  */
+
 import {
   type BoardRequests,
   type ChangeNotice,
@@ -19,6 +20,7 @@ import {
   TRADE,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { guarded } from "../background.ts";
 import { type Db, describeError } from "../db/index.ts";
 import type { Executor } from "../economy/executor.ts";
 import { timeFromDb } from "../economy/rows.ts";
@@ -181,7 +183,7 @@ export function startListingSweeper(
       console.error(`listing sweep failed: ${describeError(error)}`);
     }
     if (!stopped) {
-      timer = setTimeout(run, SWEEP_EVERY_MS);
+      timer = setTimeout(guarded("listing sweep", run), SWEEP_EVERY_MS);
       timer.unref();
     }
   };

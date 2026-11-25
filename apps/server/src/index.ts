@@ -3,7 +3,7 @@ import { WORLD_ROOM } from "@guago/shared";
 import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
-import { background } from "./background.ts";
+import { background, guarded } from "./background.ts";
 import { channels } from "./channels.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
@@ -21,11 +21,15 @@ import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
 import { fightLoadoutChanged, provideFightServices } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
+import { installProcessGuard } from "./process-guard.ts";
+import { provideRaids } from "./raid/current.ts";
+import { RaidHub } from "./raid/hub.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
 import { executorFees } from "./social/fees.ts";
 import { createSocial } from "./social/index.ts";
 import { story } from "./story/director.ts";
+import { provideStoryHooks } from "./story-signals.ts";
 import { startListingSweeper } from "./trade/board.ts";
 import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
@@ -61,8 +65,20 @@ const live = createLive(db, {
   adminSecret: config.serverSecret,
 });
 provideLive(live);
+// The bosses: one pool per boss across every channel of its arena (PLAN §10 raid).
+const raidHub = new RaidHub({
+  db,
+  clock,
+  page,
+  executor: economy.executor,
+  live: () => live.events,
+  notify: (id, change) => worldRoom()?.notify(id, change),
+});
+provideRaids(raidHub);
 // The story: new characters play the opening, and freed bosses play their scenes (PLAN §4, §10).
 story.provide({ db, opening: true });
+// The opening's fights tell the story when the stairs are clear and the golem is down.
+provideStoryHooks({ waitingOn: (c) => story.waitingOn(c), signal: (c, u) => story.signal(c, u) });
 // Moderation and the admin tool: the auth paths take its gate, the rooms its live filter.
 const adminReads = createDb(config.databaseUrl, { max: 2, statementTimeoutMs: 30_000 });
 const admin = await createModerationStack({
@@ -121,8 +137,20 @@ const server = createGameServer(
 provideFightServices({ modes: dbModes(db) });
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
+// Signals and exceptions nobody caught: keep serving through a one-off fault, saving what can be
+// saved; shut down the graceful way only when the same fault keeps coming back.
+installProcessGuard({
+  shutdown: (error) => server.gracefullyShutdown(true, error),
+  flush: async () => {
+    await economy.grants.flush();
+    await live.progress.flush();
+    await chatLog.flush();
+    await raidHub.save();
+  },
+});
 onShutdown("grants", () => economy.grants.flush());
 onShutdown("quest progress", () => live.stop());
+onShutdown("raid", () => raidHub.stop());
 onShutdown("chat log", () => chatLog.flush());
 onShutdown("database", () => db.pool.end());
 onShutdown("admin reads", () => adminReads.pool.end());
@@ -132,6 +160,7 @@ await server.listen(config.port);
 await matchMaker.createRoom(WORLD_ROOM, {});
 economy.grants.start();
 await live.start();
+await raidHub.start();
 startLedgerMaintenance(db, () => clock.now());
 startListingSweeper(
   db,
@@ -140,14 +169,17 @@ startListingSweeper(
   (id, change) => worldRoom()?.notify(id, change),
 );
 setInterval(
-  () => {
-    auth.sweep().catch(() => {});
-    economy.prune(live.progress.inflightIds()).catch(() => {});
+  guarded("ten-minute sweeps", () => {
+    background("session sweep", auth.sweep());
+    background("operation prune", economy.prune(live.progress.inflightIds()));
     background("social sweep", social.sweep());
-  },
+  }),
   10 * 60 * 1000,
 ).unref();
-setInterval(() => void admin.sweep().catch(() => {}), 60 * 1000).unref();
+setInterval(
+  guarded("moderation sweep", () => admin.sweep()),
+  60 * 1000,
+).unref();
 await serveMetrics(config.metricsPort, "127.0.0.1", live.adminRoute);
 // Its own port on a loopback or Tailscale address (config.ts), never through the game port.
 await admin.listen({

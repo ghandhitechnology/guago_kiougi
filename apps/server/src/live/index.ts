@@ -5,6 +5,7 @@
  * the raid system call. Nothing here runs on a map's simulation tick: events land in memory and
  * the database work happens in batches and in the background.
  */
+
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
@@ -59,6 +60,7 @@ import {
   type WorldMessageSchema,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
+import { guarded as guardedCallback } from "../background.ts";
 import { clubActivity } from "../club-activity.ts";
 import type { Db } from "../db/index.ts";
 import { describeError } from "../db/index.ts";
@@ -885,6 +887,15 @@ export function createLive(db: Db, o: LiveOptions) {
     bossCleared(characterId: string, bossId: string): void {
       progress.mark(characterId, "bosses", bossId);
     },
+    /**
+     * A raid board's title (PLAN §10: boards grant titles only), once: the 상장 and the
+     * principal's line when it is new. Resolves whether the title is held now.
+     */
+    async raidTitle(characterId: string, awardId: string): Promise<boolean> {
+      const r = await run(characterId, `award:${awardId}`, "live.award", { award: awardId });
+      if (r.ok && r.outcome.award) await award(characterId, String(r.outcome.award));
+      return r.ok;
+    },
   };
 
   // WorldRoom requests ----------------------------------------------------------------------
@@ -1234,16 +1245,19 @@ export function createLive(db: Db, o: LiveOptions) {
       await loadHelping();
       await page.tick();
       stopProgress = progress.start();
-      ticker = setInterval(() => {
-        const t = now();
-        checkDrowsy(t);
-        checkHome(t);
-        void page.tick().catch((error) => log(`page tick failed: ${describeError(error)}`));
-        if (Date.now() - lastSweep > 60_000) {
-          lastSweep = Date.now();
-          void board.sweep().catch(() => {});
-        }
-      }, 1000);
+      ticker = setInterval(
+        guardedCallback("living world tick", () => {
+          const t = now();
+          checkDrowsy(t);
+          checkHome(t);
+          void page.tick().catch((error) => log(`page tick failed: ${describeError(error)}`));
+          if (Date.now() - lastSweep > 60_000) {
+            lastSweep = Date.now();
+            void background("board sweep", () => board.sweep());
+          }
+        }),
+        1000,
+      );
       ticker.unref();
     },
 

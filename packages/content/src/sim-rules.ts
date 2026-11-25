@@ -2,6 +2,7 @@ import {
   type AreaRule,
   Behavior,
   type BookGrade,
+  type BossRule,
   bookDamage,
   type FieldRule,
   Kind,
@@ -67,6 +68,12 @@ import {
   ODAP_GOLEM,
   zenoDamage,
 } from "./monsters.ts";
+import {
+  BOSS_BODY_RANK,
+  RAID_BOSSES,
+  type RaidBossBody,
+  type RaidObjectDef,
+} from "./raid-bosses.ts";
 import { SLOW_RESIST, STATUS_IDS, STATUSES, type StatusId } from "./statuses.ts";
 
 /**
@@ -624,6 +631,7 @@ let compiled: SimRules | undefined;
 export function simRules(): SimRules {
   if (compiled) return compiled;
   const monsters = [...MONSTERS.map(monsterKind), golemKind(MONSTERS.length)];
+  const bosses = bossRules(monsters);
   const reactions = reactionRules();
   compiled = {
     monsters,
@@ -656,6 +664,7 @@ export function simRules(): SimRules {
       dodgeLead: tickCount(AUTO_PLAY.dodgeLead),
     },
     kit: compileKit,
+    bosses,
     momentumDamage: (speed, baseSpeed, strength) => momentumDamage(speed, baseSpeed, strength),
     qedDamage,
     zenoDamage,
@@ -701,9 +710,94 @@ export function simRules(): SimRules {
   return compiled;
 }
 
-/** The kind index of a monster or the golem, for tools and tests. */
+/**
+ * Page 1's bosses: each body, its second body and its objective entities become kinds after the
+ * golem (`<boss>`, `<boss>-part`, `<boss>-<object>`), and each boss a rule its brain reads.
+ */
+function bossRules(monsters: MonsterKind[]): BossRule[] {
+  return RAID_BOSSES.map((def, index) => {
+    const at = (kind: MonsterKind) => {
+      monsters.push(kind);
+      return kind.index;
+    };
+    const core = at(bodyKind(monsters.length, def.id, def.body));
+    const part = def.part ? at(bodyKind(monsters.length, `${def.id}-part`, def.part)) : -1;
+    const objects = def.objects.map((o) => at(objectKind(monsters.length, `${def.id}-${o.id}`, o)));
+    return {
+      id: def.id,
+      index,
+      rank: def.rank,
+      phases: def.phases,
+      core,
+      part,
+      objects,
+      add: def.add ? (monsterIndex.get(def.add.monster) ?? -1) : -1,
+      addEvery: def.add ? tickCount(def.add.every) : 0,
+      addCount: def.add?.count ?? 0,
+      addCap: def.add?.cap ?? 0,
+      tellDamage: def.tellDamage,
+      gateLeak: def.gateLeak,
+      soloPhaseRank: def.soloPhase,
+    };
+  });
+}
+
+function bodyKind(i: number, id: string, b: RaidBossBody): MonsterKind {
+  return {
+    ...ZERO_BEHAVIOR,
+    index: i,
+    id,
+    sprite: b.sprite,
+    behavior: Behavior.Boss,
+    mass: b.mass,
+    speed: perTick(b.speed),
+    radius: b.radius,
+    hp: 1,
+    damage: b.damage,
+    exp: 0,
+    coin: 0,
+    armor: b.armor,
+    innate: 0,
+    immune: 0,
+    autoAimRange: Number.POSITIVE_INFINITY,
+    aimPriority: 2,
+    promotable: false,
+    rank: BOSS_BODY_RANK,
+    // The boss's level comes from the fight that starts it (the raid's, or the player's in 복습).
+    level: 0,
+  };
+}
+
+function objectKind(i: number, id: string, o: RaidObjectDef): MonsterKind {
+  return {
+    ...ZERO_BEHAVIOR,
+    index: i,
+    id,
+    sprite: o.sprite,
+    behavior: Behavior.Object,
+    mass: o.mass,
+    speed: 0,
+    radius: o.radius,
+    hp: o.hp,
+    damage: 0,
+    exp: 0,
+    coin: 0,
+    armor: 0,
+    innate: 0,
+    immune: 0,
+    autoAimRange: Number.POSITIVE_INFINITY,
+    aimPriority: 1,
+    promotable: false,
+    rank: 1,
+    level: 0,
+  };
+}
+
+/** The kind index of a monster, the golem or a boss's kinds, for tools and tests. */
 export function monsterKindIndex(id: string): number {
   if (id === ODAP_GOLEM.id) return MONSTERS.length;
+  const boss = simRules().monsters.findIndex((k) => k.id === id && k.index > MONSTERS.length);
+  if (boss >= 0) return boss;
   const i = monsterIndex.get(id);
   if (i === undefined) throw new Error(`unknown monster ${id}`);
   return i;

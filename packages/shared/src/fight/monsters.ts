@@ -133,6 +133,7 @@ export function spawnMonster(
 export function removeMonster(w: FightWorld, m: Monster): void {
   if (!m.alive) return;
   m.alive = false;
+  m.part = false;
   w.kindAlive[m.kind.index] = (w.kindAlive[m.kind.index] as number) - 1;
   w.freeEntity(m.entity);
 }
@@ -424,6 +425,12 @@ export function stepMonsters(w: FightWorld, flow: FlowField): void {
         if (m.state === MState.Cast) want = 0;
         break;
       }
+      case Behavior.Boss:
+      case Behavior.Object:
+        // The boss's own module places them; only knockback moves them here.
+        want = 0;
+        steering = false;
+        break;
       case Behavior.Zeno: {
         if (tick - m.born >= kind.escapeAfter) {
           m.gone = true;
@@ -735,12 +742,20 @@ export function stepDangers(w: FightWorld): void {
           : e.count === Behavior.Bomber
             ? HurtFlag.Blast
             : 0;
+      // A line tell (a lane, a square, an arrow's path) hits along its length; others are rings.
+      const line = e.length > 0;
+      const ex = e.x + Math.cos(e.angle) * e.length;
+      const ey = e.y + Math.sin(e.angle) * e.length;
       for (const p of w.players) {
         if (!p.joined || p.down) continue;
-        const dx = p.x - e.x;
-        const dy = p.y - e.y;
-        const rr = e.radius + p.r;
-        if (dx * dx + dy * dy > rr * rr) continue;
+        if (line) {
+          if (segmentDistance(p.x, p.y, e.x, e.y, ex, ey) > e.width / 2 + p.r) continue;
+        } else {
+          const dx = p.x - e.x;
+          const dy = p.y - e.y;
+          const rr = e.radius + p.r;
+          if (dx * dx + dy * dy > rr * rr) continue;
+        }
         if (tick < p.invulnerableUntil) continue;
         hurtPlayer(w, p, e.damage, e.slot, flags);
         if (e.knock > 0 && !p.down) shovePlayer(p, e.x, e.y, e.knock);
@@ -783,4 +798,16 @@ export function stepDangers(w: FightWorld): void {
     }
     w.endFx(e);
   }
+}
+
+/** Distance from a point to a segment. */
+function segmentDistance(px: number, py: number, x0: number, y0: number, x1: number, y1: number) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - x0) * dx + (py - y0) * dy) / len2 : 0;
+  t = t < 0 ? 0 : Math.min(t, 1);
+  const cx = x0 + dx * t - px;
+  const cy = y0 + dy * t - py;
+  return Math.sqrt(cx * cx + cy * cy);
 }

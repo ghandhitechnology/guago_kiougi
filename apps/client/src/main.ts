@@ -1,8 +1,8 @@
-import { INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
 import * as Phaser from "phaser";
 import { BootScene } from "./boot-scene.ts";
 import { FrontScene } from "./front/front-scene.ts";
 import { typingOnPhone } from "./ui/keyboard-room.ts";
+import { measureScreen, setScreen } from "./ui/screen.ts";
 import { UiScene } from "./ui/ui-scene.ts";
 import { WorldScene } from "./world-scene.ts";
 
@@ -12,11 +12,17 @@ const viewer =
     ? (await import("./render/viewer.ts")).ViewerScene
     : null;
 
+const dpr0 = window.devicePixelRatio || 1;
+const first = measureScreen(
+  Math.round(window.innerWidth * dpr0),
+  Math.round(window.innerHeight * dpr0),
+);
+
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
   parent: "game",
-  width: W,
-  height: H,
+  width: first.w,
+  height: first.h,
   backgroundColor: "#000000",
   banner: false,
   render: { pixelArt: true },
@@ -28,19 +34,27 @@ const game = new Phaser.Game({
 });
 
 /**
- * Scales the 480×270 canvas by the largest whole number of device pixels that fits, and places
- * it on whole device pixels so fractional device pixel ratios cannot smear a pixel column.
+ * Scales the canvas by the largest whole number of device pixels that fits 270 rows, widens the
+ * view to what the device shows at that scale, and places the canvas on whole device pixels so
+ * fractional device pixel ratios cannot smear a pixel column.
  */
 function fit(): void {
   // A phone keyboard coming up shrinks the viewport; the page lifts instead of rescaling.
   if (typingOnPhone()) return;
   const dpr = window.devicePixelRatio || 1;
-  const vw = window.innerWidth * dpr;
-  const vh = window.innerHeight * dpr;
-  const k = Math.max(1, Math.floor(Math.min(vw / W, vh / H) + 1e-6));
-  game.scale.setZoom(k / dpr);
-  game.canvas.style.left = `${Math.floor((vw - W * k) / 2) / dpr}px`;
-  game.canvas.style.top = `${Math.floor((vh - H * k) / 2) / dpr}px`;
+  const vw = Math.round(window.innerWidth * dpr);
+  const vh = Math.round(window.innerHeight * dpr);
+  const view = measureScreen(vw, vh);
+  if (game.scale.width !== view.w || game.scale.height !== view.h) {
+    game.scale.resize(view.w, view.h);
+    for (const scene of game.scene.getScenes(false)) scene.cameras?.resize(view.w, view.h);
+  }
+  game.scale.setZoom(view.k / dpr);
+  const left = Math.floor((vw - view.w * view.k) / 2);
+  const top = Math.floor((vh - view.h * view.k) / 2);
+  game.canvas.style.left = `${left / dpr}px`;
+  game.canvas.style.top = `${top / dpr}px`;
+  setScreen(view, left, top, vw, vh, dpr);
 }
 
 game.events.once(Phaser.Core.Events.READY, fit);

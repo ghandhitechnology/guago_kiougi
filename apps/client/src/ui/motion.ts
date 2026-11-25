@@ -31,6 +31,8 @@ function run(
   channel: Channel = "all",
 ): void {
   const scene = target.scene;
+  // Gone with its page before a delayed motion came round to it.
+  if (!scene) return;
   let mine = running.get(target);
   if (!mine) {
     mine = new Map();
@@ -53,10 +55,11 @@ function run(
   mine.set(channel, tween);
 }
 
-/** Where an object rests when fully shown. */
+/** Where an object rests when fully shown, and at what scale when it is not 1. */
 export interface Rest {
   readonly x: number;
   readonly y: number;
+  readonly scale?: number;
 }
 
 /**
@@ -94,11 +97,12 @@ export function turnPage(target: Target, turn: () => void, done?: () => void): v
 
 /** A rubber stamp: lands big and settles with a thump. */
 export function stamp(target: Target, rest: Rest, done?: () => void): void {
+  const k = rest.scale ?? 1;
   target.setVisible(true);
   target.setAlpha(0);
-  target.setScale(1.6);
+  target.setScale(1.6 * k);
   target.setPosition(rest.x, rest.y);
-  run(target, { scaleX: 1, scaleY: 1, alpha: 1 }, 130, "Quad.In", () => {
+  run(target, { scaleX: k, scaleY: k, alpha: 1 }, 130, "Quad.In", () => {
     nudge(target, rest, 0, 1, done);
   });
 }
@@ -106,6 +110,7 @@ export function stamp(target: Target, rest: Rest, done?: () => void): void {
 /** A short shake sideways: a wrong answer. */
 export function shake(target: Target, rest: Rest): void {
   const scene = target.scene;
+  if (!scene) return;
   scene.tweens.killTweensOf(target);
   target.setPosition(rest.x, rest.y);
   scene.tweens.chain({
@@ -122,6 +127,7 @@ export function shake(target: Target, rest: Rest): void {
 /** A one-pixel bump that springs back. */
 export function nudge(target: Target, rest: Rest, dx: number, dy: number, done?: () => void) {
   const scene = target.scene;
+  if (!scene) return;
   scene.tweens.killTweensOf(target);
   target.setPosition(rest.x + dx, rest.y + dy);
   scene.tweens.add({

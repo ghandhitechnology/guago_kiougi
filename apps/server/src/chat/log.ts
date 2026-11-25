@@ -4,7 +4,7 @@
  */
 
 import type { ChatChannel } from "@guago/shared";
-import { background } from "../background.ts";
+import { guarded } from "../background.ts";
 import { type Db, describeError, pgErrorCode } from "../db/index.ts";
 import { chatLog } from "../db/schema.ts";
 
@@ -86,7 +86,7 @@ export function startChatLogMaintenance(db: Db): () => void {
       console.error(`chat_log maintenance failed, retrying: ${describeError(error)}`);
       next = MAINTAIN_RETRY_MS;
     }
-    if (!stopped) timer = setTimeout(run, next).unref();
+    if (!stopped) timer = setTimeout(guarded("chat log maintenance", run), next).unref();
   };
   void run();
   return () => {
@@ -115,7 +115,10 @@ export class ChatLog implements ChatSink {
   constructor(db: Db, options: ChatLogOptions = {}) {
     this.db = db;
     this.onMissingPartition = options.onMissingPartition;
-    this.timer = setInterval(() => background("chat log flush", this.flush()), FLUSH_EVERY_MS);
+    this.timer = setInterval(
+      guarded("chat log flush", () => this.flush()),
+      FLUSH_EVERY_MS,
+    );
     this.timer.unref();
   }
 

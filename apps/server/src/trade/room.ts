@@ -20,6 +20,7 @@ import {
   WORLD_MESSAGES,
   type WorldMessageSchema,
 } from "@guago/shared";
+import { guarded } from "../background.ts";
 import { type Db, describeError } from "../db/index.ts";
 import { Buckets } from "../economy/buckets.ts";
 import type { Executor } from "../economy/executor.ts";
@@ -127,7 +128,7 @@ export function createTrading({ db, executor, clock = () => new Date() }: Tradin
           board(me, m),
         );
       }
-      stops.push(places.listen((id) => t.end(id, "map")));
+      stops.push(places.listen(guarded("trade map change", (id: string) => t.end(id, "map"))));
       stops.push(t.start());
     },
     /** The character's WorldRoom seat dropped or left. */
