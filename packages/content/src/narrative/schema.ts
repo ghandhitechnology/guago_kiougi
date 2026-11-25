@@ -303,6 +303,22 @@ export interface Description {
   readonly desc: TextKey;
 }
 
+/** A name with no description: a status, a mode, a grade, a nameplate. Fits one row. */
+export interface Term {
+  readonly id: string;
+  readonly kind:
+    | "status"
+    | "reaction"
+    | "mode"
+    | "stat"
+    | "grade"
+    | "class"
+    | "tier"
+    | "monster"
+    | "label";
+  readonly name: TextKey;
+}
+
 /** Values a template or message fills in. `{monster|을}` picks 을 or 를 for the filled word. */
 export const SLOTS = [
   "player",
@@ -369,6 +385,8 @@ export interface Narrative {
   readonly codex: readonly CodexEntry[];
   readonly barks: readonly Bark[];
   readonly descriptions: readonly Description[];
+  /** Names the combat and progression data shows. Optional so older bundles stay valid. */
+  readonly terms?: readonly Term[];
   readonly quests: readonly QuestTemplate[];
   readonly system: readonly SystemMessage[];
   readonly announcements: readonly SystemMessage[];

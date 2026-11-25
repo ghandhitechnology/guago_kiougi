@@ -1,5 +1,6 @@
 import type { ArtMetadata, RigMeta } from "@guago/art";
 import * as Phaser from "phaser";
+import { lookAnim, lookTexture } from "./art.ts";
 
 /**
  * The student paper doll (PLAN §16 "Characters"): a look is composited once into its own
@@ -104,7 +105,11 @@ export function randomLook(meta: ArtMetadata, rand: () => number = Math.random):
 }
 
 /** The texture key of a look: the same look always maps to the same key. */
-export function dollKey(look: DollLook): string {
+/**
+ * The look's id: the same look always gets the same id. Its texture is `lookTexture(RIG, id)` and
+ * its animations `lookAnim(RIG, id, dir, anim)`, the names the world's actors already play.
+ */
+export function dollLook(look: DollLook): string {
   return [
     "doll",
     look.body,
@@ -115,10 +120,17 @@ export function dollKey(look: DollLook): string {
     look.accessories.join("+") || "-",
     look.jacket ?? "-",
     look.book ?? "-",
-  ].join(":");
+  ].join("~");
+}
+
+/** The texture key of a look. */
+export function dollKey(look: DollLook): string {
+  return lookTexture(RIG, dollLook(look));
 }
 
 const users = new Map<string, number>();
+/** Animation keys made for each look texture, removed with it. */
+const animsOf = new Map<string, string[]>();
 
 function hex(c: string): number {
   return Number.parseInt(c.slice(1), 16);
@@ -237,6 +249,23 @@ export function composeDoll(scene: Phaser.Scene, meta: ArtMetadata, look: DollLo
     });
   });
   pivot(texture.add(SHADOW_FRAME, 0, 0, shadowRow * h, w, h));
+  // Phaser animations under the shared names, for actors that play looks by animation key.
+  const id = dollLook(look);
+  const made: string[] = [];
+  animsOf.set(key, made);
+  for (const dir of rig.directions) {
+    for (const [anim, a] of Object.entries(rig.anims)) {
+      const animKey = lookAnim(RIG, id, dir, anim);
+      if (scene.anims.exists(animKey)) continue;
+      made.push(animKey);
+      scene.anims.create({
+        key: animKey,
+        frames: a.frames.map((frame) => ({ key, frame: `${dir}/${frame}` })),
+        frameRate: a.fps,
+        repeat: a.loop ? -1 : 0,
+      });
+    }
+  }
   return key;
 }
 
@@ -250,7 +279,10 @@ export function releaseDoll(scene: Phaser.Scene, key: string): void {
   users.delete(key);
   // Freed on the next frame, after anything still drawing it this frame.
   scene.time.delayedCall(0, () => {
-    if (!users.has(key) && scene.textures.exists(key)) scene.textures.remove(key);
+    if (users.has(key) || !scene.textures.exists(key)) return;
+    for (const anim of animsOf.get(key) ?? []) scene.anims.remove(anim);
+    animsOf.delete(key);
+    scene.textures.remove(key);
   });
 }
 

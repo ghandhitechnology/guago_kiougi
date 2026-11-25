@@ -1,0 +1,19 @@
+{
+  "name": "@guago/loadtest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "netsim": "node src/netsim.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  },
+  "dependencies": {
+    "@colyseus/schema": "5.0.51",
+    "@colyseus/sdk": "0.18.10",
+    "@guago/content": "workspace:*",
+    "@guago/shared": "workspace:*"
+  }
+}

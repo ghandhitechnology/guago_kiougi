@@ -9,6 +9,14 @@ export const INTERNAL_HEIGHT = 270;
 /** Tile edge in pixels (PLAN §6). */
 export const TILE_SIZE = 16;
 
+/**
+ * Positions live on a grid of 1/POS_SCALE pixel, in the simulation and on the wire alike, so a
+ * client predicting its own movement lands on exactly the value the server sends back. A uint16
+ * coordinate on this grid reaches 8191 px, 511 tiles.
+ */
+export const POS_SCALE = 8;
+export const MAX_MAP_PX = Math.floor(0xffff / POS_SCALE);
+
 /** Player sprite frame in pixels (PLAN §16). */
 export const PLAYER_SPRITE_WIDTH = 16;
 export const PLAYER_SPRITE_HEIGHT = 24;

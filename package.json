@@ -15,12 +15,18 @@
     "test": "vitest run",
     "art:build": "pnpm --filter @guago/art build",
     "art:sheet": "pnpm --filter @guago/art sheet",
+    "audio:lab": "pnpm --filter @guago/audio lab",
+    "audio:render": "pnpm --filter @guago/audio render",
+    "audio:score": "pnpm --filter @guago/audio score",
     "test:db": "vitest run --config vitest.db.config.ts",
     "db:start": "node apps/server/src/db/local.ts start",
     "db:stop": "node apps/server/src/db/local.ts stop",
     "db:reset": "node apps/server/src/db/local.ts reset",
     "db:migrate": "node --env-file-if-exists=.env apps/server/src/db/migrate.ts",
-    "db:generate": "pnpm --filter @guago/server exec drizzle-kit generate"
+    "db:generate": "pnpm --filter @guago/server exec drizzle-kit generate",
+    "balance": "pnpm --filter @guago/balance-sim balance",
+    "loadtest": "pnpm --filter @guago/loadtest start",
+    "netsim": "pnpm --filter @guago/loadtest netsim"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
