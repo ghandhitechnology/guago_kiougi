@@ -8,6 +8,7 @@ import { EGG_BARKS, EGG_DESCRIPTIONS, EGGS, EGGS_KO } from "./eggs.ts";
 import { HELP_COPY } from "./help.ts";
 import { BARKS, DESCRIPTIONS, HUB_KO } from "./hub.ts";
 import { MEALS_COPY } from "./meals.ts";
+import { MODERATION_COPY } from "./moderation.ts";
 import { OPENING, OPENING_KO } from "./opening.ts";
 import { BOSSES, PAGE1_KO, STORY } from "./page1.ts";
 import { QUESTS, QUESTS_KO } from "./quests.ts";
@@ -18,6 +19,7 @@ import { SOCIAL_COPY } from "./social-lines.ts";
 import { SPEAKERS, SPEAKERS_KO } from "./speakers.ts";
 import { STUDY_DESCRIPTIONS, STUDY_KO, STUDY_TERMS } from "./study.ts";
 import { ANNOUNCEMENTS, AWARD_FRAME, AWARDS, SYSTEM, SYSTEM_KO } from "./system.ts";
+import { TRADE_COPY } from "./trade.ts";
 
 function merge(...tables: Strings[]): Strings {
   const out: Record<string, string> = {};
@@ -37,6 +39,8 @@ const COPY: readonly CopyPart[] = [
   HELP_COPY,
   REFUSALS_COPY,
   SOCIAL_COPY,
+  TRADE_COPY,
+  MODERATION_COPY,
 ];
 const parts = <K extends Exclude<keyof CopyPart, "ko">>(k: K) =>
   COPY.flatMap((p) => (p[k] ?? []) as NonNullable<CopyPart[K]>[number][]);
