@@ -62,6 +62,9 @@ const MARKS = {
   logout: "plum.light",
   monsters: "red.light",
   gather: "rose.light",
+  arena: "clay.pale",
+  npc: "gold.pale",
+  mark: "navy.pale",
 } as const;
 
 function rgb(ramps: Ramps, name: string): Rgb {
@@ -187,6 +190,31 @@ export function overlay(
       }
     }
     labels.push({ text: name, x: cx + 8 * scale, y: cy - 6 * scale, color: sc });
+  }
+  // Arenas, NPC spots by speaker, and the marks cutscenes walk people to.
+  for (const a of map.arenas ?? []) {
+    const c = rgb(ramps, MARKS.arena);
+    box(a.rect, c, true, 2 * scale);
+    labels.push({
+      text: `${a.id} · arena ${a.modes.join(" ")}`,
+      x: a.rect.x * T + 4 * scale,
+      y: a.rect.y * T + 4 * scale,
+      color: c,
+    });
+  }
+  const dot = (x: number, y: number, r: number, c: Rgb) => {
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) if (Math.abs(dx) + Math.abs(dy) <= r) put(x + dx, y + dy, c);
+  };
+  for (const n of map.npcs ?? []) {
+    const c = rgb(ramps, MARKS.npc);
+    dot(n.x * scale, n.y * scale, 4 * scale, c);
+    labels.push({ text: n.speaker, x: (n.x + 6) * scale, y: (n.y - 4) * scale, color: c });
+  }
+  for (const [name, m] of Object.entries(map.marks ?? {})) {
+    const c = rgb(ramps, MARKS.mark);
+    dot(m.x * scale, m.y * scale, 2 * scale, c);
+    labels.push({ text: `@${name}`, x: (m.x + 4) * scale, y: (m.y + 2) * scale, color: c });
   }
   return { w, h, data, labels };
 }
