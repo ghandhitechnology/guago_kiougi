@@ -169,7 +169,7 @@ export function startDemo(
       const boss = sprite(scene, meta, "boss-zeno-drain", centre.x, centre.y + 30);
       boss.setVisible(false);
       view.addOverlay(boss);
-      const title = sprite(scene, meta, "title-zeno", 128, 24);
+      const title = sprite(scene, meta, "title-zeno", 128, 34);
       title.setScrollFactor(0).setVisible(false);
       view.addOverlay(title);
       let phase = -1;
