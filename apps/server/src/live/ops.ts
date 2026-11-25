@@ -75,6 +75,8 @@ export interface ProgressRequest {
 }
 
 export interface LogoutRequest {
+  /** The world seat's session id, the one its login recorded. */
+  session: string;
   place: LogoutPlace;
   /** The session's best measured rate, in the field `field`, when a full window was measured. */
   measured: (Rate & { field: string; sheetBook: string | null }) | null;
@@ -98,7 +100,8 @@ export interface LiveRequests {
   "live.progress": ProgressRequest;
   "live.codex": { entries: string[] };
   "live.conduct": ConductRequest;
-  "live.login": Record<string, never>;
+  /** `session` is the world seat's session id. */
+  "live.login": { session: string };
   "live.logout": LogoutRequest;
   "live.meal": { meal: string; week: number };
   "live.drowsy": { drowsy: boolean };
@@ -404,9 +407,9 @@ export function liveOps(h: Helpers): Defs {
       client: false,
       rows: () => ({}),
       currencies: () => [],
-      apply(l, _req, env) {
+      apply(l, req, env) {
         const c = l.character;
-        const ch: LiveCharacter = {};
+        const ch: LiveCharacter = { liveSession: req.session };
         const away = c.poolStartedAt !== null && c.poolStoppedAt === null;
         if (away) ch.poolStoppedAt = env.now;
         // 숙면, earned by how long the player actually slept in the 기숙사.
@@ -430,6 +433,8 @@ export function liveOps(h: Helpers): Defs {
       ],
       apply(l, req, env) {
         const c = l.character;
+        // A newer session logged in before this one's logout ran: the player is online.
+        if (c.liveSession !== null && c.liveSession !== req.session) return no("session_replaced");
         // A pool left unclaimed is paid out before the new one starts, so no fill is lost.
         const old = poolNow(c, env.now, env.page);
         let purse = l.purse;

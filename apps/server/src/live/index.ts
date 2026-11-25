@@ -523,7 +523,7 @@ export function createLive(db: Db, o: LiveOptions) {
       look: c.look,
       rules: row ? ruleState(row, []) : NO_RULES,
     });
-    const login = await run(c.id, `login:${sessionId}`, "live.login", {});
+    const login = await run(c.id, `login:${sessionId}`, "live.login", { session: sessionId });
     notify(c.id, login);
     push(c.id, { t: "page", page: page.view() });
     await freedCodex(c.id);
@@ -558,6 +558,7 @@ export function createLive(db: Db, o: LiveOptions) {
     const measured = income.measure(characterId);
     income.end(characterId);
     const result = await run(characterId, `logout:${sessionId}`, "live.logout", {
+      session: sessionId,
       place: logoutPlace(where.mapId, where.x, where.y),
       measured,
       floorLeader: await isFloorLeader(characterId),

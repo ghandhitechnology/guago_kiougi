@@ -75,6 +75,7 @@ export interface LiveCharacter {
   expulsions?: number;
   boardStreak?: number;
   boardStreakDay?: number | null;
+  liveSession?: string | null;
 }
 
 export interface NewQuest {
@@ -180,6 +181,7 @@ const COLUMNS: Readonly<Record<keyof LiveCharacter, string>> = {
   expulsions: "expulsions",
   boardStreak: "board_streak",
   boardStreakDay: "board_streak_day",
+  liveSession: "live_session",
 };
 
 function value(key: keyof LiveCharacter, v: unknown): SQL {

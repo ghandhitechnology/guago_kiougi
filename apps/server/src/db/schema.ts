@@ -120,6 +120,8 @@ export const characters = pgTable(
     /** Full daily boards in a row, ending on board day `board_streak_day` (개근상). */
     boardStreak: integer("board_streak").notNull().default(0),
     boardStreakDay: integer("board_streak_day"),
+    /** The world session that logged in last; a logout from an older one starts no pool. */
+    liveSession: text("live_session"),
     /** Bumped by every applied item or currency operation; change notices carry it. */
     rev: bigint("rev", { mode: "number" }).notNull().default(0),
     createdAt: at("created_at").notNull().defaultNow(),
