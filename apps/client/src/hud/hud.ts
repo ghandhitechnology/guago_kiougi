@@ -26,6 +26,8 @@ export interface HudActions {
   openChat(): void;
   cycleMode?(): void;
   interact?(): void;
+  /** The 자습 pool's plate pressed: the pool and its claim. */
+  openPool?(): void;
   dodge?(): void;
   /** A book slot pressed, by index. */
   cast?(slot: number): void;
@@ -238,6 +240,13 @@ export class Hud {
       scene.add.nineslice(18, 5, "ui", "bar-thin/idle", 40, 5, tl, tr, tt, tb).setOrigin(0),
       this.poolFill,
     ]);
+    this.tappable(
+      this.pool.root,
+      0,
+      0,
+      () => ({ w: 62, h: 16 }),
+      () => this.actions.openPool?.(),
+    );
 
     // The right thumb's cluster: the dodge in the corner, books around it, interact below.
     this.books = new Piece(scene, 0, 0, { dx: 60, dy: 30 });

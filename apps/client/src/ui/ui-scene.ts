@@ -10,7 +10,11 @@ import { hud } from "../hud/store.ts";
 import { registerBag } from "../menu/bag.ts";
 import { registerBoard } from "../menu/board.ts";
 import { registerCharacter } from "../menu/character.ts";
+import { registerCodex } from "../menu/codex.ts";
+import { watchMoments } from "../menu/moments.ts";
 import { Notebook } from "../menu/notebook.ts";
+import { PoolCard } from "../menu/pool.ts";
+import { registerResearch } from "../menu/research.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { VendingMachine } from "../menu/vending.ts";
 import { session } from "../world/session.ts";
@@ -53,6 +57,8 @@ export class UiScene extends Phaser.Scene {
     registerBag();
     registerCharacter();
     registerBoard();
+    registerCodex();
+    registerResearch();
     registerSettings();
     onSignOut(() => void this.signOut());
     this.dialogue = new DialogueBox(this);
@@ -97,9 +103,17 @@ export class UiScene extends Phaser.Scene {
         cast: (slot) => fight()?.cast(slot),
         mentor: () => fight()?.mentor(),
         interact: () => worldView.interact?.(),
+        openPool: () => pool.open(),
       },
       touch,
     );
+    // The 자습 pool waiting after time away, offered once on arrival and from its HUD plate.
+    const pool = new PoolCard(
+      this,
+      () => hudView.setVisible(false),
+      () => hudView.setVisible(true),
+    );
+    const unmoments = watchMoments(this, () => session.entry?.character.id);
     if (chat && touch) chat.onShownChange = (shown) => hudView.setChatOpen(shown);
     chat?.log.onAnnounce((line) => this.announce.show(line));
     // The left thumb walks; the right one aims, only while there is a fight to aim in. Neither
@@ -157,8 +171,8 @@ export class UiScene extends Phaser.Scene {
       if (name !== lastPlace) this.banner.show(name);
       lastPlace = name;
     });
-    // Things in the world that own a screen open it: the 메이커실's stations, the 자판기, the
-    // 수행평가 board, the 도감 shelf and the 0조 연구노트.
+    // Things in the world that own a screen open it: the 메이커실's stations, the 자판기s, the
+    // 수행평가 boards, the 도감 shelf and the hall of fame's 0조 연구노트.
     const vending = new VendingMachine(
       this,
       () => hudView.setVisible(false),
@@ -177,6 +191,8 @@ export class UiScene extends Phaser.Scene {
       sticks,
       notebook,
       stop: () => {
+        pool.destroy();
+        unmoments();
         unplace();
         unopen();
         unfight();
@@ -221,16 +237,25 @@ export class UiScene extends Phaser.Scene {
 
 /** The notebook tab a thing in the world opens, by its id and kind in the map. */
 function worldPanel(id: string, kind: string): { tab: string; arg?: unknown } | undefined {
-  if (kind === "station") {
-    if (id.includes("bind")) return { tab: "bag", arg: { station: "bindery" } };
-    if (id.includes("forge")) return { tab: "bag", arg: { station: "forge" } };
-    if (id.includes("pilgi") || id.includes("desk"))
-      return { tab: "bag", arg: { station: "pilgi" } };
-    return { tab: "bag" };
+  switch (kind) {
+    case "station":
+      if (id.includes("bind")) return { tab: "bag", arg: { station: "bindery" } };
+      if (id.includes("forge")) return { tab: "bag", arg: { station: "forge" } };
+      if (id.includes("pilgi") || id.includes("desk"))
+        return { tab: "bag", arg: { station: "pilgi" } };
+      return { tab: "bag" };
+    case "shop":
+      // The 자판기s: the yard's, the lounge's, the 증명관's snack machine.
+      return id.includes("vending") ? { tab: "vending" } : undefined;
+    case "quests":
+      return { tab: "board" };
+    case "board":
+      return id === "corkboard" ? { tab: "board" } : undefined;
+    case "codex":
+      return { tab: "codex" };
+    case "hall-of-fame":
+      return { tab: "research" };
+    default:
+      return undefined;
   }
-  if (kind === "shop" && id.includes("vending")) return { tab: "vending" };
-  if (kind === "board" && id === "corkboard") return { tab: "board" };
-  if (kind === "codex") return { tab: "codex" };
-  if (kind === "hall-of-fame") return { tab: "research" };
-  return undefined;
 }
