@@ -147,7 +147,10 @@ export class DialogueBox {
 
   private show(): void {
     const line = this.lines[this.index];
-    if (!line) return this.finish(undefined);
+    if (!line) {
+      this.finish(undefined);
+      return;
+    }
     const speaker = speakers.get(line.speaker);
     const name = speaker ? (narrative.NARRATIVE.ko[speaker.name] ?? line.speaker) : line.speaker;
     this.name.set(name);

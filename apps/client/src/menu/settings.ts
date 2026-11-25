@@ -1,8 +1,10 @@
-import type * as Phaser from "phaser";
+import * as Phaser from "phaser";
 import { touchScreen } from "../controls/joystick.ts";
 import { t } from "../i18n/index.ts";
+import { onQualityTier, qualityTier, setQualityTier, TIERS, type Tier } from "../render/tiers.ts";
 import { PLAYER_BUSES, setVolume, volume } from "../sound/audio.ts";
 import { Button } from "../ui/button.ts";
+import { RedPen } from "../ui/marks.ts";
 import { Modal } from "../ui/overlay.ts";
 import { Slider } from "../ui/slider.ts";
 import { Label } from "../ui/text.ts";
@@ -10,20 +12,6 @@ import { paint, sliceOf } from "../ui/theme.ts";
 import type { Ctx } from "../ui/widget.ts";
 import { session } from "../world/session.ts";
 import { registerMenuTab } from "./notebook.ts";
-
-/** The renderer's quality tiers, when the renderer offers a way to set them. */
-export interface GraphicsControl {
-  readonly tiers: readonly ("low" | "medium" | "high")[];
-  get(): "low" | "medium" | "high";
-  set(tier: "low" | "medium" | "high"): void;
-}
-
-let graphics: GraphicsControl | undefined;
-
-/** The renderer calls this once it can switch quality; until then 설정 has no graphics row. */
-export function provideGraphics(control: GraphicsControl | undefined): void {
-  graphics = control;
-}
 
 /** Signs out: provided by the UI layer, which knows how to go back to the title. */
 let signOut: (() => void) | undefined;
@@ -64,7 +52,7 @@ function section(
   page.add([label.obj, rule]);
 }
 
-/** 설정: graphics when the renderer offers it, the three volumes, the real controls, the account. */
+/** 설정: the renderer's quality tier, the three volumes, the real controls, the account. */
 export function registerSettings(): void {
   registerMenuTab({
     id: "settings",
@@ -76,26 +64,40 @@ export function registerSettings(): void {
       const w = size.w - 24;
       let y = 8;
 
-      if (graphics) {
-        const g = graphics;
-        section(ctx, page, x, y, w, t("settings.graphics"));
-        y += 15;
-        let bx = x;
-        for (const tier of g.tiers) {
-          const b: Button = new Button(ctx, bx, y, {
-            label: t(`settings.graphics.${tier}`),
-            kind: g.get() === tier ? "ink" : "paper",
-            font: "galmuri9",
-            h: 17,
-            onPress: () => {
-              g.set(tier);
-            },
-          });
-          page.add(b);
-          bx += b.bounds().w + 4;
-        }
-        y += 24;
+      // Quality tiers from the renderer: the one in use is ringed in red pen.
+      section(ctx, page, x, y, w, t("settings.graphics"));
+      y += 15;
+      const pen = new RedPen(ctx.scene);
+      const choices: { tier: Tier; button: Button }[] = [];
+      let bx = x;
+      for (const tier of TIERS) {
+        const button: Button = new Button(ctx, bx, y, {
+          label: t(`settings.graphics.${tier}`),
+          font: "galmuri9",
+          h: 17,
+          onPress: () => setQualityTier(tier),
+        });
+        page.add(button);
+        choices.push({ tier, button });
+        bx += button.bounds().w + 6;
       }
+      page.add(pen.gfx);
+      const ring = (tier: Tier | null, draw: boolean) => {
+        const c = choices.find((ch) => ch.tier === tier);
+        if (!c) {
+          pen.hide(0);
+          return;
+        }
+        pen.box(c.button.x - 2, c.button.y - 2, c.button.bounds().w + 4, 17 + 3);
+        if (draw) {
+          pen.hide(0);
+          pen.show(140);
+        } else pen.show(0);
+      };
+      ring(qualityTier(), false);
+      const stop = onQualityTier((tier) => ring(tier, true));
+      page.once(Phaser.GameObjects.Events.DESTROY, stop);
+      y += 26;
 
       section(ctx, page, x, y, w, t("settings.sound"));
       y += 14;
