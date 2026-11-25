@@ -101,6 +101,16 @@ export async function characterAfterMoves(
   return use().auth.characterOf(accountId);
 }
 
+/** Which page of the account may hold its seats: its generation, or `replaced` (auth service). */
+export function admitPage(accountId: string, presented?: number): Promise<number | "replaced"> {
+  return use().auth.admitPage(accountId, presented);
+}
+
+/** A page's generation as a client sent it, or undefined when it sent none or nonsense. */
+export function presentedGen(v: unknown): number | undefined {
+  return Number.isSafeInteger(v) && (v as number) >= 0 ? (v as number) : undefined;
+}
+
 /** Development entries only (`ALLOW_MAP_OPTION`): puts the character on a map it chose. */
 export function placeCharacter(characterId: string, mapId: string, x: number, y: number) {
   return use().auth.saveCharacterPlace(characterId, mapId, x, y);

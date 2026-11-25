@@ -2,6 +2,7 @@ import { Client, type Room } from "@colyseus/sdk";
 import {
   closeEnd,
   ENTER_PATH,
+  type Entry,
   type LinkEnd,
   MAP_MESSAGES,
   MapState,
@@ -10,6 +11,7 @@ import {
   type SeatTicket,
   type Transfer,
 } from "@guago/shared";
+import { pageGen } from "./page-gen.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,7 +35,7 @@ export interface MapLinkHandlers {
   ended(why: LinkEnd | "signedOut"): void;
 }
 
-export type Entered = { seating: Seating } | { final: "signedOut" } | { retry: true };
+export type Entered = { seating: Seating } | { final: "signedOut" | "replaced" } | { retry: true };
 
 /** How the link reaches the server; the page's own, unless a test hands in another. */
 export interface MapLinkTransport {
@@ -54,15 +56,20 @@ const devChoice = (): Record<string, unknown> => {
 /** Asks the server where this character stands and for a seat there. */
 async function enterOnPage(): Promise<Entered> {
   try {
+    const gen = pageGen.get();
     const res = await fetch(ENTER_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(devChoice()),
+      body: JSON.stringify({ ...devChoice(), ...(gen === undefined ? {} : { gen }) }),
       credentials: "same-origin",
     });
     if (res.status === 401 || res.status === 403) return { final: "signedOut" };
+    // A newer page of this account entered since: this one was replaced.
+    if (res.status === 409) return { final: "replaced" };
     if (!res.ok) return { retry: true };
-    return { seating: (await res.json()) as Seating };
+    const entry = (await res.json()) as Entry;
+    pageGen.set(entry.gen);
+    return { seating: entry };
   } catch {
     return { retry: true };
   }

@@ -38,7 +38,7 @@ import type { OpHandler } from "./economy/handler.ts";
 import type { WorldHandler } from "./live/index.ts";
 import { mutedUntil, mutes } from "./moderation/mutes.ts";
 import { places } from "./places.ts";
-import { authenticateJoin, RoomSeats } from "./seats.ts";
+import { admitPage, authenticateJoin, presentedGen, RoomSeats } from "./seats.ts";
 import { SocialHub } from "./social/hub.ts";
 import type { Social } from "./social/index.ts";
 import type { Trading } from "./trade/room.ts";
@@ -144,8 +144,14 @@ export class WorldRoom extends Room {
   private flood = new Map<string, { count: number; resetAt: number }>();
   private social: SocialHub<Member> | undefined;
 
-  static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
-    return authenticateJoin(ctx);
+  static override async onAuth(_token: string, options: unknown, ctx: AuthContext) {
+    const auth = await authenticateJoin(ctx);
+    // A page a newer page of the account replaced never takes the world seat back.
+    const gen = presentedGen((options as { gen?: unknown } | undefined)?.gen);
+    if (gen !== undefined && (await admitPage(auth.accountId, gen)) === "replaced") {
+      throw new ServerError(409, "replaced");
+    }
+    return auth;
   }
 
   override onCreate(): void {

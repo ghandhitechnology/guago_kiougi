@@ -225,6 +225,29 @@ export function createAuthService({
   return {
     characterOf,
     authenticateHash,
+
+    /**
+     * Which page of an account may hold its seats (PLAN §19 single session). Both tabs of a
+     * browser share the cookie, so pages are told apart by generation: a page entering fresh is
+     * handed the next one; entering again it presents it and keeps it while no newer page has
+     * entered since. A page presenting an older one was replaced, whether or not it heard so.
+     */
+    async admitPage(accountId: string, presented?: number): Promise<number | "replaced"> {
+      if (presented === undefined) {
+        const [row] = await db
+          .update(accounts)
+          .set({ entryGeneration: sql`${accounts.entryGeneration} + 1` })
+          .where(eq(accounts.id, accountId))
+          .returning({ gen: accounts.entryGeneration });
+        return row?.gen ?? "replaced";
+      }
+      const [row] = await db
+        .select({ gen: accounts.entryGeneration })
+        .from(accounts)
+        .where(eq(accounts.id, accountId));
+      return row && presented >= row.gen ? row.gen : "replaced";
+    },
+
     /** A room join from this IP hash is refused by a ban that refuses every account on it. */
     joinRefused: async (ip: string) => (await gate?.ipBanned(ip, "login")) ?? false,
 
