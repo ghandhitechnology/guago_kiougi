@@ -78,7 +78,7 @@ export interface DuelTiming {
   readonly wins: number;
   /** Rounds played at most (drawn rounds count). */
   readonly maxRounds: number;
-  /** A round in which nobody lands a hit for this long ends as a draw. */
+  /** A round in which nobody lands a hit for this long is decided on health at once. */
   readonly idle: number;
   /** Fighting time over the whole match; past it the round is decided on health, then the match. */
   readonly matchCap: number;
@@ -656,10 +656,9 @@ export class DuelFloor implements PvpHook {
         let winner = 0;
         let end: RoundEnd = RoundEnd.Knockout;
         if (a === 0 || b === 0) winner = a > 0 ? 1 : b > 0 ? 2 : 0;
-        else if (idle && !capped && tick < this.phaseEnds) {
-          // Nobody fought: a draw now, not a floor held for the whole clock.
-          end = RoundEnd.Time;
-        } else {
+        else {
+          // At the clock, at the match's cap, or after a lull with no hit landed (decided now,
+          // not a floor held for the whole clock): on health standing, a draw when it is equal.
           end = RoundEnd.Time;
           const ha = this.sideHealth(1);
           const hb = this.sideHealth(2);

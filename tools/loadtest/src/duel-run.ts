@@ -238,6 +238,15 @@ class Bot {
     return undefined;
   }
 
+  /** Whether the body with this session id is knocked out (its state's down bit). */
+  downed(sid: string): boolean {
+    const slot = this.slotOf(sid);
+    for (const m of this.reader?.members.values() ?? []) {
+      if (m.kind === WirePlayer && m.slot === slot) return (m.state & 4) !== 0;
+    }
+    return false;
+  }
+
   /** The network id of the body with this session id, if in view. */
   entityOf(sid: string): number | undefined {
     const slot = this.slotOf(sid);
@@ -262,6 +271,7 @@ class Bot {
       const me = this.floor?.fighters.find((f) => f.id === this.id);
       const foes = this.floor?.fighters.filter((f) => me && f.team !== me.team && !f.out) ?? [];
       for (const f of foes) {
+        if (this.downed(f.sid)) continue;
         const at = this.bodyOf(f.sid);
         if (
           at &&
@@ -324,7 +334,7 @@ if (values.verbose) {
 }
 
 /** Waits for the match to be decided on every fighter's side and returns the result. */
-async function result(fighters: Bot[], ms = 240_000): Promise<DuelResultView | undefined> {
+async function result(fighters: Bot[], ms = 420_000): Promise<DuelResultView | undefined> {
   const over = await fighters[0]?.push("over", ms);
   return over?.result;
 }
@@ -370,6 +380,8 @@ async function challenged(): Promise<void> {
   const b = await bot("cafeteria");
   const fromA = a.map?.state.map ?? "";
   const fromB = b.map?.state.map ?? "";
+  await settled(a);
+  const spotA = { ...a.self };
   const sent = await a.request("duel.challenge", { id: b.id });
   check(sent.ok, `challenge sent ${JSON.stringify(sent.body)}`);
   const got = await b.push("challenged");
@@ -380,6 +392,17 @@ async function challenged(): Promise<void> {
   say(`match ${match?.id} on ${match?.map} channel ${match?.channel}`);
   check(await fight([a, b]), "both fighters arrived on the floor and the countdown began");
   check(a.map?.state.map === "saebyeok" && b.map?.state.map === "saebyeok", "both moved to 새벽관");
+  // Walking at each other all along: through the countdown nobody moves.
+  if (a.floor?.phase === "countdown") {
+    // The countdown put everyone at their marks; from then on nobody moves until the fight.
+    await sleep(400);
+    const at = { ...a.self };
+    await sleep(1200);
+    check(
+      a.floor?.phase !== "countdown" || (a.self.x === at.x && a.self.y === at.y),
+      "the countdown holds the fighters still",
+    );
+  }
   const r = await result([a, b]);
   say(describe(r));
   check(r !== undefined && r.winner > 0, "the match was decided");
@@ -393,12 +416,52 @@ async function challenged(): Promise<void> {
     (await backHome(a, fromA)) && (await backHome(b, fromB)),
     `both put back (${fromA}, ${fromB})`,
   );
+  await sleep(500);
+  check(
+    Math.abs(a.self.x - spotA.x) <= 2 && Math.abs(a.self.y - spotA.y) <= 2,
+    `on the spot it stood on (${spotA.x | 0},${spotA.y | 0} → ${a.self.x | 0},${a.self.y | 0})`,
+  );
   const record = await a.request("duel.record", { id: a.id });
   say(`record ${JSON.stringify(record.body)}`);
   check(
     record.ok && (record.body as { played: number }).played >= 1,
     "the record counts the match",
   );
+}
+
+/** Waits until the bot's own body has been reported. */
+async function settled(b: Bot): Promise<void> {
+  for (let i = 0; i < 100 && b.self.x === 0; i++) await sleep(50);
+}
+
+async function concede(): Promise<void> {
+  say("— conceding in the countdown and on the result screen");
+  const a = await bot("campus-yard");
+  const b = await bot("campus-yard");
+  await settled(a);
+  await settled(b);
+  const spotA = { ...a.self };
+  const spotB = { ...b.self };
+  const sent = await a.request("duel.challenge", { id: b.id });
+  const got = await b.push("challenged");
+  await b.request("duel.accept", { id: got?.id ?? 0 });
+  void sent;
+  const end = Date.now() + 20_000;
+  while (Date.now() < end && b.floor?.phase !== "countdown") await sleep(50);
+  check(b.floor?.phase === "countdown", "the countdown began");
+  check((await b.request("duel.forfeit")).ok, "conceded in the countdown");
+  while (Date.now() < end && a.floor?.phase !== "over") await sleep(50);
+  check(a.floor?.phase === "over", "the match is over at once");
+  check((await a.request("duel.forfeit")).ok, "left from the result screen");
+  check(await backHome(a, "campus-yard"), "the one who left the result screen is home");
+  check(await backHome(b, "campus-yard"), "the one who conceded is home");
+  await sleep(500);
+  const near = (p: { x: number; y: number }, q: { x: number; y: number }) =>
+    Math.abs(p.x - q.x) <= 2 && Math.abs(p.y - q.y) <= 2;
+  check(near(a.self, spotA) && near(b.self, spotB), "both on the spots they stood on");
+  const again = await a.request("duel.challenge", { id: b.id });
+  check(again.ok, "free to duel again");
+  await a.request("duel.withdraw");
 }
 
 async function queued(): Promise<void> {
@@ -600,12 +663,18 @@ async function field(): Promise<void> {
   check(atPlayers.length === 0, "no hit on the field landed on a player");
   const c = await a.request("duel.forfeit", {});
   check(!c.ok, "nothing to forfeit outside a duel");
+  const from = await a.request("duel.challenge", { id: b.id });
+  check(
+    !from.ok && (from.body as { code?: string }).code === "duel_not_here",
+    `no duel from a hunting field's open ground (${JSON.stringify(from.body)})`,
+  );
   await a.close();
   await b.close();
 }
 
 const SCENARIOS: Record<string, () => Promise<void>> = {
   challenged,
+  concede,
   queued,
   forfeit: forfeitByDisconnect,
   two: twoAtOnce,
