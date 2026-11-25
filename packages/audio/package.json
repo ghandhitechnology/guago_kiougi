@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./cues": "./src/cues.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
@@ -11,9 +12,11 @@
     "render": "node src/tools/render.ts",
     "score": "node src/tools/score.ts",
     "perf": "node src/tools/perf.ts",
-    "size": "node src/tools/size.ts"
+    "size": "node src/tools/size.ts",
+    "cues": "node src/tools/cues.ts"
   },
   "devDependencies": {
+    "@guago/content": "workspace:*",
     "@types/node": "^26.6.6",
     "galmuri": "^2.40.3",
     "vite": "8.3.8"

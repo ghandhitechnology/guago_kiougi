@@ -21,6 +21,8 @@ import {
   lookTexture,
 } from "./art.ts";
 import { CameraRig } from "./camera.ts";
+import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
+import type { WorldEntry } from "./entry.ts";
 import { Footsteps } from "./footsteps.ts";
 import { drawGround } from "./ground.ts";
 import { KeyboardMove } from "./input.ts";
@@ -57,9 +59,17 @@ export class WorldScene extends Phaser.Scene {
   private selfId: string | undefined;
   private live = false;
   private lastTime: number | undefined;
+  /** Who is playing, handed over by the front end; absent when the scene runs on its own. */
+  private entry: WorldEntry | undefined;
+  /** The player's own look, composited from the character; others wear the default for now. */
+  private selfLook: string | undefined;
 
   constructor() {
     super("world");
+  }
+
+  init(data: Partial<WorldEntry>): void {
+    this.entry = data.account && data.character ? (data as WorldEntry) : undefined;
   }
 
   preload(): void {
@@ -70,6 +80,11 @@ export class WorldScene extends Phaser.Scene {
     this.meta = artMeta(this);
     createSpriteAnims(this, this.meta);
     this.look = composeLook(this, this.meta, PLAYER_RIG, defaultLook(this.meta, PLAYER_RIG)).look;
+    if (this.entry) {
+      const look = normalizeLook(this.meta, this.entry.character.look);
+      composeDoll(this, this.meta, look);
+      this.selfLook = dollLook(look);
+    }
     drawGround(this, this.meta, LAWN);
     drawProps(this, this.meta, LAWN);
     this.footsteps = new Footsteps(this, this.meta, LAWN);
@@ -143,8 +158,8 @@ export class WorldScene extends Phaser.Scene {
     prune(this.players, seated);
   }
 
-  private playerActor(): PlayerActor {
-    const actor = new PlayerActor(this, this.meta, PLAYER_RIG, this.look, PLAYER_SPEED);
+  private playerActor(look = this.look): PlayerActor {
+    const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
     actor.onStep = (x, y) => this.footsteps.step(x, y);
     return actor;
   }
@@ -160,7 +175,7 @@ export class WorldScene extends Phaser.Scene {
     const drawn = this.self?.frame(dt, () => this.keys.sample(), this.live);
     if (drawn) {
       if (!this.selfActor) {
-        this.selfActor = this.playerActor();
+        this.selfActor = this.playerActor(this.selfLook);
         this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
       }
       this.selfActor.update(drawn.x, drawn.y, drawn.facing, dt);

@@ -70,41 +70,68 @@ const armchair = (() => {
  * curve of the case is drawn from above.
  */
 const piano = (() => {
-  const p = Pic.blank(54, 44);
-  // Case top: straight on the left, the long curve on the right, in black lacquer.
-  for (let y = 1; y < 28; y++) {
-    const t = (y - 1) / 27;
-    const right = Math.round(
-      52 - 18 * Math.sin(t * Math.PI * 0.95) * (1 - t * 0.2) - (y < 6 ? (6 - y) * 2 : 0),
-    );
-    rect(p, 1, y, right - 1, 1, "j");
+  const W = 56;
+  const p = Pic.blank(W, 48);
+  // The lid seen from above: straight on the bass side, the bentside curving in to the tail.
+  const KEYS = 30;
+  for (let y = 1; y <= KEYS; y++) {
+    const t = (KEYS - y) / (KEYS - 1);
+    const u = Math.max(0, (t - 0.16) / 0.84);
+    let right = Math.round(53 - 31 * u ** 1.3);
+    let left = 2;
+    const round = [5, 3, 2, 1][y - 1];
+    if (round !== undefined) {
+      left += round;
+      right -= round;
+    }
+    rect(p, left, y, right - left + 1, 1, "j");
   }
-  for (let y = 2; y < 27; y++) {
-    const row = [...Array(54).keys()].filter((x) => p.at(x, y) === "j");
-    const r = row[row.length - 1] ?? 2;
-    p.set(2, y, "I");
-    p.set(r, y, "J");
-    if (y % 6 === 3)
-      for (let x = 4; x < r - 2; x += 1) if ((x + y) % 9 === 0) p.set(x, y, "I").set(x + 1, y, "I");
+  // Lacquer: lit along the bass side and the tail, a window's reflection across the lid.
+  for (let y = 1; y <= KEYS; y++) {
+    const row = [...Array(W).keys()].filter((x) => p.at(x, y) === "j");
+    const l = row[0] ?? 2;
+    p.set(l + 1, y, "I");
+    const d = 46 - y * 1.4;
+    for (const x of row) if (Math.abs(x - d) < 1.5 && y > 4) p.set(x, y, "I");
+    for (const x of row) if (Math.abs(x - (d + 7)) < 0.6 && y > 8) p.set(x, y, "I");
   }
-  hline(p, 2, 1, 30, "I");
-  // Dust on the lid, a vase nobody moved.
-  rect(p, 10, 6, 8, 2, "i");
-  rect(p, 30, 10, 3, 5, "x");
-  rect(p, 30, 8, 3, 2, "G");
-  // Front: fallboard, keys, the case below.
-  rect(p, 1, 28, 40, 3, "j");
-  hline(p, 1, 28, 40, "I");
-  rect(p, 2, 31, 38, 3, "w");
-  for (let x = 4; x < 39; x += 3) if (x % 21 !== 10) rect(p, x, 31, 1, 2, "J");
-  hline(p, 2, 33, 38, "k");
-  rect(p, 1, 34, 40, 3, "J");
-  // Legs and the pedal lyre.
-  rect(p, 3, 37, 3, 6, "J");
-  rect(p, 36, 37, 3, 6, "J");
-  rect(p, 19, 37, 3, 5, "J");
-  rect(p, 18, 42, 5, 1, "o");
-  return finish(p, "o");
+  hline(p, 7, 2, 12, "I");
+  // What lives on a piano nobody plays: a vase, a stack of sheet music, dust.
+  rect(p, 34, 21, 3, 5, "m");
+  vline(p, 34, 21, 5, "~");
+  rect(p, 33, 18, 2, 3, "G");
+  rect(p, 36, 17, 2, 2, "x");
+  rect(p, 10, 20, 9, 6, "w");
+  hline(p, 10, 25, 9, "K");
+  hline(p, 11, 22, 6, "K");
+  rect(p, 22, 8, 4, 2, "i");
+  rect(p, 14, 13, 3, 2, "i");
+  // Front: the keyslip, the keys, the case below.
+  rect(p, 2, KEYS + 1, 52, 3, "j");
+  hline(p, 2, KEYS + 1, 52, "I");
+  rect(p, 5, KEYS + 4, 46, 4, "w");
+  hline(p, 5, KEYS + 7, 46, "k");
+  for (let x = 5; x < 51; x += 3) vline(p, x + 2, KEYS + 4, 4, "k");
+  // Black keys in twos and threes.
+  for (let o = 0; o < 3; o++) {
+    for (const k of [0, 1, 3, 4, 5]) {
+      const x = 5 + (o * 7 + k) * 3 + 2;
+      if (x < 49) rect(p, x, KEYS + 4, 2, 2, "J");
+    }
+  }
+  rect(p, 2, KEYS + 4, 3, 4, "j");
+  rect(p, 51, KEYS + 4, 3, 4, "j");
+  rect(p, 2, KEYS + 8, 52, 3, "J");
+  hline(p, 2, KEYS + 8, 52, "j");
+  // Legs, and the lyre with its pedals.
+  for (const x of [4, 48]) {
+    rect(p, x, KEYS + 11, 4, 5, "J");
+    vline(p, x, KEYS + 11, 5, "j");
+  }
+  rect(p, 26, KEYS + 11, 4, 4, "J");
+  rect(p, 24, KEYS + 15, 8, 1, "o");
+  hline(p, 25, KEYS + 15, 2, "y");
+  return finish(p, "oy");
 })();
 
 /** The piano bench. */
@@ -226,7 +253,7 @@ export default [
     { shadow: boxShadow(50, 26, 1, 20, 48, 25, 3, 0) },
   ),
   frames("armchair", { still: armchair }, { shadow: boxShadow(24, 26, 1, 20, 22, 25, 3, 0) }),
-  frames("piano", { still: piano }, { lone: "o", shadow: boxShadow(54, 44, 2, 30, 50, 43, 3, 0) }),
+  frames("piano", { still: piano }, { lone: "oy", shadow: boxShadow(56, 48, 2, 30, 53, 46, 3, 0) }),
   frames("piano-bench", { still: pianoBench }, { shadow: boxShadow(22, 12, 1, 6, 20, 11, 2, 0) }),
   frames(
     "low-table",

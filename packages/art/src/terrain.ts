@@ -1,6 +1,7 @@
 import { BL, BR, TL, TR } from "./dualgrid.ts";
 import type { Legend, OverlayDef, OverlayPictures, TerrainDef } from "./format.ts";
 import { ArtError, checkLegend, parseGrid } from "./grid.ts";
+import { THEMES } from "./palette.ts";
 import { crop, type Indexed, indexed, stamp } from "./raster.ts";
 
 export interface CompiledTone {
@@ -17,6 +18,8 @@ export interface CompiledTerrain {
   readonly upper: string;
   readonly lower: string;
   readonly themes: readonly string[] | null;
+  /** Themes it is baked into, or null for every theme. */
+  readonly bake: readonly string[] | null;
   /** Every distinct tile, 16×16. Pair tiles are opaque; tone tiles are overlays. */
   readonly tiles: readonly Indexed[];
   /** Tile indices per mask 0 to 15. */
@@ -40,6 +43,14 @@ export const INNER_MASKS = [
   [15 & ~BR, 15 & ~BL],
   [15 & ~TR, 15 & ~TL],
 ] as const;
+
+/** A bake list names built themes only. */
+function checkBake(bake: readonly string[] | undefined, where: string): void {
+  for (const name of bake ?? []) {
+    if (!THEMES.some((t) => t.name === name))
+      throw new ArtError(where, `bake names theme "${name}", which is not built`);
+  }
+}
 
 function list(src: string | readonly string[]): readonly string[] {
   return typeof src === "string" ? [src] : src;
@@ -143,6 +154,8 @@ export interface CompiledOverlay {
   readonly kind: "overlay";
   readonly name: string;
   readonly themes: readonly string[] | null;
+  /** Themes it is baked into, or null for every theme. */
+  readonly bake: readonly string[] | null;
   /** Every distinct tile, 16×16, clear where nothing is drawn. */
   readonly tiles: readonly Indexed[];
   /** Per tile, 256 flags (row major) for the pixels inside the region; null without `inside`. */
@@ -204,7 +217,16 @@ export function compileOverlay(def: OverlayDef, name: string, where: string): Co
     const forms = form ? (m === 15 ? form.fills : form.layers.map((l) => l[m] as Indexed)) : [];
     masks.push([...new Set(imgs.map((img, k) => add(img, forms[k])))]);
   }
-  return { kind: "overlay", name, themes: def.themes ?? null, tiles, shapes, masks };
+  checkBake(def.bake, where);
+  return {
+    kind: "overlay",
+    name,
+    themes: def.themes ?? null,
+    bake: def.bake ?? null,
+    tiles,
+    shapes,
+    masks,
+  };
 }
 
 export function compileTerrain(def: TerrainDef, name: string, where: string): CompiledTerrain {
@@ -257,12 +279,14 @@ export function compileTerrain(def: TerrainDef, name: string, where: string): Co
     return { name: dn, on: d.on, density: d.density, img };
   });
 
+  checkBake(def.bake, where);
   return {
     kind: "terrain",
     name,
     upper: def.upper,
     lower: def.lower,
     themes: def.themes ?? null,
+    bake: def.bake ?? null,
     tiles,
     masks,
     tones,

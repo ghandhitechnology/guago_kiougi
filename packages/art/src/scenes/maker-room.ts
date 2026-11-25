@@ -129,7 +129,7 @@ export default scene({
     sun(104),
     sun(152),
     {
-      bands: ["greece", "rift-sun"],
+      bands: ["golden-sun", "golden-warm"],
       at: [FORGE.x, FORGE.y + 16],
       r: [64, 24],
       ragged: 4,
@@ -138,7 +138,7 @@ export default scene({
     { bands: ["campus-lamp"], at: [176, 166], r: [60, 30], ragged: 3 },
     // The open mouth throws its own light out across the floor in front of it.
     {
-      bands: ["greece", "rift-sun"],
+      bands: ["golden-sun", "golden-warm"],
       spill: {
         top: [FORGE.x - 10, FORGE.x + 10, FORGE.y + 2],
         bottom: [FORGE.x - 34, FORGE.x + 34, FORGE.y + 44],
