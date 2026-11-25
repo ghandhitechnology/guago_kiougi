@@ -196,6 +196,8 @@ export function checkMap(result: BuildResult, art: ArtIndex, registry: MapRegist
     for (const o of typeof e.overlay === "string" ? [e.overlay] : e.overlay)
       unbaked(o, art.overlays[o]?.bake);
   if (!colour(map.ambient.color)) say(`ambient ${map.ambient.color} is not a palette colour`);
+  if (map.ambient.sun && !colour(map.ambient.sun.color))
+    say(`ambient: sun ${map.ambient.sun.color} is not a palette colour`);
   if (map.ambient.unlit && !themes.has(map.ambient.unlit))
     say(`ambient: unlit theme ${map.ambient.unlit} is not built`);
   map.lights.forEach((l, i) => {

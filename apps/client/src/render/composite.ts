@@ -1,15 +1,19 @@
 /**
  * Two filters, both at the game's own 480×270 so every effect lands on the art's pixel grid.
  *
- * `LightComposite` sits on the ground layer: it multiplies the ground by the light map and
- * bands the light into a few steps with an ordered dither at the band edges, locked to world
- * pixels so the pattern travels with the ground instead of crawling over it.
+ * `LightComposite` sits on the ground layer: it multiplies the ground by the light map and bands
+ * the light into a few steps with an ordered dither at the band edges, locked to world pixels so
+ * the pattern travels with the ground. Inside a rift it shimmers the ground's rows a whole pixel
+ * at a time and splits colour at the torn lip; only the ground, so nothing standing in the tear
+ * jags.
  *
  * `Grade` sits on the whole world: it grades every pixel through a palette-aware lookup table,
- * and inside a rift shimmers rows a pixel at a time and splits colour at the torn lip.
+ * and for a boss's entrance drains the world to shades of one colour, then floods the colour
+ * back outward from a point behind a dithered edge.
  */
 import * as Phaser from "phaser";
 import { worldScroll } from "./cutaway.ts";
+import { LIGHT_MARGIN } from "./light-field.ts";
 
 const BAYER = `
 float bayer2(vec2 a) {
@@ -26,11 +30,19 @@ precision mediump float;
 
 uniform sampler2D uMainSampler;
 uniform sampler2D uLight;
+uniform sampler2D uRift;
 uniform vec2 uRes;
+uniform vec2 uLightRes;
+uniform float uMargin;
 uniform vec2 uScroll;
 uniform float uSteps;
 uniform float uSharp;
 uniform float uDither;
+uniform vec4 uRiftRect;
+uniform float uRiftOn;
+uniform float uTime;
+uniform float uHaze;
+uniform float uChroma;
 
 varying vec2 outTexCoord;
 
@@ -38,14 +50,31 @@ varying vec2 outTexCoord;
 ${BAYER}
 
 void main () {
-  vec4 albedo = texture2D(uMainSampler, outTexCoord);
+  vec2 uv = outTexCoord;
+  vec2 screen = floor(vec2(uv.x * uRes.x, (1.0 - uv.y) * uRes.y));
+  vec2 world = screen + uScroll;
+  vec2 rift = vec2(0.0);
+  if (uRiftOn > 0.5) {
+    vec2 ruv = (world + 0.5 - uRiftRect.xy) / uRiftRect.zw;
+    if (ruv.x >= 0.0 && ruv.y >= 0.0 && ruv.x <= 1.0 && ruv.y <= 1.0) {
+      rift = texture2D(uRift, vec2(ruv.x, 1.0 - ruv.y)).rg;
+    }
+    // Heat over the tear, deep inside it: thin runs of rows slip a whole pixel and climb.
+    float wave = sin(world.y * 0.5 + uTime * 3.1) * sin(world.y * 0.11 - uTime * 0.9 + world.x * 0.015);
+    uv.x += sign(wave) * step(0.72, abs(wave) * rift.x * uHaze) / uRes.x;
+  }
+  vec4 albedo = texture2D(uMainSampler, uv);
+  if (uChroma > 0.0 && rift.y > 0.5) {
+    float k = uChroma / uRes.x;
+    albedo.r = texture2D(uMainSampler, uv + vec2(k, 0.0)).r;
+    albedo.b = texture2D(uMainSampler, uv - vec2(k, 0.0)).b;
+  }
   if (albedo.a <= 0.0) {
     gl_FragColor = vec4(0.0);
     return;
   }
-  vec2 screen = vec2(outTexCoord.x * uRes.x, (1.0 - outTexCoord.y) * uRes.y);
-  vec2 world = floor(screen) + uScroll;
-  vec3 light = texture2D(uLight, outTexCoord).rgb * 2.0;
+  vec2 luv = vec2((screen.x + uMargin + 0.5) / uLightRes.x, 1.0 - (screen.y + uMargin + 0.5) / uLightRes.y);
+  vec3 light = texture2D(uLight, luv).rgb * 2.0;
   float peak = max(max(light.r, light.g), max(light.b, 0.0001));
   float q = peak * uSteps;
   float lower = floor(q);
@@ -61,18 +90,16 @@ precision mediump float;
 
 uniform sampler2D uMainSampler;
 uniform sampler2D uLut;
-uniform sampler2D uRift;
 uniform vec2 uRes;
 uniform vec2 uScroll;
-uniform vec4 uRiftRect;
-uniform float uRiftOn;
-uniform float uTime;
-uniform float uHaze;
-uniform float uChroma;
+uniform float uDrain;
+uniform vec3 uDrainColor;
+uniform vec3 uFlood;
 
 varying vec2 outTexCoord;
 
 #pragma phaserTemplate(fragmentHeader)
+${BAYER}
 
 vec3 grade(vec3 c) {
   c = clamp(c, 0.0, 1.0);
@@ -84,43 +111,48 @@ vec3 grade(vec3 c) {
 }
 
 void main () {
-  vec2 uv = outTexCoord;
-  vec2 screen = vec2(uv.x * uRes.x, (1.0 - uv.y) * uRes.y);
-  vec2 world = floor(screen) + uScroll;
-  vec2 rift = vec2(0.0);
-  if (uRiftOn > 0.5) {
-    vec2 ruv = (world + 0.5 - uRiftRect.xy) / uRiftRect.zw;
-    if (ruv.x >= 0.0 && ruv.y >= 0.0 && ruv.x <= 1.0 && ruv.y <= 1.0) {
-      rift = texture2D(uRift, vec2(ruv.x, 1.0 - ruv.y)).rg;
-    }
-    // Heat over the tear, deep inside it: thin runs of rows slip a whole pixel and climb.
-    float wave = sin(world.y * 0.5 + uTime * 3.1) * sin(world.y * 0.11 - uTime * 0.9 + world.x * 0.015);
-    uv.x += sign(wave) * step(0.72, abs(wave) * rift.x * uHaze) / uRes.x;
-  }
-  vec4 c = texture2D(uMainSampler, uv);
-  if (uChroma > 0.0 && rift.y > 0.5) {
-    float k = uChroma / uRes.x;
-    c.r = texture2D(uMainSampler, uv + vec2(k, 0.0)).r;
-    c.b = texture2D(uMainSampler, uv - vec2(k, 0.0)).b;
-  }
+  vec4 c = texture2D(uMainSampler, outTexCoord);
   if (c.a <= 0.0) {
     gl_FragColor = vec4(0.0);
     return;
   }
-  gl_FragColor = vec4(grade(c.rgb / c.a) * c.a, c.a);
+  vec3 rgb = grade(c.rgb / c.a);
+  if (uDrain > 0.0) {
+    vec2 screen = floor(vec2(outTexCoord.x * uRes.x, (1.0 - outTexCoord.y) * uRes.y));
+    vec2 world = screen + uScroll;
+    // Four shades of one colour, by brightness.
+    float y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float s = floor(clamp(y * 1.15, 0.0, 0.999) * 4.0) / 3.0;
+    vec3 drained = s < 0.5 ? mix(uDrainColor * 0.18, uDrainColor, s * 2.0) : mix(uDrainColor, vec3(1.0), (s - 0.5) * 1.1);
+    float k = uDrain;
+    if (uFlood.z > 0.0) {
+      // Colour returns outward from the flood's centre, its edge dithered.
+      float r = length(world + 0.5 - uFlood.xy) / uFlood.z;
+      k *= step(0.0, r - 1.0 + (bayer4(world) - 0.5) * 0.12);
+    }
+    rgb = mix(rgb, drained, k);
+  }
+  gl_FragColor = vec4(rgb * c.a, c.a);
 }
 `;
 
 type Texture = Phaser.Renderer.WebGL.Wrappers.WebGLTextureWrapper;
 
-/** Settings the light composite reads every frame. */
+/** Settings the ground's light composite reads every frame. */
 export class LightComposite extends Phaser.Filters.Controller {
   light: Texture | null = null;
+  lightW = 1;
+  lightH = 1;
   /** Light steps per unit of light: more steps, narrower bands. */
   steps = 4;
   /** How narrow the dithered seam between two bands is: 1 dithers the whole step. */
   sharp = 9;
   dither = true;
+  rift: Texture | null = null;
+  riftRect: [number, number, number, number] = [0, 0, 1, 1];
+  time = 0;
+  haze = 0;
+  chroma = 0;
 
   constructor(camera: Phaser.Cameras.Scene2D.Camera) {
     super(camera, LIGHT_NODE);
@@ -130,11 +162,11 @@ export class LightComposite extends Phaser.Filters.Controller {
 /** Settings the grade reads every frame. */
 export class Grade extends Phaser.Filters.Controller {
   lut: Texture | null = null;
-  rift: Texture | null = null;
-  riftRect: [number, number, number, number] = [0, 0, 1, 1];
-  time = 0;
-  haze = 0;
-  chroma = 0;
+  /** 0 is the world's own colour, 1 all of it drained to `drainColor`. */
+  drain = 0;
+  drainColor: [number, number, number] = [1, 0.3, 0.2];
+  /** While colour floods back: world centre and radius in pixels; radius 0 is no flood. */
+  flood: [number, number, number] = [0, 0, 0];
 
   constructor(camera: Phaser.Cameras.Scene2D.Camera) {
     super(camera, GRADE_NODE);
@@ -151,7 +183,9 @@ class LightNode extends Phaser.Renderer.WebGL.RenderNodes.BaseFilterShader {
 
   override setupTextures(controller: Phaser.Filters.Controller, textures: Texture[]): void {
     const c = controller as LightComposite;
-    textures[1] = c.light ?? (textures[0] as Texture);
+    const fallback = textures[0] as Texture;
+    textures[1] = c.light ?? fallback;
+    textures[2] = c.rift ?? fallback;
   }
 
   override setupUniforms(
@@ -161,11 +195,19 @@ class LightNode extends Phaser.Renderer.WebGL.RenderNodes.BaseFilterShader {
     const c = controller as LightComposite;
     const p = this.programManager;
     p.setUniform("uLight", 1);
+    p.setUniform("uRift", 2);
     p.setUniform("uRes", [drawingContext.width, drawingContext.height]);
+    p.setUniform("uLightRes", [c.lightW, c.lightH]);
+    p.setUniform("uMargin", LIGHT_MARGIN);
     p.setUniform("uScroll", worldScroll(c.camera));
     p.setUniform("uSteps", c.steps);
     p.setUniform("uSharp", c.sharp);
     p.setUniform("uDither", c.dither ? 1 : 0);
+    p.setUniform("uRiftRect", c.riftRect);
+    p.setUniform("uRiftOn", c.rift ? 1 : 0);
+    p.setUniform("uTime", c.time);
+    p.setUniform("uHaze", c.haze);
+    p.setUniform("uChroma", c.chroma);
   }
 }
 
@@ -176,9 +218,7 @@ class GradeNode extends Phaser.Renderer.WebGL.RenderNodes.BaseFilterShader {
 
   override setupTextures(controller: Phaser.Filters.Controller, textures: Texture[]): void {
     const c = controller as Grade;
-    const fallback = textures[0] as Texture;
-    textures[1] = c.lut ?? fallback;
-    textures[2] = c.rift ?? fallback;
+    textures[1] = c.lut ?? (textures[0] as Texture);
   }
 
   override setupUniforms(
@@ -188,14 +228,11 @@ class GradeNode extends Phaser.Renderer.WebGL.RenderNodes.BaseFilterShader {
     const c = controller as Grade;
     const p = this.programManager;
     p.setUniform("uLut", 1);
-    p.setUniform("uRift", 2);
     p.setUniform("uRes", [drawingContext.width, drawingContext.height]);
     p.setUniform("uScroll", worldScroll(c.camera));
-    p.setUniform("uRiftRect", c.riftRect);
-    p.setUniform("uRiftOn", c.rift ? 1 : 0);
-    p.setUniform("uTime", c.time);
-    p.setUniform("uHaze", c.haze);
-    p.setUniform("uChroma", c.chroma);
+    p.setUniform("uDrain", c.drain);
+    p.setUniform("uDrainColor", c.drainColor);
+    p.setUniform("uFlood", c.flood);
   }
 }
 
@@ -212,7 +249,7 @@ export function glTexture(scene: Phaser.Scene, key: string): Texture | null {
   return scene.textures.get(key).source[0]?.glTexture ?? null;
 }
 
-/** The light composite's banding on the CPU, for lighting a whole sprite by one value. */
+/** The light composite's banding on the CPU. */
 export function bandLight(
   light: readonly [number, number, number],
   steps: number,

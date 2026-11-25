@@ -25,6 +25,8 @@ export interface MapMasks {
   readonly shadow: Uint8Array;
   /** 255 inside an edge region (a rift's tear). */
   readonly inside: Uint8Array;
+  /** 255 on wall tiles: walls, faces, buildings, which stop light. */
+  readonly wall: Uint8Array;
 }
 
 export function readMasks(scene: Phaser.Scene, key: string): MapMasks {
@@ -38,11 +40,13 @@ export function readMasks(scene: Phaser.Scene, key: string): MapMasks {
   const n = image.width * image.height;
   const shadow = new Uint8Array(n);
   const inside = new Uint8Array(n);
+  const wall = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     shadow[i] = d[i * 4] as number;
     inside[i] = d[i * 4 + 1] as number;
+    wall[i] = d[i * 4 + 2] as number;
   }
-  return { w: image.width, h: image.height, shadow, inside };
+  return { w: image.width, h: image.height, shadow, inside, wall };
 }
 
 /** Two-pass chamfer distance to the nearest seed pixel, over `rect` of a `w`-wide mask. */

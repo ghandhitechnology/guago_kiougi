@@ -21,6 +21,7 @@
 export { loadMap, mapExists, unloadMap } from "./assets.ts";
 export {
   type EntityOptions,
+  type FlashSpec,
   LAYER_NAMES,
   type LayerName,
   type LightHandle,
@@ -29,6 +30,7 @@ export {
   MapView,
   type MapViewOptions,
   type RenderStats,
+  type TelegraphOptions,
 } from "./map-view.ts";
 export {
   clearQualityTier,

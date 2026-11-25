@@ -3,39 +3,47 @@
  *
  * Draw order, back to front, all inside one world layer that the grade filter colours:
  * - backdrop: the sky colour and what lies past the map edge, with parallax, unlit,
- * - ground: one baked image, the details that move, the rift's glowing lip, entity shadows and
- *   weather, lit pixel by pixel through the light map,
- * - objects: props and entities sorted by their feet, then overhead art (cut away around the
- *   player), foliage and atmosphere. Each sprite takes one light, the light map's value at its
- *   feet, banded the same way, so a column standing at the edge of a pool is lit as a whole
- *   instead of split by the ground behind it,
- * - glow: light itself, drawn additively: halos, the rift's inward motes, and effects drawn
+ * - ground: one baked image, the details that move, entity shadows and weather, lit pixel by
+ *   pixel through the light map,
+ * - ground glow: light lying on the ground, unlit, under whatever stands on it: a rift's lip,
+ *   enemy telegraphs,
+ * - sprites: props and entities sorted by their feet, overhead art (cut away around the player),
+ *   foliage and atmosphere. Every sprite pixel takes the light the ground has in its column at
+ *   the sprite's feet (see `sprite-light.ts`),
+ * - glow: light itself, drawn additively: halos, the rift's motes, sun shafts, effects drawn
  *   with `blend: "add"`.
  *
- * The light map is a render texture drawn first in the frame, through the same camera, so it
- * never lags the camera by a frame. Positions are world pixels; an entity's `x, y` is its feet.
+ * Above the world: overlays the drain leaves alone (a boss's entrance pieces) and the letterbox.
+ * Positions are world pixels; an entity's `x, y` is its feet.
  */
 import type { ArtMetadata, SpriteMeta } from "@guago/art";
-import { emitterParticle, valueNoise } from "@guago/art";
-import type {
-  Actor,
-  BuiltMap,
-  Doll,
-  Emitter,
-  FramePick,
-  LightSource,
-  Placement,
-  Prop,
-} from "@guago/content";
+import { emitterParticle } from "@guago/art";
+import type { Actor, BuiltMap, Doll, Emitter, FramePick, Placement, Prop } from "@guago/content";
 import * as Phaser from "phaser";
 import { composeLook, lookTexture } from "../art.ts";
 import { artMetadata, KEYS, litTheme, mapData, type ThemedAtlas, themedAtlas } from "./assets.ts";
-import { bandLight, Grade, glTexture, LightComposite, registerComposite } from "./composite.ts";
+import { Grade, glTexture, LightComposite, registerComposite } from "./composite.ts";
 import { Cutaway, registerCutaway } from "./cutaway.ts";
 import { buildLut, colorOf, gradeFor, luma, NO_GRADE, paletteColor, rgbOf } from "./grade.ts";
+import {
+  type FlashSpec,
+  LIGHT_MARGIN,
+  type Light,
+  LightField,
+  type LightSpec,
+  wobble,
+} from "./light-field.ts";
 import { buildRegionLight, type MapMasks, type Rect, type RegionLight, readMasks } from "./rift.ts";
-import { makeTextures, TEX } from "./textures.ts";
+import {
+  FeetBuffer,
+  registerSpriteLight,
+  type SpriteCode,
+  SpriteLightFilter,
+} from "./sprite-light.ts";
+import { bayer4, makeTextures, TEX } from "./textures.ts";
 import { qualityTier, TIER_SETTINGS, type Tier, type TierSettings } from "./tiers.ts";
+
+export type { FlashSpec, LightSpec } from "./light-field.ts";
 
 export type LightingMode = "screen" | "object" | "off";
 
@@ -51,19 +59,6 @@ export const LAYER_NAMES = [
   "weather",
 ] as const;
 export type LayerName = (typeof LAYER_NAMES)[number];
-
-export interface LightSpec {
-  /** Pixels across the pool's half width. */
-  readonly radius: number;
-  readonly color: number;
-  /** Light added at the pool's centre; the art shows as drawn at an ambient plus this of 1. */
-  readonly intensity: number;
-  readonly flicker?: { readonly amount: number; readonly period: number };
-  /** Height of the pool on the ground over its width; light falls on the ground in 3/4 view. */
-  readonly squash?: number;
-  /** From an entity's feet. */
-  readonly offset?: readonly [number, number];
-}
 
 export interface LightHandle {
   /** Changes the light; omitted fields stay. */
@@ -82,11 +77,19 @@ export interface EntityOptions {
   /** Overhead art near this entity cuts away. Usually the player alone. */
   readonly focus?: boolean;
   /**
-   * Lit by the map (default true): tinted each frame by the light and shade at its feet. Skipped
-   * while its tint mode is not MULTIPLY, so a white hit flash wins, and while the game holds a
-   * tint of its own.
+   * Lit by the map (default true): the light and ground shade at its feet. A sprite whose tint
+   * mode is not MULTIPLY (a white hit flash) shows unlit while it lasts.
    */
   readonly lit?: boolean;
+}
+
+export interface TelegraphOptions {
+  /** The light the telegraph throws on the ground around it. Defaults to `red.light`. */
+  readonly color?: number;
+  /** Pixels; defaults to the sprite's half width plus a little. */
+  readonly radius?: number;
+  /** Light at its centre, pulsing between 60% and 100%. Defaults to 0.9. */
+  readonly intensity?: number;
 }
 
 export interface MapViewOptions {
@@ -103,6 +106,7 @@ export interface RenderStats {
   readonly visibleObjects: number;
   readonly entities: number;
   readonly lights: number;
+  readonly flashes: number;
   readonly particles: number;
 }
 
@@ -119,15 +123,17 @@ const PARALLAX: Readonly<Record<string, number>> = {
 };
 /** Overhead sprites that are leaves: they wave on the high tier. */
 const FOLIAGE = /crown$|^pergola$/;
+/** Backdrop water that glitters under a low sun. */
+const WATER = /sea$/;
 const SHADOW_ALPHA = 0.35;
 /** A rift's spill is light relative to the tear's own daylight, which shows the art as drawn. */
 const SPILL_SCALE = 0.85;
+/** Pixels of height an entity's long shadow is cast from. */
+const ENTITY_HEIGHT = 22;
 
 interface Placed {
   readonly sprite: Phaser.GameObjects.Sprite;
   readonly bounds: Rect;
-  /** Takes the light at its feet. Backdrop and additive art does not. */
-  readonly lit: boolean;
 }
 
 interface Glow {
@@ -157,25 +163,13 @@ interface Entity {
   readonly shadow: Phaser.GameObjects.Image | null;
   readonly focus: boolean;
   readonly lit: boolean;
-  readonly light: Rgb;
-  lastTint: number;
 }
 
-interface Light {
-  spec: LightSpec;
-  x: number;
-  y: number;
-  readonly image: Phaser.GameObjects.Image;
-  readonly phaseSeed: number;
-  /** Set for lights carried by an entity. */
-  readonly owner: Lit | null;
-  /** A prop whose frames switch this light on and off (a sputtering floodlight). */
-  follows: Glow | null;
-  /** Light added at the centre this frame, after flicker. */
-  level: number;
-  objectLight: Phaser.GameObjects.Light | null;
-  /** A light with a drawn shape (a window's spill): its texture's place and alpha per pixel. */
-  shape: { readonly rect: Rect; readonly alpha: Uint8Array } | null;
+interface Telegraph {
+  readonly sprite: Lit;
+  readonly light: Light;
+  readonly intensity: number;
+  readonly born: number;
 }
 
 interface Particles {
@@ -185,18 +179,23 @@ interface Particles {
   readonly fps: number;
 }
 
-/** A smooth wobble in [-1, 1] over time, never quite repeating. */
-function wobble(t: number, period: number, seed: number): number {
-  const w = (2 * Math.PI) / period;
-  return (
-    0.55 * Math.sin(t * w + seed) +
-    0.3 * Math.sin(t * w * 2.31 + seed * 1.7) +
-    0.15 * Math.sin(t * w * 5.13 + seed * 0.3)
-  );
+/** A value moving toward a target over a time. */
+interface Ramp {
+  from: number;
+  to: number;
+  ms: number;
+  age: number;
 }
 
 function overlaps(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+function step(r: Ramp, deltaMs: number): number {
+  r.age = Math.min(r.ms, r.age + deltaMs);
+  const k = r.ms <= 0 ? 1 : r.age / r.ms;
+  const e = k * k * (3 - 2 * k);
+  return r.from + (r.to - r.from) * e;
 }
 
 export class MapView {
@@ -215,6 +214,8 @@ export class MapView {
   private readonly paintedNight: string | null;
   private readonly themedAtlases = new Map<string, ThemedAtlas>();
   private readonly masks: MapMasks;
+  private readonly field: LightField;
+  private readonly feet: FeetBuffer;
 
   private readonly world: Phaser.GameObjects.Layer;
   private readonly backdrop: Phaser.GameObjects.Layer;
@@ -222,17 +223,18 @@ export class MapView {
   private readonly ground: Phaser.GameObjects.Layer;
   private readonly shadows: Phaser.GameObjects.Layer;
   private readonly weatherLayer: Phaser.GameObjects.Layer;
+  private readonly groundGlow: Phaser.GameObjects.Layer;
+  private readonly sprites: Phaser.GameObjects.Layer;
   private readonly objects: Phaser.GameObjects.Layer;
   private readonly overhead: Phaser.GameObjects.Layer;
   private readonly foliage: Phaser.GameObjects.Layer;
   private readonly atmosphere: Phaser.GameObjects.Layer;
   private readonly glowLayer: Phaser.GameObjects.Layer;
-  /** Light lying on the ground (a rift's lip): unlit, under everything standing on it. */
-  private readonly groundGlow: Phaser.GameObjects.Layer;
-  private readonly lightLayer: Phaser.GameObjects.Layer;
-  private readonly lightRT: Phaser.GameObjects.RenderTexture;
+  private readonly overlay: Phaser.GameObjects.Layer;
+  private readonly bars: [Phaser.GameObjects.Image, Phaser.GameObjects.Image];
 
   private readonly composite: LightComposite;
+  private readonly spriteLight: SpriteLightFilter;
   private readonly grade: Grade;
   private readonly cutOverhead: Cutaway;
   private readonly cutFoliage: Cutaway;
@@ -244,25 +246,31 @@ export class MapView {
   private readonly drifts: Drift[] = [];
   private readonly particles: Particles[] = [];
   private readonly entities = new Map<Phaser.GameObjects.GameObject, Entity>();
-  private readonly lights = new Set<Light>();
+  private readonly telegraphs = new Map<Phaser.GameObjects.GameObject, Telegraph>();
+  /** How a sprite that is not an entity is coded: its feet below its y, or drawn unlit. */
+  private readonly codes = new WeakMap<
+    Phaser.GameObjects.GameObject,
+    { feet: number; unlit: boolean }
+  >();
   private readonly region: RegionLight | null;
-  private readonly regionImages: {
-    readonly inside: Phaser.GameObjects.Image;
-    readonly spill: readonly [Phaser.GameObjects.Image, Phaser.GameObjects.Image];
-    readonly glow: Phaser.GameObjects.Image;
-    readonly motes: Phaser.GameObjects.Particles.ParticleEmitter;
-    readonly color: Rgb;
-  } | null;
+  private regionGlow: Phaser.GameObjects.Image | null = null;
+  private regionMotes: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
   private regionObjectLight: Phaser.GameObjects.Light | null = null;
+  private readonly objectLights = new Map<Light, Phaser.GameObjects.Light>();
   private weather: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
-  private readonly ambientLight: Rgb;
-  /** Lights count for less in daylight: a lit window barely shows on sunny pavement. */
-  private readonly lightScale: number;
+  private glitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+  private readonly shafts: Phaser.GameObjects.Image[] = [];
+  /** The way a low sun throws shadows, per pixel of height, or null. */
+  private readonly sun: readonly [number, number] | null;
   private readonly shadeTint: Rgb;
   private readonly animKeys = new Set<string>();
   private readonly textureKeys: string[] = [];
   private readonly hidden = new Set<LayerName>();
   private readonly offs: (() => void)[] = [];
+  private drainRamp: Ramp = { from: 0, to: 0, ms: 0, age: 0 };
+  private floodRamp: Ramp | null = null;
+  private floodAt: [number, number] = [0, 0];
+  private barRamp: Ramp = { from: 0, to: 0, ms: 0, age: 0 };
   private time = 0;
 
   /** Builds the view of a map whose assets `loadMap` has loaded. */
@@ -283,46 +291,56 @@ export class MapView {
     makeTextures(scene);
     registerComposite(scene);
     registerCutaway(scene);
+    registerSpriteLight(scene);
 
     this.theme = litTheme(this.map);
     this.paintedNight = this.theme !== this.map.scene.theme ? this.map.scene.theme : null;
     this.masks = readMasks(scene, KEYS.masks(id));
     const W = this.camera.width;
     const H = this.camera.height;
+    const sun = this.map.ambient.sun;
+    this.sun = sun ? [sun.dir[0], sun.dir[1]] : null;
 
-    // The light map renders first in the frame, through the camera, and draws nothing itself.
-    this.lightRT = scene.add.renderTexture(0, 0, W, H).setOrigin(0).setScrollFactor(0);
-    this.lightRT.setRenderMode("redraw").setDepth(-1000);
+    // The ambient takes its colour more the dimmer it is: a night is deep blue, a late
+    // afternoon only a little gold.
+    const amb = rgbOf(paletteColor(this.meta, this.map.ambient.color));
+    const norm = Math.max(0.05, luma(amb));
+    const { intensity } = this.map.ambient;
+    const ambient = [...amb].map((v) => intensity * (1 + (v / norm - 1) * (1 - intensity))) as Rgb;
+    this.field = new LightField(scene, id, this.masks, this.camera, ambient, this.map.scene.seed);
+    this.field.scale = Math.max(0.25, Math.min(1, 1.6 * (1 - intensity)));
+    this.shadeTint = [...rgbOf(this.map.time.phase === "night" ? 0x8c8aa8 : 0xb4accc)];
+
     // A layer made from a config takes NORMAL blending, which would override its children's;
     // SKIP_CHECK lets each child blend its own way, as `add.layer` does.
     const layer = () => scene.make.layer({}, false).setBlendMode(Phaser.BlendModes.SKIP_CHECK);
-    this.lightLayer = layer();
     this.world = scene.add.layer().setDepth(0);
     this.backdrop = layer();
     this.lit = layer();
     this.ground = layer();
     this.shadows = layer();
     this.weatherLayer = layer();
+    this.groundGlow = layer();
+    this.sprites = layer();
     this.objects = layer();
     this.overhead = layer();
     this.foliage = layer();
     this.atmosphere = layer();
     this.glowLayer = layer();
-    this.groundGlow = layer();
     this.lit.add([this.ground, this.shadows, this.weatherLayer]);
-    this.world.add([
-      this.backdrop,
-      this.lit,
-      this.groundGlow,
-      this.objects,
-      this.overhead,
-      this.foliage,
-      this.atmosphere,
-      this.glowLayer,
-    ]);
+    this.sprites.add([this.objects, this.overhead, this.foliage, this.atmosphere]);
+    this.world.add([this.backdrop, this.lit, this.groundGlow, this.sprites, this.glowLayer]);
+    this.overlay = scene.add.layer().setDepth(50);
+    this.bars = [0, 1].map((k) =>
+      scene.add
+        .image(0, k === 0 ? 0 : H, TEX.px)
+        .setOrigin(0, k)
+        .setScrollFactor(0)
+        .setDisplaySize(W, 0)
+        .setTint(paletteColor(this.meta, "ink.deep"))
+        .setDepth(60),
+    ) as [Phaser.GameObjects.Image, Phaser.GameObjects.Image];
 
-    // Sky and ambient. The ambient takes its colour more the dimmer it is: a night is deep blue,
-    // a late afternoon only a little gold.
     const skyName = this.map.scene.sky;
     this.backdrop.add(
       new Phaser.GameObjects.Image(scene, 0, 0, TEX.px)
@@ -331,65 +349,73 @@ export class MapView {
         .setDisplaySize(W, H)
         .setTint(skyName ? paletteColor(this.meta, skyName) : 0),
     );
-    const amb = rgbOf(paletteColor(this.meta, this.map.ambient.color));
-    const norm = Math.max(0.05, luma(amb));
-    const { intensity } = this.map.ambient;
-    this.ambientLight = [...amb].map(
-      (v) => intensity * (1 + (v / norm - 1) * (1 - intensity)),
-    ) as Rgb;
-    this.lightScale = Math.max(0.25, Math.min(1, 1.6 * (1 - intensity)));
-    this.lightLayer.add(
-      new Phaser.GameObjects.Image(scene, 0, 0, TEX.px)
-        .setOrigin(0)
-        .setScrollFactor(0)
-        .setDisplaySize(W, H)
-        .setTint(colorOf(this.ambientLight.map((v) => v / 2) as Rgb)),
-    );
-    this.shadeTint = [...rgbOf(this.map.time.phase === "night" ? 0x8c8aa8 : 0xb4accc)];
 
     // Ground: the baked image, then the details that move.
     this.ground.add(new Phaser.GameObjects.Image(scene, 0, 0, KEYS.ground(id)).setOrigin(0));
     for (const d of this.map.scene.details ?? []) {
-      if ("prop" in d && d.play) this.placeThing(d, this.ground, 0, false);
+      if ("prop" in d && d.play) this.placeThing(d, this.ground, 0);
     }
-    for (const b of this.map.scene.backdrop ?? [])
-      this.placeThing(b, this.backdrop, 0, false, true);
-    for (const o of this.map.scene.objects) this.placeThing(o, this.objects, null, true);
+    for (const b of this.map.scene.backdrop ?? []) this.placeThing(b, this.backdrop, 0, true);
+    for (const o of this.map.scene.objects) this.placeThing(o, this.objects, null);
     (this.map.scene.overhead ?? []).forEach((o, i) => {
-      const p = this.placeThing(o, FOLIAGE.test(o.prop) ? this.foliage : this.overhead, i, true);
+      const p = this.placeThing(o, FOLIAGE.test(o.prop) ? this.foliage : this.overhead, i);
       if (p) this.overheadPlaced.push(p);
     });
     (this.map.scene.atmosphere ?? []).forEach((a, i) => {
-      this.placeThing(a, this.atmosphere, i, true);
+      const p = this.placeThing(a, this.atmosphere, i);
+      if (p) this.codes.set(p.sprite, { feet: 16, unlit: false });
     });
     this.buildParticles();
 
-    // Lights: the rift's region first, then every point light on top of it.
+    // Lights: the rift's region first, then every map light, shaped and cut by walls.
     this.region = this.buildRegion();
-    this.regionImages = this.region ? this.buildRegionImages(this.region) : null;
     this.map.lights.forEach((source, i) => {
-      if (!source.paint?.region) this.addMapLight(source, i);
+      if (source.paint?.region) return;
+      const light = this.field.addStatic(source, paletteColor(this.meta, source.color), i);
+      light.follows = this.sputter(source.at);
     });
-    this.lightRT.preserve(true);
-    this.lightRT.capture(this.lightLayer, { camera: this.camera });
 
-    // Filters: light on the ground, grade on the world, cutaway on what hangs overhead.
+    // Filters: light on the ground and on sprites, the grade on the world, cutaways overhead.
+    const lightW = W + 2 * LIGHT_MARGIN;
+    const lightH = H + 2 * LIGHT_MARGIN;
     this.lutKey = `render:lut:${id}`;
     buildLut(scene, this.lutKey, this.meta, gradeFor(this.meta, this.map));
     this.lit.enableFilters();
     this.composite = new LightComposite(this.lit.filterCamera);
-    this.composite.light = (
-      this.lightRT.texture as Phaser.Textures.DynamicTexture
-    ).getWebGLTexture();
+    this.composite.light = this.field.texture;
+    this.composite.lightW = lightW;
+    this.composite.lightH = lightH;
+    if (this.region) {
+      this.composite.rift = glTexture(scene, this.region.fxKey);
+      const r = this.region.fxRect;
+      this.composite.riftRect = [r.x, r.y, r.w, r.h];
+    }
     this.lit.filters?.internal.add(this.composite);
+
+    this.feet = new FeetBuffer(
+      scene,
+      this.camera,
+      [this.objects, this.overhead, this.foliage, this.atmosphere],
+      (obj) => this.code(obj),
+    );
+    this.sprites.enableFilters();
+    this.spriteLight = new SpriteLightFilter(this.sprites.filterCamera);
+    this.spriteLight.light = this.field.texture;
+    this.spriteLight.feet = this.feet.texture;
+    this.spriteLight.lightW = lightW;
+    this.spriteLight.lightH = lightH;
+    this.spriteLight.shade = this.shadeTint;
+    if (sun) {
+      const len = Math.hypot(sun.dir[0], sun.dir[1]) || 1;
+      this.spriteLight.sun = [-Math.round(sun.dir[0] / len), -Math.round(sun.dir[1] / len)];
+      this.spriteLight.rim = [...rgbOf(paletteColor(this.meta, sun.color))];
+      this.spriteLight.rimOn = true;
+    }
+    this.sprites.filters?.internal.add(this.spriteLight);
+
     this.world.enableFilters();
     this.grade = new Grade(this.world.filterCamera);
     this.grade.lut = glTexture(scene, this.lutKey);
-    if (this.region) {
-      this.grade.rift = glTexture(scene, this.region.fxKey);
-      const r = this.region.fxRect;
-      this.grade.riftRect = [r.x, r.y, r.w, r.h];
-    }
     this.world.filters?.internal.add(this.grade);
     this.overhead.enableFilters();
     this.cutOverhead = new Cutaway(this.overhead.filterCamera);
@@ -399,6 +425,7 @@ export class MapView {
     this.foliage.filters?.internal.add(this.cutFoliage);
 
     this.buildWeather();
+    if (sun) this.buildSun(sun.color);
     this.applyTier();
     this.setLighting(this.lighting);
 
@@ -411,7 +438,7 @@ export class MapView {
     this.update(0);
   }
 
-  // Public API -----------------------------------------------------------------------------
+  // Entities and lights ---------------------------------------------------------------------
 
   /**
    * Adds an entity (player, monster, NPC) to the Y-sorted layer with its ground shadow. The
@@ -436,8 +463,6 @@ export class MapView {
       shadow,
       focus: options.focus ?? false,
       lit: options.lit ?? true,
-      light: [1, 1, 1],
-      lastTint: 0xffffff,
     });
   }
 
@@ -447,31 +472,101 @@ export class MapView {
     if (!e) return;
     this.objects.remove(obj);
     e.shadow?.destroy();
-    if (e.lit && e.obj.tint === e.lastTint) e.obj.clearTint();
-    for (const l of [...this.lights]) if (l.owner === obj) this.dropLight(l);
+    for (const l of [...this.field.lights]) {
+      if ((l.owner as unknown) === obj) this.dropLight(l);
+    }
     this.entities.delete(obj);
   }
 
   /** A light carried by an entity: a lamp, a spell, a glowing book. */
   attachLight(obj: Lit, spec: LightSpec): LightHandle {
-    return this.handle(this.createLight(spec, obj.x, obj.y, obj));
+    return this.handle(this.makeLight(spec, obj.x, obj.y, obj));
   }
 
   /** A light standing in the world. */
   addLight(x: number, y: number, spec: LightSpec): LightHandle {
-    return this.handle(this.createLight(spec, x, y, null));
+    return this.handle(this.makeLight(spec, x, y, null));
+  }
+
+  /**
+   * A burst of light at a point that fades from its peak to nothing over `ms`: a hit spark, a
+   * cast, an explosion. Pooled; hundreds at once cost one quad each in the light map.
+   */
+  flash(x: number, y: number, spec: FlashSpec): void {
+    if (this.lighting === "screen") this.field.flash(x, y, spec);
   }
 
   /**
    * An effect sprite in the glow layer: never darkened, and drawn additively when its art says
-   * `blend: "add"`. For sparks, bolts, telegraphs and other light.
+   * `blend: "add"`. For sparks, bolts and other light.
    */
   addEffect(obj: Lit, additive?: boolean): void {
-    const frame = obj.frame.name;
-    const name = frame.split("/")[0] ?? "";
+    const name = obj.frame.name.split("/")[0] ?? "";
     const sprite = this.meta.sprites[name];
     if (additive ?? sprite?.blend === "add") obj.setBlendMode(Phaser.BlendModes.ADD);
     this.glowLayer.add(obj);
+  }
+
+  /**
+   * An enemy telegraph on the ground: drawn unlit under everything standing on it, so it reads
+   * at full strength in the darkest map, with a pulsing light thrown around it. Remove with
+   * `removeTelegraph`, or destroy the sprite.
+   */
+  addTelegraph(obj: Lit, options: TelegraphOptions = {}): void {
+    if (this.telegraphs.has(obj)) return;
+    this.groundGlow.add(obj);
+    const intensity = options.intensity ?? 0.9;
+    const light = this.makeLight(
+      {
+        radius: options.radius ?? obj.displayWidth / 2 + 10,
+        color: options.color ?? paletteColor(this.meta, "red.light"),
+        intensity,
+        squash: obj.displayHeight / Math.max(1, obj.displayWidth) + 0.1,
+      },
+      obj.x,
+      obj.y,
+      obj,
+    );
+    this.telegraphs.set(obj, { sprite: obj, light, intensity, born: this.time });
+    obj.once(Phaser.GameObjects.Events.DESTROY, () => this.removeTelegraph(obj));
+  }
+
+  removeTelegraph(obj: Phaser.GameObjects.GameObject): void {
+    const t = this.telegraphs.get(obj);
+    if (!t) return;
+    this.dropLight(t.light);
+    this.groundGlow.remove(obj);
+    this.telegraphs.delete(obj);
+  }
+
+  /**
+   * Drains the world to shades of one colour over `ms` (a boss's entrance), or back to its own
+   * colour with `drain(null, ms)`. Overlays, the glow layer's halos and the UI are untouched
+   * only when added with `addOverlay`; everything in the world drains.
+   */
+  drain(color: number | null, ms = 600): void {
+    if (color !== null) this.grade.drainColor = [...rgbOf(color)];
+    this.floodRamp = null;
+    this.grade.flood = [0, 0, 0];
+    this.drainRamp = { from: this.grade.drain, to: color === null ? 0 : 1, ms, age: 0 };
+  }
+
+  /** Floods a drained world's colour back outward from a world point over `ms`. */
+  flood(x: number, y: number, ms = 900): void {
+    if (this.grade.drain <= 0) return;
+    this.floodAt = [x, y];
+    const reach = Math.hypot(this.camera.width, this.camera.height) + 40;
+    this.floodRamp = { from: 1, to: reach, ms, age: 0 };
+  }
+
+  /** Black bars top and bottom, `size` pixels each, sliding in or out over `ms`. */
+  letterbox(on: boolean, ms = 400, size = 28): void {
+    this.barRamp = { from: this.bars[0].displayHeight, to: on ? size : 0, ms, age: 0 };
+  }
+
+  /** Draws above the world, untouched by its light and drain: a boss's drain sprite, a title. */
+  addOverlay(obj: Phaser.GameObjects.GameObject): void {
+    this.overlay.add(obj);
   }
 
   /** How deep in a ground shadow a point is: 0 in the open, 1 in full shade. */
@@ -484,52 +579,7 @@ export class MapView {
 
   /** The light falling on a point this frame, before banding: 1 shows the art as drawn. */
   lightAt(x: number, y: number): Rgb {
-    const xi = Math.round(x);
-    const yi = Math.round(y);
-    const { w, h, inside } = this.masks;
-    const inTear =
-      this.region !== null &&
-      xi >= 0 &&
-      yi >= 0 &&
-      xi < w &&
-      yi < h &&
-      (inside[yi * w + xi] ?? 0) > 0;
-    const out: Rgb = inTear ? [1, 1, 1] : [...this.ambientLight];
-    const r = this.region;
-    const img = this.regionImages;
-    if (!inTear && r && img) {
-      const lx = xi - r.rect.x;
-      const ly = yi - r.rect.y;
-      if (lx >= 0 && ly >= 0 && lx < r.rect.w && ly < r.rect.h) {
-        const i = ly * r.rect.w + lx;
-        const a =
-          ((r.spill[0][i] ?? 0) * img.spill[0].alpha + (r.spill[1][i] ?? 0) * img.spill[1].alpha) /
-          127.5;
-        for (let c = 0; c < 3; c++) out[c] = (out[c] as number) + (img.color[c] as number) * a;
-      }
-    }
-    for (const l of this.lights) {
-      if (l.level <= 0) continue;
-      if (l.shape) {
-        const { rect, alpha } = l.shape;
-        const lx = xi - rect.x;
-        const ly = yi - rect.y;
-        if (lx < 0 || ly < 0 || lx >= rect.w || ly >= rect.h) continue;
-        const v = ((alpha[ly * rect.w + lx] ?? 0) / 255) * l.level;
-        const col = rgbOf(l.spec.color);
-        for (let c = 0; c < 3; c++) out[c] = (out[c] as number) + (col[c] as number) * v;
-        continue;
-      }
-      const R = l.spec.radius;
-      const dx = (x - l.x) / R;
-      const dy = (y - l.y) / (R * (l.spec.squash ?? 0.58));
-      const r2 = dx * dx + dy * dy;
-      if (r2 >= 1) continue;
-      const v = (1 - r2) ** 2 * l.level;
-      const col = rgbOf(l.spec.color);
-      for (let c = 0; c < 3; c++) out[c] = (out[c] as number) + (col[c] as number) * v;
-    }
-    return out;
+    return this.field.lightAt(x, y);
   }
 
   get qualityTier(): Tier {
@@ -547,15 +597,17 @@ export class MapView {
   }
 
   /**
-   * `screen`: the light map and the grade, the game's look. `object`: Phaser's per-object
-   * lights, kept to compare against. `off`: the art as drawn.
+   * `screen`: the light map, sprite light and grade, the game's look. `object`: Phaser's
+   * per-object lights, kept to compare against. `off`: the art as drawn.
    */
   setLighting(mode: LightingMode): void {
     this.lighting = mode;
     const screen = mode === "screen";
     this.composite.setActive(screen);
+    this.spriteLight.setActive(screen);
     this.grade.setActive(screen);
-    this.lightRT.setVisible(screen);
+    this.field.setVisible(screen);
+    this.feet.rt.setVisible(screen);
     for (const g of [this.glowLayer, this.groundGlow])
       g.setVisible(mode !== "off" && !this.hidden.has("glow"));
     for (const g of this.glows) g.overlay.setVisible(screen && g.prop.visible);
@@ -563,23 +615,34 @@ export class MapView {
     const lights = this.scene.lights;
     if (object) {
       lights.enable();
-      lights.setAmbientColor(colorOf(this.ambientLight.map((v) => Math.min(1, v)) as Rgb));
+      lights.setAmbientColor(colorOf(this.field.ambient.map((v) => Math.min(1, v)) as Rgb));
     } else lights.disable();
-    for (const layer of [
+    const layers = [
       this.ground,
       this.shadows,
       this.objects,
       this.overhead,
       this.foliage,
       this.atmosphere,
-    ]) {
-      for (const child of layer.getChildren()) {
+    ];
+    for (const l of layers) {
+      for (const child of l.getChildren()) {
         if ("setLighting" in child && typeof child.setLighting === "function")
           child.setLighting(object);
       }
     }
-    for (const l of this.lights) this.syncObjectLight(l);
-    // Object lights have no shape: the rift becomes one big point light at its heart.
+    for (const [light, ol] of this.objectLights) {
+      lights.removeLight(ol);
+      this.objectLights.delete(light);
+    }
+    if (object) {
+      for (const l of this.field.lights) {
+        this.objectLights.set(
+          l,
+          lights.addLight(l.x, l.y, l.spec.radius * 1.6, l.spec.color, l.spec.intensity * 1.6),
+        );
+      }
+    }
     if (object && this.region && !this.regionObjectLight) {
       const src = this.region.source;
       const reach = Math.max(...(src.paint?.reach ?? [src.radius]));
@@ -594,10 +657,6 @@ export class MapView {
       lights.removeLight(this.regionObjectLight);
       this.regionObjectLight = null;
     }
-    if (!screen) {
-      for (const p of this.placed) if (p.lit) p.sprite.clearTint();
-      for (const p of this.particles) for (const s of p.sprites) s.clearTint();
-    }
   }
 
   /** The grade on or off (off shows lit colours without the palette pull), for review. */
@@ -607,8 +666,10 @@ export class MapView {
 
   /** Review knobs: light steps, seam sharpness and how far colours pull to the palette. */
   tune(knobs: { steps?: number; sharp?: number; snap?: number }): void {
-    if (knobs.steps !== undefined) this.composite.steps = knobs.steps;
-    if (knobs.sharp !== undefined) this.composite.sharp = knobs.sharp;
+    for (const f of [this.composite, this.spriteLight]) {
+      if (knobs.steps !== undefined) f.steps = knobs.steps;
+      if (knobs.sharp !== undefined) f.sharp = knobs.sharp;
+    }
     if (knobs.snap !== undefined) {
       buildLut(this.scene, this.lutKey, this.meta, {
         ...gradeFor(this.meta, this.map),
@@ -642,15 +703,16 @@ export class MapView {
     for (const p of this.placed) if (p.sprite.visible) visible++;
     let particles = 0;
     for (const p of this.particles) for (const s of p.sprites) if (s.visible) particles++;
-    particles += this.weather?.getAliveParticleCount() ?? 0;
-    particles += this.regionImages?.motes.getAliveParticleCount() ?? 0;
+    for (const e of [this.weather, this.regionMotes, this.glitter])
+      particles += e?.getAliveParticleCount() ?? 0;
     return {
       tier: this.tierName,
       lighting: this.lighting,
       objects: this.placed.length,
       visibleObjects: visible,
       entities: this.entities.size,
-      lights: this.lights.size + (this.region ? 1 : 0),
+      lights: this.field.lights.size + (this.region ? 1 : 0),
+      flashes: this.field.flashCount,
       particles,
     };
   }
@@ -658,14 +720,17 @@ export class MapView {
   /** Removes everything the view made. Shared atlases stay loaded; see `unloadMap`. */
   destroy(): void {
     for (const off of this.offs.splice(0)) off();
-    for (const l of [...this.lights]) this.dropLight(l);
+    for (const obj of [...this.telegraphs.keys()]) this.removeTelegraph(obj);
     for (const obj of [...this.entities.keys()]) this.removeEntity(obj);
+    for (const ol of this.objectLights.values()) this.scene.lights.removeLight(ol);
     if (this.regionObjectLight) this.scene.lights.removeLight(this.regionObjectLight);
     this.scene.lights.disable();
     for (const g of this.glows) g.overlay.destroy();
     this.world.destroy();
-    this.lightLayer.destroy();
-    this.lightRT.destroy();
+    this.overlay.destroy();
+    for (const b of this.bars) b.destroy();
+    this.field.destroy();
+    this.feet.destroy();
     for (const key of [this.lutKey, ...this.textureKeys, ...(this.region?.keys ?? [])]) {
       if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
     }
@@ -673,6 +738,24 @@ export class MapView {
   }
 
   // Building ---------------------------------------------------------------------------------
+
+  private makeLight(spec: LightSpec, x: number, y: number, owner: Lit | null): Light {
+    const light = this.field.create(spec, x, y, owner);
+    if (this.lighting === "object") {
+      this.objectLights.set(
+        light,
+        this.scene.lights.addLight(x, y, spec.radius * 1.6, spec.color, spec.intensity * 1.6),
+      );
+    }
+    return light;
+  }
+
+  private dropLight(light: Light): void {
+    this.field.drop(light);
+    const ol = this.objectLights.get(light);
+    if (ol) this.scene.lights.removeLight(ol);
+    this.objectLights.delete(light);
+  }
 
   private handle(light: Light): LightHandle {
     return {
@@ -685,6 +768,34 @@ export class MapView {
       },
       remove: () => this.dropLight(light),
     };
+  }
+
+  /** How a sprite is coded for the sprite light pass. */
+  private code(obj: Phaser.GameObjects.GameObject): SpriteCode {
+    const y = (obj as unknown as { y: number }).y;
+    const e = this.entities.get(obj);
+    if (e) {
+      const x = (obj as unknown as { x: number }).x;
+      return { feetY: y, unlit: !e.lit, shade: this.shadeAt(x, y) };
+    }
+    const c = this.codes.get(obj);
+    return { feetY: y + (c?.feet ?? 0), unlit: c?.unlit ?? false, shade: 0 };
+  }
+
+  /** A light at a prop that switches itself on and off follows the prop's frames. */
+  private sputter(at: readonly [number, number]): (() => number) | null {
+    let best: Glow | null = null;
+    let bestD = 48;
+    for (const g of this.glows) {
+      if (!g.prop.anims.isPlaying) continue;
+      const d = Math.hypot(g.prop.x - at[0], g.prop.y - at[1]);
+      if (d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    const g = best;
+    return g ? () => g.level : null;
   }
 
   /** An atlas recoloured into the map's theme, made once per atlas. */
@@ -741,7 +852,6 @@ export class MapView {
     t: Prop | Actor | Doll,
     layer: Phaser.GameObjects.Layer,
     order: number | null,
-    lit: boolean,
     backdrop = false,
   ): Placed | null {
     if ("rig" in t) return this.placeDoll(t, layer, order);
@@ -779,11 +889,7 @@ export class MapView {
       if (additive) sprite.setBlendMode(Phaser.BlendModes.ADD);
       (additive ? this.glowLayer : layer).add(sprite);
       sprite.setDepth(order ?? ((t as Placement).sort ?? y) + x * 1e-5);
-      const placed: Placed = {
-        sprite,
-        bounds: this.boundsOf(sprite, t.drift?.to),
-        lit: lit && !additive,
-      };
+      const placed: Placed = { sprite, bounds: this.boundsOf(sprite, t.drift?.to) };
       if (factor === 1) this.placed.push(placed);
       if (t.drift) {
         this.drifts.push({
@@ -815,7 +921,7 @@ export class MapView {
     sprite.setPosition(t.at[0], t.at[1]).setFlipX(t.flip === true);
     layer.add(sprite);
     sprite.setDepth(order ?? (t.sort ?? t.at[1]) + t.at[0] * 1e-5);
-    const placed: Placed = { sprite, bounds: this.boundsOf(sprite), lit: true };
+    const placed: Placed = { sprite, bounds: this.boundsOf(sprite) };
     this.placed.push(placed);
     return placed;
   }
@@ -865,6 +971,7 @@ export class MapView {
       .setDepth(prop.depth + 1e-7);
     if (!prop.frame.customPivot) overlay.setDisplayOrigin(ox, oy);
     layer.add(overlay);
+    this.codes.set(overlay, { feet: 0, unlit: true });
     const frames = new Map<string, { n: number; cx: number; cy: number }>();
     const glowTex = this.scene.textures.get(glowKey);
     const ctx = (glowTex.getSourceImage() as HTMLCanvasElement).getContext("2d", {
@@ -914,7 +1021,11 @@ export class MapView {
       for (let k = 0; k < e.count; k++) {
         const s = new Phaser.GameObjects.Sprite(this.scene, 0, 0, sp.atlas, frames[0] ?? "");
         if (!s.frame.customPivot) s.setDisplayOrigin(sp.origin[0], sp.origin[1]);
-        this.atmosphere.add(s);
+        if (sp.blend === "add") {
+          s.setBlendMode(Phaser.BlendModes.ADD);
+          this.glowLayer.add(s);
+        } else this.atmosphere.add(s);
+        this.codes.set(s, { feet: 16, unlit: false });
         sprites.push(s);
       }
       this.particles.push({ emitter: e, sprites, frames, fps });
@@ -954,31 +1065,119 @@ export class MapView {
     this.weatherLayer.add(this.weather);
   }
 
+  /**
+   * Under a low sun: water past the map's edge glitters, and broad shafts of light lean across
+   * the air in the sun's direction, banded and dithered like the rest of the light.
+   */
+  private buildSun(color: string): void {
+    const warm = paletteColor(this.meta, color);
+    const water = this.placed
+      .filter((p) => WATER.test(p.sprite.frame.name.split("/")[0] ?? ""))
+      .map((p) => p.bounds);
+    for (const b of this.backdrop.getChildren()) {
+      const s = b as Phaser.GameObjects.Sprite;
+      if (s.frame && WATER.test(s.frame.name.split("/")[0] ?? "")) {
+        water.push({
+          x: s.x - s.displayOriginX,
+          y: s.y - s.displayOriginY,
+          w: s.frame.realWidth,
+          h: s.frame.realHeight,
+        });
+      }
+    }
+    if (water.length > 0) {
+      const area = water.reduce((a, b) => {
+        const x0 = Math.min(a.x, b.x);
+        const y0 = Math.min(a.y, b.y);
+        return {
+          x: x0,
+          y: y0,
+          w: Math.max(a.x + a.w, b.x + b.w) - x0,
+          h: Math.max(a.y + a.h, b.y + b.h) - y0,
+        };
+      });
+      this.glitter = this.scene.add.particles(0, 0, TEX.px, {
+        x: { min: area.x, max: area.x + area.w },
+        y: { min: area.y + 2, max: area.y + area.h - 2 },
+        lifespan: { min: 180, max: 520 },
+        alpha: { start: 0, end: 1, ease: (v: number) => Math.sin(v * Math.PI) },
+        scaleX: { min: 0.5, max: 1.5 },
+        scaleY: 0.5,
+        tint: [warm, 0xffffff],
+        blendMode: Phaser.BlendModes.ADD,
+        frequency: 14,
+      });
+      this.backdrop.add(this.glitter);
+    }
+    // Shafts: a slanted band of dithered light, a few across the map, drifting a little.
+    if (!this.sun) return;
+    const key = `render:shaft:${this.map.id}`;
+    const H = this.camera.height;
+    const slant = this.sun[0] / Math.max(0.2, Math.abs(this.sun[1]) + 0.35);
+    const bandW = 70;
+    const w = Math.ceil(bandW + Math.abs(slant) * H);
+    if (!this.scene.textures.exists(key)) {
+      const tex = this.scene.textures.createCanvas(key, w, H);
+      if (tex) {
+        const ctx = tex.getContext();
+        const img = ctx.createImageData(w, H);
+        for (let y = 0; y < H; y++) {
+          const shift = slant > 0 ? slant * y : Math.abs(slant) * (H - y);
+          for (let x = 0; x < w; x++) {
+            const u = (x - shift) / bandW;
+            if (u < 0 || u > 1) continue;
+            const v = Math.sin(u * Math.PI) * (0.55 + 0.45 * Math.sin((y / H) * Math.PI));
+            const level = v > 0.66 ? 2 : v > 0.3 + bayer4(x, y) * 0.12 ? 1 : 0;
+            const o = (y * w + x) * 4;
+            img.data[o] = 255;
+            img.data[o + 1] = 255;
+            img.data[o + 2] = 255;
+            img.data[o + 3] = [0, 20, 36][level] as number;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        tex.refresh();
+        this.textureKeys.push(key);
+      }
+    }
+    for (let x = 80; x < this.width; x += 340) {
+      const shaft = new Phaser.GameObjects.Image(this.scene, x, 0, key)
+        .setOrigin(0, 0)
+        .setScrollFactor(0.9, 0)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setTint(warm);
+      this.glowLayer.add(shaft);
+      this.shafts.push(shaft);
+    }
+  }
+
   private buildRegion(): RegionLight | null {
     const source = this.map.lights.find((l) => l.paint?.region);
     if (!source) return null;
-    return buildRegionLight(this.scene, this.map.id, this.masks, source, this.map.scene.seed);
-  }
-
-  private buildRegionImages(region: RegionLight) {
-    const color = paletteColor(this.meta, region.source.color);
-    const at = (key: string, r: Rect) =>
-      new Phaser.GameObjects.Image(this.scene, r.x, r.y, key).setOrigin(0);
-    const spill = region.spillKeys.map((key) =>
-      at(key, region.rect).setBlendMode(Phaser.BlendModes.ADD).setTint(color),
-    ) as [Phaser.GameObjects.Image, Phaser.GameObjects.Image];
-    // Light spills first, then the tear's own daylight is written over it.
-    const inside = at(region.insideKey, region.insideRect).setTint(0x808080);
-    this.lightLayer.add([...spill, inside]);
+    const region = buildRegionLight(
+      this.scene,
+      this.map.id,
+      this.masks,
+      source,
+      this.map.scene.seed,
+    );
+    if (!region) return null;
+    this.field.setRegion(region, paletteColor(this.meta, source.color));
     // The lip glows on the ground, under whatever stands on it.
-    const glow = at(region.glowKey, region.glowRect)
+    this.regionGlow = new Phaser.GameObjects.Image(
+      this.scene,
+      region.glowRect.x,
+      region.glowRect.y,
+      region.glowKey,
+    )
+      .setOrigin(0)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setTint(paletteColor(this.meta, "gold.pale"));
-    this.groundGlow.add(glow);
+    this.groundGlow.add(this.regionGlow);
     const lip = region.lip;
     const n = lip.length / 2;
     const [cx, cy] = region.core;
-    const motes = this.scene.add.particles(0, 0, TEX.px, {
+    this.regionMotes = this.scene.add.particles(0, 0, TEX.px, {
       emitZone: {
         type: "random",
         source: {
@@ -998,87 +1197,8 @@ export class MapView {
       frequency: 90,
       maxAliveParticles: 48,
     });
-    this.glowLayer.add(motes);
-    return { inside, spill, glow, motes, color: [...rgbOf(color)] as Rgb };
-  }
-
-  private addMapLight(source: LightSource, index: number): void {
-    // A pool lies where the contact sheet paints it, as flat as it paints it.
-    const paint = source.paint;
-    const at = paint?.at ?? source.at;
-    const light = this.createLight(
-      {
-        radius: source.radius,
-        color: paletteColor(this.meta, source.color),
-        intensity: source.intensity,
-        squash: paint?.r ? paint.r[1] / paint.r[0] : 0.58,
-        ...(source.flicker ? { flicker: source.flicker } : {}),
-      },
-      at[0],
-      at[1],
-      null,
-    );
-    if (paint?.spill) this.shapeSpill(light, paint.spill, index);
-    // A light standing at a prop that switches itself on and off follows the prop's frames.
-    let best: Glow | null = null;
-    let bestD = 48;
-    for (const g of this.glows) {
-      if (!g.prop.anims.isPlaying) continue;
-      const d = Math.hypot(g.prop.x - source.at[0], g.prop.y - source.at[1]);
-      if (d < bestD) {
-        bestD = d;
-        best = g;
-      }
-    }
-    light.follows = best;
-  }
-
-  /**
-   * Gives a light the shape of a window's spill: a trapezoid falling from the sill, brightest at
-   * the top and centre, its edges broken by the same seeded noise as the sheet's painted light.
-   */
-  private shapeSpill(
-    light: Light,
-    spill: NonNullable<NonNullable<LightSource["paint"]>["spill"]>,
-    index: number,
-  ): void {
-    const { top, bottom } = spill;
-    const pad = 3;
-    const x0 = Math.floor(Math.min(top[0], bottom[0])) - pad;
-    const x1 = Math.ceil(Math.max(top[1], bottom[1])) + pad;
-    const rect: Rect = { x: x0, y: top[2], w: x1 - x0, h: bottom[2] - top[2] + pad };
-    const key = `render:spill:${this.map.id}:${index}`;
-    const alpha = new Uint8Array(rect.w * rect.h);
-    if (this.scene.textures.exists(key)) this.scene.textures.remove(key);
-    const tex = this.scene.textures.createCanvas(key, rect.w, rect.h);
-    if (!tex) return;
-    const ctx = tex.getContext();
-    const img = ctx.createImageData(rect.w, rect.h);
-    const span = Math.max(1, bottom[2] - top[2]);
-    for (let y = 0; y < rect.h; y++) {
-      const v = y / span;
-      const a = top[0] + (bottom[0] - top[0]) * Math.min(1, v);
-      const b = top[1] + (bottom[1] - top[1]) * Math.min(1, v);
-      const half = Math.max(1, (b - a) / 2);
-      for (let x = 0; x < rect.w; x++) {
-        const wx = rect.x + x + 0.5;
-        const n = (valueNoise(wx, rect.y + y, 3, this.map.scene.seed + index) - 0.5) * 0.25;
-        const f = Math.max(Math.abs(wx - (a + b) / 2) / half, v) + n;
-        const value = f >= 1 ? 0 : (1 - f) ** 1.1;
-        const o = (y * rect.w + x) * 4;
-        const q = Math.round(value * 255);
-        img.data[o] = 255;
-        img.data[o + 1] = 255;
-        img.data[o + 2] = 255;
-        img.data[o + 3] = q;
-        alpha[y * rect.w + x] = q;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    tex.refresh();
-    this.textureKeys.push(key);
-    light.image.setTexture(key).setOrigin(0).setPosition(rect.x, rect.y);
-    light.shape = { rect, alpha };
+    this.glowLayer.add(this.regionMotes);
+    return region;
   }
 
   private defaultShadow(obj: Lit): { texture: string; frame: string } | null {
@@ -1091,54 +1211,12 @@ export class MapView {
     return null;
   }
 
-  private createLight(spec: LightSpec, x: number, y: number, owner: Lit | null): Light {
-    const image = new Phaser.GameObjects.Image(this.scene, 0, 0, TEX.pool);
-    image.setBlendMode(Phaser.BlendModes.ADD);
-    this.lightLayer.add(image);
-    const light: Light = {
-      spec,
-      x,
-      y,
-      image,
-      phaseSeed: Math.random() * 100,
-      owner,
-      follows: null,
-      level: 0,
-      objectLight: null,
-      shape: null,
-    };
-    this.lights.add(light);
-    this.syncObjectLight(light);
-    return light;
-  }
-
-  private dropLight(light: Light): void {
-    if (!this.lights.delete(light)) return;
-    light.image.destroy();
-    if (light.objectLight) this.scene.lights.removeLight(light.objectLight);
-  }
-
-  private syncObjectLight(light: Light): void {
-    const want = this.lighting === "object";
-    if (want && !light.objectLight) {
-      light.objectLight = this.scene.lights.addLight(
-        light.x,
-        light.y,
-        light.spec.radius * 1.6,
-        light.spec.color,
-        light.spec.intensity * 1.6,
-      );
-    } else if (!want && light.objectLight) {
-      this.scene.lights.removeLight(light.objectLight);
-      light.objectLight = null;
-    }
-  }
-
   private applyTier(): void {
     const t = this.tier;
     this.composite.dither = t.dither;
-    this.grade.haze = t.riftHaze ? 1 : 0;
-    this.grade.chroma = t.riftChroma ? 1 : 0;
+    this.spriteLight.dither = t.dither;
+    this.composite.haze = t.riftHaze ? 1 : 0;
+    this.composite.chroma = t.riftChroma ? 1 : 0;
     for (const p of this.particles) {
       const keep = Math.round(p.emitter.count * t.particles);
       p.sprites.forEach((s, k) => {
@@ -1147,7 +1225,9 @@ export class MapView {
       });
     }
     if (this.weather) this.weather.maxAliveParticles = t.weather;
-    if (this.regionImages) this.regionImages.motes.maxAliveParticles = t.riftMotes;
+    if (this.regionMotes) this.regionMotes.maxAliveParticles = t.riftMotes;
+    if (this.glitter) this.glitter.maxAliveParticles = Math.round(t.weather / 2);
+    for (const s of this.shafts) s.setVisible(t.riftShafts);
     this.cutFoliage.wobble = t.foliageWobble ? 1 : 0;
   }
 
@@ -1173,11 +1253,19 @@ export class MapView {
     }
     this.updateParticles(t, view);
     this.updateGlows();
-    this.updateLights(t);
+    this.updateEntities();
+    this.updateTelegraphs(t);
+    this.field.update(t, deltaMs, this.tier.entityLights);
     this.updateRegion(t);
-    this.lightSprites(deltaMs);
     this.updateCutaway();
-    this.grade.time = t;
+    this.updateEntrance(deltaMs);
+    for (const s of this.shafts) s.setAlpha(0.75 + 0.25 * Math.sin(t * 0.4 + s.x * 0.01));
+    this.composite.time = t;
+    if (this.lighting === "screen") this.feet.queue();
+    for (const [light, ol] of this.objectLights) {
+      ol.setPosition(light.x, light.y);
+      ol.setIntensity(light.level * 1.6);
+    }
   }
 
   private updateParticles(t: number, view: Rect): void {
@@ -1198,50 +1286,31 @@ export class MapView {
     }
   }
 
-  /** The banded light at a point as a tint, never above the art as drawn. */
-  private tintAt(x: number, y: number, shade = 0): number {
-    const l = bandLight(this.lightAt(x, y), this.composite.steps, this.composite.sharp);
-    if (shade > 0.01)
-      for (let c = 0; c < 3; c++)
-        l[c] = (l[c] as number) * (1 + ((this.shadeTint[c] as number) - 1) * shade);
-    return colorOf(l.map((v) => Math.min(1, v)) as Rgb);
-  }
-
-  /** Lights every sprite by the light at its feet, and sorts and shades entities. */
-  private lightSprites(deltaMs: number): void {
-    const screen = this.lighting === "screen";
-    if (screen) {
-      for (const p of this.placed) {
-        const s = p.sprite;
-        if (!p.lit || !s.visible) continue;
-        // Light along the sprite's feet, left edge and right edge: a column is lit as a whole,
-        // and a run of stands or fence carries the light across its pieces without steps.
-        const left = s.x - s.displayOriginX;
-        const right = left + s.frame.realWidth;
-        const a = this.tintAt(left + 1, s.y);
-        const b = this.tintAt(right - 1, s.y);
-        if (s.flipX) s.setTint(b, a, b, a);
-        else s.setTint(a, b, a, b);
-      }
-      for (const p of this.particles) {
-        for (const s of p.sprites) if (s.visible) s.setTint(this.tintAt(s.x, s.y + 16));
-      }
-    }
-    const k = Math.min(1, deltaMs / 90);
+  /** Sorts entities by their feet and lays their shadows, long under a low sun. */
+  private updateEntities(): void {
+    const sun = this.sun;
     for (const e of this.entities.values()) {
       const { obj } = e;
       obj.setDepth(obj.y + obj.x * 1e-5);
-      e.shadow?.setPosition(Math.round(obj.x), Math.round(obj.y)).setVisible(obj.visible);
-      if (!e.lit || !screen) continue;
-      // A flash or the game's own tint wins; lighting resumes once the tint is cleared.
-      if (obj.tintMode !== Phaser.TintModes.MULTIPLY) continue;
-      if (obj.tint !== e.lastTint && obj.tint !== 0xffffff) continue;
-      const target = [...rgbOf(this.tintAt(obj.x, obj.y, this.shadeAt(obj.x, obj.y)))];
-      for (let c = 0; c < 3; c++)
-        e.light[c] = (e.light[c] as number) + ((target[c] as number) - (e.light[c] as number)) * k;
-      const tint = colorOf(e.light);
-      obj.setTint(tint);
-      e.lastTint = tint;
+      const s = e.shadow;
+      if (!s) continue;
+      s.setVisible(obj.visible);
+      if (sun && this.shadeAt(obj.x, obj.y) < 0.5) {
+        // Cast away from the sun: stretched along it, starting at the feet.
+        const len = Math.hypot(sun[0], sun[1]) * ENTITY_HEIGHT;
+        const w = s.frame.realWidth;
+        s.setScale((w + len) / w, 1).setPosition(
+          Math.round(obj.x + (sun[0] * ENTITY_HEIGHT) / 2),
+          Math.round(obj.y + (sun[1] * ENTITY_HEIGHT) / 2),
+        );
+      } else s.setScale(1).setPosition(Math.round(obj.x), Math.round(obj.y));
+    }
+  }
+
+  private updateTelegraphs(t: number): void {
+    for (const g of this.telegraphs.values()) {
+      const pulse = 0.8 + 0.2 * Math.sin((t - g.born) * 9);
+      g.light.spec = { ...g.light.spec, intensity: g.intensity * pulse };
     }
   }
 
@@ -1267,51 +1336,35 @@ export class MapView {
     }
   }
 
-  private updateLights(t: number): void {
-    // Entity lights beyond the tier's budget go dark, the farthest from the camera first.
-    const cx = this.camera.scrollX + this.camera.width / 2;
-    const cy = this.camera.scrollY + this.camera.height / 2;
-    const carried = [...this.lights].filter((l) => l.owner);
-    carried.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
-    const allowed = new Set(carried.slice(0, this.tier.entityLights));
-    for (const l of this.lights) {
-      if (l.owner) {
-        l.x = l.owner.x + (l.spec.offset?.[0] ?? 0);
-        l.y = l.owner.y + (l.spec.offset?.[1] ?? 0);
-      }
-      const { spec } = l;
-      let k = 1;
-      if (spec.flicker) k += spec.flicker.amount * wobble(t, spec.flicker.period, l.phaseSeed);
-      if (l.follows) k *= 0.08 + 0.92 * l.follows.level;
-      if (l.owner && (!allowed.has(l) || !l.owner.visible)) k = 0;
-      l.level = Math.max(0, Math.min(2, spec.intensity * k * this.lightScale));
-      l.image.setTint(spec.color).setAlpha(l.level / 2);
-      if (!l.shape) {
-        const size = spec.radius * 2;
-        l.image.setPosition(l.x, l.y).setDisplaySize(size, size * (spec.squash ?? 0.58));
-      }
-      if (l.objectLight) {
-        l.objectLight.setPosition(l.x, l.y);
-        l.objectLight.setIntensity(l.level * 1.6);
-      }
-    }
-  }
-
   private updateRegion(t: number): void {
     const r = this.region;
-    const img = this.regionImages;
-    if (!r || !img) return;
+    if (!r) return;
     const src = r.source;
     const pulse = src.paint?.pulse ?? src.flicker;
     let k = 1;
     if (pulse) k += pulse.amount * 2.5 * Math.sin((2 * Math.PI * t) / pulse.period);
     if (src.flicker) k += src.flicker.amount * 0.5 * wobble(t, src.flicker.period * 1.7, 3.1);
-    const base = (src.intensity * SPILL_SCALE * k) / 2;
+    const base = src.intensity * SPILL_SCALE * k;
     // The shafts drift: two ray patterns crossfade over about eleven seconds.
     const mix = this.tier.riftShafts ? 0.5 + 0.5 * Math.sin((2 * Math.PI * t) / 11) : 0;
-    img.spill[0].setAlpha(Math.min(1, base * (1 - mix)));
-    img.spill[1].setAlpha(Math.min(1, base * mix));
-    img.glow.setAlpha(0.7 + 0.3 * Math.sin((2 * Math.PI * t) / (pulse?.period ?? 2.2)));
+    this.field.setRegionLevels(base * (1 - mix), base * mix);
+    this.regionGlow?.setAlpha(0.7 + 0.3 * Math.sin((2 * Math.PI * t) / (pulse?.period ?? 2.2)));
+  }
+
+  private updateEntrance(deltaMs: number): void {
+    this.grade.drain = step(this.drainRamp, deltaMs);
+    if (this.floodRamp) {
+      const r = step(this.floodRamp, deltaMs);
+      this.grade.flood = [this.floodAt[0], this.floodAt[1], r];
+      if (this.floodRamp.age >= this.floodRamp.ms) {
+        this.floodRamp = null;
+        this.grade.flood = [0, 0, 0];
+        this.drainRamp = { from: 0, to: 0, ms: 0, age: 0 };
+        this.grade.drain = 0;
+      }
+    }
+    const h = Math.round(step(this.barRamp, deltaMs));
+    for (const b of this.bars) b.setDisplaySize(this.camera.width, h).setVisible(h > 0);
   }
 
   private updateCutaway(): void {

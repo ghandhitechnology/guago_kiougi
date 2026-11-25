@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BuiltMap } from "@guago/content";
+import { type BuiltMap, buildAllMaps } from "@guago/content";
 import { Rgba } from "../raster.ts";
 import { edgeInside, renderGround, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import type { Atlas } from "./emit.ts";
@@ -15,8 +15,9 @@ export function bakedFiles(id: string) {
  * Bakes what the game draws of a map as images instead of tiles: its ground (terrain, tones,
  * decals, still details, edges and shadows) by the same renderer as the contact sheet, in the
  * theme the game lights (`ambient.unlit`, else the map's theme), and a mask image: red is ground
- * shadow, green is inside an edge's region (a rift's torn cells, cut along the drawn edge).
- * Returns the bytes written per map.
+ * shadow, green is inside an edge's region (a rift's torn cells, cut along the drawn edge), blue
+ * is wall: solid tiles that are not a prop's footprint (walls, wall faces, buildings, the
+ * stands), which stop light. Returns the bytes written per map.
  */
 export function bakeMaps(
   dir: string,
@@ -28,6 +29,7 @@ export function bakeMaps(
     atlases.map((a) => [a.name, { w: a.png.w, h: a.png.h, data: a.png.data, frames: a.frames }]),
   );
   const sizes = new Map<string, number>();
+  const footprints = new Map(buildAllMaps().map((r) => [r.map.id, r.footprints]));
   for (const map of maps) {
     const theme = map.ambient.unlit ?? map.scene.theme;
     const img = renderGround({ ...map.scene, theme }, meta, pixels);
@@ -42,10 +44,17 @@ export function bakeMaps(
       const m = edgeInside(map.scene, meta, edge);
       for (let i = 0; i < m.length; i++) inside[i] = Math.max(inside[i] as number, m[i] as number);
     }
+    const feet = footprints.get(map.id) ?? new Set<number>();
+    const wall = (px: number, py: number) => {
+      const tx = Math.floor(px / 16);
+      const ty = Math.floor(py / 16);
+      return map.collision.rows[ty]?.[tx] === "#" && !feet.has(ty * map.w + tx);
+    };
     const masks = new Rgba(img.w, img.h);
     for (let i = 0; i < img.w * img.h; i++) {
       masks.data[i * 4] = img.shadow[i] as number;
       masks.data[i * 4 + 1] = inside[i] as number;
+      masks.data[i * 4 + 2] = wall(i % img.w, Math.floor(i / img.w)) ? 255 : 0;
       masks.data[i * 4 + 3] = 255;
     }
     const masksPng = masks.png();
