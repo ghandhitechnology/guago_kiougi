@@ -33,6 +33,7 @@ import {
 import { ChatFilter } from "./chat/filter.ts";
 import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
+import type { WorldHandler } from "./live/index.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
 
@@ -76,6 +77,8 @@ interface Services {
   log: ChatSink | undefined;
   /** Item and currency operations; without it the room does not take them (tests). */
   ops: OpHandler | undefined;
+  /** More request handlers (the living world, live/index.ts). */
+  handlers?: readonly WorldHandler[];
 }
 
 let services: Services | undefined;
@@ -86,8 +89,14 @@ export function provideWorldServices(s: {
   filter?: ChatFilter;
   log?: ChatSink;
   ops?: OpHandler;
+  handlers?: readonly WorldHandler[];
 }): void {
-  services = { filter: s.filter ?? ChatFilter.fromFile(), log: s.log, ops: s.ops };
+  services = {
+    filter: s.filter ?? ChatFilter.fromFile(),
+    log: s.log,
+    ops: s.ops,
+    ...(s.handlers ? { handlers: s.handlers } : {}),
+  };
 }
 
 function use(): Services {
@@ -133,6 +142,12 @@ export class WorldRoom extends Room {
       for (const op of OPS) {
         this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
       }
+    }
+    for (const h of use().handlers ?? []) {
+      this.handle(h.type, h.schema, (client, message) => {
+        const me = this.members.get(client.sessionId);
+        if (me) void h.run(me.characterId, message);
+      });
     }
     this.unlisten = places.listen((characterId, mapId) => {
       const member = this.byCharacter.get(characterId);
@@ -229,6 +244,11 @@ export class WorldRoom extends Room {
       masked: false,
       at: new Date(sent.at),
     });
+  }
+
+  /** Any message to one character, if online (the living world's pushes and refusals). */
+  sendTo(characterId: string, type: string, body: unknown): void {
+    this.byCharacter.get(characterId)?.client.send(type, body);
   }
 
   /** A change the player did not ask for (a combat grant), sent to them if they are online. */

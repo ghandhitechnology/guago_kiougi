@@ -12,6 +12,7 @@ import {
   type ItemView,
   type LogoutPlace,
   type Major,
+  type NoticeCadence,
   type PoolFill,
   type ProgressionView,
   pilgiChance,
@@ -68,14 +69,44 @@ export interface CharacterRow {
   poolSheetBook: string | null;
   restedUntil: Date | null;
   rev: number;
+  // The living world (live/ops.ts writes these).
+  poolStoppedAt: Date | null;
+  huntRates: HuntRates | null;
+  homeUntil: Date | null;
+  penaltyUntil: Date | null;
+  drowsy: boolean;
+  mealId: string | null;
+  mealUntil: Date | null;
+  titles: string[];
+  patrolCatches: number;
+  expulsions: number;
+  boardStreak: number;
+  boardStreakDay: number | null;
+}
+
+/** The best income rate last measured, in the last field hunted (`hunt_rates`). */
+export interface HuntRates extends Rate {
+  readonly field: string;
+  readonly sheetBook: string | null;
 }
 
 /** A 수행평가 notice as stored when it was posted: its reward is fixed from then on. */
 export interface StoredOffer {
-  readonly cadence: "daily" | "weekly" | "repeat";
+  readonly cadence: NoticeCadence;
   readonly reward: QuestReward;
   /** The book whose 낱장 the notice pays, named when it was accepted. */
   readonly sheetBook: string;
+  // Set by the board (live/board.ts) on every notice it posts.
+  /** Narrative template id, or the story beat id. */
+  readonly template?: string;
+  readonly kind?: string;
+  readonly slots?: Readonly<Record<string, string | number>>;
+  /** 상점 paid when it is done (도움). */
+  readonly merit?: number;
+  /** Game ms the notice comes down; progress stops then. Null for story chapters. */
+  readonly expiresAt?: number | null;
+  /** The 도움 notice a `help:` row works on. */
+  readonly notice?: string;
 }
 
 export interface QuestRow {
@@ -126,7 +157,9 @@ export function itemFromDb(r: Record<string, unknown>): ItemRow {
 
 export const CHARACTER_COLUMNS = `c.id, c.major, c.minor, c.level, c.exp, c.tier, c.demerits, c.merits,
   c.stat_understanding, c.stat_memory, c.stat_focus, c.stat_vitality, c.stat_agility, c.stat_luck,
-  c.pool_started_at, c.pool_rates, c.pool_place, c.pool_sheet_book, c.rested_until, c.rev`;
+  c.pool_started_at, c.pool_rates, c.pool_place, c.pool_sheet_book, c.rested_until, c.rev,
+  c.pool_stopped_at, c.hunt_rates, c.home_until, c.penalty_until, c.drowsy, c.meal_id,
+  c.meal_until, c.titles, c.patrol_catches, c.expulsions, c.board_streak, c.board_streak_day`;
 
 export function characterFromDb(r: Record<string, unknown>): CharacterRow {
   return {
@@ -152,6 +185,21 @@ export function characterFromDb(r: Record<string, unknown>): CharacterRow {
     poolSheetBook: (r.pool_sheet_book as string | null) ?? null,
     restedUntil: timeFromDb(r.rested_until),
     rev: Number(r.rev),
+    poolStoppedAt: timeFromDb(r.pool_stopped_at),
+    huntRates: (r.hunt_rates as HuntRates | null) ?? null,
+    homeUntil: timeFromDb(r.home_until),
+    penaltyUntil: timeFromDb(r.penalty_until),
+    drowsy: r.drowsy === true,
+    mealId: (r.meal_id as string | null) ?? null,
+    mealUntil: timeFromDb(r.meal_until),
+    titles: (r.titles as string[] | null) ?? [],
+    patrolCatches: Number(r.patrol_catches ?? 0),
+    expulsions: Number(r.expulsions ?? 0),
+    boardStreak: Number(r.board_streak ?? 0),
+    boardStreakDay:
+      r.board_streak_day === null || r.board_streak_day === undefined
+        ? null
+        : Number(r.board_streak_day),
   };
 }
 
@@ -259,8 +307,9 @@ export function itemView(row: ItemRow): ItemView {
 }
 
 /**
- * The pool as it stands at `now`: what claiming it would pay. Catch-up follows the character's
- * level against the live Page (`frontier`), like every other EXP they earn.
+ * The pool as it stands at `now`: what claiming it would pay. It fills only while the player is
+ * away: from logout to the next login (`pool_stopped_at`). Catch-up follows the character's level
+ * against the live Page (`frontier`), like every other EXP they earn.
  */
 export function poolNow(
   c: CharacterRow,
@@ -269,7 +318,8 @@ export function poolNow(
 ): { fill: PoolFill; cap: number } | null {
   if (!c.poolStartedAt || !c.poolRates || !c.poolPlace) return null;
   const rates = c.poolRates;
-  const seconds = (now.getTime() - c.poolStartedAt.getTime()) / 1000;
+  const until = Math.min(now.getTime(), c.poolStoppedAt?.getTime() ?? Number.POSITIVE_INFINITY);
+  const seconds = (until - c.poolStartedAt.getTime()) / 1000;
   const floorLeader = rates.floorLeader === true;
   const mult = catchUp(c.level, frontier);
   return {
