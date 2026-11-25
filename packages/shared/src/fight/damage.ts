@@ -426,14 +426,22 @@ export function damageMonster(
     }
   }
   if (kind.behavior === Behavior.Zeno) dmg = w.rules.zenoDamage(m.hp, m.maxHp, dmg, kind.halvings);
-  if (dmg > m.hp) dmg = m.hp;
-  m.hp -= dmg;
+  const boss = m.part ? w.boss : null;
+  if (boss) {
+    // A boss part's hit goes to the boss's one pool, through its gimmick and its shield.
+    const full = dmg;
+    dmg = boss.take(w, p, m, dmg);
+    if (dmg < full * 0.999) flags |= HitFlag.Blocked;
+  } else {
+    if (dmg > m.hp) dmg = m.hp;
+    m.hp -= dmg;
+    if (p) addContribution(m, p.index, dmg);
+  }
   m.flash = true;
   m.dirty |= Dirty.Hp;
-  if (p) addContribution(m, p.index, dmg);
-  if (knock > 0 && kind.behavior !== Behavior.Golem)
+  if (knock > 0 && kind.behavior !== Behavior.Golem && (!boss || boss.pushable(m)))
     push(w, m, p, weapon, fromX, fromY, knock, dmg);
-  const killed = m.hp <= 1e-9;
+  const killed = !boss && m.hp <= 1e-9;
   if (killed) {
     m.hp = 0;
     m.dying = true;
@@ -684,6 +692,19 @@ export function settleKills(w: FightWorld, onKill: (m: Monster) => void): void {
     const m = w.dead[k] as Monster;
     const weapon = m.killedWith;
     m.killedWith = null;
+    if (m.kind.behavior === Behavior.Object || m.part) {
+      // Objectives and boss parts earn no EXP or drops: the boss fight credits them.
+      if (m.kind.behavior === Behavior.Object) {
+        const by = m.target >= 0 ? w.players[m.target] : undefined;
+        w.boss?.objective(w, m, by?.joined ? by : null);
+      }
+      const ev = w.event(Ev.Kill);
+      ev.a = -1;
+      ev.c = m.entity;
+      ev.x = m.x;
+      ev.y = m.y;
+      continue;
+    }
     contributions.length = 0;
     for (let i = 0; i < m.contribBy.length; i++) {
       const by = m.contribBy[i] as number;

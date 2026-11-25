@@ -77,7 +77,30 @@ export const Priv = {
   Cast: 12,
   /** The client's own body when it changed: u8 mask, then the fields it names (`SelfField`). */
   Self: 13,
+  /** A boss fight cue (note: a `BOSS_CUES` index, b the player's body slot or -1). */
+  Cue: 14,
+  /** The client completed an objective (note: a `ObjectiveKind`). */
+  Objective: 15,
+  /**
+   * The boss's bar as this client sees it, when it changed (HP at most 5 times a second):
+   * u16 entity · u8 boss · u8 phase · u8 flags (`BossFlag`) · u8 mode · f32 hp · f32 max ·
+   * u8 shield (0–255).
+   */
+  Boss: 16,
 } as const;
+
+/** A boss record as read (`Priv.Boss`). */
+export interface WireBoss {
+  entity: number;
+  boss: number;
+  phase: number;
+  flags: number;
+  mode: number;
+  hp: number;
+  max: number;
+  /** 0 to 1. */
+  shield: number;
+}
 
 /**
  * Fields of a Self record: the body absolutely (u16 x, u16 y in 1/POS_SCALE px, u8 facing, u32
@@ -689,8 +712,10 @@ export interface SnapshotSink {
   cast(fx: number, cast: number): void;
   /** The client's own body changed; fields not in the record keep their last value. */
   self(s: WireSelf): void;
-  /** Level ups, phases, merits, rolls, knock-outs: `type` is a `Priv` value. */
+  /** Level ups, phases, merits, rolls, knock-outs, boss cues, objectives: `type` is a `Priv`. */
   note(type: number, a: number, b: number, c: number): void;
+  /** The boss's bar, phase, shield and gimmick state changed. */
+  boss(b: WireBoss): void;
 }
 
 /**
@@ -855,6 +880,17 @@ export class SnapshotReader {
 
   /** The client's own body, accumulated over Self records. */
   readonly me: WireSelf = { x: 0, y: 0, facing: 0, seq: 0, roll: 0, hp: 0, shield: 0 };
+  /** The last boss record. */
+  readonly boss: WireBoss = {
+    entity: 0,
+    boss: 0,
+    phase: 0,
+    flags: 0,
+    mode: 0,
+    hp: 0,
+    max: 0,
+    shield: 0,
+  };
   hasSelf = false;
 
   /** Transfers that found nothing to transfer: zero unless the two sides disagree. */
@@ -1039,6 +1075,19 @@ export class SnapshotReader {
           sink.self(me);
           break;
         }
+        case Priv.Boss: {
+          const b = this.boss;
+          b.entity = r.u16();
+          b.boss = r.u8();
+          b.phase = r.u8();
+          b.flags = r.u8();
+          b.mode = r.u8();
+          b.hp = r.f32();
+          b.max = r.f32();
+          b.shield = r.u8() / 255;
+          sink.boss(b);
+          break;
+        }
         default:
           sink.note(type, r.i16(), r.i16(), r.i16());
       }
@@ -1059,4 +1108,5 @@ export const NULL_SINK: SnapshotSink = {
   cast() {},
   self() {},
   note() {},
+  boss() {},
 };

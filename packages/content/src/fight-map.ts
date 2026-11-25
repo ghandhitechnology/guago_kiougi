@@ -21,6 +21,8 @@ export function fightMapOf(map: BuiltMap | MapDef): FightMap {
         z.kind === "monsters" ? [{ rect: z.rect, monster: z.monster, weight: z.density }] : [],
       ),
       eliteZones: zones.filter((z) => z.kind === "elite").map((z) => z.rect),
+      marks: map.marks,
+      ...(map.spawns.respawn ? { wake: { x: map.spawns.respawn.x, y: map.spawns.respawn.y } } : {}),
     };
   }
   return {

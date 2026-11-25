@@ -95,6 +95,7 @@ export function stepFight(w: FightWorld, inputs?: FightInputs): void {
   if (w.tick % FLOW_TICKS === 0) w.flow.build(w);
   stepDirector(w);
   rebuildHash(w);
+  w.boss?.step(w);
   stepMonsters(w, w.flow);
   stepDangers(w);
   stepWeapons(w);
