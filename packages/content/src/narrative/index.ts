@@ -2,6 +2,7 @@
  * Every word a player reads in the hub and in Page 1, as one bundle with its Korean locale.
  * Read through `narrative` from `@guago/content`; run `validateNarrative` before shipping.
  */
+import { AGORA_BARKS, AGORA_KO } from "./agora.ts";
 import { CODEX, CODEX_KO } from "./codex.ts";
 import { CUTSCENES, CUTSCENES_KO } from "./cutscenes.ts";
 import { DUEL_COPY } from "./duel.ts";
@@ -59,7 +60,7 @@ export const NARRATIVE: Narrative = {
   story: STORY,
   bosses: BOSSES,
   codex: CODEX,
-  barks: [...BARKS, ...EGG_BARKS],
+  barks: [...BARKS, ...EGG_BARKS, ...AGORA_BARKS],
   descriptions: [
     ...DESCRIPTIONS,
     ...EGG_DESCRIPTIONS,
@@ -82,6 +83,7 @@ export const NARRATIVE: Narrative = {
     PAGE1_KO,
     CODEX_KO,
     HUB_KO,
+    AGORA_KO,
     QUESTS_KO,
     SYSTEM_KO,
     EGGS_KO,
