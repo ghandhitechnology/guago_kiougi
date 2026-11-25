@@ -915,7 +915,11 @@ export class StationView {
 
   /** The well lit up for two frames, then fading: a hit landing on the book. */
   private flash(at: { x: number; y: number; w: number; h: number }, color: string): void {
-    const f = this.ctx.scene.add.rectangle(at.x, at.y, at.w, at.h, paint(color)).setOrigin(0);
+    // Light laid over the book, not a block in front of it: the cover shows through.
+    const f = this.ctx.scene.add
+      .rectangle(at.x, at.y, at.w, at.h, paint(color))
+      .setOrigin(0)
+      .setAlpha(0.6);
     this.stage.add(f);
     this.ctx.scene.time.delayedCall(34, () => fade(f, 0, 200, () => f.destroy()));
   }
