@@ -17,8 +17,9 @@ import {
   type ChatLine,
   CLUB_FEE,
   CLUB_FOUND_LEVEL,
-  MAP_ROOM,
+  ENTER_PATH,
   partyExpMultiplier,
+  type Seating,
   type SocialEvent,
   type SocialRequests,
   type SocialType,
@@ -196,10 +197,16 @@ async function online(name: string, jar: Jar): Promise<Player> {
 
 async function enterMap(p: Player, map: string): Promise<void> {
   await p.map?.leave();
-  p.map = await new Client(BASE, { headers: { cookie: cookieHeader(p.jar) } }).joinOrCreate(
-    MAP_ROOM,
-    { map },
-  );
+  // The entry route seats the character on the named map (ALLOW_MAP_OPTION is set above).
+  const res = await fetch(BASE + ENTER_PATH, {
+    method: "POST",
+    headers: { cookie: cookieHeader(p.jar), "content-type": "application/json" },
+    body: JSON.stringify({ map }),
+  });
+  const { seat } = (await res.json()) as Seating;
+  p.map = await new Client(BASE, {
+    headers: { cookie: cookieHeader(p.jar) },
+  }).consumeSeatReservation(seat);
   p.map.onMessage("*", () => {});
   await until(() => p.link.presence.get(p.link.me ?? "")?.map === map, `${p.name} on ${map}`);
 }

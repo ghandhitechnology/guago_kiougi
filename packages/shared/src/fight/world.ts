@@ -865,6 +865,15 @@ export class FightWorld {
     for (const e of this.effects) if (e.alive && e.owner === p.index) this.endFx(e);
     for (const k of this.pickups) if (k.alive && k.owner === p.index) k.alive = false;
     for (const q of this.players) if (q.reviver === p.index) q.reviver = -1;
+    // Its tags go with it, so whoever takes the slot next never inherits a share of a kill.
+    for (const m of this.monsters) {
+      if (!m.alive) continue;
+      for (let i = 0; i < m.contribBy.length; i++) {
+        if (m.contribBy[i] !== p.index) continue;
+        m.contribBy[i] = -1;
+        m.contribDamage[i] = 0;
+      }
+    }
   }
 
   playerById(id: string): Player | undefined {

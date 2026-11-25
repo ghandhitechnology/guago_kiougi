@@ -203,6 +203,8 @@ export interface PresenceEntry {
   level: number;
   /** Map id the character stands on; empty while it is on none. */
   map: string;
+  /** Channel of that map, from 1; 0 while it is on none. */
+  ch: number;
 }
 
 /**
@@ -213,7 +215,7 @@ export type PresenceMessage =
   | { t: "all"; you: string; list: PresenceEntry[] }
   | { t: "join"; p: PresenceEntry }
   | { t: "leave"; id: string }
-  | { t: "map"; id: string; map: string }
+  | { t: "map"; id: string; map: string; ch: number }
   | { t: "level"; id: string; level: number };
 
 // Text rules ---------------------------------------------------------------------------------

@@ -3,20 +3,26 @@ import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
 import { mapById } from "@guago/content";
 import {
+  type Collidable,
+  type Doorway,
+  ENTER_PATH,
   encodeInput,
   type Facing,
   INPUT_MESSAGE,
-  MAP_ROOM,
   MapState,
   MODE_MESSAGE,
   MOVE_MAX,
+  moveBody,
   NULL_SINK,
   POS_SCALE,
   Predictor,
+  portalAt,
   Q,
+  type Seating,
   SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
   SnapshotReader,
+  shutDoors,
   TICK_MS,
   TILE_SIZE,
   WirePlayer,
@@ -35,11 +41,15 @@ import { startNetsim } from "./netsim.ts";
  * client (mean and the worst client), events, knock-outs and the server's memory.
  *
  *   pnpm loadtest --bots 80 --seconds 300 --url ws://localhost:2608
- *   … --map p1-colonnade  open the room on this map (the server needs ALLOW_MAP_OPTION=1);
- *                         without it the room runs the server's GUAGO_MAP
+ *   … --map p1-colonnade  seat the bots on this map (default campus-field) and `--monsters 150`
+ *                         fills a fieldless one; both need ALLOW_MAP_OPTION=1 on the server
  *   … --auto 0.5          share of bots in full auto
  *   … --latency 150 --jitter 30 --loss 0.01   every bot through a simulated mobile link
  *   … --out report.txt    also write the report to a file
+ *
+ * Bots enter through `POST /api/enter` like the browser. A channel holds 60 players (PLAN §10):
+ * to put more in one room, run the server with MAP_CHANNEL_SEATS raised. Bots never walk through
+ * a door; the server never walks a full-auto body through one.
  *
  * Bots sign in through the HTTP API as bot0001, bot0002 … (`--accounts` changes the prefix),
  * make their characters on first use and keep their sessions in .local/ for the next run. The
@@ -58,7 +68,8 @@ const { values } = parseArgs({
     jitter: { type: "string", default: "0" },
     loss: { type: "string", default: "0" },
     accounts: { type: "string", default: "bot" },
-    map: { type: "string" },
+    map: { type: "string", default: "campus-field" },
+    monsters: { type: "string" },
     metrics: { type: "string" },
     out: { type: "string" },
   },
@@ -70,7 +81,10 @@ const WARMUP = Number(values.warmup);
 const AUTO = Number(values.auto);
 const target = new URL(values.url);
 const metricsUrl = values.metrics ?? `http://127.0.0.1:${Number(target.port) + 100}/metrics`;
-const joinOptions = values.map ? { map: values.map } : {};
+const choice = {
+  map: values.map,
+  ...(values.monsters === undefined ? {} : { monsters: Number(values.monsters) }),
+};
 
 let url = values.url;
 if (values.latency !== undefined) {
@@ -142,16 +156,21 @@ class Bot {
     return this.reader.broken;
   }
 
-  private map: ReturnType<typeof mapById>;
+  /** The room's walls as the server has them (doors to unbuilt maps shut), and its doors. */
+  private map: Collidable | undefined;
+  private doors: readonly Doorway[] = [];
   private speed = 60;
 
   private onPatch(state: MapState): void {
     if (this.reader.cols === 1 && state.map) {
-      this.map = mapById(state.map);
-      if (this.map) {
+      const def = mapById(state.map);
+      if (def) {
+        const portals = "portals" in def ? def.portals : [];
+        this.doors = portals;
+        this.map = { collision: shutDoors(def.collision, portals) };
         const cell = SNAP_CELL_TILES * TILE_SIZE;
-        this.reader.cols = Math.ceil((this.map.collision.w * TILE_SIZE) / cell);
-        this.reader.rows = Math.ceil((this.map.collision.h * TILE_SIZE) / cell);
+        this.reader.cols = Math.ceil((def.collision.w * TILE_SIZE) / cell);
+        this.reader.rows = Math.ceil((def.collision.h * TILE_SIZE) / cell);
       }
     }
     let me = this.slot === undefined ? undefined : state.players.get(this.slot);
@@ -251,6 +270,7 @@ class Bot {
         const tx = Math.floor(Math.random() * w);
         const ty = Math.floor(Math.random() * h);
         if (rows[ty]?.[tx] !== ".") continue;
+        if (portalAt(this.doors, (tx + 0.5) * TILE_SIZE, (ty + 0.5) * TILE_SIZE) >= 0) continue;
         this.goal = [(tx + 0.5) * TILE_SIZE, (ty + 0.5) * TILE_SIZE];
         break;
       }
@@ -274,6 +294,14 @@ class Bot {
   tick(n: number): void {
     if (this.auto || !this.predictor || this.down) return;
     if (n % 4 === 0) this.think(n);
+    // A door would take the bot to another map: turn back instead.
+    const map = this.map;
+    const next = map && moveBody(map, this.predictor.body, this.dir[0], this.dir[1], this.speed);
+    if (next && portalAt(this.doors, next.x, next.y) >= 0) {
+      this.dir = [-this.dir[0], -this.dir[1]];
+      this.until = n + 20;
+      this.goalUntil = n;
+    }
     const input = this.predictor.tick(this.dir[0], this.dir[1]);
     if (input) this.room.send(INPUT_MESSAGE, encodeInput(input));
   }
@@ -292,8 +320,15 @@ for (let i = 0; i < BOTS; i++) {
   const cookie = await signIn(`http://${target.host}`, values.accounts, i + 1);
   for (let attempt = 1; ; attempt++) {
     try {
+      const res = await fetch(`http://${target.host}${ENTER_PATH}`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(choice),
+      });
+      if (!res.ok) throw new Error(`enter answered ${res.status}`);
+      const { seat } = (await res.json()) as Seating;
       const client = new Client(url, { headers: { cookie } });
-      const room = await client.joinOrCreate(MAP_ROOM, joinOptions, MapState);
+      const room = await client.consumeSeatReservation(seat, MapState);
       bots.push(new Bot(room, i < Math.round(BOTS * AUTO)));
       break;
     } catch (err) {

@@ -15,6 +15,7 @@ export * from "./live-protocol.ts";
 export * from "./loadout.ts";
 export * from "./messages.ts";
 export * from "./movement.ts";
+export * from "./navigation.ts";
 export * from "./numbers.ts";
 export * from "./prediction.ts";
 export * from "./progress.ts";
