@@ -251,7 +251,7 @@ function cone(dir: "down" | "up" | "side"): string {
       const reach = along * HALF;
       if (across > reach) continue;
       const rim = across > reach - 1.2 || along > CONE_LEN - 1.2;
-      const band = along < CONE_LEN * 0.4 ? "Y" : along < CONE_LEN * 0.75 ? "y" : "w";
+      const band = along < CONE_LEN * 0.4 ? "w" : along < CONE_LEN * 0.75 ? "Y" : "y";
       pic.set(x, y, rim ? "a" : band);
     }
   }
