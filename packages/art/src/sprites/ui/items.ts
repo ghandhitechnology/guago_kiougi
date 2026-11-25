@@ -221,26 +221,26 @@ const books = sprite({
       [5, 5],
     ),
     /** 홀리데이 일반물리: the heavy plum tome with its gold band and a thrown arc. */
-    holiday: over(
+    "holiday-physics": over(
       book(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),
       stack("YYYYYYYYYY", "gggggggggg"),
       3,
       9,
     ),
     /** 전자기 실습서: a lab manual with a bolt across it. */
-    electro: book(
+    "em-lab": book(
       paleCover("6", "8"),
       stack("....88", "...88.", "..88..", ".8888.", "..88..", ".88...", "88...."),
       [5, 4],
     ),
     /** 줌인 일반화학: a flask, half full. */
-    zoomin: book(
+    "zoomin-chem": book(
       SEA,
       stack("..www..", "..w.w..", "..w.w..", ".w...w.", "w55555w", "wwwwwww"),
       [5, 5],
     ),
     /** 실험 보고서: a report under a clip, with the alcohol lamp's flame on it. */
-    report: over(
+    "lab-report": over(
       book(
         paleCover("1", "3"),
         stack("...2...", "..22...", "..242..", ".24442.", ".24w42.", "..222.."),
@@ -251,25 +251,25 @@ const books = sprite({
       0,
     ),
     /** 캠핑 생명과학: a cell, looking out. */
-    camping: book(
+    "camping-bio": book(
       GRASS,
       stack("..www..", ".wjjjw.", "wjjFFjw", "wjjFFjw", ".wjjjw.", "..www.."),
       [5, 5],
     ),
     /** 해부 실습서: a scalpel across a pale workbook. */
-    dissect: book(
+    dissection: book(
       paleCover("F", "h"),
       stack("......S", ".....SS", "....SS.", "...hf..", "..hf...", ".hf....", "hf....."),
       [5, 4],
     ),
     /** 지구는 둥글다 지구과학: the globe, parallels and a meridian. */
-    round: book(
+    "round-earth": book(
       GOLD,
       stack("..www..", ".wYwYw.", "wYYwYYw", "wwwwwww", "wYYwYYw", ".wYwYw.", "..www.."),
       [5, 4],
     ),
     /** 암석 표본 상자: the specimen tray, three stones in their compartments. */
-    rocks: book(
+    "rock-box": book(
       paleCover("v", "g"),
       stack("vvvvvvvvvv", "vqqvEEvllv", "vqqvCCvppv", "vvvvvvvvvv"),
       [4, 6],

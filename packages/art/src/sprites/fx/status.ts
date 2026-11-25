@@ -157,7 +157,7 @@ const ICONS: Record<string, string> = {
     ....1....
   `,
   /** 불: a flame with a pale heart. */
-  fire: over(
+  burn: over(
     solid(FLAME, "6", "4", "8", "7"),
     `
       .........
@@ -217,7 +217,7 @@ const ICONS: Record<string, string> = {
     `,
   ),
   /** 수분: a water drop. */
-  water: over(
+  wet: over(
     solid(DROP, "o", "s", "r", "q"),
     `
       .........
@@ -245,8 +245,44 @@ const ICONS: Record<string, string> = {
     .xmmmmmmx
     ..xxxxxxx
   `,
+  /** 나트륨: a soft grey lump of sodium, cut to show the bright metal inside. */
+  sodium: `
+    .........
+    .........
+    ..jjjjj..
+    .jkkkkkj.
+    jkkmnnmkj
+    jkmnWnmlj
+    jkkmmmllj
+    .jkllllj.
+    ..jjjjj..
+  `,
+  /** 감염: a spiked capsid, the green of something catching. */
+  infection: `
+    ....a....
+    .a..d..a.
+    ..adcda..
+    .adccbda.
+    adcceccda
+    .adccbda.
+    ..adbda..
+    .a..d..a.
+    ....a....
+  `,
+  /** 증명: the tombstone that ends a proof. */
+  proof: `
+    .........
+    .ooooooo.
+    .osssrro.
+    .osrrrqo.
+    .osrrrqo.
+    .orrrqqo.
+    .orqqqqo.
+    .ooooooo.
+    .........
+  `,
   /** 방어 감소: a shield split by a crack. */
-  armorBreak: over(
+  "armor-break": over(
     solid(SHIELD, "o", "s", "r", "q"),
     `
       .........
@@ -284,7 +320,7 @@ Object.entries(ICONS).forEach(([name, grid], i) => {
 });
 
 const status = sprite({
-  name: "fx-status",
+  name: "status",
   group: "combat",
   outline: false,
   palette: STATUS,

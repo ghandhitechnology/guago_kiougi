@@ -64,7 +64,7 @@ const tool = sprite({
     /** 컴퍼스: a drawing compass, needle leg and pencil leg. */
     compass: compass(),
     /** 모눈자: a clear ruler printed with a grid and ticks. */
-    gridruler: stack(
+    "grid-ruler": stack(
       "................",
       "................",
       "................",
@@ -140,7 +140,7 @@ const tool = sprite({
       "....o...........",
     ),
     /** 알코올램프: the lamp, its wick lit with a blue flame. */
-    lamp: stack(
+    "alcohol-lamp": stack(
       ".......o........",
       "......o5o.......",
       "......o4o.......",
@@ -180,7 +180,7 @@ const tool = sprite({
     /** 핀셋: tweezers, closed at the tips, green grips. */
     tweezers: tweezers(),
     /** 지진계: the drum's paper with a trace on it, and the pen arm. */
-    seismograph: stack(
+    seismometer: stack(
       "............ooo.",
       "...........oCCo.",
       "..........oCco..",
@@ -199,7 +199,7 @@ const tool = sprite({
       "................",
     ),
     /** 돌망치: a geologist's hammer, square face and pick, on a hickory handle. */
-    hammer: stack(
+    "rock-hammer": stack(
       "................",
       ".ooooo..........",
       ".oWsSoooooo.....",
