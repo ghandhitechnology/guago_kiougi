@@ -213,10 +213,10 @@ function chainRing(k: number): Pic {
   const h = 26;
   const cx = w / 2;
   const cy = h / 2;
-  const n = 12;
+  const n = 16;
   const pic = Pic.blank(w, h);
   for (let i = 0; i < n; i++) {
-    const a = ((i + k / 4) / n) * Math.PI * 2;
+    const a = ((i + k / 2) / n) * Math.PI * 2;
     const x = cx + Math.cos(a) * 18;
     const y = cy + Math.sin(a) * 9;
     // Links alternate: one lying along the ring, the next standing across it.
@@ -231,7 +231,7 @@ function chainRing(k: number): Pic {
       paintAt(w, h, (px, py) => {
         const u = (px - x) * lx + (py - y) * ly;
         const v = -(px - x) * ly + (py - y) * lx;
-        const e = Math.hypot(u / (along ? 3.2 : 2.2), v / (along ? 1.9 : 1.6));
+        const e = Math.hypot(u / (along ? 3.6 : 2.4), v / (along ? 2.1 : 1.8));
         if (e > 1 || e < 0.42) return null;
         if (e > 0.8) return "o";
         return front ? (v < 0 ? "W" : "p") : v < 0 ? "l" : "m";
