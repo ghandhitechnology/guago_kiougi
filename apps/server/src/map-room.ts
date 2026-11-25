@@ -981,6 +981,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {
+        // A client that has not acknowledged its join (or is leaving) is sent nothing: Colyseus
+        // would queue the frames for it without limit. Its first real message is a keyframe.
+        if (client.state !== ClientState.JOINED && client.state !== ClientState.RECONNECTED)
+          continue;
         const pawn = this.pawns.get(client.sessionId);
         if (!pawn || pawn.leaving) continue;
         client.sendBytes(SNAPSHOT_MESSAGE, this.net.message(pawn.net));
