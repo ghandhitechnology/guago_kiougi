@@ -83,8 +83,6 @@ if (values.latency !== undefined) {
   url = `ws://localhost:${port}`;
 }
 
-const between = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1));
-
 interface Stats {
   bytes: number;
   snapshots: number;
@@ -376,6 +374,12 @@ const rooms = samples.map((s) => s.room);
 const fights = rooms.flatMap((r) => (r.fight ? [r.fight] : []));
 const median = (pick: (r: RoomReport) => number) => quantile(rooms.map(pick), 0.5);
 const worstOf = (pick: (r: RoomReport) => number) => Math.max(0, ...rooms.map(pick));
+/** The snapshot parts of the heaviest single client in the heaviest window. */
+const worstParts = rooms.reduce<Record<string, number>>((best, r) => {
+  const w = r.fight?.worstByPart;
+  const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);
+  return w && sum(w) > sum(best) ? w : best;
+}, {});
 const fmed = (pick: (f: NonNullable<RoomReport["fight"]>) => number) =>
   quantile(fights.map(pick), 0.5);
 const fworst = (pick: (f: NonNullable<RoomReport["fight"]>) => number) =>
@@ -477,6 +481,9 @@ const lines = [
         )}`,
     )
     .join("  ")}`,
+  `  worst client's      ${parts
+    .map((k) => `${k} ${fixed(worstParts[k] ?? 0, 0)}`)
+    .join("  ")}   (its heaviest window)`,
   `per second            kills ${fixed(fmed((f) => f.killsPerSecond))}  spawns ${fixed(fmed((f) => f.spawnsPerSecond))} (max ${fixed(fworst((f) => f.spawnsPerSecond))})  casts ${fixed(fmed((f) => f.castsPerSecond))}  hits ${fixed(fmed((f) => f.hitsPerSecond))}  events ${fixed(fmed((f) => f.eventsPerSecond))}  effect records ${fixed(fmed((f) => f.fxPerSecond))}`,
   `knocked out           ${(last?.downs ?? 0) - (firstFight?.downs ?? 0)} times, revived ${(last?.revives ?? 0) - (firstFight?.revives ?? 0)}, woke at the spawn ${(last?.wakes ?? 0) - (firstFight?.wakes ?? 0)}`,
   `server memory         rss ${mb(memStart?.rss)} → ${mb(memEnd?.rss)} MB, heap ${mb(memStart?.heapUsed)} → ${mb(memEnd?.heapUsed)} MB`,
