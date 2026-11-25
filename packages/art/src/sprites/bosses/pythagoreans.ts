@@ -457,19 +457,37 @@ emblem("emblem-ten", () => "bright");
 emblem("emblem-shake", (i) => (i % 3 === 0 ? "lit" : "dim"), 1);
 emblem("emblem-fall", (i) => (i % 2 ? "dim" : "off"), 2);
 
-/** The diagonal burning across the doubter's chest while the weak point is open. */
-part(
-  "diagonal",
-  0,
-  0,
-  `
-  +.....
-  .AY...
-  ..AY..
-  ...AY.
-  ....A+
-`,
-);
+/** The diagonal burning through the middle of the formation while the weak point is open. */
+function burn(name: string, len: number, flare: boolean): string {
+  const rows: string[][] = Array.from({ length: 72 }, () => Array(64).fill("."));
+  const x0 = 20;
+  const y0 = 40;
+  for (let k = 0; k < len; k++) {
+    const x = x0 + k;
+    const y = y0 + k;
+    const put = (dx: number, dy: number, ch: string) => {
+      const row = rows[y + dy];
+      if (row && x + dx >= 0 && x + dx < 64) row[x + dx] = ch;
+    };
+    put(0, 0, "+");
+    put(1, 0, ";");
+    put(0, 1, "~");
+    if (flare && k % 5 === 2) {
+      put(-2, 2, ";");
+      put(3, -2, ";");
+    }
+  }
+  for (const [x, y] of [
+    [x0 - 2, y0 - 2],
+    [x0 + len + 1, y0 + len + 1],
+  ] as const) {
+    const row = rows[y];
+    if (row) row[x] = "+";
+  }
+  return part(name, 0, 0, rows.map((r) => r.join("")).join("\n"));
+}
+burn("diagonal", 24, false);
+burn("diagonal-flare", 24, true);
 /** A cord stretched along one row through the joined hands, knotted at every member. */
 function cord(name: string, y: number, x0: number, x1: number, plucked: boolean): string {
   const rows = [Array(64).fill("."), Array(64).fill(".")];
@@ -595,18 +613,18 @@ const plan: Record<string, Placement[]> = {
   weak0: formation(
     (_, i) =>
       i === DOUBTER
-        ? { face: "open" }
-        : { arms: "ears", face: "wince", dx: away(i, 2), dy: i === 0 ? -2 : 0 },
+        ? { face: "open", dy: 5 }
+        : { arms: "ears", face: "wince", dx: away(i, 3), dy: i === 0 ? -2 : 0 },
     "emblem-shake",
-    ["diagonal", 29, 55],
+    "diagonal",
   ),
   weak1: formation(
     (_, i) =>
       i === DOUBTER
-        ? { face: "glance" }
-        : { arms: "ears", face: "wince", dx: away(i, 3), dy: i === 0 ? -3 : 1 },
+        ? { face: "glance", dy: 5 }
+        : { arms: "ears", face: "wince", dx: away(i, 4), dy: i === 0 ? -3 : 1 },
     "emblem-fall",
-    ["diagonal", 29, 55],
+    "diagonal-flare",
   ),
 
   hit: formation(all({ face: "wince", dx: 1, nod: -1 }), ["emblem-shake", 1, 0]),
