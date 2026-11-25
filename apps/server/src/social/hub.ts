@@ -21,6 +21,10 @@
  * Every request gets exactly one answer: `done` once its events are out, or `refused` with a
  * code. Nothing answers differently because someone blocked the sender: a whisper, friend
  * request, party invite or club invite to a player who blocked you looks delivered and is not.
+ *
+ * Requests run one at a time per player, and all social database work shares at most
+ * `SOCIAL_CONNECTIONS` of the pool, so no player and no burst can park the connections seat
+ * saves, item operations and logins need.
  */
 import { emoteAllowed } from "@guago/content";
 import {
@@ -100,6 +104,16 @@ const OK: Answer = {};
 const VITALS_MS = 250;
 const SWEEP_EVERY = 4;
 const CLUB_EXP_MS = 60_000;
+/**
+ * Pool connections the social systems may hold at once, of the ten `createDb` opens: the rest
+ * stay free for seat saves, item operations, logins and the chat log.
+ */
+export const SOCIAL_CONNECTIONS = 6;
+/**
+ * Requests one player may have waiting, above the largest single-type burst (10); past this
+ * they are refused as too fast.
+ */
+const QUEUED_PER_PLAYER = 16;
 
 const person = (e: PresenceEntry): PartyPerson => ({
   id: e.id,
@@ -145,6 +159,33 @@ class Lanes {
   }
 }
 
+/** At most `max` tasks at once; the rest wait their turn in arrival order. */
+class Gate {
+  private active = 0;
+  private readonly waiting: (() => void)[] = [];
+  /** The most ever running at once, for the load measurement. */
+  peak = 0;
+  private readonly max: number;
+
+  constructor(max: number) {
+    this.max = max;
+  }
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active < this.max) this.active++;
+    // A finishing task hands its place straight to the next in line.
+    else await new Promise<void>((resolve) => this.waiting.push(resolve));
+    this.peak = Math.max(this.peak, this.active);
+    try {
+      return await task();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active--;
+    }
+  }
+}
+
 export class SocialHub<P extends Peer> {
   private readonly social: Social;
   private readonly room: SocialRoom<P>;
@@ -154,6 +195,11 @@ export class SocialHub<P extends Peer> {
   /** Lanes for what the hub holds about each player, and for reading each club's views. */
   private readonly people = new Lanes();
   private readonly clubs = new Lanes();
+  /** Each player's requests, one at a time. */
+  private readonly queue = new Lanes();
+  private readonly queued = new Map<string, number>();
+  /** Shared by every request and login, so social work never holds more of the pool. */
+  readonly gate = new Gate(SOCIAL_CONNECTIONS);
   private readonly timers: NodeJS.Timeout[] = [];
   private ticks = 0;
   private readonly unlisten: () => void;
@@ -177,7 +223,7 @@ export class SocialHub<P extends Peer> {
 
   /** Resolves once every queued request and lane task has run. */
   async drained(): Promise<void> {
-    await Promise.all([this.clubs.drained(), this.people.drained()]);
+    await Promise.all([this.queue.drained(), this.clubs.drained(), this.people.drained()]);
     await this.people.drained();
   }
 
@@ -191,10 +237,12 @@ export class SocialHub<P extends Peer> {
     const model = emptyModel();
     this.state.set(characterId, model);
     try {
-      await this.people.run(characterId, async () => {
-        if (this.state.get(characterId) !== model) return;
-        await this.read(characterId, model);
-      });
+      await this.gate.run(() =>
+        this.people.run(characterId, async () => {
+          if (this.state.get(characterId) !== model) return;
+          await this.read(characterId, model);
+        }),
+      );
     } catch (error) {
       if (this.state.get(characterId) === model) this.state.delete(characterId);
       throw error;
@@ -279,19 +327,28 @@ export class SocialHub<P extends Peer> {
 
   // Requests -------------------------------------------------------------------------------
 
-  /** Runs one validated request and answers it exactly once. */
+  /** Queues one validated request behind the player's others and answers it exactly once. */
   async handle<K extends SocialType>(peer: P, type: K, req: SocialRequest<K>): Promise<void> {
+    const id = peer.characterId;
     const retryMs = this.room.limit(peer, type);
-    if (retryMs > 0) {
+    const waiting = this.queued.get(id) ?? 0;
+    if (retryMs > 0 || waiting >= QUEUED_PER_PLAYER) {
       this.room.answer(peer, WORLD_MESSAGES.refused, {
         type,
         n: req.n,
         code: "rate_limited",
-        retryMs,
+        retryMs: retryMs > 0 ? retryMs : 1000,
       });
       return;
     }
-    await this.serve(peer, type, req);
+    this.queued.set(id, waiting + 1);
+    try {
+      await this.queue.run(id, () => this.gate.run(() => this.serve(peer, type, req)));
+    } finally {
+      const left = (this.queued.get(id) ?? 1) - 1;
+      if (left > 0) this.queued.set(id, left);
+      else this.queued.delete(id);
+    }
   }
 
   private async serve<K extends SocialType>(peer: P, type: K, req: SocialRequest<K>) {
