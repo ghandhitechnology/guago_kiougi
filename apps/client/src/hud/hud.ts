@@ -29,6 +29,8 @@ export interface HudActions {
   /** A book slot pressed, by index. */
   cast?(slot: number): void;
   mentor?(): void;
+  /** The phone's emote button: opens or closes the emote wheel. */
+  emote?(): void;
 }
 
 function plate(scene: Phaser.Scene, x: number, y: number, w: number, h: number) {
@@ -132,6 +134,10 @@ export class Hud {
   private mentorReady = false;
   private readonly interact: Piece;
   private readonly chat: Piece;
+  private readonly emote: Piece;
+  /** Told where the left column ends whenever it changes, so the party frames sit under it. */
+  onLeftColumn: ((bottom: number) => void) | undefined;
+  private leftEnd = 27;
   private lagTimer: Phaser.Time.TimerEvent | undefined;
   private lastHp: number | undefined;
   private readonly unwatch: () => void;
@@ -293,6 +299,20 @@ export class Hud {
       () => this.actions.openChat(),
     );
 
+    // Phones: the emote wheel's button beside the chat button.
+    this.emote = new Piece(scene, 38, 27, { dx: -70, dy: 0 });
+    this.emote.root.add([
+      scene.add.image(0, 0, "ui", "touch-btn/idle").setOrigin(0),
+      scene.add.image(8, 8, "ui", "emote-icon/wave").setOrigin(0),
+    ]);
+    this.tappable(
+      this.emote.root,
+      0,
+      0,
+      () => ({ w: 28, h: 28 }),
+      () => this.actions.emote?.(),
+    );
+
     for (const p of [
       this.card,
       this.vitals,
@@ -306,6 +326,7 @@ export class Hud {
       this.mentor,
       this.interact,
       this.chat,
+      this.emote,
     ]) {
       p.root.setDepth(100);
     }
@@ -315,6 +336,7 @@ export class Hud {
       this.minimapPiece.show(map !== undefined);
       this.menu.show(map !== undefined);
       this.chat.show(map !== undefined && this.touch);
+      this.emote.show(map !== undefined && this.touch && this.actions.emote !== undefined);
       this.layoutLeft();
     });
     scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
@@ -326,9 +348,15 @@ export class Hud {
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
   }
 
+  /** Where the left column ends: under the chat button on a phone, under the mode chip elsewhere. */
+  get leftBottom(): number {
+    return this.leftEnd;
+  }
+
   /** Hides or shows the whole HUD, as when the notebook opens over it. */
   setVisible(on: boolean): void {
     for (const p of [
+      this.emote,
       this.card,
       this.vitals,
       this.mode,
@@ -349,11 +377,12 @@ export class Hud {
   /** The phone's chat button hides while the chat panel it opens is out. */
   setChatOpen(open: boolean): void {
     fade(this.chat.root, !open && this.chat.live ? 1 : 0, 100);
+    fade(this.emote.root, !open && this.emote.live ? 1 : 0, 100);
   }
 
   /** While a dialogue box covers the bottom of the screen, the thumb's buttons step aside. */
   setDialogue(open: boolean): void {
-    for (const p of [this.books, this.dodge, this.mentor, this.interact, this.chat]) {
+    for (const p of [this.books, this.dodge, this.mentor, this.interact, this.chat, this.emote]) {
       fade(p.root, !open && p.live ? 1 : 0, 120);
     }
   }
@@ -450,6 +479,9 @@ export class Hud {
       y += 17;
     }
     this.chat.moveTo(6, y);
+    this.emote?.moveTo(38, y);
+    this.leftEnd = this.touch ? y + 30 : y;
+    this.onLeftColumn?.(this.leftEnd);
   }
 
   private apply(data: Partial<HudData>, changed: ReadonlySet<keyof HudData>): void {

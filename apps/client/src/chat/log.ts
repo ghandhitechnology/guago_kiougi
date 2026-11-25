@@ -36,7 +36,10 @@ export class ChatLog {
   private counter = 0;
   private readonly unlisten: () => void;
 
+  private readonly link: WorldLink;
+
   constructor(link: WorldLink) {
+    this.link = link;
     this.unlisten = link.on((e) => {
       if (e.type === "chat") this.chat(e.line, e.mine);
       else if (e.type === "system") this.system(e.line);
@@ -53,9 +56,18 @@ export class ChatLog {
     return () => this.listeners.delete(fn);
   }
 
-  /** The lines a tab shows, oldest first. */
+  /** The lines a tab shows, oldest first; lines from players blocked since are left out. */
   linesFor(tab: Tab): LogLine[] {
-    return this.lines.filter((l) => l.tone === tab || l.tone === "system" || l.tone === "refusal");
+    return this.lines.filter(
+      (l) =>
+        (l.tone === tab || l.tone === "system" || l.tone === "refusal") &&
+        !(l.from && !l.mine && this.link.isBlocked(l.from.id)),
+    );
+  }
+
+  /** Redraws whoever shows the log, as after a block hides lines already in it. */
+  refresh(): void {
+    this.emit();
   }
 
   setActive(tab: Tab): void {
@@ -71,6 +83,8 @@ export class ChatLog {
 
   private chat(line: ChatLine, mine: boolean): void {
     if (!isTab(line.ch)) return;
+    // A blocked player's lines never show, whatever reached the client before the block.
+    if (!mine && this.link.isBlocked(line.from.id)) return;
     const tab = line.ch;
     this.add({
       id: line.id,

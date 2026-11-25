@@ -101,6 +101,11 @@ export class ChatPanel {
   onShownChange: ((shown: boolean) => void) | undefined;
   /** Who whispered last: the 귓속말 tab answers them when no one else is picked. */
   private replyTo: string | undefined;
+  /**
+   * A speaker's name tapped in the log: the player card opens on them, with the line, so it can
+   * be reported. Without a listener the tap starts a whisper.
+   */
+  onNameTap: ((from: { id: string; name: string }, lineId: number) => void) | undefined;
   private readonly unlisten: () => void;
 
   constructor(scene: Phaser.Scene, link: WorldLink, layout: ChatLayout) {
@@ -197,7 +202,12 @@ export class ChatPanel {
     this.unlisten = this.log.on(() => this.redraw());
     // 주변 lines are said aloud: a bubble over whoever said it.
     const unbubble = link.on((e) => {
-      if (e.type === "chat" && e.line.ch === "near" && e.line.from.sid) {
+      if (
+        e.type === "chat" &&
+        e.line.ch === "near" &&
+        e.line.from.sid &&
+        !link.isBlocked(e.line.from.id)
+      ) {
         worldView.overlays?.say(e.line.from.sid, e.line.text);
       }
       if (e.type === "chat" && e.line.ch === "whisper" && e.line.from.id !== link.me) {
@@ -213,12 +223,7 @@ export class ChatPanel {
       if (e.type === "status" && e.status === "replaced")
         this.log.note(t("chat.status.replaced"), "system");
     });
-    // A player's nameplate clicked in the world starts a whisper to them.
-    worldView.onNameTap = (_id, name, kind) => {
-      if (kind === "player") this.open(name);
-    };
     this.root.once(Phaser.GameObjects.Events.DESTROY, () => {
-      worldView.onNameTap = undefined;
       unbubble();
       this.unlisten();
       this.log.dispose();
@@ -486,12 +491,16 @@ export class ChatPanel {
         });
         this.body.add(label.obj);
         if (piece.kind === "name" && row.line.from && !row.line.mine) {
-          const name = row.line.from.name;
+          const from = row.line.from;
+          const lineId = row.line.id;
           const zone = this.scene.add
             .zone(x - 1, y, label.width + 2, ROW)
             .setOrigin(0)
             .setInteractive({ useHandCursor: true });
-          zone.on("pointerup", () => this.open(name));
+          zone.on("pointerup", () => {
+            if (this.onNameTap) this.onNameTap(from, lineId);
+            else this.open(from.name);
+          });
           this.body.add(zone);
         }
         x += label.width + (piece.kind === "name" ? 5 : 1);

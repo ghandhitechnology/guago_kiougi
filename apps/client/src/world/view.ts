@@ -44,8 +44,18 @@ class WorldView {
   selfSid: string | undefined;
   /** Nameplates, bubbles and the prompt, while the world scene runs. */
   overlays: WorldOverlays | undefined;
-  /** Someone's nameplate tapped or clicked, by session or speaker id; chat whispers players. */
-  onNameTap: ((id: string, name: string, kind: EntityKind) => void) | undefined;
+  /**
+   * Someone's nameplate or body tapped, clicked or long-pressed, by session or speaker id; the
+   * player card opens for players.
+   */
+  onNameTap:
+    | ((id: string, name: string, kind: EntityKind, part: "name" | "body") => void)
+    | undefined;
+  /**
+   * The player picked an emote on the wheel: the world scene plays it on the own body at once,
+   * before the server's echo, which it should then skip (the wheel shows the icon itself).
+   */
+  onSelfEmote: ((id: string) => void) | undefined;
   private readonly listeners = new Set<(map: MapView | undefined) => void>();
 
   /** The world scene started on a map. */

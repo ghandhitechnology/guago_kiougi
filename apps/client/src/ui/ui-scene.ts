@@ -9,6 +9,7 @@ import { Hud } from "../hud/hud.ts";
 import { hud } from "../hud/store.ts";
 import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
+import { type SocialUi, startSocialUi } from "../social/social-ui.ts";
 import { session } from "../world/session.ts";
 import { PlaceBanner } from "./banner.ts";
 import { DialogueBox } from "./dialogue.ts";
@@ -28,6 +29,7 @@ export class UiScene extends Phaser.Scene {
         chat: ChatPanel | undefined;
         sticks: Joystick[];
         notebook: Notebook;
+        social: SocialUi | undefined;
         stop: () => void;
       }
     | undefined;
@@ -67,14 +69,20 @@ export class UiScene extends Phaser.Scene {
     const touch = touchScreen();
     const chat = link ? new ChatPanel(this, link, { top: touch, rows: touch ? 5 : 7 }) : undefined;
     chat?.setFoldedButton(!touch);
-    const notebook = new Notebook(this, () => hudView.setVisible(true));
+    let social: SocialUi | undefined;
+    const notebook = new Notebook(this, () => {
+      hudView.setVisible(true);
+      social?.setHudVisible(true);
+    });
     const hudView = new Hud(
       this,
       {
         openMenu: () => {
           hudView.setVisible(false);
+          social?.setHudVisible(false);
           notebook.open();
         },
+        emote: () => social?.toggleWheel(),
         openChat: () => chat?.open(),
         cycleMode: () => fight()?.cycleMode(),
         dodge: () => fight()?.dodge(),
@@ -84,6 +92,7 @@ export class UiScene extends Phaser.Scene {
       touch,
     );
     if (chat && touch) chat.onShownChange = (shown) => hudView.setChatOpen(shown);
+    social = link ? startSocialUi(this, link, { chat, hud: hudView }) : undefined;
     // The left thumb walks; the right one aims, only while there is a fight to aim in. Neither
     // works under a dialogue.
     const sticks: Joystick[] = [];
@@ -109,7 +118,9 @@ export class UiScene extends Phaser.Scene {
         return true;
       }
       if (e.key === "Escape") {
+        if (social?.back()) return true;
         hudView.setVisible(false);
+        social?.setHudVisible(false);
         notebook.open();
         return true;
       }
@@ -136,6 +147,7 @@ export class UiScene extends Phaser.Scene {
       chat,
       sticks,
       notebook,
+      social,
       stop: () => {
         unplace();
         unfight();
@@ -157,6 +169,7 @@ export class UiScene extends Phaser.Scene {
     this.dialogue.onOpenChange = undefined;
     w.stop();
     w.notebook.close();
+    w.social?.destroy();
     w.chat?.destroy();
     for (const s of w.sticks) s.destroy();
     w.hud.destroy();

@@ -1,6 +1,8 @@
 import * as Phaser from "phaser";
+import { emblemTexture } from "../social/emblem.ts";
 import { Label, measure, wrap } from "../ui/text.ts";
 import { paint, sliceOf } from "../ui/theme.ts";
+import { clubOf, worldPeople } from "./people.ts";
 import { worldView } from "./view.ts";
 
 /**
@@ -23,6 +25,10 @@ interface Plate {
   readonly root: Phaser.GameObjects.Container;
   readonly back: Phaser.GameObjects.NineSlice;
   readonly label: Label;
+  /** Another player's body, for taps and long presses on it. */
+  body?: Phaser.GameObjects.Zone;
+  /** The club line under the name: emblem and club name. */
+  tag?: Phaser.GameObjects.Container | undefined;
   x: number;
   y: number;
 }
@@ -46,11 +52,13 @@ export class WorldOverlays {
   private prompt: Phaser.GameObjects.Image | undefined;
   private promptAt = { x: 0, y: 0 };
   private clock = 0;
+  private readonly unpeople: () => void;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     scene.events.on(Phaser.Scenes.Events.UPDATE, this.tick, this);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.destroy());
+    this.unpeople = worldPeople.on((sid) => this.clubTag(sid));
   }
 
   /** A nameplate for someone, created or renamed. */
@@ -63,11 +71,17 @@ export class WorldOverlays {
       const color = kind === "npc" ? "gold.light" : "stone.bright";
       const label = new Label(this.scene, 3, 2, "", { font: "galmuri9", color });
       const root = this.scene.add.container(0, 0, [back, label.obj]).setDepth(DEPTH);
+      p = { root, back, label, x: 0, y: 0 };
       if (kind !== "self") {
         back.setInteractive({ useHandCursor: true });
-        back.on("pointerup", () => worldView.onNameTap?.(id, p?.label.obj.text ?? name, kind));
+        this.tappable(back, id, kind, "name");
       }
-      p = { root, back, label, x: 0, y: 0 };
+      if (kind === "player") {
+        // The body: the student's 16×24 above the feet.
+        p.body = this.scene.add.zone(0, 0, 16, 26).setOrigin(0.5, 1).setDepth(DEPTH);
+        p.body.setInteractive({ useHandCursor: true });
+        this.tappable(p.body, id, kind, "body");
+      }
       this.plates.set(id, p);
     }
     p.label.set(name);
@@ -75,6 +89,7 @@ export class WorldOverlays {
     p.back.setSize(w, 13);
     p.label.at(-Math.ceil(w / 2) + 3, 2);
     p.back.setX(-Math.ceil(w / 2));
+    this.clubTag(id);
   }
 
   /** Where someone's feet are now. */
@@ -84,10 +99,13 @@ export class WorldOverlays {
     p.x = Math.round(x);
     p.y = Math.round(y);
     p.root.setPosition(p.x, p.y + 2);
+    p.body?.setPosition(p.x, p.y + 1);
   }
 
   remove(id: string): void {
-    this.plates.get(id)?.root.destroy();
+    const p = this.plates.get(id);
+    p?.root.destroy();
+    p?.body?.destroy();
     this.plates.delete(id);
     for (const b of this.bubbles) if (b.owner === id) b.expires = 0;
   }
@@ -126,8 +144,20 @@ export class WorldOverlays {
     const tail = this.scene.add
       .image(Math.floor(w / 2) - 2, h - 1, "ui", "bubble-tail/idle")
       .setOrigin(0);
-    const root = this.scene.add.container(0, 0, [back, tail, ...parts]).setDepth(DEPTH + 1);
     const chars = [...text].length;
+    this.pushBubble(id, p, [back, tail, ...parts], w, h, Math.min(7000, 2600 + chars * 70));
+  }
+
+  /** A bubble of `w`×`h` over someone's head for `ms`, stacking over their older ones. */
+  private pushBubble(
+    id: string,
+    p: Plate,
+    parts: Phaser.GameObjects.GameObject[],
+    w: number,
+    h: number,
+    ms: number,
+  ): void {
+    const root = this.scene.add.container(0, 0, parts).setDepth(DEPTH + 1);
     const bubble: Bubble = {
       root,
       owner: id,
@@ -135,7 +165,7 @@ export class WorldOverlays {
       h,
       shown: 0,
       lift: 0,
-      expires: this.clock + Math.min(7000, 2600 + chars * 70),
+      expires: this.clock + ms,
       leaving: false,
     };
     // Older lines from the same person rise above this one; the oldest beyond the stack goes.
@@ -148,6 +178,87 @@ export class WorldOverlays {
     root.setScale(0.6).setAlpha(0);
     this.scene.tweens.add({ targets: root, scale: 1, alpha: 1, duration: 120, ease: "Back.Out" });
     this.layoutBubble(bubble, p);
+  }
+
+  /**
+   * An emote's icon in a small bubble over someone's head, by session id: it pops in, bobs once
+   * and goes. A newer line or emote from the same person pushes it up like a speech bubble.
+   */
+  emote(id: string, emoteId: string): void {
+    const p = this.plates.get(id);
+    const frame = `emote-icon/${emoteId}`;
+    if (!p || !this.scene.textures.getFrame("ui", frame)) return;
+    const w = 18;
+    const h = 17;
+    const [l, r, t, b] = sliceOf("bubble");
+    const back = this.scene.add.nineslice(0, 0, "ui", "bubble/idle", w, h, l, r, t, b).setOrigin(0);
+    const tail = this.scene.add
+      .image(Math.floor(w / 2) - 2, h - 1, "ui", "bubble-tail/idle")
+      .setOrigin(0);
+    const icon = this.scene.add.image(3, 3, "ui", frame).setOrigin(0);
+    this.pushBubble(id, p, [back, tail, icon], w, h, 2400);
+    this.scene.tweens.add({ targets: icon, y: 2, duration: 160, yoyo: true, delay: 140 });
+  }
+
+  /** Taps and long presses on a nameplate or a body ask the world view's listener. */
+  private tappable(
+    target: Phaser.GameObjects.GameObject,
+    id: string,
+    kind: PlateKind,
+    part: "name" | "body",
+  ): void {
+    let downAt = 0;
+    let held: Phaser.Time.TimerEvent | undefined;
+    const fire = () => {
+      const name = this.plates.get(id)?.label.obj.text ?? "";
+      if (kind !== "self") worldView.onNameTap?.(id, name, kind, part);
+    };
+    target.on("pointerdown", () => {
+      downAt = this.clock;
+      held?.remove();
+      // A long press opens at once on touch, without waiting for the finger to lift.
+      held = this.scene.time.delayedCall(420, () => {
+        held = undefined;
+        downAt = -1;
+        fire();
+      });
+    });
+    target.on("pointerup", () => {
+      held?.remove();
+      held = undefined;
+      if (downAt >= 0 && this.clock - downAt < 420) fire();
+      downAt = -1;
+    });
+    target.on("pointerout", () => {
+      held?.remove();
+      held = undefined;
+      downAt = -1;
+    });
+  }
+
+  /** Puts the club line under a player's nameplate, or takes it away. */
+  private clubTag(id: string): void {
+    const p = this.plates.get(id);
+    if (!p) return;
+    const body = worldPeople.get(id);
+    const club = body ? clubOf(body) : undefined;
+    p.tag?.destroy();
+    p.tag = undefined;
+    if (!club) return;
+    const label = new Label(this.scene, 15, 2, club.name, {
+      font: "galmuri9",
+      color: "grass.pale",
+    });
+    const w = label.width + 18;
+    const [l, r, t, b] = sliceOf("nameplate");
+    const back = this.scene.add.nineslice(0, 0, "ui", "nameplate/idle", w, 13, l, r, t, b);
+    back.setOrigin(0);
+    const emblem = this.scene.add
+      .image(2, 1, emblemTexture(this.scene, club.emblem, "s"))
+      .setOrigin(0);
+    const tag = this.scene.add.container(-Math.ceil(w / 2), 14, [back, emblem, label.obj]);
+    p.root.add(tag);
+    p.tag = tag;
   }
 
   /** The prompt over the thing in reach, by kind (`talk`, `use`, `read`); `undefined` clears it. */
@@ -231,8 +342,12 @@ export class WorldOverlays {
   }
 
   destroy(): void {
+    this.unpeople();
     this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.tick, this);
-    for (const p of this.plates.values()) p.root.destroy();
+    for (const p of this.plates.values()) {
+      p.root.destroy();
+      p.body?.destroy();
+    }
     this.plates.clear();
     for (const b of this.bubbles) b.root.destroy();
     this.bubbles.length = 0;
