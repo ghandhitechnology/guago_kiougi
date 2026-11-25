@@ -7,15 +7,24 @@ export const MAX_NUMBERS = 40;
  * New numbers a frame may add. Past it, only crits and hits well above the recent average still
  * get one: a sweep through thirty monsters shows its biggest hits, not thirty labels.
  */
-const NEW_PER_FRAME = 3;
-/** A number that has taken this many hits moves up to the big font. */
+const NEW_PER_FRAME = 2;
+/** Ordinary hits on screen at once; past it the oldest of them is let go early. */
+const MAX_SMALL = 12;
+/** A number that has taken this many hits is a merged total and moves up to the big font. */
 const BIG_AFTER = 3;
 /** A hit on the same target within this keeps growing the same number. */
 const MERGE_MS = 420;
-const LIFE_MS = 720;
-const FADE_MS = 180;
-/** A new number standing on another moves up by this, px: a line of the small font and a gap. */
-const STACK_PX = 9;
+const LIFE_MS = 680;
+const BIG_LIFE_MS = 900;
+const FADE_MS = 160;
+/** The arc: thrown up and away from the player, falling back a little before it fades. */
+const RISE = 105;
+const SIDE = 22;
+const GRAVITY = 300;
+/** The player's own body, around their feet: no number is drawn over it. */
+const BODY_HALF_W = 9;
+const BODY_TOP = 28;
+const BODY_BOTTOM = 3;
 /** Above the world, under the reticle. */
 const DEPTH = 20;
 
@@ -29,15 +38,19 @@ export const NumberStyle = {
   Hurt: 3,
   /** Healing and shields. */
   Heal: 4,
+  /** Several hits or kills merged into one event: the big font. */
+  Total: 5,
 } as const;
 export type NumberStyle = (typeof NumberStyle)[keyof typeof NumberStyle];
 
+/** The digit fonts as drawn: outlined, no box; small for hits, big for crits and totals. */
 const FONT: Readonly<Record<NumberStyle, string>> = {
   [NumberStyle.Hit]: "dmg-small",
   [NumberStyle.Crit]: "dmg-crit",
   [NumberStyle.Small]: "dmg-small",
   [NumberStyle.Hurt]: "dmg-small-crit",
   [NumberStyle.Heal]: "dmg-small",
+  [NumberStyle.Total]: "dmg",
 };
 
 interface Num {
@@ -47,11 +60,14 @@ interface Num {
   amount: number;
   /** ms since it last grew. */
   age: number;
-  /** ms since it appeared. */
+  /** ms since its arc started. */
   total: number;
+  life: number;
+  /** Where its arc starts, and the arc's sideways and upward speeds, px/s. */
   x: number;
   y: number;
-  drift: number;
+  vx: number;
+  vy: number;
   pop: number;
   alive: boolean;
   /** Order it appeared in, for recycling the oldest. */
@@ -60,10 +76,14 @@ interface Num {
   hits: number;
 }
 
+const big = (s: NumberStyle) => s === NumberStyle.Crit || s === NumberStyle.Total;
+
 /**
  * Pooled damage numbers (PLAN §6): forty at most, rapid hits on one target merging into one
- * number that grows and pops each time it is added to, Korean units (만, 억, 조), crits in their
- * own font and bigger. A number rises and eases out; when every slot is taken the oldest goes.
+ * number that grows, Korean units (만, 억, 조). Each is the bitmap digits as drawn, with no box:
+ * small for ordinary hits, the big fonts only for crits and merged totals. A number is thrown up
+ * and away from the player in a short arc, so it leaves the body it belongs to instead of
+ * covering it, and it is never drawn over the player.
  */
 export class DamageNumbers {
   private readonly pool: Num[] = [];
@@ -73,7 +93,10 @@ export class DamageNumbers {
   visible = 0;
   private added = 0;
   private average = 0;
-  /** Extra scale and rise for small screens are not needed: the game is drawn at 480×270. */
+  /** Where the player stands this frame. */
+  private selfX = 0;
+  private selfY = 0;
+
   constructor(scene: Phaser.Scene) {
     for (let i = 0; i < MAX_NUMBERS; i++) {
       const text = scene.add.bitmapText(0, 0, FONT[NumberStyle.Hit], "");
@@ -85,9 +108,11 @@ export class DamageNumbers {
         amount: 0,
         age: 0,
         total: 0,
+        life: LIFE_MS,
         x: 0,
         y: 0,
-        drift: 0,
+        vx: 0,
+        vy: 0,
         pop: 0,
         alive: false,
         born: 0,
@@ -116,68 +141,88 @@ export class DamageNumbers {
     }
     if (n) {
       n.amount += amount;
-      // A crit inside a merge makes the whole number a crit.
-      if (style === NumberStyle.Crit && n.style !== NumberStyle.Crit) {
-        n.style = style;
-        n.text.setFont(FONT[style]);
+      n.hits++;
+      // A crit inside a merge makes the whole number a crit; enough hits make it a total.
+      const next =
+        style === NumberStyle.Crit || n.style === NumberStyle.Crit
+          ? NumberStyle.Crit
+          : n.hits >= BIG_AFTER
+            ? NumberStyle.Total
+            : n.style;
+      if (next !== n.style) {
+        n.style = next;
+        n.text.setFont(FONT[next]);
       }
       n.age = 0;
-      n.hits++;
-      if (n.style === NumberStyle.Hit && n.hits >= BIG_AFTER && n.text.font !== "dmg")
-        n.text.setFont("dmg");
-      n.pop = style === NumberStyle.Crit ? 1 : 0.7;
-      n.x = x;
-      n.y = Math.min(n.y, y);
+      n.pop = 1;
+      n.life = big(n.style) ? BIG_LIFE_MS : LIFE_MS;
+      // It grows where its target is: the arc starts again from over the head.
+      this.throwFrom(n, x, y);
       n.text.setText(formatKorean(n.amount));
       return;
     }
     if (amount < 1) return;
     // A plain hit over the frame's budget only shows when it stands out.
     const standout =
-      style === NumberStyle.Crit || style === NumberStyle.Hurt || amount > this.average * 2;
+      style === NumberStyle.Crit ||
+      style === NumberStyle.Hurt ||
+      style === NumberStyle.Total ||
+      amount > this.average * 2;
     this.average = this.average === 0 ? amount : this.average * 0.95 + amount * 0.05;
     if (this.added >= NEW_PER_FRAME && !standout) return;
     this.added++;
+    if (!big(style) && style !== NumberStyle.Hurt) this.retireSmall();
     n = this.free();
     n.alive = true;
     n.target = target;
     n.style = style;
     n.amount = amount;
     n.age = 0;
-    n.total = 0;
-    this.side = -this.side;
-    n.drift = this.side * (2 + Math.random() * 4);
-    n.pop = style === NumberStyle.Crit ? 1.2 : 0.8;
+    n.pop = 1;
+    n.life = big(style) ? BIG_LIFE_MS : LIFE_MS;
     n.born = this.serial++;
     n.hits = 1;
     n.text.setFont(FONT[style]);
     n.text.setText(formatKorean(amount)).setVisible(true).setAlpha(1);
     n.text.clearTint();
     if (style === NumberStyle.Heal) n.text.setTint(0xacd26a);
-    n.x = x + (Math.random() - 0.5) * 8;
-    n.y = this.clear(n, n.x, y - Math.random() * 4);
+    this.throwFrom(n, x, y);
   }
 
   /**
-   * The height a new number at (x, y) can stand at without covering one already rising there:
-   * it stacks above, so a crowd's numbers read as a column instead of a smudge.
+   * One merged total for an event made of many hits (a multi-kill): the big font, thrown from
+   * the middle of it.
    */
-  private clear(n: Num, x: number, y: number): number {
-    const w = n.text.width;
-    for (let tries = 0; tries < 4; tries++) {
-      let moved = false;
-      for (const p of this.pool) {
-        if (!p.alive || p === n) continue;
-        const f = Math.min(1, p.total / LIFE_MS);
-        const px = p.x + p.drift * f;
-        const py = p.y - 16 * (1 - (1 - f) * (1 - f));
-        if (Math.abs(px - x) * 2 >= w + p.text.width || Math.abs(py - y) >= STACK_PX) continue;
-        y = py - STACK_PX;
-        moved = true;
-      }
-      if (!moved) break;
+  total(x: number, y: number, amount: number): void {
+    this.show(-1, x, y, amount, NumberStyle.Total);
+  }
+
+  /** Starts a number's arc at (x, y): up, and away from the player's side. */
+  private throwFrom(n: Num, x: number, y: number): void {
+    const dx = x - this.selfX;
+    let side: number;
+    if (Math.abs(dx) > 4) side = Math.sign(dx);
+    else {
+      this.side = -this.side;
+      side = this.side;
     }
-    return y;
+    n.x = x;
+    n.y = y;
+    n.total = 0;
+    n.vx = side * SIDE * (0.6 + Math.random() * 0.8) * (big(n.style) ? 0.5 : 1);
+    n.vy = -RISE * (0.9 + Math.random() * 0.2) * (big(n.style) ? 1.1 : 1);
+  }
+
+  /** Lets the oldest ordinary hit go early when too many are up. */
+  private retireSmall(): void {
+    let count = 0;
+    let oldest: Num | undefined;
+    for (const p of this.pool) {
+      if (!p.alive || big(p.style) || p.style === NumberStyle.Hurt) continue;
+      count++;
+      if (!oldest || p.born < oldest.born) oldest = p;
+    }
+    if (count >= MAX_SMALL && oldest) oldest.age = Math.max(oldest.age, oldest.life - FADE_MS);
   }
 
   private free(): Num {
@@ -189,34 +234,44 @@ export class DamageNumbers {
     return oldest as Num;
   }
 
-  update(dtMs: number): void {
+  /** Moves every number along its arc; (selfX, selfY) is where the player is drawn. */
+  update(dtMs: number, selfX: number, selfY: number): void {
     this.added = 0;
+    this.selfX = selfX;
+    this.selfY = selfY;
     let visible = 0;
     for (const n of this.pool) {
       if (!n.alive) continue;
       n.age += dtMs;
       n.total += dtMs;
-      if (n.age >= LIFE_MS) {
+      if (n.age >= n.life) {
         n.alive = false;
         n.text.setVisible(false);
         continue;
       }
       visible++;
-      // Rise fast, then hang: ease out over the life since it last grew.
-      const f = Math.min(1, n.total / LIFE_MS);
-      const rise = 16 * (1 - (1 - f) * (1 - f));
-      n.pop = Math.max(0, n.pop - dtMs / 90);
-      const crit = n.style === NumberStyle.Crit;
-      // Pops are whole steps so the font keeps its pixels: a crit doubles for a beat, any
-      // other number kicks up a few pixels each time it grows.
-      const scale = crit && n.pop > 0.5 ? 2 : 1;
-      const kick = Math.round(n.pop * 4);
-      const shake = crit && n.age < 120 ? (Math.random() < 0.5 ? -1 : 1) : 0;
-      n.text
-        .setScale(scale)
-        .setPosition(Math.round(n.x + n.drift * f + shake), Math.round(n.y - rise - kick))
-        .setDepth(DEPTH + (crit ? 1 : 0) + n.born * 1e-6);
-      const left = LIFE_MS - n.age;
+      const s = n.total / 1000;
+      // Each new hit kicks it up a pixel or two for a beat; pops are whole pixels, never a scale.
+      n.pop = Math.max(0, n.pop - dtMs / 110);
+      const kick = Math.round(n.pop * (big(n.style) ? 3 : 2));
+      let x = Math.round(n.x + n.vx * s);
+      const y = Math.round(n.y + n.vy * s + 0.5 * GRAVITY * s * s) - kick;
+      const shake = n.style === NumberStyle.Crit && n.age < 100 ? ((n.age / 34) & 1 ? 1 : -1) : 0;
+      // Never over the player: a number that would cross their body steps out to its side.
+      const half = n.text.width / 2;
+      if (
+        x + half > selfX - BODY_HALF_W &&
+        x - half < selfX + BODY_HALF_W &&
+        y > selfY - BODY_TOP &&
+        y - n.text.height < selfY + BODY_BOTTOM
+      ) {
+        x =
+          x >= selfX
+            ? Math.ceil(selfX + BODY_HALF_W + half + 1)
+            : Math.floor(selfX - BODY_HALF_W - half - 1);
+      }
+      n.text.setPosition(x + shake, y).setDepth(DEPTH + (big(n.style) ? 1 : 0) + n.born * 1e-6);
+      const left = n.life - n.age;
       n.text.setAlpha(left < FADE_MS ? left / FADE_MS : 1);
     }
     this.visible = visible;

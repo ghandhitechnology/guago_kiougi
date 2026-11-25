@@ -789,7 +789,7 @@ export class FightView {
     const own = this.own;
     const hpShare = own ? Math.max(0, this.selfHp) / Math.max(1, own.maxHp) : 1;
     this.overlays.update(this.bodies.byId.values(), dt, hpShare, this.options.selfBar ?? true);
-    ctx.numbers.update(dt);
+    ctx.numbers.update(dt, ctx.selfX, ctx.selfY);
     ctx.particles.update(dt);
     ctx.lights.update(dt);
     ctx.sound.update(now);
