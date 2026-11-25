@@ -313,6 +313,7 @@ export class ViewerScene extends Phaser.Scene {
   private gradeOn = true;
 
   private demo: ((t: number, dt: number) => void) | null = null;
+  private panT = 0;
   private demoTime = 0;
 
   override update(_time: number, delta: number): void {
@@ -330,6 +331,15 @@ export class ViewerScene extends Phaser.Scene {
       const p = this.pointOnPath(this.pathT);
       this.moveTo(this.hero, p[0], p[1], dt, true);
       cam.centerOn(Math.round(this.hero.sprite.x), Math.round(this.hero.sprite.y - 12));
+    } else if (this.params.get("pan") === "1") {
+      // A slow drift over the whole map, for recordings of maps without a walk.
+      this.panT += dt;
+      const w = Math.max(0, this.view.width - cam.width);
+      const h = Math.max(0, this.view.height - cam.height);
+      cam.setScroll(
+        Math.round(w * (0.5 - 0.5 * Math.cos(this.panT * 0.21))),
+        Math.round(h * (0.5 - 0.5 * Math.cos(this.panT * 0.13 + 0.6))),
+      );
     } else {
       const speed = 180 * dt;
       if (this.cursors.left.isDown) cam.scrollX -= speed;

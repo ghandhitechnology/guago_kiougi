@@ -85,6 +85,35 @@ function distanceField(mask: Uint8Array, w: number, rect: Rect): Float32Array {
   return d;
 }
 
+/** A box blur of a distance field, `r` pixels each way, in two passes. */
+function blurField(src: Float32Array, w: number, h: number, r: number): Float32Array {
+  const a = new Float32Array(w * h);
+  const b = new Float32Array(w * h);
+  const cap = 4096;
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = -r; x <= r; x++)
+      sum += Math.min(cap, src[y * w + Math.max(0, Math.min(w - 1, x))] as number);
+    for (let x = 0; x < w; x++) {
+      a[y * w + x] = sum / (2 * r + 1);
+      const add = src[y * w + Math.min(w - 1, x + r + 1)] as number;
+      const sub = src[y * w + Math.max(0, x - r)] as number;
+      sum += Math.min(cap, add) - Math.min(cap, sub);
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += a[Math.max(0, Math.min(h - 1, y)) * w + x] as number;
+    for (let y = 0; y < h; y++) {
+      b[y * w + x] = sum / (2 * r + 1);
+      sum +=
+        (a[Math.min(h - 1, y + r + 1) * w + x] as number) -
+        (a[Math.max(0, y - r) * w + x] as number);
+    }
+  }
+  return b;
+}
+
 /** Ragged-edge noise in pixels, as the contact sheet breaks its painted bands. */
 function ragged(x: number, y: number, amount: number, seed: number): number {
   const n = 0.65 * valueNoise(x, y, 7, seed) + 0.35 * valueNoise(x, y, 2.5, seed + 9);
@@ -191,17 +220,24 @@ export function buildRegionLight(
     new Uint8Array(rect.w * rect.h),
     new Uint8Array(rect.w * rect.h),
   ];
+  // The spill measures distance from a softened lip, so its bands sweep in broad arcs instead
+  // of copying every tooth of the torn edge; its edges break on large, slow noise.
+  const soft = blurField(field, rect.w, rect.h, 10);
+  const swell2 = (x: number, y: number, s: number) =>
+    (0.7 * valueNoise(x, y, 26, s) + 0.3 * valueNoise(x, y, 11, s + 7) - 0.5) * 2 * amount * 0.7;
   const spill = (variant: 0 | 1) =>
     makeCanvasTexture(scene, `rift:${id}:spill${variant}`, rect.w, rect.h, (d) => {
       for (let y = 0; y < rect.h; y++) {
         for (let x = 0; x < rect.w; x++) {
           const dist = field[y * rect.w + x] as number;
+          const smooth = soft[y * rect.w + x] as number;
           const wx = rect.x + x;
           const wy = rect.y + y;
           let v = 0;
           if (dist > 0) {
             const reach = reachMax * shaft(wx, wy, variant * 1.7);
-            const f = 1 - (dist + ragged(wx, wy, amount, seed + variant * 31)) / reach;
+            const f =
+              1 - (Math.max(dist * 0.35, smooth) + swell2(wx, wy, seed + variant * 31)) / reach;
             v = f <= 0 ? 0 : f ** 1.35;
           }
           const o = (y * rect.w + x) * 4;
