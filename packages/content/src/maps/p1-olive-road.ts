@@ -3,12 +3,14 @@ import {
   blob,
   cellOf,
   edgeLine,
-  GREEK_LEGEND,
+  fieldLegend,
   merge,
   type Placed,
   px,
+  rubble,
   scatter,
   settle,
+  track,
   trees,
 } from "./greek.ts";
 import type { Decal, Prop, Vec } from "./layers.ts";
@@ -225,6 +227,14 @@ const placed = merge(
 );
 
 const details: (Decal | Prop)[] = [
+  // The cart road's ruts, the farm track, and the path worn down to the bridge.
+  ...track("ruts", ROAD, PLAN),
+  ...track("ruts", FARM_TRACK, PLAN),
+  ...track("footpath", WEST_PATH, PLAN),
+  // Stone the ploughs turned up and heaped by the walls.
+  ...rubble([20, 34], 4, 5, 21, PLAN),
+  ...rubble([55, 10], 4, 5, 22, PLAN),
+  ...rubble([28, 50], 4, 4, 23, PLAN),
   { prop: "bridge", at: [32, 330], raw: true },
   { prop: "oil-stain", at: [920, 680] },
   { prop: "oil-stain", at: [952, 700], flip: true },
@@ -248,7 +258,7 @@ const map: MapSource = {
   sky: "olive.mid",
   ambient: { color: "stone.bright", intensity: 0.92 },
   plan: PLAN,
-  legend: GREEK_LEGEND,
+  legend: fieldLegend("slab"),
   details,
   shadows: placed.shadows,
   objects: placed.objects,

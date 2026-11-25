@@ -676,6 +676,102 @@ const SURF = [
   `,
 ];
 
+// The roof, fallen -----------------------------------------------------------------------------------
+
+/**
+ * The pediment's east half where it came down: the raking cornice still lit along its edge, the
+ * tympanum behind it with the legs of a carved horse and the hem of a robe, its broken end raw.
+ * Lying on its back, so we see it from above and a little in front.
+ */
+function pedimentFallen(): string {
+  const W = 58;
+  const H = 24;
+  const pic = Pic.blank(W, H);
+  // The tympanum: a long low triangle, its apex to the west.
+  for (let x = 2; x < W - 4; x++) {
+    const top = Math.round(18 - (x - 2) * 0.2);
+    const bottom = 20;
+    for (let y = top; y <= bottom; y++) pic.set(x, y, y === top ? "w" : y === top + 1 ? "k" : "K");
+    // The raking cornice: a thick lit band along the top edge.
+    for (let k = 1; k <= 3; k++) pic.set(x, top - k, k === 3 ? "w" : k === 2 ? "k" : "K");
+  }
+  // The relief: horse legs and a robe's hem, worn soft.
+  for (const [x, y, h] of [
+    [14, 15, 4],
+    [17, 15, 4],
+    [24, 14, 5],
+    [27, 14, 5],
+  ] as const)
+    for (let k = 0; k < h; k++) pic.set(x, y + k, "v").set(x + 1, y + k, "M");
+  for (let x = 34; x < 44; x++) pic.set(x, 17, x % 2 ? "v" : "M").set(x, 18, "v");
+  // The broken end, east: a ragged lit face.
+  for (let y = 4; y < 21; y++) {
+    const end = W - 4 - ((y * 7) % 4);
+    for (let x = end; x < W - 2; x++)
+      pic.set(x, y, pic.at(x - 1, y) === "." ? "." : x === end ? "w" : ".");
+  }
+  // The underside where it lies: a dark sliver.
+  for (let x = 3; x < W - 6; x++) pic.set(x, 21, "M").set(x, 22, "S");
+  return finish(pic, "d", "K");
+}
+
+/** An acroterion knocked from the roof's corner: a scroll of marble lying on its side. */
+const ACROTERION = `
+  ....dddddd....
+  ..ddwwkkKKdd..
+  .dwwkdddkKKMd.
+  dwkkd.dd.dKMd.
+  dkKKddkkddKMSd
+  dKKKKKKKKKMMSd
+  .ddddddddddddd
+`;
+
+/**
+ * A kore, a robed marble girl, lying on her back where she fell from the porch, broken at the
+ * knees: braids, the folds of her robe in long ridges, one hand still holding an offering.
+ */
+function statueToppled(): string {
+  const W = 44;
+  const H = 16;
+  const pic = Pic.blank(W, H);
+  const body = (x: number): [number, number] | null => {
+    if (x < 3 || x > 38) return null;
+    if (x < 9) return [6, 11]; // head and braids
+    if (x < 11) return [7, 10]; // neck
+    if (x < 30) return [4, 13]; // robe, shoulders to hips
+    return [5, 12]; // legs to the break
+  };
+  for (let x = 0; x < W; x++) {
+    const span = body(x);
+    if (!span) continue;
+    const [y0, y1] = span;
+    for (let y = y0; y <= y1; y++) {
+      const u = (y - y0) / Math.max(1, y1 - y0);
+      let ch = u < 0.25 ? "w" : u < 0.6 ? "k" : u < 0.85 ? "K" : "M";
+      // Folds: long ridges down the robe.
+      if (x > 11 && x < 37 && (y - y0) % 3 === 2 && x % 5 !== 0) ch = "v";
+      pic.set(x, y, ch);
+    }
+  }
+  // Braids over the shoulder, the offering in the hand.
+  pic.put("vvv\nv.v", 5, 5);
+  pic.put("rr\nrr", 18, 3);
+  // The break at the knees, raw and pale.
+  for (let y = 5; y <= 12; y++) pic.set(38, y, "w");
+  // The feet and plinth lie a little apart.
+  pic.put(
+    `
+      .dddd.
+      dwkKMd
+      dkKMSd
+      .dddd.
+    `,
+    W - 6,
+    8,
+  );
+  return finish(pic, "d", "k", "r");
+}
+
 export default [
   one("entablature", [88, COL_H + 2], entablature(), { origin: [42, COL_H + 1] }),
   sprite({
@@ -698,6 +794,11 @@ export default [
     anim: { idle: { frames: ["low"], fps: 1 } },
   }),
   one("statue", [18, 39], statue(), { shadow: oval(18, 39, 9.5, 38, 9.5, 1.6) }),
+  one("pediment-fallen", [58, 24], pedimentFallen(), { shadow: oval(58, 24, 30, 22, 28, 2) }),
+  one("acroterion", [14, 7], finish(Pic.of(ACROTERION), "d", "k"), {
+    shadow: oval(14, 7, 7, 6, 7, 1.4),
+  }),
+  one("statue-toppled", [44, 16], statueToppled(), { shadow: oval(44, 16, 22, 14, 20, 1.8) }),
   one("statue-head", [8, 6], finish(Pic.of(STATUE_HEAD), "d", "k")),
   one("herm", [12, 31], herm(), {
     lone: "d",

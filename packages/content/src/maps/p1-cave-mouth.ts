@@ -1,5 +1,15 @@
 import type { LightSource, MapSource, Thing } from "./format.ts";
-import { cellOf, edgeLine, GREEK_LEGEND, merge, type Placed, scatter, settle } from "./greek.ts";
+import {
+  cellOf,
+  edgeLine,
+  fieldLegend,
+  merge,
+  type Placed,
+  rubble,
+  scatter,
+  settle,
+  track,
+} from "./greek.ts";
 import type { Decal, Prop, Vec } from "./layers.ts";
 import { fractal } from "./noise.ts";
 import { PlanGrid } from "./plan.ts";
@@ -134,15 +144,14 @@ const at = cellOf(PLAN);
 const CLIFF_FOOT = 9 * T;
 
 function cliff(): Placed {
-  const frames = ["a", "b", "c", "b", "a", "c"];
   return {
     objects: [
-      ...Array.from(
-        { length: W / 4 },
-        (_, k): Prop => ({
-          prop: "cliff-face",
-          frame: frames[k % frames.length] as string,
-          at: [k * 64, CLIFF_FOOT],
+      // The wall, one piece in five sections.
+      ...[0, 1, 2, 3, 4].map(
+        (k): Prop => ({
+          prop: "cliff-wall",
+          frame: `s${k}`,
+          at: [k * 256, CLIFF_FOOT + 4],
           sort: CLIFF_FOOT - 8,
         }),
       ),
@@ -276,7 +285,42 @@ const DROPPED: readonly [x: number, y: number, frame: string][] = [
   [610, 760, "man"],
 ];
 
+/** The path everyone walks along the valley floor, from the grove to the city road. */
+const VALLEY: readonly Vec[] = [
+  [0, 45],
+  [12, 46],
+  [26, 44],
+  [40, 47],
+  [56, 46],
+  [70, 49],
+  [79, 49],
+];
+
+/** Steps cut where each terrace ends, so the way down reads from above. */
+const STEPS: readonly Vec[] = [
+  [30, 23],
+  [49, 22],
+  [14, 38],
+  [24, 37],
+  [57, 39],
+  [66, 38],
+];
+
 const details: (Decal | Prop)[] = [
+  ...STEPS.map(([x, y]): Prop => ({ prop: "rock-steps", at: [x * T + 8, y * T + 6] })),
+  ...track("footpath", VALLEY, PLAN),
+  ...track(
+    "footpath",
+    [
+      [41, 10],
+      [42, 18],
+      [38, 30],
+      [36, 44],
+    ],
+    PLAN,
+  ),
+  // Rock fallen from the cliff, heaped along its foot.
+  ...[8, 20, 30, 52, 62, 72].flatMap((x, i) => rubble([x, 10], 3, 4, 30 + i, PLAN)),
   ...DROPPED.map(
     ([x, y, frame], i): Prop => ({
       prop: "cutout",
@@ -324,13 +368,6 @@ const lights: LightSource[] = [
     color: "gold.light",
     intensity: 1.45,
     flicker: { amount: 0.16, period: 0.6 },
-    paint: {
-      bands: ["greece", "dusk-fire"],
-      at: [FIRE[0] * T + 8, FIRE[1] * T + 8],
-      r: [84, 50],
-      ragged: 10,
-      pulse: { amount: 0.05, period: 0.6 },
-    },
   },
   ...[CAVE[0] - 3, CAVE[0] + 2].map(
     (tx): LightSource => ({
@@ -339,7 +376,6 @@ const lights: LightSource[] = [
       color: "gold.light",
       intensity: 0.95,
       flicker: { amount: 0.2, period: 0.45 },
-      paint: { bands: ["dusk-fire"], at: [tx * T + 8, 10 * T + 6], r: [24, 12], ragged: 4 },
     }),
   ),
   // The guards' lamp under the awning.
@@ -361,7 +397,7 @@ const map: MapSource = {
   sky: "plum.dark",
   ambient: { color: "plum.light", intensity: 0.5, unlit: "greece" },
   plan: PLAN,
-  legend: GREEK_LEGEND,
+  legend: fieldLegend("slab"),
   backdrop: [{ prop: "dusk-sky", at: [0, 0], repeat: 6, raw: true }],
   details,
   shadows: placed.shadows,

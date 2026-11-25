@@ -127,8 +127,8 @@ const placed = merge({
       }),
     ),
     // The water sculpture in its green basin, and its plaque.
-    place("water-sculpture", GATE_X, 7),
-    { prop: "plaque", at: [GATE_X * T + 52, 9 * T + 14] },
+    place("water-sculpture", GATE_X - 2, 8),
+    { prop: "plaque", at: [(GATE_X + 4) * T + 4, 10 * T + 10] },
     // Benches nobody sits on, a lamp, flowerbeds gone to seed.
     place("bench", 14, 11),
     place("bench", 38, 11),
@@ -202,7 +202,7 @@ const placed = merge({
 
 const details: (Decal | Prop)[] = [
   // Fresh turf at the gate: the only part anyone has touched.
-  { prop: "sod", at: [(GATE_X - 1) * T, 2 * T] },
+  { prop: "sod", at: [(GATE_X - 1) * T - 2, 1 * T + 6] },
   // Lily pads.
   ...(
     [
@@ -231,6 +231,23 @@ const map: MapSource = {
   shadows: placed.shadows,
   objects: placed.objects,
   overhead: placed.overhead,
+  // Mist lying on the pond and the low lawn, drifting.
+  atmosphere: (
+    [
+      [330, 340, 60, 0],
+      [470, 390, 70, 4],
+      [400, 430, 50, 9],
+      [180, 470, 80, 2],
+      [700, 300, 60, 6],
+    ] as const
+  ).map(
+    ([x, y, reach, phase]): Prop => ({
+      prop: "mist",
+      at: [x, y],
+      drift: { to: [x + reach, y - 4], period: 16, phase },
+      raw: true,
+    }),
+  ),
   emitters: [
     {
       sprite: "gnats",
