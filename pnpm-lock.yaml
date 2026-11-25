@@ -111,6 +111,19 @@ importers:
         specifier: 5.0.51
         version: 5.0.51(typescript@7.0.2)
 
+  tools/balance-sim:
+    dependencies:
+      '@guago/content':
+        specifier: workspace:*
+        version: link:../../packages/content
+      '@guago/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+
 packages:
 
   '@better-auth/utils@0.5.1':
