@@ -867,6 +867,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     ]);
     client.view = new StateView();
     const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing, mode);
+    // Through a door (a seat with its facing): the key still held from it does not carry the
+    // player straight back out. A login or a reload carries no key over.
+    if (options.facing !== undefined) this.arrive(id, pawn.player.x, pawn.player.y);
     this.countBytes(client);
     const p = pawn.player;
     client.send(MAP_MESSAGES.zones, { zones: pawn.zones } satisfies ZoneUpdate);
@@ -917,8 +920,6 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       throw error;
     }
     player.facing = facing;
-    // Put down here: a key still held from the last door does not carry it straight back out.
-    this.arrive(id, player.x, player.y);
     player.mode = mode;
     player.exp = loadout.exp;
     // Back within a quarter of an hour: as hurt and as busy as it left (fight/carry.ts).
@@ -1229,11 +1230,13 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const last = list[list.length - 1];
       if (last) this.pressing.set(id, last.mx !== 0 || last.my !== 0);
     }
-    const walkers: { id: string; x: number; y: number; pressing: boolean }[] = [];
+    const walkers: { id: string; x: number; y: number; pressing?: boolean }[] = [];
     for (const p of this.world.players) {
       if (!p.joined || p.down || p.away || MODE_AUTO[p.mode].move) continue;
       if (this.pawns.get(p.id)?.leaving !== false) continue;
-      walkers.push({ id: p.id, x: p.x, y: p.y, pressing: this.pressing.get(p.id) ?? false });
+      // No input yet from a body just seated: the key that brought it may still be down.
+      const pressing = this.pressing.get(p.id);
+      walkers.push({ id: p.id, x: p.x, y: p.y, ...(pressing === undefined ? {} : { pressing }) });
     }
     const doors = stepDoors(this.inside, walkers, this.def.portals, this.arrivals);
     this.inside = new Map(doors.inside);

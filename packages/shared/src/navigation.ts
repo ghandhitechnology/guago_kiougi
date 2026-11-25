@@ -178,7 +178,10 @@ export function stepDoors(
     readonly id: string;
     readonly x: number;
     readonly y: number;
-    /** A direction is held this tick (`holdArrival`); bodies with no arrival may leave it out. */
+    /**
+     * A direction is held by its last input (`holdArrival`); left out before its first input,
+     * which keeps an arrival: the key that brought it may still be down.
+     */
     readonly pressing?: boolean;
   }[],
   portals: readonly Doorway[],
@@ -192,7 +195,7 @@ export function stepDoors(
     const was = before.get(b.id) ?? at;
     inside.set(b.id, at);
     const prior = arrivals.get(b.id);
-    const arrival = prior && holdArrival(prior, b.pressing ?? false, at);
+    const arrival = prior && holdArrival(prior, b.pressing ?? true, at);
     if (arrival) held.set(b.id, arrival);
     if (arrival && at === arrival.door) continue;
     if (at >= 0 && at !== was) entered.push({ id: b.id, portal: at });
