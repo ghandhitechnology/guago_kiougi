@@ -194,6 +194,23 @@ const map: MapSource = {
     d: { terrain: "dirt", theme: "greece" },
     m: { terrain: "marble", theme: "greece" },
   },
+  rules: [
+    // The square field's sand has worn out into the lawn along its edges, never in a line.
+    ...[
+      { x: 13, y: 11, w: 38, h: 2 },
+      { x: 13, y: 48, w: 38, h: 2 },
+      { x: 13, y: 24, w: 1, h: 24 },
+      { x: 50, y: 12, w: 1, h: 17 },
+      { x: 50, y: 34, w: 1, h: 14 },
+    ].map((inside) => ({
+      on: ",",
+      to: "s",
+      scale: 2.2,
+      threshold: 0.5,
+      near: { chars: "s", within: 1 },
+      inside,
+    })),
+  ],
   edges: [{ overlay: "rift", inside: "dm" }],
   stamps: [{ stamp: SHED, at: [64, 24] }],
   blocks: [
