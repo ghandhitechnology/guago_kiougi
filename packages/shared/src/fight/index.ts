@@ -6,6 +6,7 @@ export * from "./boss.ts";
 export * from "./bosses/index.ts";
 export * from "./damage.ts";
 export * from "./director.ts";
+export * from "./duel.ts";
 export * from "./flow.ts";
 export * from "./hash.ts";
 export * from "./monsters.ts";

@@ -99,9 +99,11 @@ export function stepFight(w: FightWorld, inputs?: FightInputs): void {
   w.boss?.step(w);
   stepMonsters(w, w.flow);
   stepDangers(w);
+  w.pvp?.before(w);
   stepWeapons(w);
   stepEffects(w);
   stepMinions(w);
+  w.pvp?.after(w);
   settleKills(w, (m) => onKill(w, m));
   for (const m of w.monsters) {
     if (!m.alive) continue;

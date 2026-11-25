@@ -121,6 +121,39 @@ class Channels {
     return seating;
   }
 
+  /**
+   * Reserves a seat in one given channel of `map` (a dueling floor, or the channel a fighter came
+   * from), past the seats newcomers may take; any channel when that one is gone or full.
+   */
+  async seatIn(
+    map: string,
+    roomId: string,
+    auth: RoomAuth,
+    options: SeatOptions = {},
+  ): Promise<Seating> {
+    const seating = await this.locked(map, async () => {
+      const channel = (this.byMap.get(map) ?? []).find((c) => c.roomId === roomId);
+      const room = channel && (matchMaker.getLocalRoomById(roomId) as Room | undefined);
+      if (!channel || !room || room.hasReachedMaxClients()) return null;
+      try {
+        const seat = await matchMaker.reserveSeatFor(channel.cache, options, auth);
+        const made: Seating = { map, channel: channel.number, seat: ticket(seat) };
+        this.latest.set(auth.accountId, { map, roomId: channel.roomId, seating: made });
+        return made;
+      } catch {
+        return null;
+      }
+    });
+    return seating ?? this.seat(map, auth, options);
+  }
+
+  /** Opens one more channel of `map` whatever the others hold: a dueling floor for a match. */
+  openExtra(map: string): Promise<void> {
+    return this.locked(map, async () => {
+      await this.create(map);
+    });
+  }
+
   /** The channels of a map with their players and reserved seats, lowest first. */
   list(map: string): { channel: number; roomId: string; clients: number }[] {
     return (this.byMap.get(map) ?? []).map((c) => ({

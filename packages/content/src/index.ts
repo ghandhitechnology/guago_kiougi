@@ -6,6 +6,7 @@ export * from "./cast.ts";
 export * from "./classes.ts";
 export * from "./combat-content.ts";
 export * from "./drops.ts";
+export * from "./duel.ts";
 export * from "./economy.ts";
 export * from "./fields.ts";
 export * from "./fight-map.ts";
