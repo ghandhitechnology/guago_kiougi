@@ -131,6 +131,15 @@ export function building(spec: BuildingSpec): Stamp {
         else if (ch === "[") piece(spec.material, "door-l", px, y);
         else if (ch === "]") piece(spec.material, "door-r", px, y);
         else if (ch === "d") piece(spec.material, "door-side", px, y);
+        else if (ch === "o")
+          objects.push({
+            prop: spec.material,
+            anim: `${p}-curtain`,
+            play: true,
+            index: x % 5,
+            at: [px, y],
+            sort: base,
+          });
         else {
           const bay = BAYS[ch];
           if (!bay) throw new Error(`building ${spec.name}: bay "${ch}" is not known`);

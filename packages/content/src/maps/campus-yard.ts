@@ -377,6 +377,15 @@ const map: MapSource = {
       ],
     },
     blob(282, 348, 12, 4),
+    // The covered walk's roof, its shadow beside it on the lawn.
+    {
+      poly: [
+        [372, 736],
+        [404, 736],
+        [418, 896],
+        [386, 896],
+      ],
+    },
     // The pergola's dappled shade.
     blob(772, 546, 44, 12, 6),
     ...treeShadow(PINE_FEET[0], PINE_FEET[1], 96, 34),

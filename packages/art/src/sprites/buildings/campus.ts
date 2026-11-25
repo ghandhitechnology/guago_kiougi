@@ -97,7 +97,7 @@ const legend = (roles: Roles): Legend => ({ ...GLASS, ...roles }) as Legend;
 function facade(name: string, roles: Roles, brick = false) {
   const frames = facadeFrames({
     texture: brick ? "brick" : "plain",
-    glass: ["sky", "blind", "dark", "open", "lit", "poster", "plant", "face"],
+    glass: ["sky", "blind", "dark", "open", "open2", "lit", "poster", "plant", "face"],
   });
   return sprite({
     name,
@@ -106,7 +106,12 @@ function facade(name: string, roles: Roles, brick = false) {
     palette: legend(roles),
     outline: false,
     frames,
-    anim: { idle: { frames: ["g-wall"], fps: 1 } },
+    anim: {
+      idle: { frames: ["g-wall"], fps: 1 },
+      // A curtain in an open window, pushed out and sucked back by the sea wind.
+      "g-curtain": { frames: ["g-open", "g-open2", "g-open", "g-open", "g-open2"], fps: 3 },
+      "u-curtain": { frames: ["u-open", "u-open2", "u-open", "u-open", "u-open2"], fps: 3 },
+    },
   });
 }
 

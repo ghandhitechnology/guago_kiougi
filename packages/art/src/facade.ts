@@ -97,6 +97,16 @@ const open: Glass = (r, h) => {
   return cells.join("");
 };
 
+/** The same open pane a moment later, the curtain sucked back in. */
+const open2: Glass = (r, h) => {
+  const base = dark(r, h);
+  const curtain = r < 4 ? 1 : r < 12 ? 2 : r < 16 ? 3 : 2;
+  const cells = [...base];
+  for (let x = 0; x < curtain; x++) cells[GLASS_W - 1 - x] = x === 0 ? "c" : "C";
+  if (r > 7) cells[5] = "M";
+  return cells.join("");
+};
+
 /** Lights on inside: fluorescent tubes at the top, the room warm below. */
 const lit: Glass = (r) => {
   if (r === 0) return "YYYYYYYYYYYY";
@@ -150,7 +160,17 @@ const face: Glass = (r, h) => {
     .join("");
 };
 
-const GLASSES: Record<GlassState, Glass> = { sky, blind, dark, open, lit, poster, plant, face };
+const GLASSES: Record<GlassState, Glass> = {
+  sky,
+  open2,
+  blind,
+  dark,
+  open,
+  lit,
+  poster,
+  plant,
+  face,
+};
 
 // Facade bays ------------------------------------------------------------------------------------
 

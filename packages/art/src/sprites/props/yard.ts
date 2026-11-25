@@ -602,10 +602,11 @@ const MENU = `
 const WALKWAY = (() => {
   const rows: string[] = [];
   for (let y = 0; y < 16; y++) {
-    let row = "Ji";
-    for (let x = 0; x < 28; x++) row += y % 4 === 0 ? "K" : x < 4 ? "+" : y % 4 === 3 ? "M" : "k";
-    row += "IJ";
-    rows.push(row);
+    let row = "JiI";
+    for (let x = 0; x < 26; x++)
+      row += x % 5 === 0 ? "K" : x % 5 === 1 ? "+" : x % 5 === 4 ? "M" : "k";
+    row += "SIJ";
+    rows.push(y === 7 ? `JiI${"K".repeat(26)}SIJ` : row);
   }
   return rows.join("\n");
 })();
