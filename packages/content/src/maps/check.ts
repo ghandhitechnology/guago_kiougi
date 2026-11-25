@@ -3,6 +3,7 @@ import { CUTSCENES } from "../narrative/cutscenes.ts";
 import { OPENING } from "../narrative/opening.ts";
 import type { Cutscene } from "../narrative/schema.ts";
 import { SPEAKERS } from "../narrative/speakers.ts";
+import { stageMapOf } from "../stages.ts";
 import type { BuildResult } from "./build.ts";
 import type { BuiltMap, TileRect } from "./format.ts";
 import type { Actor, Decal, Doll, Prop } from "./layers.ts";
@@ -310,10 +311,7 @@ const SCENES: readonly Cutscene[] = [...CUTSCENES, ...OPENING.map((b) => b.scene
  * scene staged in `study-hall` plays in the map that names that room).
  */
 export function sceneMap(maps: readonly BuiltMap[], place: string): BuiltMap | undefined {
-  return (
-    maps.find((m) => m.id === place) ??
-    maps.find((m) => m.zones.some((z) => z.kind === "room" && z.id === place))
-  );
+  return stageMapOf(maps, place);
 }
 
 /**

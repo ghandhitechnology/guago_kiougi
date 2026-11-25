@@ -18,4 +18,5 @@ export * as narrative from "./narrative/index.ts";
 export * from "./places.ts";
 export * from "./sim-rules.ts";
 export * from "./social.ts";
+export * from "./stages.ts";
 export * from "./statuses.ts";
