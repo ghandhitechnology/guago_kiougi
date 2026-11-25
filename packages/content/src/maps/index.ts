@@ -9,6 +9,8 @@ import gaseol2f from "./gaseol-2f.ts";
 import gaseol4f from "./gaseol-4f.ts";
 import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
 import jeungmyeong from "./jeungmyeong.ts";
+// Page 1 hunting fields and the 생태공원.
+import p1Colonnade from "./p1-colonnade.ts";
 
 export * from "./build.ts";
 export * from "./buildings.ts";
@@ -31,6 +33,8 @@ export const MAP_SOURCES: readonly MapSource[] = [
   gaseol2f,
   gaseol4f,
   jeungmyeong,
+  // Page 1 hunting fields and the 생태공원.
+  p1Colonnade,
 ];
 
 /**
@@ -57,6 +61,13 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   "club-4",
   "club-5",
   "club-6",
+  // Page 1: the era town, the 위험 구역, the two lairs and the arena (narrative place ids).
+  "p1-agora",
+  "p1-shadow-cave",
+  "p1-croton-school",
+  "p1-elea-track",
+  "p1-lyceum",
+  "p1-olive-road",
 ]);
 
 /** Builds every map. */
