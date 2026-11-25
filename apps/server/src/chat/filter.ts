@@ -20,7 +20,8 @@
  *   allowed word is not a hit.
  *
  * Cost is linear in the text: runs of one letter longer than three are folded into the third, a
- * match may span at most `MAX_SPAN` letters, each start position is walked once per trie state,
+ * match may span at most `MAX_SPAN` letters and pass over at most `MAX_GAP` optional ones in a
+ * row, each start position is walked once per trie state,
  * and everything (walk, placement checks) draws on one step budget. Running out of it fails
  * closed: the result is `unreadable`, never a silent pass.
  */
@@ -135,8 +136,10 @@ const SPACE = /\s/u;
 const MAX_RUN = 3;
 /** Letters one match may span, gaps and repeats included. */
 const MAX_SPAN = 32;
+/** Optional letters (digits, symbols, drawn-out vowels) passed over in a row inside a match. */
+const MAX_GAP = 2;
 /** Steps one message may spend, walk and placement together. */
-const STEP_BUDGET = 60_000;
+const STEP_BUDGET = 20_000;
 /** Longest particle or suffix after a word entry, in letters. */
 const MAX_SUFFIX = 3;
 
@@ -144,7 +147,7 @@ const MAX_SUFFIX = 3;
 interface Sym {
   /** What it may be read as; a pattern letter matches any of them. */
   alts: readonly string[];
-  /** May be passed over inside a match: a digit used as noise, a drawn-out vowel. */
+  /** May be passed over inside a match: a digit or symbol used as noise. */
   opt: boolean;
   /** Code points it covers (more than one when a run was folded into it). */
   src: number;
@@ -231,19 +234,24 @@ export function skeleton(text: string): Skeleton {
       const split = Array.from(jamo.map((j) => SPLIT[j as string] ?? j).join(""));
       const syllable = isSyllable(code);
       const lastVowel = [...split].reverse().find((c) => V.includes(c));
-      // A syllable of ㅇ and the vowel just heard (시이, 바아) only draws the sound out.
+      // A syllable of ㅇ and the vowel just heard (시이, 바아) only draws the sound out: it is read
+      // as that vowel once more, which a match takes as a repeat, and never starts a match.
       const drawnOut =
         syllable && split.length === 2 && split[0] === "ㅇ" && split[1] === openVowel;
-      split.forEach((c, i) => {
-        push({
-          alts: [c],
-          opt: drawnOut,
-          src,
-          end: src,
-          first: i === 0,
-          last: i === split.length - 1,
+      if (drawnOut) {
+        push({ alts: [split[1] as string], opt: false, src, end: src, first: false, last: true });
+      } else {
+        split.forEach((c, i) => {
+          push({
+            alts: [c],
+            opt: false,
+            src,
+            end: src,
+            first: i === 0,
+            last: i === split.length - 1,
+          });
         });
-      });
+      }
       openVowel = syllable && V.includes(split.at(-1) ?? "") ? lastVowel : undefined;
       return syllable ? "syllable" : "jamo";
     }
@@ -330,10 +338,11 @@ function walk(sk: Skeleton, root: TrieNode, budget: Budget): Hit[] | undefined {
   const hits = new Map<string, Hit>();
   const seen = new Set<string>();
 
-  // `i` is the next letter to read; `prev` the pattern letter just matched.
-  const step = (i: number, node: TrieNode, prev: string, start: number): boolean => {
+  // `i` is the next letter to read; `prev` the pattern letter just matched; `gap` the optional
+  // letters passed over since.
+  const step = (i: number, node: TrieNode, prev: string, start: number, gap: number): boolean => {
     if (--budget.left < 0) return false;
-    const key = `${i} ${node.id} ${prev}`;
+    const key = `${i} ${node.id} ${prev} ${gap}`;
     if (seen.has(key)) return true;
     seen.add(key);
     const s = syms[i];
@@ -345,15 +354,16 @@ function walk(sk: Skeleton, root: TrieNode, budget: Budget): Hit[] | undefined {
           hits.set(`${entry.mode} ${entry.text} ${from} ${s.end}`, { entry, from, to: s.end });
         }
       }
-      return step(i + 1, into, letter, start);
+      return step(i + 1, into, letter, start, 0);
     };
     for (const a of s.alts) {
       const child = node.next.get(a);
       if (child && !consume(child, a)) return false;
     }
-    // The letter just matched, again: fuuuck, ㅅㅅ in 씨.
-    if (s.alts.includes(prev) && !consume(node, prev)) return false;
-    if (s.opt && !step(i + 1, node, prev, start)) return false;
+    // The letter just matched, again: fuuuck, ㅅㅅ in 씨. Only a real letter right after it repeats
+    // one; a digit or symbol may stand for a letter of the word, not draw one out.
+    if (!s.opt && gap === 0 && s.alts.includes(prev) && !consume(node, prev)) return false;
+    if (s.opt && gap < MAX_GAP && !step(i + 1, node, prev, start, gap + 1)) return false;
     return true;
   };
 
@@ -373,7 +383,7 @@ function walk(sk: Skeleton, root: TrieNode, budget: Budget): Hit[] | undefined {
           });
         }
       }
-      if (!step(start + 1, child, a, start)) return undefined;
+      if (!step(start + 1, child, a, start, 0)) return undefined;
     }
   }
   return [...hits.values()];
