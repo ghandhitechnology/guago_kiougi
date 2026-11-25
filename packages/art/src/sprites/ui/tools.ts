@@ -360,6 +360,72 @@ const BIOLOGY_TOOLS = {
   ),
 };
 
+const EARTH_TOOLS = {
+  /** 풍향계: a weathervane, its arrow and the rooster's tail. */
+  "wind-vane": sealed(
+    "",
+    ".......Y",
+    "...GGGGYGGG",
+    "..GgYYYYYYgG",
+    "...GGGGYGG",
+    ".......Y",
+    "...YY..Y..YY",
+    "....YYYYYYY",
+    "...YY..Y..YY",
+    ".......Y",
+    ".......G",
+    ".......G",
+    "......SSS",
+    ".....SSSSS",
+  ),
+  /** 망원경: a brass telescope on its tripod, aimed up. */
+  telescope: sealed(
+    "...........WW",
+    "..........NbnN",
+    ".........Nbnn",
+    "........NbnN",
+    ".......YbnN",
+    "......NbYN",
+    ".....Nbnn",
+    "....NNnN",
+    ".....GG",
+    "....G.G",
+    "...G..G",
+    "..G...G",
+    ".G....G",
+  ),
+  /** 달력: a desk calendar torn to a day with a red circle on it. */
+  calendar: sealed(
+    "...S..S..S",
+    "..xrrrrrrrrx",
+    "..xRRRRRRRRx",
+    "..WWWWWWWWWW",
+    "..WsWsWsWsWW",
+    "..WWWWWWWWWW",
+    "..WsWRRWsWsW",
+    "..WWWRWWWWWW",
+    "..WsWsWsWsWW",
+    "..WWWWWWWWWW",
+    "..ssssssssss",
+  ),
+  /** 온도계: a thermometer, its column up near the top. */
+  thermometer: sealed(
+    "......WW",
+    ".....WppW",
+    ".....WppW",
+    ".....WrpW",
+    ".....WrpW",
+    ".....WrpW",
+    ".....WrpW",
+    ".....WrpW",
+    ".....WrpW",
+    "....WrrrrW",
+    "....WrRrrW",
+    "....WrrrrW",
+    ".....WWWW",
+  ),
+};
+
 const tool = sprite({
   ...ui,
   name: "tool",
@@ -372,6 +438,7 @@ const tool = sprite({
     ...PHYSICS_TOOLS,
     ...CHEMISTRY_TOOLS,
     ...BIOLOGY_TOOLS,
+    ...EARTH_TOOLS,
     /** 컴퍼스: a drawing compass, needle leg and pencil leg. */
     compass: compass(),
     /** 모눈자: a clear ruler printed with a grid and ticks. */

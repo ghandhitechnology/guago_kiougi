@@ -351,6 +351,74 @@ const BIOLOGY = {
   ),
 };
 
+// 지구과학 --------------------------------------------------------------------------------
+
+const EARTH = {
+  /** 일기도 분석 노트: a cloud and its rain. */
+  "weather-map": book(
+    GOLD_DEEP,
+    stack(".www...", "wwwww..", "wwwwwww", ".......", "w.w.w..", ".w.w.w."),
+    [5, 4],
+  ),
+  /** 천체 관측 일지: a star and a falling one. */
+  "star-log": book(
+    GOLD,
+    stack("...w...", "..www..", "...w..t", ".....t.", "....t..", "..ww..."),
+    [5, 4],
+  ),
+  /** 조석 예보표: a wave over the tide line. */
+  "tide-table": book(
+    GOLD_PALE,
+    stack("..gg...", ".g..g..", "g....gg", ".......", "ggggggg"),
+    [5, 5],
+  ),
+  /** 화산 탐구 보고서: a cone and its plume. */
+  volcano: book(
+    GOLD_DEEP,
+    stack("..w.w..", "...w...", "...t...", "..www..", ".wwwww.", "wwwwwww"),
+    [5, 4],
+  ),
+
+  /** 판 구조론: two plates, one under the other. */
+  "plate-tectonics": evolved(
+    GOLD,
+    stack("wwww...", "wwwww..", "....ww.", "..wwwww", ".wwwwww"),
+    [5, 5],
+    "y",
+  ),
+  /** 암석의 순환: three stones chasing round. */
+  "rock-cycle": evolved(
+    GOLD_PALE,
+    stack("..qq...", "..qq.EE", "w....EE", ".w...w.", "..aa.w.", "..aa..."),
+    [5, 5],
+  ),
+  /** 태풍의 눈: the spiral and its clear eye. */
+  "typhoon-eye": evolved(
+    GOLD_DEEP,
+    stack("..www..", ".w...w.", "w..t..w", "w.t.t.w", "w..t...", ".w...w.", "..www.."),
+    [5, 4],
+  ),
+  /** 유성우: a shower of falling stars. */
+  "meteor-shower": evolved(
+    GOLD,
+    stack("......t", "..t..t.", ".t..t..", "t..t..t", "..t..t.", ".t..t.."),
+    [5, 4],
+    "y",
+  ),
+  /** 사리: two waves, the second higher. */
+  "spring-tide": evolved(
+    GOLD_PALE,
+    stack(".gg....", "g..g.gg", "...gg..", ".......", "ggggggg"),
+    [5, 5],
+  ),
+  /** 성층 화산: a tall cone banded in layers, erupting. */
+  stratovolcano: evolved(
+    GOLD_DEEP,
+    stack("..YYY..", "...Y...", "..www..", "..GGG..", ".wwwww.", ".GGGGG.", "wwwwwww"),
+    [5, 4],
+  ),
+};
+
 const books = sprite({
   ...ui,
   name: "book",
@@ -362,6 +430,7 @@ const books = sprite({
     ...PHYSICS,
     ...CHEMISTRY,
     ...BIOLOGY,
+    ...EARTH,
     /** 홀리데이 일반물리: the heavy plum tome with its gold band and a thrown arc. */
     "holiday-physics": over(
       book(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),
