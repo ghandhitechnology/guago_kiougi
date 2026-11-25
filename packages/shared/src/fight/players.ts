@@ -90,6 +90,13 @@ export function stepPlayers(w: FightWorld, inputs: FightInputs | undefined): voi
     const x0 = p.x;
     const y0 = p.y;
     const list = inputs?.get(p.id);
+    if (p.frozen) {
+      // Between a duel's rounds: the inputs are spent and nothing moves.
+      if (list && list.length > 0) p.seq = (list[list.length - 1] as FightInput).seq;
+      p.movedX = 0;
+      p.movedY = 0;
+      continue;
+    }
     if (p.down) {
       if (list && list.length > 0) p.seq = (list[list.length - 1] as FightInput).seq;
       knockedOut(w, p);

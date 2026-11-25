@@ -2,9 +2,11 @@
  * Every word a player reads in the hub and in Page 1, as one bundle with its Korean locale.
  * Read through `narrative` from `@guago/content`; run `validateNarrative` before shipping.
  */
+import { AGORA_BARKS, AGORA_KO } from "./agora.ts";
 import { CODEX, CODEX_KO } from "./codex.ts";
 import { CUTSCENES, CUTSCENES_KO } from "./cutscenes.ts";
-import { EGG_BARKS, EGG_DESCRIPTIONS, EGGS, EGGS_KO } from "./eggs.ts";
+import { DUEL_COPY } from "./duel.ts";
+import { EGG_BARKS, EGG_DESCRIPTIONS, EGG_PROPS, EGGS, EGGS_KO } from "./eggs.ts";
 import { HELP_COPY } from "./help.ts";
 import { BARKS, DESCRIPTIONS, HUB_KO } from "./hub.ts";
 import { MEALS_COPY } from "./meals.ts";
@@ -19,6 +21,7 @@ import { SOCIAL_COPY } from "./social-lines.ts";
 import { SPEAKERS, SPEAKERS_KO } from "./speakers.ts";
 import { STUDY_DESCRIPTIONS, STUDY_KO, STUDY_TERMS } from "./study.ts";
 import { ANNOUNCEMENTS, AWARD_FRAME, AWARDS, SYSTEM, SYSTEM_KO } from "./system.ts";
+import { THINGS_COPY } from "./things.ts";
 import { TRADE_COPY } from "./trade.ts";
 
 function merge(...tables: Strings[]): Strings {
@@ -32,7 +35,10 @@ function merge(...tables: Strings[]): Strings {
   return out;
 }
 
-/** Live-world copy (급식, school rules, notices, refusals, social, trade, moderation). */
+/**
+ * Live-world copy (급식, school rules, notices, refusals, social, trade, moderation, duels) and
+ * what the maps' objects say.
+ */
 const COPY: readonly CopyPart[] = [
   MEALS_COPY,
   SCHOOL_LIFE_COPY,
@@ -41,6 +47,8 @@ const COPY: readonly CopyPart[] = [
   SOCIAL_COPY,
   TRADE_COPY,
   MODERATION_COPY,
+  DUEL_COPY,
+  THINGS_COPY,
 ];
 const parts = <K extends Exclude<keyof CopyPart, "ko">>(k: K) =>
   COPY.flatMap((p) => (p[k] ?? []) as NonNullable<CopyPart[K]>[number][]);
@@ -52,10 +60,11 @@ export const NARRATIVE: Narrative = {
   story: STORY,
   bosses: BOSSES,
   codex: CODEX,
-  barks: [...BARKS, ...EGG_BARKS],
+  barks: [...BARKS, ...EGG_BARKS, ...AGORA_BARKS],
   descriptions: [
     ...DESCRIPTIONS,
     ...EGG_DESCRIPTIONS,
+    ...EGG_PROPS,
     ...STUDY_DESCRIPTIONS,
     ...parts("descriptions"),
   ],
@@ -74,6 +83,7 @@ export const NARRATIVE: Narrative = {
     PAGE1_KO,
     CODEX_KO,
     HUB_KO,
+    AGORA_KO,
     QUESTS_KO,
     SYSTEM_KO,
     EGGS_KO,

@@ -227,7 +227,17 @@ describe("duel replay", () => {
     expect(first.watcher.hp).toBe(first.watcher.kit.maxHp);
   });
 
-  it("leaves a field with no duel floor and no stand-ins", () => {
+  it("finds player-on-player hits when a floor is on, and none on a field", () => {
+    const onFloor = floorWith(
+      [
+        { major: "physics", team: 1 },
+        { major: "chemistry", team: 2 },
+      ],
+      3,
+    );
+    const floorHits = playerHits(onFloor.w, 20 * 30, onFloor.players);
+    expect(floorHits).toBeGreaterThan(0);
+
     const map = fightMapOf(mapById("p1-colonnade") as never);
     const w = createFight(map, rules, fieldOf("p1-colonnade"), 3);
     const players = MAJORS.map((major, i) => {
@@ -242,16 +252,258 @@ describe("duel replay", () => {
       p.mode = Mode.Semi;
       return p;
     });
-    const entities = new Set(players.map((p) => p.entity));
-    for (let t = 0; t < 600; t++) {
-      stepFight(w, new Map());
-      expect(w.pvp).toBeNull();
-      for (let i = 0; i < w.eventCount; i++) {
-        const e = w.events[i];
-        if (e?.type === Ev.Hit) expect(entities.has(e.c)).toBe(false);
-        if (e?.type === Ev.Hurt) expect(entities.has(e.c)).toBe(false);
-      }
-    }
+    expect(playerHits(w, 600, players)).toBe(0);
+    expect(w.pvp).toBeNull();
     expect(w.monsters.some((m) => m.fighter >= 0)).toBe(false);
+  });
+});
+
+// ── The floor's rules ──────────────────────────────────────────────────────────
+
+type Entry = { major: (typeof MAJORS)[number]; team: number };
+
+/** A floor with fighters at their marks (team 1 or 2) and spectators (team 0) in the middle. */
+function floorWith(entries: readonly Entry[], seed: number, timing = DUEL_TIMING) {
+  if (!arena) throw new Error("no floor");
+  const map = fightMapOf(built);
+  const w = createFight(
+    { ...map, collision: fenceFloor(map.collision, arena.rect) },
+    rules,
+    null,
+    seed,
+  );
+  const floor = new DuelFloor(w, arena.rect, DUEL_NORMS, timing);
+  const cx = (arena.rect.x + arena.rect.w / 2) * 16;
+  const cy = (arena.rect.y + arena.rect.h / 2) * 16;
+  const mode = entries.filter((e) => e.team > 0).length > 2 ? "3v3" : "1v1";
+  const marks = duelMarks(arena, mode);
+  const used = [0, 0, 0];
+  const players: Player[] = [];
+  const start: Parameters<DuelFloor["start"]>[1][number][] = [];
+  entries.forEach((e, i) => {
+    const kit = duelKit(
+      rules,
+      duelBuild(e.major, null, gearOf(e.major), DUEL_NORMS),
+      DUEL_NORMS,
+      Mode.Semi,
+    );
+    const p = w.addPlayer(`f${i}`, i, cx, cy, kit, DUEL_NORMS.level);
+    p.mode = Mode.Semi;
+    players.push(p);
+    if (e.team === 0) return;
+    const mark = marks.filter((m) => m.team === e.team)[used[e.team] ?? 0] as {
+      x: number;
+      y: number;
+    };
+    used[e.team] = (used[e.team] ?? 0) + 1;
+    start.push({ player: p, team: e.team, mark });
+  });
+  floor.start(w, start);
+  return { w, floor, players };
+}
+
+/** Every fighter walks at the nearest player of another side; spectators stand. */
+function walk(w: FightWorld, players: readonly Player[], seq: number) {
+  const inputs = new Map<string, FightInput[]>();
+  for (const p of players) {
+    const foe = players
+      .filter((q) => q !== p && q.joined && !q.down && (p.team === 0 || q.team !== p.team))
+      .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+    if (!foe || p.team === 0) continue;
+    const dx = foe.x - p.x;
+    const dy = foe.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const go = d > 40 ? 1 : 0;
+    inputs.set(p.id, [
+      { seq, mx: Math.round((dx / d) * MOVE_MAX * go), my: Math.round((dy / d) * MOVE_MAX * go) },
+    ]);
+  }
+  return inputs;
+}
+
+/** Hits and hurts between players over `ticks` ticks of walking at each other. */
+function playerHits(w: FightWorld, ticks: number, players: readonly Player[]): number {
+  let n = 0;
+  for (let t = 0; t < ticks; t++) {
+    stepFight(w, walk(w, players, t + 1));
+    const entities = new Set(players.filter((p) => p.joined).map((p) => p.entity));
+    for (let i = 0; i < w.eventCount; i++) {
+      const e = w.events[i];
+      if ((e?.type === Ev.Hit || e?.type === Ev.Hurt) && entities.has(e.c)) n++;
+    }
+  }
+  return n;
+}
+
+/** Runs until `stop` or `ticks`, calling `each` after every step. */
+function run(
+  w: FightWorld,
+  players: readonly Player[],
+  ticks: number,
+  each: (t: number) => void,
+  stop: () => boolean = () => false,
+) {
+  for (let t = 0; t < ticks && !stop(); t++) {
+    stepFight(w, walk(w, players, t + 1));
+    each(t);
+  }
+}
+
+describe("a duel floor", () => {
+  it("never lets a fighter hurt its own side", () => {
+    const { w, floor, players } = floorWith(
+      [
+        { major: "physics", team: 1 },
+        { major: "chemistry", team: 1 },
+        { major: "earth", team: 1 },
+        { major: "biology", team: 2 },
+        { major: "math", team: 2 },
+        { major: "physics", team: 2 },
+      ],
+      11,
+    );
+    const teamOf = new Map(players.map((p) => [p.entity, p.team]));
+    let hurts = 0;
+    run(
+      w,
+      players,
+      20 * 200,
+      () => {
+        for (let i = 0; i < w.eventCount; i++) {
+          const e = w.events[i];
+          if (e?.type !== Ev.Hurt) continue;
+          const victim = w.players[e.a];
+          if (!victim) continue;
+          hurts++;
+          expect(teamOf.get(e.c)).not.toBe(victim.team);
+        }
+      },
+      () => floor.phase === DuelPhase.Over,
+    );
+    expect(hurts).toBeGreaterThan(50);
+  });
+
+  it("takes a forfeited fighter out of every hit, both ways", () => {
+    const { w, floor, players } = floorWith(
+      [
+        { major: "physics", team: 1 },
+        { major: "math", team: 1 },
+        { major: "biology", team: 2 },
+        { major: "earth", team: 2 },
+      ],
+      12,
+    );
+    const quitter = players[1] as Player;
+    run(w, players, DUEL_TIMING.countdown + 60, () => {});
+    expect(floor.forfeit(w, quitter.id)).toBe(true);
+    expect(quitter.team).toBe(0);
+    run(
+      w,
+      players,
+      20 * 60,
+      () => {
+        for (let i = 0; i < w.eventCount; i++) {
+          const e = w.events[i];
+          if (e?.type === Ev.Hit) {
+            expect(e.a).not.toBe(quitter.index);
+            expect(e.c).not.toBe(quitter.entity);
+          }
+          if (e?.type === Ev.Hurt) expect(e.a).not.toBe(quitter.index);
+        }
+      },
+      () => floor.phase === DuelPhase.Over,
+    );
+  });
+
+  it("holds everyone still with no hits through the countdown, the pause and the result", () => {
+    const { w, floor, players } = floorWith(
+      [
+        { major: "math", team: 1 },
+        { major: "chemistry", team: 2 },
+      ],
+      13,
+    );
+    const seen = new Set<number>();
+    let last = players.map((p) => [p.x, p.y]);
+    let phase: number = floor.phase;
+    run(
+      w,
+      players,
+      20 * 400,
+      () => {
+        // The phase this step ran in, not the one its end turned to.
+        const was = phase;
+        phase = floor.phase;
+        const still = was !== DuelPhase.Fight && floor.phase === was;
+        if (still) {
+          seen.add(floor.phase);
+          for (let i = 0; i < w.eventCount; i++) expect(w.events[i]?.type).not.toBe(Ev.Hit);
+          // A round starts by putting everyone at their mark; within a phase nobody moves.
+          players.forEach((p, i) => {
+            const [x, y] = last[i] as number[];
+            if (was === DuelPhase.Pause || was === DuelPhase.Over || was === DuelPhase.Countdown) {
+              expect([p.x, p.y]).toEqual([x, y]);
+            }
+          });
+        }
+        last = players.map((p) => [p.x, p.y]);
+      },
+      () => floor.phase === DuelPhase.Over && seen.has(DuelPhase.Over),
+    );
+    expect(seen.has(DuelPhase.Countdown)).toBe(true);
+    expect(seen.has(DuelPhase.Pause)).toBe(true);
+  });
+
+  it("leaves nothing of the match in the world after it is cleared", () => {
+    const { w, floor, players } = floorWith(
+      [
+        { major: "physics", team: 1 },
+        { major: "chemistry", team: 2 },
+      ],
+      14,
+    );
+    run(w, players, DUEL_TIMING.countdown + 100, () => {});
+    floor.clear(w);
+    for (const p of players) {
+      expect(p.team).toBe(0);
+      expect(p.frozen).toBe(false);
+      expect(p.statusMask).toBe(0);
+    }
+    expect(playerHits(w, 20 * 20, players)).toBe(0);
+    expect(w.monsters.some((m) => m.alive && m.fighter >= 0)).toBe(false);
+  });
+
+  it("calls a round with no blows a draw, and ends a match at its time cap", () => {
+    const quiet = floorWith(
+      [
+        { major: "math", team: 1 },
+        { major: "math", team: 2 },
+      ],
+      15,
+    );
+    // No books on either side: the round is a draw once it has been idle long enough.
+    for (const p of quiet.players) quiet.w.setKit(p, { ...p.kit, weapons: [] });
+    for (let t = 0; t < DUEL_TIMING.countdown + DUEL_TIMING.idle + 5; t++)
+      stepFight(quiet.w, new Map());
+    expect(quiet.floor.rounds[0]).toMatchObject({ winner: 0 });
+    expect(quiet.floor.rounds[0]?.ticks).toBeLessThanOrEqual(DUEL_TIMING.idle + 1);
+
+    const capped = floorWith(
+      [
+        { major: "physics", team: 1 },
+        { major: "earth", team: 2 },
+      ],
+      16,
+      { ...DUEL_TIMING, matchCap: 20 * 6 },
+    );
+    run(
+      capped.w,
+      capped.players,
+      20 * 30,
+      () => {},
+      () => capped.floor.phase === DuelPhase.Over,
+    );
+    expect(capped.floor.phase).toBe(DuelPhase.Over);
+    expect(capped.floor.result?.ticks).toBeLessThanOrEqual(20 * 6 + 1);
   });
 });
