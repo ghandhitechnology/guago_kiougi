@@ -12,7 +12,6 @@ import {
   put,
   rng,
 } from "../../fx.ts";
-import { shade } from "../../paint.ts";
 import { DANGER, DANGER_LONE } from "./telegraph.ts";
 
 /**
