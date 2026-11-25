@@ -348,7 +348,7 @@ export const SLOTS = [
   "award",
   /** A club's name. */
   "club",
-  /** A duration or a moment the client formats: "4분", "12월 3일 18시". */
+  /** A moment the client formats: "18:30", "12월 3일 18시". */
   "time",
   /** The target of a count, beside `count`. */
   "total",

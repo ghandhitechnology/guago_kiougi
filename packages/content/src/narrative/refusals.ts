@@ -36,7 +36,7 @@ const WORLD: Readonly<Record<RefusalCode, Line>> = {
   empty: ["narrator", "아무 말도 쓰지 않았다."],
   too_long: ["narrator", "너무 길다. 조금 줄여야 한다."],
   rate_limited: ["narrator", "말이 너무 빠르다. 숨 좀 고르고."],
-  muted: ["sagam", "채팅 금지 중입니다. {time} 뒤에 풀립니다."],
+  muted: ["sagam", "채팅 금지 중입니다. {time}에 풀립니다."],
   level: ["narrator", "전체 채팅은 {level}레벨부터 쓸 수 있다."],
   target_offline: ["narrator", "그 학생은 지금 접속해 있지 않다."],
   target_self: ["narrator", "자기 자신한테는 보낼 수 없다."],

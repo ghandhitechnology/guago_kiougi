@@ -47,7 +47,7 @@ const DIRECT = lines("trade", [
   ["too-far", "narrator", "toast", "너무 멀다. 가까이 가야 거래할 수 있다."],
   ["level", "narrator", "toast", "거래는 1학년 전직 뒤부터 할 수 있다."],
   ["bound", "narrator", "toast", "귀속된 물건은 건넬 수 없다."],
-  ["cooldown", "narrator", "toast", "{time} 뒤부터 건넬 수 있는 물건이다.", ["time"]],
+  ["cooldown", "narrator", "toast", "{time}부터 건넬 수 있는 물건이다.", ["time"]],
 ]);
 
 const MARKET = lines("market", [
@@ -61,7 +61,7 @@ const MARKET = lines("market", [
   ["full", "store", "toast", "한 사람당 열 개까지만 붙일 수 있어요."],
   ["level", "store", "toast", "매점은 1학년 전직 뒤부터 쓸 수 있어요."],
   ["bound", "store", "toast", "이건 못 받아요. 귀속된 물건이에요."],
-  ["cooldown", "store", "toast", "{time} 뒤부터 팔 수 있는 물건이에요.", ["time"]],
+  ["cooldown", "store", "toast", "{time}부터 팔 수 있는 물건이에요.", ["time"]],
   ["fee-short", "store", "toast", "수수료가 모자라요."],
 ]);
 

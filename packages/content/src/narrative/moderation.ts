@@ -2,8 +2,8 @@
  * Moderation as the player meets it (PLAN §12): the filter's automatic mute, an operator's mute,
  * kick and ban, and a confirmed filter strike. No jokes: a player is losing something. The
  * automatic mute keeps the school voice (권 사감, plain); anything an operator decided is the
- * 운영진, out of the fiction. `muted` is the key the WorldRoom already sends, with `until`
- * formatted by the client into {time}.
+ * 운영진, out of the fiction. `muted` is the key the WorldRoom already sends; the client
+ * formats `until` as the clock time the mute ends and fills {time} with it.
  */
 import { Writer } from "./author.ts";
 import type { CopyPart, Slot, SystemMessage } from "./schema.ts";
@@ -20,12 +20,12 @@ const line = (
 ): SystemMessage => ({ id, voice, channel, text: s.t(text), slots });
 
 const MODERATION: readonly SystemMessage[] = [
-  line("muted", "sagam", "toast", "채팅이 막혔습니다. {time} 뒤에 풀립니다.", ["time"]),
+  line("muted", "sagam", "toast", "채팅이 막혔습니다. {time}에 풀립니다.", ["time"]),
   line(
     "moderation.muted",
     "office",
     "dialogue",
-    "운영진이 채팅을 막았습니다. {time} 뒤에 풀립니다. 사유: {reason}",
+    "운영진이 채팅을 막았습니다. {time}에 풀립니다. 사유: {reason}",
     ["time", "reason"],
   ),
   line("moderation.kicked", "office", "dialogue", "운영진이 접속을 끊었습니다. 사유: {reason}", [
