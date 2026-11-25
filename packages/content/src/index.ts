@@ -1,3 +1,4 @@
+export { type Collidable, isSolidTile, type TileCollision } from "@guago/shared";
 export * from "./attacks.ts";
 export * from "./board.ts";
 export * from "./books.ts";
@@ -6,7 +7,7 @@ export * from "./combat-content.ts";
 export * from "./drops.ts";
 export * from "./economy.ts";
 export * from "./fields.ts";
-export * from "./maps.ts";
+export * from "./maps/index.ts";
 export * from "./modes.ts";
 export * from "./monsters.ts";
 export * as narrative from "./narrative/index.ts";
