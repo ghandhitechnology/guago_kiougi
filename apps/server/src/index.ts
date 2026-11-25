@@ -6,9 +6,12 @@ import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
+import { startLedgerMaintenance } from "./economy/ledger.ts";
 import { studentLooks } from "./looks.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
+import { startListingSweeper } from "./trade/board.ts";
+import { createTrading } from "./trade/room.ts";
 import { worldRoom } from "./world-room.ts";
 
 assertServable(config);
@@ -27,12 +30,14 @@ const auth = createAuthService({
 });
 startChatLogMaintenance(db);
 const chatLog = new ChatLog(db, { onMissingPartition: () => maintainChatLog(db) });
+// Blocks join from the social systems: pass their `isBlocked` here once they land.
+const trading = createTrading({ db, executor: economy.executor });
 const server = createGameServer(
   auth,
   config,
   studentLooks,
   { log: chatLog },
-  { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants },
+  { ops: economy.ops, routes: economy.routes(auth), grants: economy.grants, trading },
 );
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
@@ -44,6 +49,8 @@ await server.listen(config.port);
 // The one WorldRoom exists from the start, so two first joins can never make two.
 await matchMaker.createRoom(WORLD_ROOM, {});
 economy.grants.start();
+startLedgerMaintenance(db);
+startListingSweeper(db, economy.executor, (id, change) => worldRoom()?.notify(id, change));
 setInterval(
   () => {
     auth.sweep().catch(() => {});
