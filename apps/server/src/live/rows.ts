@@ -19,6 +19,8 @@ export interface LiveRows {
   helpState?: boolean;
   /** The character's `floor_leaders` row of this board week, locked. */
   leader?: number;
+  /** The character's `merit_daily` counts of this board day. */
+  tallyDay?: number;
 }
 
 export interface HelpNoticeRow {
@@ -43,6 +45,8 @@ export interface LiveLoaded {
   helping: boolean;
   /** The 층장 row asked for: absent, or whether it was paid. */
   leader: { paid: boolean } | null;
+  /** `merit_daily` counts of the day asked for, by key. */
+  daily: ReadonlyMap<string, number>;
 }
 
 export const NO_LIVE: LiveLoaded = {
@@ -51,6 +55,7 @@ export const NO_LIVE: LiveLoaded = {
   posted: false,
   helping: false,
   leader: null,
+  daily: new Map(),
 };
 
 /** Living-world columns an operation sets on the character. */
@@ -91,6 +96,8 @@ export interface LiveWrite {
   notice?: { update: Pick<HelpNoticeRow, "id" | "state" | "helperId"> } | { insert: HelpNoticeRow };
   /** Marks the character's 층장 row of this week paid. */
   leaderPaid?: number;
+  /** `merit_daily` counts to add to. */
+  daily?: readonly { day: number; key: string; n: number }[];
 }
 
 export async function loadLive(
@@ -132,7 +139,13 @@ export async function loadLive(
       for update`);
     if (rows[0]) leader = { paid: rows[0].paid === true };
   }
-  return { kills, notice, posted, helping, leader };
+  const daily = new Map<string, number>();
+  if (want.tallyDay !== undefined) {
+    const { rows } = await q.execute(sql`
+      select key, n from merit_daily where character_id = ${characterId} and day = ${want.tallyDay}`);
+    for (const r of rows) daily.set(r.key as string, Number(r.n));
+  }
+  return { kills, notice, posted, helping, leader, daily };
 }
 
 export function noticeFromDb(r: Record<string, unknown>): HelpNoticeRow {
@@ -240,6 +253,11 @@ export async function writeLive(
       returning quest_id`);
     const made = new Set(rows.map((r) => r.quest_id as string));
     quests = n.filter((x) => made.has(x.row.id)).map((x) => questView(x.row));
+  }
+  for (const d of (w.daily ?? []).filter((x) => x.n > 0)) {
+    await q.execute(sql`
+      insert into merit_daily (character_id, day, key, n) values (${characterId}, ${d.day}, ${d.key}, ${d.n})
+      on conflict (character_id, day, key) do update set n = merit_daily.n + excluded.n`);
   }
   if (w.leaderPaid !== undefined) {
     await q.execute(sql`

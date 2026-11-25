@@ -16,6 +16,7 @@ import {
   type DemeritReason,
   EXPEL,
   earn,
+  HELP_PAIR_DAILY,
   type LedgerEntry,
   type LogoutPlace,
   MEAL,
@@ -30,6 +31,7 @@ import {
   restedSeconds,
   SECOND_MS,
   sheet,
+  tallyCredit,
 } from "@guago/shared";
 import type { Applied, CharacterChange, Loaded, OpDef, Step } from "../economy/ops.ts";
 import {
@@ -68,6 +70,8 @@ export interface ProgressRequest {
   met: string[];
   /** The 도움 notice behind the `help:` row, when there is one. */
   notice?: string;
+  /** Board day of the batch, for the daily 상점 caps. */
+  day: number;
 }
 
 export interface LogoutRequest {
@@ -79,7 +83,15 @@ export interface LogoutRequest {
 
 export type ConductRequest =
   | { kind: "demerit"; reason: DemeritReason; amount: number }
-  | { kind: "merit"; reason: MeritReason; amount: number; neat: boolean; week: number };
+  | {
+      kind: "merit";
+      reason: MeritReason;
+      amount: number;
+      neat: boolean;
+      week: number;
+      /** Board day, for the daily tally caps. */
+      day: number;
+    };
 
 export interface LiveRequests {
   "live.board": { quests: PostedQuest[] };
@@ -139,8 +151,10 @@ function earnMerits(
   purse: Purse,
   amount: number,
   reason: string,
-  week: number,
+  /** The board week, and how many of `amount` count toward its 층장 tally. */
+  tally: { week: number; counted: number },
 ): { purse: Purse; ledger: LedgerEntry[]; live: LiveWrite; cancelled: number; spare: number } {
+  const { week, counted } = tally;
   const m = addMerits({ demerits: c.demerits }, amount);
   const paid = earn(purse, { merit: m.spare }, `merit.${reason}`);
   return {
@@ -154,9 +168,15 @@ function earnMerits(
         { kind: "merit", amount, reason },
         { kind: "demerit", amount: -m.cancelled, reason: "merit.cancel" },
       ],
-      tally: [{ week, kind: "merit", n: amount }],
+      tally: counted > 0 ? [{ week, kind: "merit", n: counted }] : [],
     },
   };
+}
+
+/** What of `amount` counts toward the tally today, and the `merit_daily` row recording it. */
+function counted(l: Loaded, reason: MeritReason, amount: number, day: number) {
+  const n = tallyCredit(reason, amount, l.live.daily.get(reason) ?? 0);
+  return { n, daily: { day, key: reason, n } };
 }
 
 function mergeLive(a: LiveWrite, b: LiveWrite): LiveWrite {
@@ -166,6 +186,7 @@ function mergeLive(a: LiveWrite, b: LiveWrite): LiveWrite {
     character: { ...a.character, ...b.character },
     conduct: [...(a.conduct ?? []), ...(b.conduct ?? [])],
     tally: [...(a.tally ?? []), ...(b.tally ?? [])],
+    daily: [...(a.daily ?? []), ...(b.daily ?? [])],
   };
 }
 
@@ -226,6 +247,7 @@ export function liveOps(h: Helpers): Defs {
       rows: (req) => ({
         quests: req.quests,
         live: {
+          tallyDay: req.day,
           kills: Object.keys(req.kills),
           ...(req.notice ? { notice: req.notice } : {}),
         },
@@ -255,18 +277,27 @@ export function liveOps(h: Helpers): Defs {
           }
           // A 도움 notice pays the helper on the spot, once: the row goes straight to claimed.
           changed.push({ ...q, progress, state: "claimed" });
-          if (!q.offer.merit) continue;
-          const m = earnMerits(
-            { ...l.character, ...live.character } as CharacterRow,
-            purse,
-            q.offer.merit ?? 0,
-            "help",
-            boardWeek(now),
-          );
-          purse = m.purse;
-          ledger.push(...m.ledger);
-          live = mergeLive(live, m.live);
           const n = l.live.notice;
+          // The same helper and poster are paid once a board day; the notice still counts done.
+          const pair = n ? `help:${n.posterId}` : "";
+          const paidPair =
+            (l.live.daily.get(pair) ?? 0) + (live.daily ?? []).filter((d) => d.key === pair).length;
+          if (q.offer.merit && n && paidPair < HELP_PAIR_DAILY) {
+            const c = counted(l, "help", q.offer.merit, req.day);
+            const m = earnMerits(
+              { ...l.character, ...live.character } as CharacterRow,
+              purse,
+              q.offer.merit,
+              "help",
+              { week: boardWeek(now), counted: c.n },
+            );
+            purse = m.purse;
+            ledger.push(...m.ledger);
+            live = mergeLive(live, {
+              ...m.live,
+              daily: [c.daily, { day: req.day, key: pair, n: 1 }],
+            });
+          }
           if (
             n &&
             n.id === q.offer.notice &&
@@ -310,7 +341,7 @@ export function liveOps(h: Helpers): Defs {
 
     "live.conduct": {
       client: false,
-      rows: () => ({}),
+      rows: (req) => (req.kind === "merit" ? { live: { tallyDay: req.day } } : {}),
       currencies: (req) => (req.kind === "merit" ? ["merit"] : []),
       apply(l, req, env) {
         const c = l.character;
@@ -318,12 +349,14 @@ export function liveOps(h: Helpers): Defs {
         if (req.kind === "merit") {
           const rolls = Array.from({ length: req.amount }, () => env.roll());
           const extra = req.neat ? neatBonus(req.amount, rolls) : 0;
-          const m = earnMerits(c, l.purse, req.amount + extra, req.reason, req.week);
+          const total = req.amount + extra;
+          const t = counted(l, req.reason, total, req.day);
+          const m = earnMerits(c, l.purse, total, req.reason, { week: req.week, counted: t.n });
           return ok({
             character: {},
             purse: m.purse,
             ledger: m.ledger,
-            live: m.live,
+            live: { ...m.live, daily: [t.daily] },
             outcome: {
               cancelled: m.cancelled,
               spare: m.spare,
@@ -506,13 +539,11 @@ export function liveOps(h: Helpers): Defs {
         const row = l.live.leader;
         if (!row) return no("not_leader");
         if (row.paid) return ok({ outcome: { paid: false } });
-        const m = earnMerits(
-          l.character,
-          l.purse,
-          MERITS["floor-leader"],
-          "floor-leader",
-          req.week,
-        );
+        // The 층장's own +5 never counts toward choosing the next 층장.
+        const m = earnMerits(l.character, l.purse, MERITS["floor-leader"], "floor-leader", {
+          week: req.week,
+          counted: 0,
+        });
         return ok({
           character: {},
           purse: m.purse,

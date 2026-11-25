@@ -12,6 +12,7 @@ import {
   catchUp,
   DAY_MS,
   HOUR_MS,
+  MERIT_TALLY_DAILY,
   MINUTE_MS,
   POOL,
   poolTerms,
@@ -485,7 +486,7 @@ describe("week turnover", () => {
       [y, 2],
       [z, 1],
     ] as const) {
-      for (let i = 0; i < n; i++) await a.live.events.cleaning(c.id);
+      for (let i = 0; i < n; i++) await a.live.events.revive(c.id, c === x ? y.id : x.id);
     }
     expect(await a.live.events.eat(z.id)).toBe("ok");
     a.clock.step(12 * DAY_MS);
@@ -548,5 +549,66 @@ describe("week turnover", () => {
     const run = await scenario({ tx: true });
     expect(run.hit).toBe(true);
     await paidOnce(run.lines, run.b);
+  });
+});
+
+describe("상점 farming", () => {
+  const tally = async (id: string) =>
+    (
+      await db.pool.query(
+        "select coalesce(sum(n), 0)::int as n from weekly_tally where character_id = $1 and kind = 'merit'",
+        [id],
+      )
+    ).rows[0].n as number;
+
+  it("counts at most the daily cap of a reason toward 층장, and pays every point", async () => {
+    const w = await world();
+    const c = await character(w);
+    const friend = await character(w);
+    for (let i = 0; i < 9; i++) await w.live.events.revive(c.id, friend.id);
+    expect((await row(c.id)).merits).toBe(9);
+    expect(await tally(c.id)).toBe(MERIT_TALLY_DAILY.revive);
+    w.clock.step(DAY_MS);
+    await w.live.events.revive(c.id, friend.id);
+    expect(await tally(c.id)).toBe(MERIT_TALLY_DAILY.revive + 1);
+  });
+
+  it("pays a 도움 between the same two players once a day", async () => {
+    const w = await world();
+    const poster = await character(w, 1);
+    const helper = await character(w, 30);
+    const help = async () => {
+      const posted = await w.live.board.post(poster.id, "help-revive");
+      if ("refused" in posted) throw new Error(posted.refused);
+      expect(posted.result.ok).toBe(true);
+      expect(await w.live.board.take(helper.id, posted.notice)).toMatchObject({ ok: true });
+      w.live.progress.help(helper.id, helpQuestId(posted.notice), posted.notice);
+      await w.live.progress.flush(helper.id);
+      expect((await w.live.board.quest(helper.id, helpQuestId(posted.notice)))?.state).toBe(
+        "claimed",
+      );
+    };
+    await help();
+    await help();
+    expect((await row(helper.id)).merits).toBe(1);
+    expect(await ledgerCount(helper.id, "merit.help")).toBe(1);
+    w.clock.step(DAY_MS);
+    await help();
+    expect((await row(helper.id)).merits).toBe(2);
+  });
+
+  it("never counts a 층장's own +5 toward the next 층장", async () => {
+    const w = await world();
+    const c = await character(w);
+    await w.live.events.cleaning(c.id);
+    w.clock.step(5 * DAY_MS);
+    await w.page.tick();
+    w.clock.step(7 * DAY_MS);
+    await w.page.tick();
+    const weeks = await db.pool.query("select week from floor_leaders where character_id = $1", [
+      c.id,
+    ]);
+    expect(weeks.rows).toHaveLength(1);
+    expect((await row(c.id)).merits).toBe(1 + 5);
   });
 });

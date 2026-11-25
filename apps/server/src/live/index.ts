@@ -19,6 +19,7 @@ import {
   NEAT,
 } from "@guago/content";
 import {
+  boardDay,
   boardWeek,
   type Character,
   CLUB_EXP_FOR_NOTICE,
@@ -402,6 +403,7 @@ export function createLive(db: Db, o: LiveOptions) {
             amount,
             neat: neat(characterId),
             week: boardWeek(now()),
+            day: boardDay(now()),
           },
     );
     if (!result.ok) {

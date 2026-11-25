@@ -165,6 +165,26 @@ export const CLUB_EXP_FOR_NOTICE = {
   help: 15,
 } as const;
 
+/**
+ * 상점 a day that count toward the week's 층장 tally, by reason. Everything earned is still paid
+ * (it cancels 벌점, the rest is spendable); past the cap it only stops counting for 층장. The
+ * 층장's own +5 never counts, so a 층장 is not chosen again by being one.
+ */
+export const MERIT_TALLY_DAILY: Readonly<Record<MeritReason, number>> = {
+  revive: 5,
+  help: 3,
+  cleaning: 1,
+  "floor-leader": 0,
+};
+
+/** How much of `amount` new 상점 counts toward the tally, with `counted` already today. */
+export function tallyCredit(reason: MeritReason, amount: number, counted: number): number {
+  return Math.max(0, Math.min(amount, MERIT_TALLY_DAILY[reason] - counted));
+}
+
+/** A 도움 between the same helper and poster pays its 상점 once a board day. */
+export const HELP_PAIR_DAILY = 1;
+
 /** 층장: the five players with the most 상점 in a week (PLAN §11). */
 export const FLOOR_LEADERS = 5;
 

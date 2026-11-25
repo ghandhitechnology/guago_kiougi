@@ -843,6 +843,26 @@ export const weeklyTally = pgTable(
   ],
 );
 
+/**
+ * Per board day counts against the anti-farming caps: 상점 counted toward the 층장 tally by
+ * reason (`revive`, `help`, …), and 도움 notices paid per poster (`help:<poster id>`).
+ */
+export const meritDaily = pgTable(
+  "merit_daily",
+  {
+    characterId: uuid("character_id")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
+    day: integer("day").notNull(),
+    key: text("key").notNull(),
+    n: integer("n").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.characterId, t.day, t.key] }),
+    check("merit_daily_n_check", sql`${t.n} >= 0`),
+  ],
+);
+
 /** The week's five 층장 (PLAN §11), chosen from the week before. */
 export const floorLeaders = pgTable(
   "floor_leaders",

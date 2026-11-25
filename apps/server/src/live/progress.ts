@@ -10,6 +10,7 @@
  * the database refuse is logged whole and dropped.
  */
 import { randomUUID } from "node:crypto";
+import { boardDay } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
 import { describeError } from "../db/index.ts";
@@ -184,6 +185,7 @@ export class ProgressBuffer {
         visit: [...p.visit],
         met: [...p.met],
         ...(p.notice ? { notice: p.notice } : {}),
+        day: boardDay(this.now().getTime()),
       },
     };
   }
