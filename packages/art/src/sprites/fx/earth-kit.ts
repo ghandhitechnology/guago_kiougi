@@ -248,8 +248,8 @@ export function meteor(size: number, k: number): Pic {
     pic,
     paintAt(size, size, (x, y) => {
       // Distance along the tail (up and to the right of the head) and across it.
-      const u = (x - hx) * 0.7071 - (y - hy) * 0.7071;
-      const v = (x - hx) * 0.7071 + (y - hy) * 0.7071;
+      const u = (x - hx) * Math.SQRT1_2 - (y - hy) * Math.SQRT1_2;
+      const v = (x - hx) * Math.SQRT1_2 + (y - hy) * Math.SQRT1_2;
       if (u < 0 || u > tail) return null;
       const width = hr * (1 - u / tail) * 1.1;
       if (Math.abs(v) > width) return null;
@@ -273,8 +273,8 @@ export function meteor(size: number, k: number): Pic {
   for (let i = 0; i < 4; i++) {
     const u = tail * (0.3 + r() * 0.8);
     pic.set(
-      Math.round(hx + u * 0.7071 + (r() - 0.5) * 4),
-      Math.round(hy - u * 0.7071 + (r() - 0.5) * 4),
+      Math.round(hx + u * Math.SQRT1_2 + (r() - 0.5) * 4),
+      Math.round(hy - u * Math.SQRT1_2 + (r() - 0.5) * 4),
       i % 2 ? "'" : ",",
     );
   }
