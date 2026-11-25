@@ -7,7 +7,7 @@ import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
 import { LiveClock } from "./live/clock.ts";
-import { provideLivePage } from "./live/current.ts";
+import { provideLive, provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
@@ -44,6 +44,7 @@ const live = createLive(db, {
   looks: studentLooks,
   testEvents: config.liveTestEvents,
 });
+provideLive(live);
 const auth = createAuthService({
   db,
   onSessionsRevoked: evictAccount,
