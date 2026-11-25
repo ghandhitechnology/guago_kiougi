@@ -438,6 +438,8 @@ export class BagView {
     this.choosing = undefined;
     this.pen.hide(80);
     this.pick = e.item ? { item: e.item.id } : { stack: e.stack ?? "" };
+    // The inspector says it all now; the card would only cover it.
+    this.card.hide(true);
     this.said.clear();
     this.redraw();
   }
@@ -453,6 +455,7 @@ export class BagView {
     const it = inventory.worn(kind).get(slot);
     if (!it) return;
     this.pick = { item: it.id };
+    this.card.hide(true);
     this.said.clear();
     this.redraw();
   }
@@ -499,6 +502,9 @@ export class BagView {
   }
 
   private showCard(it: ItemView | undefined, stack: string | undefined, cell: ItemCell): void {
+    // What the inspector already shows gets no card over it.
+    const p = this.pick;
+    if (p && (("item" in p && p.item === it?.id) || ("stack" in p && p.stack === stack))) return;
     const at = cell.bounds();
     if (stack) {
       const g = materialGood(stack);
