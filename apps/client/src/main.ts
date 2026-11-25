@@ -2,6 +2,12 @@ import { INTERNAL_HEIGHT as H, INTERNAL_WIDTH as W } from "@guago/shared";
 import * as Phaser from "phaser";
 import { WorldScene } from "./world-scene.ts";
 
+/** The map viewer replaces the game under the dev server when the URL asks for it. */
+const viewer =
+  import.meta.env.DEV && new URLSearchParams(location.search).has("view")
+    ? (await import("./render/viewer.ts")).ViewerScene
+    : null;
+
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
   parent: "game",
@@ -11,7 +17,7 @@ const game = new Phaser.Game({
   banner: false,
   render: { pixelArt: true },
   scale: { mode: Phaser.Scale.NONE },
-  scene: [WorldScene],
+  scene: viewer ? [viewer] : [WorldScene],
 });
 
 /**
