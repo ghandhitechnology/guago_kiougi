@@ -557,7 +557,7 @@ function addTool(s: State, def: string) {
     return;
   }
   const merged = mergeTools(have, { id: `t${s.nextId++}`, def, level: 1 });
-  if (merged.ok) s.tools.set(def, merged.state);
+  if (merged.ok) s.tools.set(def, merged.state.into);
 }
 
 function board(

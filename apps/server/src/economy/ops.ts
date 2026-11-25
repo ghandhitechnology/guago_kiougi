@@ -322,7 +322,12 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
       if (typeof row === "string") return no(row);
       const r = feedSheets({ item: toBook(row), purse: l.purse }, req.count, l.character.level);
       if (!r.ok) return no(r.error);
-      return ok({ purse: r.state.purse, ledger: r.ledger, put: [withBook(row, r.state.item)] });
+      return ok({
+        purse: r.state.purse,
+        ledger: r.ledger,
+        put: [withBook(row, r.state.item)],
+        outcome: { used: r.state.used },
+      });
     },
   },
 
@@ -337,12 +342,14 @@ export const OPS: { [K in AnyOp]: OpDef<Requests[K]> } = {
       if (typeof from === "string") return no(from);
       const r = mergeTools(toTool(into), toTool(from));
       if (!r.ok) return no(r.error);
-      if (!allInBag(wornAmong([from]), [from.id])) return no("item_equipped");
+      const left = r.state.from;
+      // A copy that is used up must come from the bag; one with levels left keeps its place.
+      if (left === null && !allInBag(wornAmong([from]), [from.id])) return no("item_equipped");
       return ok({
-        put: [withTool(into, r.state)],
-        remove: [from.id],
+        put: [withTool(into, r.state.into), ...(left ? [withTool(from, left)] : [])],
+        remove: left ? [] : [from.id],
         itemKey: "sink.merge",
-        outcome: { item: into.id, level: r.state.level },
+        outcome: { item: into.id, level: r.state.into.level, left: left?.level ?? 0 },
       });
     },
   },
