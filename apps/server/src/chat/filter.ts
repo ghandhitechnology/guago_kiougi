@@ -189,15 +189,15 @@ export function skeleton(text: string): Skeleton {
       // A syllable of ㅇ and the vowel just heard (시이, 바아) only draws the sound out.
       const drawnOut =
         syllable && letters.length === 2 && letters[0] === "ㅇ" && letters[1] === openVowel;
-      letters.forEach((c, i) =>
+      letters.forEach((c, i) => {
         syms.push({
           alts: [c],
           opt: drawnOut,
           src,
           first: i === 0,
           last: i === letters.length - 1,
-        }),
-      );
+        });
+      });
       openVowel = syllable && V.includes(letters.at(-1) ?? "") ? lastVowel : undefined;
       return;
     }

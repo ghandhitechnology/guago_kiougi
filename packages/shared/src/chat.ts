@@ -164,11 +164,7 @@ const STRIP = /[\p{Cc}\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
 export function cleanChatText(
   raw: string,
 ): { ok: true; text: string } | { ok: false; code: "empty" | "too_long" } {
-  const text = raw
-    .normalize("NFC")
-    .replace(STRIP, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
+  const text = raw.normalize("NFC").replace(STRIP, " ").replace(/\s+/gu, " ").trim();
   if (text === "") return { ok: false, code: "empty" };
   if (text.length > CHAT_MAX_UNITS || chatLength(text) > CHAT_MAX_LENGTH) {
     return { ok: false, code: "too_long" };
