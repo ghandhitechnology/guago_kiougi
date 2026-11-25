@@ -212,7 +212,7 @@ export const ENZYME = book<ZoneAttack>({
     { at: 40, add: { radius: 16 } },
     { at: 80, add: { radius: 16 } },
   ],
-  cues: { body: "fx-aura", hit: "fx-aura" },
+  cues: { body: "", hit: "fx-aura", area: "fx-aura" },
   evolution: {
     id: "catalyst",
     attack: {
@@ -230,6 +230,7 @@ export const ENZYME = book<ZoneAttack>({
       buff: { attackSpeed: 0.3, cooldown: 0.1 },
     } satisfies ZoneAttack,
     levels: [],
+    cues: { area: "evo-catalyst" },
   },
 });
 

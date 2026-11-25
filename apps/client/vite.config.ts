@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { fightBots } from "./fight-bots.ts";
 
 /**
  * In development the browser talks to one origin: Vite proxies the HTTP API and the Colyseus
@@ -8,6 +9,7 @@ import { defineConfig } from "vite";
 const gameServer = process.env.GAME_SERVER_URL ?? "http://localhost:2567";
 
 export default defineConfig({
+  plugins: [fightBots(gameServer)],
   server: {
     port: Number(process.env.CLIENT_PORT ?? 5173),
     strictPort: true,

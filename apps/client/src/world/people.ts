@@ -6,8 +6,8 @@ import { decodeEmblem, type Emblem } from "@guago/shared";
  * appears and lets go when it leaves; nameplates, the player card and the 과잠 read from here.
  *
  * ```ts
+ * worldPeople.only(sids);       // in the map patch: forgets players who left
  * worldPeople.seen(p.sid, p);   // in the map patch, for every seated player, the own one too
- * worldPeople.gone(sid);        // when a body is pruned
  * normalizeLook(meta, clubDress(look, p));   // dresses a club member in the 과잠
  * ```
  */
@@ -74,6 +74,11 @@ export function clubDress<
   };
 }
 
+/** What of a body's club shows on its look: changes when the 과잠 or its crest would. */
+export function clubKeyOf(p: Pick<SyncedBody, "clubId" | "jacket" | "emblem">): string {
+  return p.clubId && p.jacket ? `${p.jacket}|${p.emblem}` : "";
+}
+
 class WorldPeople {
   private readonly bodies = new Map<string, SyncedBody>();
   /** The club each body was last seen in, to notice joins and leaves. */
@@ -94,6 +99,11 @@ class WorldPeople {
     if (!this.bodies.delete(sid)) return;
     this.clubs.delete(sid);
     for (const l of this.listeners) l(sid);
+  }
+
+  /** Forgets every body not in `here`, as when players leave the map. */
+  only(here: { has(sid: string): boolean }): void {
+    for (const sid of [...this.bodies.keys()]) if (!here.has(sid)) this.gone(sid);
   }
 
   /** Forgets every body, as on leaving a map. */
