@@ -53,7 +53,7 @@ import {
   WORLD_MESSAGES,
 } from "@guago/shared";
 import { sql } from "drizzle-orm";
-import { background } from "../background.ts";
+import { background, guarded } from "../background.ts";
 import { clubActivity } from "../club-activity.ts";
 import { clubTags } from "../club-tags.ts";
 import { describeError } from "../db/index.ts";
@@ -212,12 +212,22 @@ export class SocialHub<P extends Peer> {
     this.social = social;
     this.room = room;
     this.handlers = this.makeHandlers();
-    this.timers.push(setInterval(() => this.tick(), VITALS_MS));
-    this.timers.push(setInterval(() => background("club EXP", this.creditClubs()), CLUB_EXP_MS));
+    this.timers.push(
+      setInterval(
+        guarded("social vitals", () => this.tick()),
+        VITALS_MS,
+      ),
+    );
+    this.timers.push(
+      setInterval(
+        guarded("club EXP", () => this.creditClubs()),
+        CLUB_EXP_MS,
+      ),
+    );
     for (const t of this.timers) t.unref();
     // Changes made outside a request (moderation removing a character) reach members too.
-    this.unlisten = social.onClubChange((change) =>
-      background("club change", this.clubChanged(change)),
+    this.unlisten = social.onClubChange(
+      guarded("club change", (change: ClubChange) => this.clubChanged(change)),
     );
   }
 
