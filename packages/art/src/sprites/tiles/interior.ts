@@ -256,43 +256,47 @@ const TERRAZZO_SHEEN_FRINGE: readonly (readonly Mark[])[] = [[[6, 6, P("ww")]], 
 
 // Cafeteria tile ------------------------------------------------------------------------------
 
-/** Small quarry tiles, eight pixels with their grout, a few lighter and a few chipped. */
-function tiles(light: readonly number[], chip: readonly number[]): string {
+/**
+ * Glazed floor tiles, long ones laid in running bond so the joints never line up into a grid,
+ * one chipped at a corner here and there. Low contrast on purpose: a hall of them should read
+ * as a floor first.
+ */
+function tiles(chip: readonly [number, number][], crack: boolean): string {
   const pic = Pic.blank(16, 16, "P");
-  for (let i = 0; i < 16; i++) {
-    pic.set(7, i, "p").set(15, i, "p").set(i, 7, "p").set(i, 15, "p");
-  }
-  [
-    [0, 0],
-    [8, 0],
-    [0, 8],
-    [8, 8],
-  ].forEach(([tx, ty], k) => {
-    if (light.includes(k)) {
-      for (let y = 1; y < 5; y++)
-        for (let x = 1; x < 5; x++)
-          if (x + y < 6) pic.set((tx as number) + x, (ty as number) + y, "E");
+  for (let y = 0; y < 16; y++) {
+    const row = Math.floor(y / 8);
+    const shift = row % 2 ? 8 : 0;
+    for (let x = 0; x < 16; x++) {
+      const bx = (x + 16 - shift) % 16;
+      if (y % 8 === 7 || bx === 15) pic.set(x, y, "p");
     }
-    if (chip.includes(k)) pic.put(P("pp\np."), (tx as number) + 4, (ty as number) + 4);
-  });
+  }
+  for (const [x, y] of chip) pic.put(P("pp\np."), x, y);
+  if (crack) pic.put(P("p..\n.pp"), 4, 2);
   return pic.toString();
 }
 
-const TILE_BASES = [tiles([], []), tiles([1], []), tiles([], [2]), tiles([3], [0]), tiles([0], [])];
+const TILE_BASES = [
+  tiles([], false),
+  tiles([[5, 4]], false),
+  tiles([], true),
+  tiles([[11, 12]], false),
+  tiles([], false),
+];
 
-/** Mopped, still wet: grout darkened and a shine across the tiles. */
+/** Mopped, still wet: a shine across the tiles. */
 const TILE_WET: readonly (readonly Mark[])[] = [
   [
-    [1, 1, P("ww\nw.")],
-    [9, 9, P("ww\nw.")],
-    [10, 2, P(".w\nww")],
+    [1, 1, P("EE\nE.")],
+    [9, 9, P("EE\nE.")],
+    [10, 2, P(".E\nEE")],
   ],
   [
-    [2, 9, P("ww\nw.")],
-    [9, 1, P("ww\nw.")],
+    [2, 9, P("EE\nE.")],
+    [9, 1, P("EE\nE.")],
   ],
 ];
-const TILE_WET_FRINGE: readonly (readonly Mark[])[] = [[[9, 9, P("w.\n.w")]], []];
+const TILE_WET_FRINGE: readonly (readonly Mark[])[] = [[[9, 9, P("E.\n.E")]], []];
 
 // Dorm vinyl ----------------------------------------------------------------------------------
 
@@ -475,7 +479,7 @@ const terrazzoFloor = terrain({
 });
 
 const tileFloor = terrain({
-  ...mats("tile", "p"),
+  ...mats("tile", "t"),
   themes: ["campus", "campus-dusk"],
   base: TILE_BASES,
   tones: [
