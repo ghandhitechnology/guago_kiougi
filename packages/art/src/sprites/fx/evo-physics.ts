@@ -1,5 +1,5 @@
 import { type Legend, sprite } from "../../format.ts";
-import { clean, ell, framesOf, line, names, Pic, paintAt, put } from "../../fx.ts";
+import { clean, ell, framesOf, line, names, Pic, paintAt, put, segDist } from "../../fx.ts";
 import { PHYS, PHYS_LONE, TOME, tome } from "./physics.ts";
 import { bob, spiral } from "./physics-kit.ts";
 
@@ -8,20 +8,84 @@ const evo = { group: "combat-evolved", outline: false, palette: PHYS, lone: PHYS
 
 /**
  * 프린키피아 사본: the tome bound again in its deepest plum with a pale gold band, flying flat
- * and straight now, so it turns slower: four frames over a half turn.
+ * and straight now, so it turns slower: four frames over a half turn. Its silk bookmark streams
+ * out behind it, a long gold ribbon waving and forked at the end: drawn at sixteen aims
+ * (`fly{aim}`), so the client never turns it and the tome reads as a comet from across a field.
  */
-const PRINCIPIA: Legend = { ...TOME, y: "gold.pale" };
+const PRINCIPIA: Legend = { ...TOME, y: "gold.pale", Y: "gold.light", G: "gold.mid" };
+
+function ribbon(a: number, k: number): Pic {
+  const s = 64;
+  const c = s / 2;
+  const ux = -Math.cos(a);
+  const uy = -Math.sin(a);
+  const pts: [number, number][] = [];
+  for (let d = 5; d <= 30; d += 1) {
+    const wave = Math.sin(d * 0.32 - k * 1.6) * (d / 30) * 3.6;
+    pts.push([c + ux * d - uy * wave, c + uy * d + ux * wave]);
+  }
+  const pic = paintAt(s, s, (x, y) => {
+    let best = 9;
+    let side = 0;
+    let along = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const p = pts[i] as [number, number];
+      const q = pts[i + 1] as [number, number];
+      const dist = segDist(x, y, p, q);
+      if (dist < best) {
+        best = dist;
+        side = (q[0] - p[0]) * (y - p[1]) - (q[1] - p[1]) * (x - p[0]);
+        along = i;
+      }
+    }
+    const half = along > 21 ? 1.5 : 1.25 - along * 0.012;
+    if (best > half) return null;
+    // The forked end: the middle of the last few pixels is cut away.
+    if (along > 21 && best < 0.55) return null;
+    return side * (ux + uy) > 0 ? "G" : "Y";
+  });
+  const out = pic.clone();
+  for (let y = 0; y < s; y++)
+    for (let x = 0; x < s; x++) {
+      if (pic.at(x, y) !== ".") continue;
+      if ([pic.at(x - 1, y), pic.at(x + 1, y), pic.at(x, y - 1), pic.at(x, y + 1)].some((ch) => ch && ch !== "."))
+        out.set(x, y, "o");
+    }
+  return out;
+}
+
 const principia = sprite({
   name: "evo-principia",
   group: "combat-evolved",
   palette: PRINCIPIA,
-  size: [18, 18],
-  origin: [9, 9],
-  frames: framesOf(
-    "spin",
-    [0, 1, 2, 3].map((k) => tome((k * Math.PI) / 4).swap("lmdYG", "mddyY")),
-  ),
-  anim: { spin: { frames: names("spin", 4), fps: 10, jump: 0.5 } },
+  size: [64, 64],
+  origin: [32, 32],
+  frames: {
+    ...framesOf(
+      "spin",
+      [0, 1, 2, 3].map((k) =>
+        put(Pic.blank(64, 64), tome((k * Math.PI) / 4).swap("lmdYG", "mddyY"), 23, 23),
+      ),
+    ),
+    ...Object.fromEntries(
+      Array.from({ length: 16 }, (_, d) =>
+        [0, 1, 2, 3].map((k) => {
+          const pic = ribbon((d / 16) * Math.PI * 2, k);
+          put(pic, tome((k * Math.PI) / 4).swap("lmdYG", "mddyY"), 23, 23);
+          return [`fly${d}-${k}`, clean(pic).toString()];
+        }),
+      ).flat(),
+    ),
+  },
+  anim: {
+    spin: { frames: names("spin", 4), fps: 10, jump: 0.5 },
+    ...Object.fromEntries(
+      Array.from({ length: 16 }, (_, d) => [
+        `fly${d}`,
+        { frames: names(`fly${d}-`, 4), fps: 10, jump: 0.5 },
+      ]),
+    ),
+  },
 });
 
 /**
