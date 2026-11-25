@@ -99,7 +99,7 @@ startListingSweeper(
 setInterval(
   () => {
     auth.sweep().catch(() => {});
-    economy.prune().catch(() => {});
+    economy.prune(live.progress.inflightIds()).catch(() => {});
     void social.sweep();
   },
   10 * 60 * 1000,
