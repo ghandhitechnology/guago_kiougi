@@ -7,19 +7,39 @@ import {
   ServerError,
 } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
-import { type BuiltMap, type Interactable, type Patrol, patrolPose, sees } from "@guago/content";
 import {
-  addPlayer,
+  type BuiltMap,
+  type Drop,
+  fieldOf,
+  fightMapOf,
+  type Interactable,
+  monsterKindIndex,
+  type Patrol,
+  patrolPose,
+  sees,
+  simRules,
+} from "@guago/content";
+import {
+  AIM_MESSAGE,
+  aimMessage,
   type Caught,
+  type ChangeNotice,
   type Character,
   CLOSE_MAP_CHANGED,
-  type Collidable,
-  createWorld,
+  CONTROL_MODES,
+  createFight,
   type DoorRattle,
   type DoorRefusal,
   dressPlayer,
+  Ev,
   type Facing,
+  type FightInput,
+  type FightMap,
+  FightNet,
+  type FightWorld,
+  gainExp,
   type Halt,
+  hurtPlayer,
   INPUT_MESSAGE,
   InputQueue,
   type Interaction,
@@ -29,37 +49,54 @@ import {
   MAP_SEATS,
   MAX_MAP_PX,
   MapState,
-  MonsterState,
-  type MoveInput,
+  MODE_AUTO,
+  MODE_MESSAGE,
+  Mode,
+  type Modifiers,
+  modeMessage,
+  type NetViewer,
+  NO_MODIFIERS,
   type NpcLine,
   NpcState,
   nearestUsable,
+  newViewer,
   OWNER_TAG,
+  overlapsSolid,
   PLAYER_RADIUS,
+  type Player,
+  type PlayerKit,
   PlayerState,
   POS_SCALE,
   RECONNECT_SECONDS,
-  removePlayer,
-  type SimWorld,
+  REVIVE_MESSAGE,
+  reviveMessage,
+  SNAPSHOT_MESSAGE,
+  sameModifiers,
   shutDoorAhead,
   shutDoors,
-  skipTicks,
-  step,
+  snap,
+  spawnMonster,
+  startRevive,
   stepDoors,
+  stepFight,
   TICK_MS,
   TILE_SIZE,
   type Transfer,
   type Usable,
   wearClub,
+  withModifiers,
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
 import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
+import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
-import { InterestGrid, type Viewer } from "./interest.ts";
+import { grants } from "./economy/grants.ts";
+import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
 import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
+import { parties } from "./parties.ts";
 import { places } from "./places.ts";
 import { type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
@@ -96,6 +133,13 @@ const LOG_EVERY_MS = 30_000;
  * keeps every tick within a few milliseconds of its time.
  */
 const POLL_MS = 5;
+/** Party frames hear about health and mode this often (only changes go on). */
+const VITALS_EVERY_MS = 500;
+/**
+ * The living world's modifiers and whether the map is open are read this often. Buffs end on the
+ * game clock with no signal, so the room asks; a kit is rebuilt only when a value changed.
+ */
+const LIVE_EVERY_MS = 2_000;
 /**
  * A socket whose player went through a door is closed if still open after this: the client takes
  * its new seat at once, and an old connection kept open counts for nothing anyway.
@@ -139,14 +183,55 @@ export function checkMapRooms(): void {
   for (const room of ROOMS) room.checkBodies();
 }
 
+/** The step's party key for a party id. */
+function partyOf(id: number | undefined): string | null {
+  return id === undefined ? null : String(id);
+}
+
+/** Aim, mode and revive requests a client may send per second, after a small burst. */
+const RATES = { aim: [20, 10], mode: [2, 2], revive: [4, 4] } as const;
+
+/** A token bucket for one kind of request from one client. */
+class Bucket {
+  private tokens: number;
+  private last = performance.now();
+  private readonly rate: number;
+  private readonly burst: number;
+
+  constructor(rate: number, burst: number) {
+    this.rate = rate;
+    this.burst = burst;
+    this.tokens = burst;
+  }
+
+  take(): boolean {
+    const now = performance.now();
+    this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) / 1000) * this.rate);
+    this.last = now;
+    if (this.tokens < 1) return false;
+    this.tokens -= 1;
+    return true;
+  }
+}
+
 /** A player's body in this room: what is synced, what its client sees, what it asked to do. */
 interface Pawn {
   readonly slot: string;
   readonly client: Client;
   readonly character: Character;
   readonly state: InstanceType<typeof PlayerState>;
-  readonly viewer: Viewer;
+  readonly net: NetViewer;
   readonly queue: InputQueue;
+  readonly player: Player;
+  readonly buckets: { aim: Bucket; mode: Bucket; revive: Bucket };
+  /** What it fights with; replaced when an operation changes it. */
+  loadout: Loadout;
+  /** The living world's multipliers its kit was built with. */
+  mods: Modifiers;
+  /** EXP below one, carried to the next grant: grants take whole numbers. */
+  expCarry: number;
+  /** Tick it was seated, for "present for the whole surge". */
+  readonly since: number;
   /** Walking out through a door: no more inputs, no more doors. */
   leaving: boolean;
   zones: readonly string[];
@@ -160,6 +245,9 @@ interface Pawn {
   unseenUntil: number;
   /** A meal at the 급식 counter is being served: one at a time. */
   eating: boolean;
+  /** Where the body stood before this tick's step, to tell a push against a shut door. */
+  fromX: number;
+  fromY: number;
 }
 
 /** A cast member standing here, with what the room remembers about them. */
@@ -187,12 +275,41 @@ function facingToward(x: number, y: number, tx: number, ty: number): Facing {
   return dy < 0 ? 1 : 0;
 }
 
+let loadouts: Loadouts = starterLoadouts;
+
+/** Called once at server start to read loadouts from the inventory. */
+export function provideFightServices(s: { loadouts?: Loadouts }): void {
+  if (s.loadouts) loadouts = s.loadouts;
+}
+
+/** Characters fighting in this process, by id, for loadout changes. */
+const fighting = new Map<string, { room: MapRoom; pawn: Pawn }>();
+
+/**
+ * An operation landed for a character (the executor's `onApplied`): when it touched what the
+ * character fights with (an equip, 필기, a forge, a level or stats), its kit is rebuilt.
+ */
+export function fightLoadoutChanged(characterId: string, change: ChangeNotice): void {
+  const at = fighting.get(characterId);
+  if (!at) return;
+  const touched =
+    (change.items?.some((i) => i.slot !== null) ?? false) ||
+    (change.removed?.length ?? 0) > 0 ||
+    change.progression !== undefined;
+  if (!touched) return;
+  void at.room.reload(at.pawn);
+}
+
+/** The fight map a room runs on: the built map's, with walls a closed door swaps. */
+type RoomMap = { -readonly [K in keyof FightMap]: FightMap[K] };
+
 /**
  * One channel of one map (PLAN §10, §19). The server decides everything: clients send `input`
- * and `interact` only, each input is queued per player and spent one tick at a time by the
- * shared simulation, and the state that comes back carries the last input applied so the owner
- * can reconcile its prediction. Doors, zones, the cast and what is in reach are worked out from
- * the server's own positions.
+ * (movement, a dodge, a manual cast), `aim`, `mode`, `revive` and `interact`; the shared fight
+ * step runs at 20 Hz and owns every body, monster and effect; each client then gets its own
+ * snapshot of the cells around its screen, and the schema carries who is here, the owner's own
+ * numbers, the cast and the shut doors. Doors, zones, the cast and patrols are worked out from the
+ * step's positions after each tick.
  */
 export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   override state = new MapState();
@@ -202,15 +319,17 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   private def!: BuiltMap;
   /** The walls players walk on here; closed doors swap its grid as the Page clock moves. */
-  private map!: { collision: Collidable["collision"] };
-  private world!: SimWorld;
-  private grid!: InterestGrid;
+  private map!: RoomMap;
+  private world!: FightWorld;
+  private net!: FightNet;
+  /** Bodies entering or leaving a client's view, for metrics: only on joins and leaves. */
+  private viewChanges = 0;
   private metrics!: RoomMetrics;
   private readonly pawns = new Map<string, Pawn>();
+  private readonly bySlot = new Map<number, Pawn>();
   /** Free body slots, longest free first, so a body is never handed on within one patch. */
   private readonly free: string[] = [];
   private seats!: RoomSeats;
-  private readonly monsters = new Map<number, InstanceType<typeof MonsterState>>();
   /** The portal each player stands in, for the doorway step. */
   private inside = new Map<string, number>();
   private people: Person[] = [];
@@ -221,9 +340,14 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private patrols: readonly Patrol[] = [];
   private graceMs = 30_000;
   private ticks!: TickClock;
+  /** Tick the current surge began. */
+  private surgeFrom = 0;
   private unlistenClubs: (() => void) | undefined;
   /** Sessions whose body walked out through a door; their socket stays open a little while. */
   private readonly moved = new Set<string>();
+  private unlistenParties: (() => void) | undefined;
+  /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
+  private readonly devActions: (() => void)[] = [];
 
   /**
    * Map rooms are never matchmade by a client: every seat is reserved by the server for a
@@ -237,8 +361,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const def = builtMap(options.map);
     if (!def) throw new Error(`no built map ${options.map}`);
     this.def = def;
-    // Its own copy: closed doors change it as the Page clock opens maps.
-    this.map = { collision: roomCollision(def).collision };
+    // Its own walls: closed doors change them as the Page clock opens maps.
+    this.map = { ...fightMapOf(def), collision: roomCollision(def).collision };
     this.patrols = def.patrols;
     this.graceMs = options.grace * 1000;
     const { w, h } = def.collision;
@@ -246,10 +370,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       throw new Error(`map ${def.id} is larger than positions can address (${MAX_MAP_PX} px)`);
     }
     const seed = (Math.random() * 2 ** 32) >>> 0;
-    // Monsters only for load tests; field monsters arrive with the combat simulation.
-    const monsters = options.monsters ? [{ kind: "odap", count: options.monsters }] : [];
-    this.world = createWorld(this.map, monsters, seed);
-    this.grid = new InterestGrid(this.world.width, this.world.height);
+    const field = fieldOf(def.id, process.env.GUAGO_FIELD);
+    this.world = createFight(this.map, simRules(), field, seed);
+    this.net = new FightNet(this.world);
+    // A map with no field gets wandering 오답 only when a load test asks (`monsters`).
+    if (!field && options.monsters) this.scatter(options.monsters);
     this.metrics = new RoomMetrics(this.roomId, def.id);
     this.seats = new RoomSeats(def.id, (id) => this.placeOf(id));
     this.state.map = def.id;
@@ -263,17 +388,39 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     }
     this.placeCast();
     this.refreshDoors();
-    this.sync();
 
-    this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: MoveInput) => {
+    this.onMessage(INPUT_MESSAGE, inputMessage, (client, input: FightInput) => {
       const pawn = this.pawns.get(client.sessionId);
       if (pawn && !pawn.leaving) this.metrics.inputsDropped += pawn.queue.push(input);
     });
     this.onMessage(MAP_MESSAGES.interact, interactMessage, (client, n: number) => {
       this.interact(client, n);
     });
+    this.onMessage(AIM_MESSAGE, aimMessage, (client, aim) => {
+      const pawn = this.pawns.get(client.sessionId);
+      if (!pawn?.buckets.aim.take()) return;
+      const p = pawn.player;
+      p.aiming = aim !== null;
+      p.aimX = aim?.dx ?? 0;
+      p.aimY = aim?.dy ?? 0;
+    });
+    this.onMessage(MODE_MESSAGE, modeMessage, (client, mode) => {
+      const pawn = this.pawns.get(client.sessionId);
+      if (!pawn?.buckets.mode.take()) return;
+      if (pawn.player.mode === mode) return;
+      pawn.player.mode = mode as Mode;
+      pawn.player.casts = 0;
+      this.tellMode(pawn);
+    });
+    this.onMessage(REVIVE_MESSAGE, reviveMessage, (client, slot) => {
+      const pawn = this.pawns.get(client.sessionId);
+      const target = this.bySlot.get(slot);
+      if (!pawn?.buckets.revive.take() || !target) return;
+      startRevive(this.world, pawn.player, target.player);
+    });
+    if (process.env.GUAGO_DEV_COMMANDS === "1") this.devCommands();
 
-    // Patches go out right after each step, so every patch is exactly one tick of the world.
+    // Patches and snapshots go out right after each step, so each is exactly one tick of the world.
     this.ticks = new TickClock(performance.now());
     this.setTimestep(() => this.loop(), POLL_MS);
     this.patchRate = 0;
@@ -290,12 +437,171 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
         if (pawn.character.id === characterId) wearClub(pawn.state, tag);
       }
     });
+    // Party members on this map share kills within 20 tiles (PLAN §6); the step reads the party.
+    this.unlistenParties = parties.listen((characterId, partyId) => {
+      const pawn = fighting.get(characterId)?.pawn;
+      if (pawn && this.pawns.get(pawn.player.id) === pawn) pawn.player.party = partyOf(partyId);
+    });
+    // Party frames: health and mode, which the party module passes on only when they change.
+    this.clock.setInterval(() => {
+      for (const pawn of this.pawns.values()) {
+        const p = pawn.player;
+        const mode = CONTROL_MODES[p.mode] ?? "semi";
+        parties.report(pawn.character.id, { hp: p.hp, maxHp: p.kit.maxHp, mode });
+      }
+    }, VITALS_EVERY_MS);
+    // The living world is read every couple of seconds from memory, never on the tick.
+    this.readLive();
+    this.clock.setInterval(() => this.readLive(), LIVE_EVERY_MS);
     if (invariants.on) {
       ROOMS.add(this);
       this.clock.setInterval(() => this.checkBodies(), BODY_CHECK_MS);
     }
     // Made for a seat that may never be taken.
     this.emptied();
+  }
+
+  /** A closed map spawns nothing; a changed modifier rebuilds that player's kit. */
+  private readLive(): void {
+    const l = live();
+    this.world.director.paused = !(l?.isOpen(this.mapId) ?? true);
+    if (!l) return;
+    for (const pawn of this.pawns.values()) {
+      const mods = l.modifiers(pawn.character.id);
+      if (sameModifiers(mods, pawn.mods)) continue;
+      pawn.mods = mods;
+      pawn.player.expMult = mods.exp;
+      this.world.setKit(pawn.player, this.kitOf(pawn, pawn.player.level));
+    }
+  }
+
+  /** A character's kit at a level: its loadout's books and stats, then the living world's modifiers. */
+  private kitOf(pawn: Pawn, level: number): PlayerKit {
+    const kit = this.world.rules.kit(buildOf(pawn.character, pawn.loadout, level));
+    return withModifiers(kit, pawn.mods);
+  }
+
+  /** A mode chosen or a seat taken: full auto's unbroken time is what brings 졸음. */
+  private tellMode(pawn: Pawn): void {
+    live()?.events.autoHunting(pawn.character.id, pawn.player.mode === Mode.Auto);
+  }
+
+  /** The step's events the living world counts (notices, 상점 and 벌점); it buffers them all. */
+  private tellLive(): void {
+    const l = live();
+    if (!l) return;
+    const w = this.world;
+    const place = w.field?.id ?? this.mapId;
+    const of = (index: number) => {
+      const p = w.players[index];
+      return p?.joined ? this.pawns.get(p.id) : undefined;
+    };
+    for (let i = 0; i < w.eventCount; i++) {
+      const e = w.events[i];
+      if (!e) continue;
+      switch (e.type) {
+        case Ev.Credit: {
+          const pawn = of(e.a);
+          const kind = w.rules.monsters[e.d];
+          if (pawn && kind) l.events.kill(pawn.character.id, kind.id, 1);
+          break;
+        }
+        case Ev.Wake: {
+          // Woke at the arrival point without being got up: the 기절 counts.
+          const pawn = of(e.a);
+          if (pawn) void l.events.knockout(pawn.character.id);
+          break;
+        }
+        case Ev.Revive: {
+          const target = of(e.a);
+          const by = of(e.b);
+          if (target && by) void l.events.revive(by.character.id, target.character.id);
+          break;
+        }
+        case Ev.Phase:
+          if (e.d === 1) this.surgeFrom = w.tick;
+          else {
+            // A wave is clean for whoever was here for all of it and took no hit.
+            for (const pawn of this.pawns.values()) {
+              if (pawn.since > this.surgeFrom || pawn.player.lastHurt >= this.surgeFrom) continue;
+              l.events.cleanWave(pawn.character.id, place);
+            }
+          }
+          break;
+      }
+    }
+    for (const g of w.grants) {
+      const pawn = this.pawns.get(g.player.id);
+      const item = (g.drop.payload as Drop).item;
+      if (!pawn) continue;
+      if (item.kind === "page") l.events.collect(pawn.character.id, "sheet", item.qty);
+      else if (item.kind === "ink" || item.kind === "binding")
+        l.events.collect(pawn.character.id, item.kind, item.qty);
+    }
+  }
+
+  /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
+  async reload(pawn: Pawn): Promise<void> {
+    const loadout = await loadouts.read(pawn.character);
+    if (this.pawns.get(pawn.player.id) !== pawn) return;
+    pawn.loadout = loadout;
+    const p = pawn.player;
+    // The inventory's level is the record; the fight may run ahead of grants not yet landed.
+    if (loadout.level > p.level) p.level = loadout.level;
+    this.world.setKit(p, this.kitOf(pawn, p.level));
+  }
+
+  /**
+   * Development only (`GUAGO_DEV_COMMANDS=1`): put a monster or the golem beside a player, to
+   * meet each archetype on purpose. Never on in a deployment.
+   */
+  private devCommands(): void {
+    this.onMessage("dev", (client, msg: unknown) => {
+      const pawn = this.pawns.get(client.sessionId);
+      if (!pawn || !Array.isArray(msg)) return;
+      const [cmd, a, b] = msg as [unknown, unknown, unknown];
+      const p = pawn.player;
+      if (cmd === "spawn" && typeof a === "string") {
+        const kind = this.world.rules.monsters[monsterKindIndex(a)];
+        if (!kind) return;
+        const n = typeof b === "number" ? Math.min(20, Math.max(1, b)) : 1;
+        for (let i = 0; i < n; i++) {
+          const ang = (i / n) * Math.PI * 2;
+          spawnMonster(
+            this.world,
+            kind,
+            p.level,
+            false,
+            p.x + Math.cos(ang) * 90,
+            p.y + Math.sin(ang) * 60,
+          );
+        }
+      } else if (cmd === "clear") {
+        for (const m of this.world.monsters) if (m.alive) m.gone = true;
+      } else if (cmd === "exp" && typeof a === "number" && a > 0) {
+        // Inside the next tick, so its level-up events reach the snapshot.
+        this.devActions.push(() => gainExp(this.world, p, Math.min(1e7, a)));
+      } else if (cmd === "down") {
+        this.devActions.push(() => {
+          p.invulnerableUntil = 0;
+          hurtPlayer(this.world, p, p.hp + p.shield + 1, p.entity, 0);
+        });
+      }
+    });
+  }
+
+  /** Load tests on a map with no field: `n` 오답 scattered over open ground. */
+  private scatter(n: number): void {
+    const kind = this.world.rules.monsters[monsterKindIndex("odap")];
+    if (!kind) return;
+    const { width, height } = this.world;
+    for (let i = 0, tries = 0; i < n && tries < n * 50; tries++) {
+      const x = 16 + Math.random() * (width - 32);
+      const y = 16 + Math.random() * (height - 32);
+      if (overlapsSolid(this.map, x, y, 12) || this.world.inSafe(x, y)) continue;
+      spawnMonster(this.world, kind, 1, false, x, y);
+      i++;
+    }
   }
 
   /** Players seated in this room. */
@@ -344,7 +650,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   /** Where a session's character stands, in whole pixels, for saving. */
   private placeOf(id: string): { x: number; y: number } | undefined {
-    const p = this.world.players.find((q) => q.id === id);
+    const p = this.world.playerById(id);
     return p && { x: Math.round(p.x), y: Math.round(p.y) };
   }
 
@@ -356,7 +662,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       // A seat is good only for where the character belongs as it is taken: a ticket from before
       // a door, an expel or another page's move is refused, and the client enters again.
       if (!(await this.belongsHere(character))) throw new ServerError(409, "elsewhere");
-      this.seat(client, character, options);
+      await this.seat(client, character, options);
     } catch (error) {
       // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
       this.removeBody(client.sessionId);
@@ -379,8 +685,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     return belongsOn(saved, sentHome) === this.def.id;
   }
 
-  /** Puts a joined character's body into the world and the client's view around it. */
-  private seat(client: Client, character: Character, options: SeatOptions): void {
+  /** Puts a joined character's body into the fight and the client's views around it. */
+  private async seat(client: Client, character: Character, options: SeatOptions): Promise<void> {
     const id = client.sessionId;
     if (invariants.on) oneBody(character.id, this);
     const start =
@@ -391,52 +697,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)
         : start.facing;
-    const view = new StateView();
-    client.view = view;
-    const slot = this.free.shift();
-    const state = slot === undefined ? undefined : this.state.players.get(slot);
-    if (slot === undefined || !state) {
-      throw new Error("no free body; maxClients should have refused the join");
-    }
-    const viewer: Viewer = { view, cell: undefined };
-    // Recorded at once, so removeBody finds and frees the slot whatever fails below.
-    const pawn: Pawn = {
-      slot,
-      client,
-      character,
-      state,
-      viewer,
-      queue: new InputQueue(),
-      leaving: false,
-      zones: [],
-      zoneTile: -1,
-      lastInteract: 0,
-      lastRattle: 0,
-      atDesk: false,
-      unseenUntil: 0,
-      eating: false,
-    };
-    this.pawns.set(id, pawn);
-    this.world = addPlayer(this.world, id, start.x, start.y);
-    this.world = {
-      ...this.world,
-      players: this.world.players.map((p) => (p.id === id ? { ...p, facing } : p)),
-    };
-    const player = this.world.players.at(-1);
-    if (!player) throw new Error("player was not added");
-    state.sid = id;
-    state.x = wire(player.x);
-    state.y = wire(player.y);
-    state.facing = player.facing;
-    state.seq = 0;
-    dressPlayer(state, character);
-    wearClub(state, clubTags.get(character.id));
-    view.add(state, OWNER_TAG);
-    pawn.zones = zonesAt(this.def.zones, player.x, player.y);
-    pawn.zoneTile = this.tileOf(player.x, player.y);
-    const cell = this.grid.place(state, player.x, player.y);
-    this.grid.watch(viewer, cell ?? this.grid.cellOfEntity(state));
+    const loadout = await loadouts.read(character);
+    client.view = new StateView();
+    const pawn = this.placeBody(client, character, loadout, start.x, start.y, facing);
     this.countBytes(client);
+    const p = pawn.player;
     client.send(MAP_MESSAGES.zones, { zones: pawn.zones } satisfies ZoneUpdate);
     places.enter(character.id, {
       mapId: this.def.id,
@@ -446,7 +711,95 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       at: () => this.placeOf(id),
       zones: () => this.pawns.get(id)?.zones ?? [],
     });
-    this.visit(character.id, placesAt(this.def, player.x, player.y));
+    this.visit(character.id, placesAt(this.def, p.x, p.y));
+  }
+
+  /**
+   * A body in the fight with a free slot, its owner's view of itself and of everyone here, and
+   * everyone's view of it. Recorded at once, so `removeBody` frees whatever was made if a later
+   * step fails.
+   */
+  private placeBody(
+    client: Client,
+    character: Character,
+    loadout: Loadout,
+    x: number,
+    y: number,
+    facing: Facing,
+  ): Pawn {
+    const id = client.sessionId;
+    const view = client.view;
+    const slot = this.free.shift();
+    const state = slot === undefined ? undefined : this.state.players.get(slot);
+    if (slot === undefined || !state || !view) {
+      if (slot !== undefined) this.free.unshift(slot);
+      throw new Error("no free body; maxClients should have refused the join");
+    }
+    const level = Math.max(1, loadout.level);
+    const mods = live()?.modifiers(character.id) ?? NO_MODIFIERS;
+    const kit = withModifiers(this.world.rules.kit(buildOf(character, loadout, level)), mods);
+    let player: Player;
+    try {
+      player = this.world.addPlayer(id, Number(slot), x, y, kit, level);
+    } catch (error) {
+      this.free.unshift(slot);
+      throw error;
+    }
+    player.facing = facing;
+    player.exp = loadout.exp;
+    player.expMult = mods.exp;
+    player.party = partyOf(parties.of(character.id)?.id);
+    const net = newViewer();
+    net.player = player;
+    this.net.viewers.add(net);
+    const pawn: Pawn = {
+      slot,
+      client,
+      character,
+      state,
+      net,
+      queue: new InputQueue(),
+      player,
+      loadout,
+      mods,
+      expCarry: 0,
+      since: this.world.tick,
+      buckets: {
+        aim: new Bucket(RATES.aim[0], RATES.aim[1]),
+        mode: new Bucket(RATES.mode[0], RATES.mode[1]),
+        revive: new Bucket(RATES.revive[0], RATES.revive[1]),
+      },
+      leaving: false,
+      zones: zonesAt(this.def.zones, player.x, player.y),
+      zoneTile: this.tileOf(player.x, player.y),
+      lastInteract: 0,
+      lastRattle: 0,
+      atDesk: false,
+      unseenUntil: 0,
+      eating: false,
+      fromX: player.x,
+      fromY: player.y,
+    };
+    player.rebuild = (lv) => this.kitOf(pawn, lv);
+    this.pawns.set(id, pawn);
+    this.bySlot.set(Number(slot), pawn);
+    fighting.set(character.id, { room: this, pawn });
+    state.sid = id;
+    dressPlayer(state, character);
+    wearClub(state, clubTags.get(character.id));
+    this.syncOwn(state, player);
+    view.add(state, OWNER_TAG);
+    // Who is here is small and rare, so every client holds every seated player's identity;
+    // the bodies themselves move in the snapshot.
+    for (const other of this.pawns.values()) {
+      if (other === pawn) continue;
+      const theirs = other.client.view;
+      if (!view.has(other.state)) view.add(other.state);
+      if (theirs && !theirs.has(state)) theirs.add(state);
+      this.viewChanges += 2;
+    }
+    this.tellMode(pawn);
+    return pawn;
   }
 
   /** Tells the living world the character is in these places (도감 school entries, notices). */
@@ -456,9 +809,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   }
 
   override onDrop(client: Client): void {
-    // The character stays where it stood; queued inputs from before the drop are stale.
     const pawn = this.pawns.get(client.sessionId);
-    pawn?.queue.clear();
+    // The character stays and plays itself meanwhile (PLAN §19 reconnect); queued inputs are stale.
+    if (pawn) {
+      pawn.queue.clear();
+      pawn.player.away = true;
+    }
     if (!this.seats.mayReconnect(client)) {
       if (pawn) pawn.leaving = true;
       return;
@@ -474,7 +830,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const pawn = this.pawns.get(client.sessionId);
     if (!pawn || pawn.leaving || !(await this.belongsHere(pawn.character))) {
       if (client.state !== ClientState.LEAVING) client.leave(CLOSE_MAP_CHANGED);
+      return;
     }
+    pawn.player.away = false;
+    pawn.net.fresh = true;
+    this.net.resendDrops(pawn.net);
   }
 
   override async onLeave(client: Client): Promise<void> {
@@ -493,21 +853,34 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     ROOMS.delete(this);
     channels.forget(this.roomId);
     this.unlistenClubs?.();
+    this.unlistenParties?.();
     this.metrics.dispose();
   }
 
-  /** Takes a player's body out of the world and frees its slot. Safe to call twice. */
+  /**
+   * Takes a body out of the fight and every view, hands its EXP to the pending grant, and frees
+   * its slot: the same on a disconnect, a door and 명령퇴사. Its minions, effects, pickups and
+   * tags on monsters go with it (`FightWorld.removePlayer`). Safe to call twice.
+   */
   private removeBody(id: string): void {
     const pawn = this.pawns.get(id);
     if (pawn) {
-      this.grid.watch(pawn.viewer, undefined);
-      this.grid.remove(pawn.state);
+      this.handOverExp(pawn);
+      if (fighting.get(pawn.character.id)?.pawn === pawn) fighting.delete(pawn.character.id);
+      for (const other of this.pawns.values()) {
+        const theirs = other.client.view;
+        if (other === pawn || !theirs?.has(pawn.state)) continue;
+        theirs.remove(pawn.state);
+        this.viewChanges++;
+      }
       pawn.state.sid = "";
       this.pawns.delete(id);
+      this.bySlot.delete(Number(pawn.slot));
       this.free.push(pawn.slot);
+      this.net.viewers.delete(pawn.net);
     }
     this.inside.delete(id);
-    this.world = removePlayer(this.world, id);
+    this.world.removePlayer(id);
     this.metrics.forget(id);
   }
 
@@ -522,20 +895,60 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     };
   }
 
+  /** EXP earned since the last hand-over joins the character's pending grant, in whole points. */
+  private handOverExp(pawn: Pawn): void {
+    const p = pawn.player;
+    if (p.expEarned <= 0) return;
+    const total = pawn.expCarry + p.expEarned;
+    const whole = Math.floor(total);
+    p.expEarned = 0;
+    pawn.expCarry = total - whole;
+    if (whole >= 1 && Number.isSafeInteger(whole)) {
+      grants()?.add(pawn.character.id, { exp: whole, drops: [] });
+      clubActivity.add(pawn.character.id, whole);
+    }
+  }
+
   private loop(): void {
     const now = performance.now();
     const { run, skip } = this.ticks.advance(now);
     if (run === 0) return;
     const start = now;
     const cpu = process.threadCpuUsage();
-    // Ticks lost to a stall keep their numbers, so the stamps on patches keep wall time.
-    if (skip > 0) this.world = skipTicks(this.world, skip);
+    // Ticks lost to a stall keep their numbers, so the stamps on every message keep wall time.
+    if (skip > 0) this.world.tick += skip;
+    let simMs = 0;
+    let netMs = 0;
     for (let i = 0; i < run; i++) {
-      const inputs = new Map<string, MoveInput[]>();
-      for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take());
-      const before = this.world;
-      this.world = step(this.world, this.map, inputs);
-      this.afterStep(before, inputs);
+      const inputs = new Map<string, FightInput[]>();
+      for (const [id, pawn] of this.pawns) {
+        inputs.set(id, pawn.queue.take() as FightInput[]);
+        pawn.fromX = pawn.player.x;
+        pawn.fromY = pawn.player.y;
+      }
+      const s0 = performance.now();
+      stepFight(this.world, inputs);
+      if (this.devActions.length > 0) for (const act of this.devActions.splice(0)) act();
+      // What combat earned goes to each character's pending grant; nothing touches the database.
+      const sink = grants();
+      for (const g of this.world.grants) {
+        const pawn = this.pawns.get(g.player.id);
+        if (pawn) sink?.add(pawn.character.id, { exp: 0, drops: [g.drop.payload as Drop] });
+      }
+      for (const pawn of this.pawns.values()) this.handOverExp(pawn);
+      this.tellLive();
+      const s1 = performance.now();
+      this.net.update();
+      for (const client of this.clients) {
+        const pawn = this.pawns.get(client.sessionId);
+        if (!pawn || pawn.leaving) continue;
+        client.sendBytes(SNAPSHOT_MESSAGE, this.net.message(pawn.net));
+      }
+      const s2 = performance.now();
+      simMs += s1 - s0;
+      netMs += s2 - s1;
+      this.metrics.countTick(this.world, this.net);
+      this.afterStep(inputs);
     }
     this.sync();
     const patchStart = performance.now();
@@ -543,45 +956,61 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const end = performance.now();
     const used = process.threadCpuUsage(cpu);
     this.metrics.recordTick(end - start, (used.user + used.system) / 1000, end - patchStart);
+    this.metrics.recordFight(simMs, netMs);
     this.metrics.players = this.pawns.size;
     this.metrics.clients = this.clients.length;
-    this.metrics.monsters = this.world.monsters.length;
-    this.metrics.viewChanges = this.grid.changes;
+    this.metrics.monsters = this.world.director.alive;
+    this.metrics.viewChanges = this.viewChanges;
   }
 
-  /** Mirrors the simulation into the synced state and moves entities between interest cells. */
+  private syncOwn(state: InstanceType<typeof PlayerState>, p: Player): void {
+    state.speed = p.kit.speed;
+    state.maxHp = p.kit.maxHp;
+    state.exp = Math.floor(p.exp);
+    state.level = p.level;
+    state.mode = p.mode;
+    state.down = p.downAt >= 0 ? p.downAt + 1 : 0;
+    state.dodgeReady = p.dodgeReadyAt;
+    const books = p.kit.weapons.map((wp) => this.world.rules.books[wp.book] ?? "");
+    if (books.length !== state.books.length || books.some((b, i) => state.books[i] !== b)) {
+      state.books.clear();
+      state.books.push(...books);
+    }
+    // Cooldowns: they move only on a cast, a kit change or an attack-speed aura.
+    const tick = this.world.tick;
+    const rate = (1 + p.attackSpeed) / Math.max(0.2, 1 - p.cooldownBuff);
+    const n = p.kit.weapons.length;
+    for (let s = 0; s < n; s++) {
+      const left = p.ready[s] ?? 0;
+      const ready = left > 0 ? tick + Math.ceil(left / rate - 1e-6) : 0;
+      const cooldown = Math.min(65535, Math.round((p.kit.weapons[s]?.cooldown ?? 0) / rate));
+      if (s >= state.ready.length) state.ready.push(ready);
+      else if (state.ready[s] !== ready) state.ready[s] = ready;
+      if (s >= state.cooldown.length) state.cooldown.push(cooldown);
+      else if (state.cooldown[s] !== cooldown) state.cooldown[s] = cooldown;
+    }
+    if (state.ready.length > n) state.ready.splice(n);
+    if (state.cooldown.length > n) state.cooldown.splice(n);
+  }
+
+  /** Mirrors each player's own numbers into its synced body. */
   private sync(): void {
-    const { state, world, grid } = this;
-    state.tick = world.tick;
-    for (const m of world.monsters) {
-      let synced = this.monsters.get(m.id);
-      if (!synced) {
-        synced = new MonsterState();
-        synced.kind = m.kind;
-        state.monsters.set(String(m.id), synced);
-        this.monsters.set(m.id, synced);
-      }
-      synced.x = wire(m.x);
-      synced.y = wire(m.y);
-      synced.facing = m.facing;
-      grid.place(synced, m.x, m.y);
-    }
-    for (const p of world.players) {
-      const pawn = this.pawns.get(p.id);
-      if (!pawn) continue;
-      pawn.state.x = wire(p.x);
-      pawn.state.y = wire(p.y);
-      pawn.state.facing = p.facing;
-      pawn.state.seq = p.seq;
-      const cell = grid.place(pawn.state, p.x, p.y);
-      if (cell !== undefined) grid.watch(pawn.viewer, cell);
-    }
+    for (const pawn of this.pawns.values()) this.syncOwn(pawn.state, pawn.player);
   }
 
   // Doors, zones and people, once per tick ----------------------------------------------------
 
-  private afterStep(before: SimWorld, inputs: ReadonlyMap<string, readonly MoveInput[]>): void {
-    const walkers = this.world.players.filter((p) => !this.pawns.get(p.id)?.leaving);
+  /**
+   * After the step: doors, zones, desks, shut doors pushed against, the cast and patrols. Only a
+   * player's own steps take it through a door: a body the server walks (완전 자동, 스킬 수동,
+   * a dropped client) or one knocked out never leaves the fight that way.
+   */
+  private afterStep(inputs: ReadonlyMap<string, readonly FightInput[]>): void {
+    const walkers: Player[] = [];
+    for (const p of this.world.players) {
+      if (!p.joined || p.down || p.away || MODE_AUTO[p.mode].move) continue;
+      if (this.pawns.get(p.id)?.leaving === false) walkers.push(p);
+    }
     const doors = stepDoors(this.inside, walkers, this.def.portals);
     this.inside = new Map(doors.inside);
     const now = Date.now();
@@ -596,10 +1025,9 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       }
       void this.walkThrough(pawn, p.id, p.to, p.spawn);
     }
-    const was = new Map(before.players.map((p) => [p.id, p]));
-    for (const p of walkers) {
-      const pawn = this.pawns.get(p.id);
-      if (!pawn || pawn.leaving) continue;
+    for (const pawn of this.pawns.values()) {
+      if (pawn.leaving) continue;
+      const p = pawn.player;
       const tile = this.tileOf(p.x, p.y);
       if (tile !== pawn.zoneTile) {
         pawn.zoneTile = tile;
@@ -613,9 +1041,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
         this.standAtDesk(pawn, p.x, p.y);
       }
       // Pushing against a shut door: had a move this tick and went nowhere.
-      const prev = was.get(p.id);
-      if (!prev || (inputs.get(p.id)?.length ?? 0) === 0) continue;
-      if (Math.abs(p.x - prev.x) + Math.abs(p.y - prev.y) > 1) continue;
+      if ((inputs.get(p.id)?.length ?? 0) === 0) continue;
+      if (Math.abs(p.x - pawn.fromX) + Math.abs(p.y - pawn.fromY) > 1) continue;
       const shut = shutDoorAhead(this.def.portals, p.x, p.y, p.facing, PLAYER_RADIUS, this.closed);
       const door = this.def.portals[shut];
       if (!door || now - pawn.lastRattle < RATTLE_COOLDOWN_MS) continue;
@@ -662,10 +1089,11 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   }
 
   /**
-   * Through a door (PLAN §10), or sent somewhere by the school: the body leaves this world at
-   * once, the character is written on the other side, this room lets go of the account's seat,
-   * and only then does the client get a reserved seat in the target map's room. See
-   * `RoomSeats.moveOut` for why nothing can be lost or doubled in between.
+   * Through a door (PLAN §10), or sent somewhere by the school: the body leaves this fight at
+   * once (as on a disconnect: EXP handed over, minions, effects, pickups and tags gone), the
+   * character is written on the other side, this room lets go of the account's seat, and only
+   * then does the client get a reserved seat in the target map's room. See `RoomSeats.moveOut`
+   * for why nothing can be lost or doubled in between.
    */
   private async walkThrough(pawn: Pawn, via: string, to: string, spawn: string): Promise<void> {
     const target = builtMap(to);
@@ -739,22 +1167,20 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
 
   /** Puts a body back where it stood after a door that could not be walked through. */
   private restoreBody(pawn: Pawn, x: number, y: number): void {
-    const slot = this.free.shift();
-    const state = slot === undefined ? undefined : this.state.players.get(slot);
-    if (slot === undefined || !state) return;
-    const id = pawn.client.sessionId;
-    this.world = addPlayer(this.world, id, x, y);
-    state.sid = id;
-    state.x = wire(x);
-    state.y = wire(y);
-    dressPlayer(state, pawn.character);
-    wearClub(state, clubTags.get(pawn.character.id));
-    const back: Pawn = { ...pawn, slot, state, leaving: false, queue: new InputQueue() };
-    pawn.client.view?.add(state, OWNER_TAG);
-    this.pawns.set(id, back);
-    this.moved.delete(id);
-    const cell = this.grid.place(state, x, y);
-    this.grid.watch(back.viewer, cell ?? this.grid.cellOfEntity(state));
+    try {
+      const back = this.placeBody(
+        pawn.client,
+        pawn.character,
+        pawn.loadout,
+        x,
+        y,
+        pawn.player.facing,
+      );
+      back.net.fresh = true;
+      this.moved.delete(pawn.client.sessionId);
+    } catch {
+      // No free body: the client is told to enter again by its seat's eviction.
+    }
   }
 
   /**
@@ -817,7 +1243,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       let nearest: { x: number; y: number; d: number } | undefined;
       let near = false;
       for (const p of this.world.players) {
-        if (this.pawns.get(p.id)?.leaving) continue;
+        if (!p.joined || this.pawns.get(p.id)?.leaving) continue;
         const d = Math.hypot(p.x - npc.x, p.y - npc.y);
         if (d <= BARK_PX) near = true;
         if (d <= NOTICE_PX && (!nearest || d < nearest.d)) nearest = { x: p.x, y: p.y, d };
@@ -862,7 +1288,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     const now = Date.now();
     if (now - pawn.lastInteract < INTERACT_COOLDOWN_MS) return;
     pawn.lastInteract = now;
-    const at = this.world.players.find((p) => p.id === client.sessionId);
+    const at = this.world.playerById(client.sessionId);
     const target = at && nearestUsable(this.usable, at.x, at.y);
     void this.answer(pawn, target, n, at).then((answer) => {
       if (this.clients.includes(client)) client.send(MAP_MESSAGES.interaction, answer);
@@ -924,6 +1350,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     for (const patrol of this.patrols) {
       const pose = patrolPose(patrol, t);
       for (const p of this.world.players) {
+        if (!p.joined) continue;
         const pawn = this.pawns.get(p.id);
         if (!pawn || pawn.leaving || tick < pawn.unseenUntil) continue;
         if (sees(this.map, patrol, pose, p.x, p.y)) this.catch(pawn, patrol);
@@ -936,12 +1363,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     pawn.unseenUntil = this.world.tick + CAUGHT_GRACE_TICKS;
     const back = spawnPlace(this.def, "main");
     pawn.queue.clear();
-    this.world = {
-      ...this.world,
-      players: this.world.players.map((p) =>
-        p.id === id ? { ...p, x: back.x, y: back.y, facing: back.facing } : p,
-      ),
-    };
+    const p = pawn.player;
+    p.x = snap(back.x);
+    p.y = snap(back.y);
+    p.facing = back.facing;
+    p.rollLeft = 0;
+    p.forceTicks = 0;
     this.inside.delete(id);
     this.broadcast(MAP_MESSAGES.halt, { patrol: patrol.id } satisfies Halt);
     pawn.client.send(MAP_MESSAGES.caught, {

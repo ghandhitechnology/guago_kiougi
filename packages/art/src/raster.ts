@@ -1,3 +1,4 @@
+import { crc32, deflateSync } from "node:zlib";
 import { PNG } from "pngjs";
 import { COLORS, hexToRgb } from "./palette.ts";
 
@@ -129,11 +130,87 @@ export class Rgba {
     }
   }
 
+  /**
+   * The image as a PNG: indexed (a palette of the colours it uses, with transparency) when it
+   * has 256 colours or fewer, as almost all art drawn to the 64-colour palette does, else RGBA.
+   * Whichever file is smaller is kept.
+   */
   png(): Buffer {
     const png = new PNG({ width: this.w, height: this.h });
     png.data = Buffer.from(this.data.buffer, this.data.byteOffset, this.data.byteLength);
-    return PNG.sync.write(png, { colorType: 6, deflateLevel: 9, filterType: 4 });
+    const rgba = PNG.sync.write(png, { colorType: 6, deflateLevel: 9, filterType: 4 });
+    const pal = indexedPng(this.w, this.h, this.data);
+    return pal && pal.length < rgba.length ? pal : rgba;
   }
+}
+
+function chunk(type: string, data: Buffer): Buffer {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, "ascii");
+  const tail = Buffer.alloc(4);
+  tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])) >>> 0, 0);
+  return Buffer.concat([head, data, tail]);
+}
+
+/**
+ * Writes RGBA pixels as a palette PNG, or returns null past 256 colours. Fully clear pixels
+ * share one entry; entries with any transparency come first so the tRNS chunk stays short. The
+ * bit depth is the least that holds the palette.
+ */
+export function indexedPng(
+  w: number,
+  h: number,
+  data: Uint8Array | Uint8ClampedArray,
+): Buffer | null {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const keyAt = (i: number) => {
+    const v = view.getUint32(i * 4, false);
+    return (v & 255) === 0 ? 0 : v;
+  };
+  const seen = new Map<number, number>();
+  for (let i = 0; i < w * h; i++) {
+    const k = keyAt(i);
+    if (!seen.has(k)) {
+      if (seen.size === 256) return null;
+      seen.set(k, 0);
+    }
+  }
+  const keys = [...seen.keys()].sort((a, b) => (a & 255) - (b & 255) || a - b);
+  for (const [n, k] of keys.entries()) seen.set(k, n);
+  const depth = keys.length <= 2 ? 1 : keys.length <= 4 ? 2 : keys.length <= 16 ? 4 : 8;
+  const perByte = 8 / depth;
+  const stride = Math.ceil(w / perByte);
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * (stride + 1);
+    for (let x = 0; x < w; x++) {
+      const n = seen.get(keyAt(y * w + x)) as number;
+      const at = row + 1 + Math.floor(x / perByte);
+      raw[at] = (raw[at] as number) | (n << (8 - depth - (x % perByte) * depth));
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = depth;
+  ihdr[9] = 3;
+  const plte = Buffer.alloc(keys.length * 3);
+  const alphas: number[] = [];
+  keys.forEach((k, n) => {
+    plte[n * 3] = (k >>> 24) & 255;
+    plte[n * 3 + 1] = (k >>> 16) & 255;
+    plte[n * 3 + 2] = (k >>> 8) & 255;
+    if ((k & 255) < 255) alphas.push(k & 255);
+  });
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", ihdr),
+    chunk("PLTE", plte),
+    ...(alphas.length ? [chunk("tRNS", Buffer.from(alphas))] : []),
+    chunk("IDAT", deflateSync(raw, { level: 9, memLevel: 9 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 /** Renders an indexed image into a fresh RGBA canvas at 1×. */
