@@ -167,19 +167,22 @@ const server = createServer((req, res) => {
     else if (path.startsWith("/src/") && path.endsWith(".ts"))
       file = inside(join(ART_ROOT, "src"), path.slice(5));
     if (!file) throw new Error("not found");
+    // Read before answering, so a missing file is a 404 rather than a crash after the headers.
     if (file.endsWith(".ts")) {
+      const body = stripTypeScriptTypes(readFileSync(file, "utf8"));
       res.writeHead(200, {
         "content-type": "text/javascript; charset=utf-8",
         "cache-control": "no-store",
       });
-      res.end(stripTypeScriptTypes(readFileSync(file, "utf8")));
+      res.end(body);
       return;
     }
+    const body = readFileSync(file);
     res.writeHead(200, {
       "content-type": TYPES[extname(file)] ?? "application/octet-stream",
       "cache-control": "no-store",
     });
-    res.end(readFileSync(file));
+    res.end(body);
   } catch {
     res.writeHead(404);
     res.end();
