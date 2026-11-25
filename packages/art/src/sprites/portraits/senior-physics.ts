@@ -4,8 +4,8 @@ import { FACE_LONE, faceLegend, hair, portraitFrames, varsity } from "../../port
 
 /**
  * 배도윤, 2학년 물리, in dialogue. Delighted by every collision and never stands still: spiky
- * brown hair over a red sweatband, eyes wide for the next impact, a plaster on the cheek, the
- * red 과잠 of the 물리 class and a stopwatch on a cord.
+ * brown hair over a plum sweatband, eyes wide for the next impact, a plaster on the cheek, the
+ * plum 과잠 of the 물리 class and a stopwatch on a cord.
  */
 
 const spikes = hair({
@@ -84,10 +84,10 @@ const spikes = hair({
 const band = Pic.blank(48, 48);
 for (let x = 10; x <= 37; x++) {
   const dip = Math.round(((x - 23.5) / 14) ** 2 * 2);
-  band.set(x, 14 + dip, "R");
-  band.set(x, 15 + dip, x < 30 ? "m" : "r");
-  band.set(x, 16 + dip, x < 30 ? "r" : "r");
-  band.set(x, 17 + dip, "R");
+  band.set(x, 14 + dip, "E");
+  band.set(x, 15 + dip, x < 30 ? "F" : "A");
+  band.set(x, 16 + dip, "A");
+  band.set(x, 17 + dip, "E");
 }
 
 /** A plaster on the cheek. */
@@ -120,10 +120,13 @@ export default sprite({
     h: "wood.mid",
     H: "wood.light",
     Y: "wood.pale",
-    J: "red.deep",
-    j: "red.dark",
-    c: "red.mid",
-    C: "red.light",
+    J: "plum.deep",
+    j: "plum.dark",
+    c: "plum.mid",
+    C: "plum.light",
+    E: "plum.deep",
+    A: "plum.dark",
+    F: "plum.mid",
     R: "red.deep",
     r: "red.dark",
     m: "red.mid",
@@ -137,7 +140,7 @@ export default sprite({
   frames: portraitFrames({
     head: "student",
     front: [spikes, band],
-    casters: "XxR",
+    casters: "XxE",
     clothes: [varsity()],
     items: [
       [watch, 20, 37],

@@ -306,9 +306,9 @@ const math = rig({
 // 배도윤 · 물리 -------------------------------------------------------------------------------
 
 /**
- * 배도윤, 2학년 물리: delighted by every collision, never still. Spiky hair under a red
- * sweatband, the crimson 과잠, sneakers, and a textbook he keeps tossing up to watch it come
- * down. His signature is the throw.
+ * 배도윤, 2학년 물리: delighted by every collision, never still. Spiky hair under a plum
+ * sweatband, the plum 과잠 of the 물리 class, and a textbook he keeps tossing up to watch it
+ * come down. His signature is the throw.
  */
 const physicsPalette: Legend = { ...ink };
 
@@ -361,7 +361,7 @@ const spikes = part({
 });
 
 const sweatband = part({
-  palette: physicsPalette,
+  palette: { ...physicsPalette, R: "plum.deep", r: "plum.dark", m: "plum.mid", M: "plum.light" },
   pieces: {
     head: {
       at: { down: [5, 5], up: [5, 5], side: [5, 5] },
@@ -495,7 +495,7 @@ const physics = rig({
       "spikes",
       "delighted",
       "tossBook",
-      { skin: "warm", hair: "brown", jacket: "crimson" },
+      { skin: "warm", hair: "brown", jacket: "violet" },
       {
         accessory: "sweatband",
       },

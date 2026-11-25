@@ -879,7 +879,7 @@ const ladle = part({
 });
 
 const cook = rig({
-  name: "cook",
+  name: "head-cook",
   ...frame,
   group: "cast",
   parts: {

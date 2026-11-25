@@ -4,7 +4,7 @@ import { FACE_LONE, faceLegend, hair, mirrored, portraitFrames } from "../../por
 
 /**
  * 교장 선생님 in dialogue. Turns a tear in spacetime into a programme by first period: silver
- * hair combed straight back off a high forehead, a clipped moustache over a press-photo smile,
+ * hair combed straight back off a high forehead, a clipped moustache over a pleased, practised smile,
  * and the 명찰 he makes everyone wear pinned square on his own lapel.
  */
 
@@ -137,7 +137,7 @@ export default sprite({
       neutral: {
         eyes: "calm",
         brows: "up",
-        mouth: "grin",
+        mouth: "smile",
         mouthY: 34,
         under: [[moustache, 19, 31]],
       },
