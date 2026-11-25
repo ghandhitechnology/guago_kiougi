@@ -1,16 +1,20 @@
 import {
-  type Backend,
-  BackendError,
-  type Character,
-  type Look,
-  type Major,
-  type Session,
-} from "./types.ts";
+  checkLoginId,
+  checkName,
+  checkPassword,
+  normalizeLoginId,
+  normalizeName,
+  normalizeRecoveryCode,
+  RECOVERY_CODE_ALPHABET,
+  RECOVERY_CODE_LENGTH,
+} from "@guago/shared";
+import { type Backend, BackendError, type Character, type Session } from "./types.ts";
 
 /**
  * A stand-in for the account API, for working on screens with no server. Only loaded when
- * `VITE_BACKEND=memory` in a dev build; production bundles never contain it. Accounts live in
- * localStorage so a reload keeps the session, which is how "returning player" is tried out.
+ * `VITE_BACKEND=memory` in a dev build; production bundles never contain it. It runs the
+ * shared rules the server runs. Accounts live in localStorage so a reload keeps the session,
+ * which is how "returning player" is tried out.
  */
 
 interface Stored {
@@ -46,35 +50,43 @@ function fail(code: ConstructorParameters<typeof BackendError>[0]): never {
 }
 
 function recoveryCode(): string {
-  const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const pick = () => abc[Math.floor(Math.random() * abc.length)];
-  return Array.from({ length: 4 }, () => Array.from({ length: 4 }, pick).join("")).join("-");
+  const pick = () =>
+    RECOVERY_CODE_ALPHABET[Math.floor(Math.random() * RECOVERY_CODE_ALPHABET.length)];
+  const raw = Array.from({ length: RECOVERY_CODE_LENGTH }, pick).join("");
+  return raw.match(/.{4}/g)?.join("-") ?? raw;
 }
 
-const NAME = /^[가-힣a-zA-Z0-9]{2,8}$/;
+function session(s: Stored, id: string): Session {
+  const a = s.accounts.find((x) => x.id === id);
+  if (!a) fail("unauthorized");
+  return { account: { id: a.id, loginId: a.loginId }, character: s.characters[a.id] ?? null };
+}
 
 export const memoryBackend: Backend = {
-  async signup(loginId, password, ageConfirmed) {
+  async signup(rawId, password, ageConfirmed) {
     await wait();
     const s = load();
     if (!ageConfirmed) fail("age_required");
-    if (password.length < 8) fail("weak_password");
+    const bad = checkLoginId(rawId) ?? checkPassword(password);
+    if (bad) fail(bad);
+    const loginId = normalizeLoginId(rawId);
     if (s.accounts.some((a) => a.loginId === loginId)) fail("login_taken");
     const code = recoveryCode();
     const id = `a${s.accounts.length + 1}`;
-    s.accounts.push({ id, loginId, password, code });
+    s.accounts.push({ id, loginId, password, code: normalizeRecoveryCode(code) });
     s.session = id;
     save(s);
     return { recoveryCode: code };
   },
-  async login(loginId, password): Promise<Session> {
+  async login(rawId, password) {
     await wait();
     const s = load();
+    const loginId = normalizeLoginId(rawId);
     const a = s.accounts.find((x) => x.loginId === loginId && x.password === password);
     if (!a) fail("bad_credentials");
     s.session = a.id;
     save(s);
-    return { account: { id: a.id, loginId: a.loginId }, character: s.characters[a.id] ?? null };
+    return session(s, a.id);
   },
   async logout() {
     await wait();
@@ -85,27 +97,29 @@ export const memoryBackend: Backend = {
   async me() {
     await wait();
     const s = load();
-    const a = s.accounts.find((x) => x.id === s.session);
-    if (!a) return null;
-    return { account: { id: a.id, loginId: a.loginId }, character: s.characters[a.id] ?? null };
+    return s.session && s.accounts.some((a) => a.id === s.session) ? session(s, s.session) : null;
   },
-  async nameAvailable(name) {
+  async nameAvailable(raw) {
     await wait();
-    if (!NAME.test(name)) return { available: false, reason: "name_invalid" };
+    if (checkName(raw)) return { available: false, reason: "name_invalid" };
+    const name = normalizeName(raw);
     const taken = Object.values(load().characters).some((c) => c.name === name);
     return taken ? { available: false, reason: "name_taken" } : { available: true };
   },
-  async createCharacter(name: string, major: Major, look: Look) {
+  async createCharacter(raw, major, look) {
     await wait();
     const s = load();
-    if (!s.session) fail("bad_credentials");
-    if (!NAME.test(name)) fail("name_invalid");
+    if (!s.session) fail("unauthorized");
+    const bad = checkName(raw);
+    if (bad) fail(bad);
+    const name = normalizeName(raw);
+    if (s.characters[s.session]) fail("character_exists");
     if (Object.values(s.characters).some((c) => c.name === name)) fail("name_taken");
     const character: Character = {
       id: `c${Object.keys(s.characters).length + 1}`,
       name,
       major,
-      look,
+      look: { ...look, accessories: [...look.accessories] },
       level: 1,
       mapId: "lawn",
       x: 192,
@@ -116,13 +130,20 @@ export const memoryBackend: Backend = {
     save(s);
     return character;
   },
-  async recover(loginId, code, newPassword) {
+  async recover(rawId, code, newPassword) {
     await wait();
     const s = load();
-    const a = s.accounts.find((x) => x.loginId === loginId && x.code === code.toUpperCase());
+    const loginId = normalizeLoginId(rawId);
+    const a = s.accounts.find(
+      (x) => x.loginId === loginId && x.code === normalizeRecoveryCode(code),
+    );
     if (!a) fail("bad_credentials");
-    if (newPassword.length < 8) fail("weak_password");
+    const bad = checkPassword(newPassword);
+    if (bad) fail(bad);
+    const next = recoveryCode();
     a.password = newPassword;
+    a.code = normalizeRecoveryCode(next);
     save(s);
+    return { recoveryCode: next };
   },
 };

@@ -3,7 +3,9 @@ import * as Phaser from "phaser";
 import { artMeta } from "../art.ts";
 import { type Backend, backend, type Session } from "../backend/index.ts";
 import { FRONT_SCENE, WORLD_SCENE, type WorldEntry } from "../entry.ts";
+import { t } from "../i18n/index.ts";
 import { fade, slide, stamp } from "../ui/motion.ts";
+import { toast } from "../ui/overlay.ts";
 import { NightBackdrop } from "./backdrop.ts";
 import { CreatorScreen } from "./creator.ts";
 import {
@@ -96,6 +98,16 @@ export class FrontScene extends Phaser.Scene implements Flow {
     this.session = session;
     const s = this.screen("code", () => new CodeScreen(this)) as CodeScreen;
     s.show(code, () => this.creator());
+    this.showLogo("form");
+    this.go("code");
+  }
+
+  recovered(loginId: string, code: string): void {
+    const s = this.screen("code", () => new CodeScreen(this)) as CodeScreen;
+    s.show(code, () => {
+      toast(t("recover.done"));
+      this.login(loginId);
+    });
     this.showLogo("form");
     this.go("code");
   }

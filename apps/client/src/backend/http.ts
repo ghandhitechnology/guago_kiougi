@@ -1,24 +1,15 @@
 import {
-  type ApiErrorCode,
-  type Backend,
-  BackendError,
-  type Character,
-  type NameCheck,
-  type Session,
-} from "./types.ts";
+  API,
+  API_ERRORS,
+  type CreateCharacterResponse,
+  type LoginResponse,
+  type NameAvailableResponse,
+  type RecoverResponse,
+  type SignupResponse,
+} from "@guago/shared";
+import { type Backend, BackendError } from "./types.ts";
 
-const API_CODES: readonly ApiErrorCode[] = [
-  "login_taken",
-  "bad_credentials",
-  "rate_limited",
-  "name_taken",
-  "name_invalid",
-  "signup_limit",
-  "age_required",
-  "weak_password",
-];
-
-/** The API is served from the page's own origin (Caddy in production, Vite's proxy in dev). */
+/** The API is served from the page's own origin (the proxy in production, Vite's in dev). */
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -36,12 +27,12 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    throw new BackendError(res.ok ? "unknown" : res.status >= 500 ? "offline" : "unknown");
+    // A proxy's own error page: the game server behind it is down.
+    throw new BackendError(res.status >= 500 ? "offline" : "unknown");
   }
   if (!res.ok) {
     const code = (data as { error?: string }).error;
-    if (res.status === 429) throw new BackendError("rate_limited");
-    const known = API_CODES.find((c) => c === code);
+    const known = API_ERRORS.find((c) => c === code);
     throw new BackendError(known ?? (res.status >= 500 ? "offline" : "unknown"));
   }
   return data as T;
@@ -49,25 +40,25 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 
 export const httpBackend: Backend = {
   signup: (loginId, password, ageConfirmed) =>
-    call("POST", "/api/signup", { loginId, password, ageConfirmed }),
-  login: (loginId, password) => call<Session>("POST", "/api/login", { loginId, password }),
+    call<SignupResponse>("POST", API.signup, { loginId, password, ageConfirmed }),
+  login: (loginId, password) => call<LoginResponse>("POST", API.login, { loginId, password }),
   async logout() {
-    await call("POST", "/api/logout");
+    await call("POST", API.logout);
   },
   async me() {
     try {
-      return await call<Session>("GET", "/api/me");
+      return await call<LoginResponse>("GET", API.me);
     } catch (e) {
-      if (e instanceof BackendError && e.code !== "offline" && e.code !== "rate_limited") {
+      if (e instanceof BackendError && (e.code === "unauthorized" || e.code === "forbidden")) {
         return null;
       }
       throw e;
     }
   },
   nameAvailable: (name) =>
-    call<NameCheck>("GET", `/api/name-available?name=${encodeURIComponent(name)}`),
+    call<NameAvailableResponse>("GET", `${API.nameAvailable}?name=${encodeURIComponent(name)}`),
   async createCharacter(name, major, look) {
-    const { character } = await call<{ character: Character }>("POST", "/api/character", {
+    const { character } = await call<CreateCharacterResponse>("POST", API.character, {
       name,
       major,
       look,
@@ -75,6 +66,11 @@ export const httpBackend: Backend = {
     return character;
   },
   async recover(loginId, recoveryCode, newPassword) {
-    await call("POST", "/api/recover", { loginId, recoveryCode, newPassword });
+    const { recoveryCode: next } = await call<RecoverResponse>("POST", API.recover, {
+      loginId,
+      recoveryCode,
+      newPassword,
+    });
+    return { recoveryCode: next };
   },
 };

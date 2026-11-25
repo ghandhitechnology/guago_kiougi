@@ -1,6 +1,7 @@
 /**
  * Korean copy. Voices: the school office (notices and errors) speaks in 합니다체; the player's
- * own buttons are short verbs; each class senior speaks in 반말.
+ * own buttons are short verbs; each major's line is its senior's, in the register the voice
+ * bible (`packages/content/src/narrative/speakers.ts`) gives them.
  */
 export const ko = {
   "title.login": "등교하기",
@@ -46,8 +47,11 @@ export const ko = {
   "look.hairColor": "머리색",
   "look.face": "얼굴",
   "look.uniform": "교복",
-  "look.glasses": "안경",
-  "look.goggles": "고글",
+  "look.accessory": "소품",
+
+  "accessory.none": "없음",
+  "accessory.glasses": "안경",
+  "accessory.goggles": "고글",
 
   "skin.fair": "21호",
   "skin.warm": "23호",
@@ -90,20 +94,36 @@ export const ko = {
   "major.biology.mechanic": "증식",
   "major.earth.mechanic": "예보",
 
-  "major.math.line": "같은 놈을 열 번 맞히면 증명 끝. 그다음은 Q.E.D.야.",
-  "major.physics.line": "세게 밀어. 날아가서 부딪히는 것까지 다 내 데미지야.",
-  "major.chemistry.line": "산이랑 염기만 외워. 나머진 섞으면 알아서 터져.",
-  "major.biology.line": "하나가 둘 되고, 둘이 넷 돼. 혼자 싸울 일은 없어.",
-  "major.earth.line": "기다려. 늦게 오는 예보일수록 크게 온다.",
+  // 석지안 (반말): exact, says what is optimal and stops.
+  "major.math.line": "한 놈만 열 번 때려. 열 번째가 Q.E.D.야.",
+  // 배도윤 (반말): delighted by collisions, estimates with 대충.
+  "major.physics.line": "밀어서 날려. 날아간 놈이 뒤에 놈을 치면 그것도 대충 다 내 거야.",
+  // 한소율 (해요체): safety first, everything is a reaction in order.
+  "major.chemistry.line": "산을 묻히고 염기를 묻히세요. 순서만 지키면 알아서 반응해요.",
+  // 오여름 (반말): 얘네, counts, gentle.
+  "major.biology.line": "얘네가 둘로 나뉘면 넷이 되고, 넷이면 여덟이야. 혼자 싸울 일 없어.",
+  // 우태산 (반말): forecasts with -겠다, in seconds, few words.
+  "major.earth.line": "삼 초 기다리면 크게 오겠다. 오 초면 더 크겠다.",
 
-  "error.login_taken": "이미 있는 아이디입니다.",
-  "error.bad_credentials": "아이디나 비밀번호가 맞지 않습니다.",
+  "error.bad_request": "서류 양식이 맞지 않습니다. 다시 내 주십시오.",
+  "error.forbidden": "이 문으로는 들어올 수 없습니다.",
+  "error.unauthorized": "등교 기록이 없습니다. 다시 등교해 주십시오.",
   "error.rate_limited": "너무 자주 두드렸습니다. 잠시 뒤에 다시 오십시오.",
-  "error.name_taken": "같은 이름의 학생이 이미 있습니다.",
-  "error.name_invalid": "학생부에 올릴 수 없는 이름입니다.",
-  "error.signup_limit": "오늘은 이 교문으로 더 받지 않습니다.",
-  "error.age_required": "만 14세 이상만 입학할 수 있습니다.",
+  "error.server_error": "교무실에 문제가 생겼습니다. 잠시 뒤에 다시 오십시오.",
+  "error.login_invalid": "아이디는 영문 소문자, 숫자, 밑줄로 4~16자입니다.",
+  "error.login_banned": "쓸 수 없는 아이디입니다.",
+  "error.login_taken": "이미 있는 아이디입니다.",
   "error.weak_password": "비밀번호는 8자 이상이어야 합니다.",
+  "error.age_required": "만 14세 이상만 입학할 수 있습니다.",
+  "error.signup_limit": "오늘은 이 교문으로 더 받지 않습니다.",
+  "error.bad_credentials": "아이디나 비밀번호가 맞지 않습니다.",
+  "error.account_banned": "정학 처분 중인 계정입니다.",
+  "error.name_invalid": "이름은 한글, 영문, 숫자로 2~8자입니다.",
+  "error.name_banned": "학생부에 올릴 수 없는 이름입니다.",
+  "error.name_taken": "같은 이름의 학생이 이미 있습니다.",
+  "error.major_invalid": "그런 전공은 개설되지 않았습니다.",
+  "error.look_invalid": "교복 규정에 맞지 않습니다.",
+  "error.character_exists": "이미 학생부에 오른 계정입니다.",
   "error.offline": "교무실이 응답하지 않습니다.",
   "error.unknown": "교무실에서 서류를 잃어버렸습니다. 다시 내 주십시오.",
   "error.id_required": "아이디를 적어 주십시오.",

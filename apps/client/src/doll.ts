@@ -20,9 +20,12 @@ export interface DollLook {
   readonly hairColor: string;
   readonly face: string;
   readonly uniform: string;
-  /** Parts of the accessory layer, drawn in order. */
+  /**
+   * Parts worn over the uniform, at most one per layer: an `accessory` part (glasses, goggles)
+   * and a `jacket` part (the 과잠), as the account API stores them.
+   */
   readonly accessories: readonly string[];
-  /** The 과잠's colour, a `jacket` slot option; no 과잠 when absent. */
+  /** The 과잠's colour, a `jacket` slot option; the slot's first colour when absent. */
   readonly jacket?: string;
   readonly book?: string;
 }
@@ -33,7 +36,11 @@ export interface LookOptions {
   readonly hairColor: readonly string[];
   readonly face: readonly string[];
   readonly uniform: readonly string[];
+  /** Parts of the `accessory` layer. */
   readonly accessories: readonly string[];
+  /** Parts of the `jacket` layer. */
+  readonly jackets: readonly string[];
+  /** Colours of the `jacket` slot. */
   readonly jacket: readonly string[];
 }
 
@@ -54,6 +61,7 @@ export function lookOptions(meta: ArtMetadata): LookOptions {
     face: rig.parts.face ?? [],
     uniform: rig.parts.uniform ?? [],
     accessories: rig.parts.accessory ?? [],
+    jackets: rig.parts.jacket ?? [],
     jacket: slot("jacket"),
   };
 }
@@ -71,7 +79,11 @@ export function normalizeLook(meta: ArtMetadata, look: Partial<DollLook>): DollL
     hairColor: pick(o.hairColor, look.hairColor) ?? "",
     face: pick(o.face, look.face) ?? "",
     uniform: pick(o.uniform, look.uniform) ?? "",
-    accessories: (look.accessories ?? []).filter((a) => o.accessories.includes(a)),
+    // One part per layer, the first of each kept.
+    accessories: [
+      ...(look.accessories ?? []).filter((a) => o.accessories.includes(a)).slice(0, 1),
+      ...(look.accessories ?? []).filter((a) => o.jackets.includes(a)).slice(0, 1),
+    ],
     ...(jacket === undefined ? {} : { jacket }),
     ...(look.book === undefined ? {} : { book: look.book }),
   };
@@ -141,9 +153,8 @@ export function composeDoll(scene: Phaser.Scene, meta: ArtMetadata, look: DollLo
       case "hair":
         return [look.hair];
       case "accessory":
-        return look.accessories;
       case "jacket":
-        return look.jacket && first ? [first] : [];
+        return look.accessories.filter((a) => rig.parts[layer]?.includes(a));
       case "book":
         return [look.book ?? first ?? ""];
       default:

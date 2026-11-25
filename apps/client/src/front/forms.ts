@@ -1,3 +1,4 @@
+import { checkLoginId, checkPassword } from "@guago/shared";
 import type * as Phaser from "phaser";
 import { type Backend, errorCode, errorText, type Session } from "../backend/index.ts";
 import { t } from "../i18n/index.ts";
@@ -16,7 +17,8 @@ const W = 480;
 const H = 270;
 const FIELD_H = 20;
 const GAP = 5;
-const ERROR_H = 14;
+/** Room for two lines of the office's refusal. */
+const ERROR_H = 26;
 
 /** What the front end's screens can ask of the scene that runs them. */
 export interface Flow {
@@ -27,6 +29,8 @@ export interface Flow {
   recover(): void;
   /** Signed up and signed in: show the recovery code, then the creator. */
   signedUp(session: Session, code: string): void;
+  /** A new password set with the recovery code: show the new code, then sign in. */
+  recovered(loginId: string, code: string): void;
   /** Signed in: on to the creator, or into the world when a character exists. */
   signedIn(session: Session): void;
 }
@@ -167,7 +171,7 @@ export class LoginScreen extends FormScreen {
     const at = this.page(t("login.title"), 210, rows);
     this.id = this.field(at.x, at.y, at.w, t("login.id"), {
       autocomplete: "username",
-      maxLength: 20,
+      maxLength: 16,
     });
     this.password = this.field(
       at.x,
@@ -221,7 +225,7 @@ export class SignupScreen extends FormScreen {
     const at = this.page(t("signup.title"), 210, rows);
     this.id = this.field(at.x, at.y, at.w, t("signup.id"), {
       autocomplete: "username",
-      maxLength: 20,
+      maxLength: 16,
     });
     const py = at.y + FIELD_LABEL_H + FIELD_H + GAP;
     this.password = this.field(at.x, py, at.w, t("signup.password"), {
@@ -242,8 +246,15 @@ export class SignupScreen extends FormScreen {
       this.say(t("error.id_required"), this.id);
       return;
     }
-    if (this.password.value.length < 8) {
-      this.say(t("error.weak_password"), this.password);
+    // The shared rules answer before the server is asked.
+    const idError = checkLoginId(loginId);
+    if (idError) {
+      this.say(t(`error.${idError}`), this.id);
+      return;
+    }
+    const pwError = checkPassword(this.password.value);
+    if (pwError) {
+      this.say(t(`error.${pwError}`), this.password);
       return;
     }
     if (!this.age.checked) {
@@ -255,8 +266,9 @@ export class SignupScreen extends FormScreen {
       this.go,
       async () => {
         const { recoveryCode } = await this.flow.api.signup(loginId, password, this.age.checked);
-        // Signing in straight after holds whether or not signup already set a session.
-        const session = await this.flow.api.login(loginId, password);
+        // Signup sets the session cookie; signing in again covers a server that did not.
+        const session =
+          (await this.flow.api.me()) ?? (await this.flow.api.login(loginId, password));
         return { recoveryCode, session };
       },
       (code) =>
@@ -282,7 +294,7 @@ export class RecoverScreen extends FormScreen {
     const at = this.page(t("recover.title"), 210, step * 3 - GAP);
     this.id = this.field(at.x, at.y, at.w, t("recover.id"), {
       autocomplete: "username",
-      maxLength: 20,
+      maxLength: 16,
     });
     this.code = this.field(at.x, at.y + step, at.w, t("recover.code"), { maxLength: 24 });
     this.password = this.field(at.x, at.y + step * 2, at.w, t("recover.password"), {
@@ -304,21 +316,18 @@ export class RecoverScreen extends FormScreen {
     const code = this.code.value.trim();
     if (!loginId) return this.say(t("error.id_required"), this.id);
     if (!code) return this.say(t("error.code_required"), this.code);
-    if (this.password.value.length < 8) return this.say(t("error.weak_password"), this.password);
+    const pwError = checkPassword(this.password.value);
+    if (pwError) return this.say(t(`error.${pwError}`), this.password);
     const done = await this.send(
       this.go,
-      async () => {
-        await this.flow.api.recover(loginId, code, this.password.value);
-        return true;
-      },
+      () => this.flow.api.recover(loginId, code, this.password.value),
       (c) =>
         c === "bad_credentials" ? this.code : c === "weak_password" ? this.password : undefined,
     );
     if (done) {
-      toast(t("recover.done"));
       this.code.value = "";
       this.password.value = "";
-      this.flow.login(loginId);
+      this.flow.recovered(loginId, done.recoveryCode);
     }
   }
 }

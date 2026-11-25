@@ -1,4 +1,5 @@
 import type { ArtMetadata } from "@guago/art";
+import { checkName } from "@guago/shared";
 import * as Phaser from "phaser";
 import {
   type Backend,
@@ -21,7 +22,6 @@ import {
 } from "../doll.ts";
 import { type TextKey, t, tMaybe } from "../i18n/index.ts";
 import { Button } from "../ui/button.ts";
-import { Checkbox } from "../ui/checkbox.ts";
 import { List, type ListRow, type RowCtx } from "../ui/list.ts";
 import { nudge, turnPage } from "../ui/motion.ts";
 import { Modal, Tooltip } from "../ui/overlay.ts";
@@ -47,8 +47,10 @@ export interface CreatorHooks {
 
 const SCALE = 4;
 const CX = 240;
-const FEET = 176;
+/** The student's feet: high enough that two lines of name error fit above 등교. */
+const FEET = 158;
 const NAME_MAX = 8;
+const NONE = "none";
 
 /** A row that flips through a list of values with arrows either side. */
 class Stepper implements ListRow {
@@ -211,8 +213,6 @@ export class CreatorScreen extends Screen {
   private readonly center: Phaser.GameObjects.Container;
   private readonly list: List;
   private readonly steppers: Stepper[];
-  private readonly glasses: Checkbox;
-  private readonly goggles: Checkbox;
   private readonly name: TextField;
   private readonly nameNote: Label;
   private readonly nameTick: Phaser.GameObjects.Image;
@@ -330,6 +330,19 @@ export class CreatorScreen extends Screen {
         text: named("uniform"),
         onChange: set("uniform", "spin"),
       }),
+      // One thing on the face at a time: the account API keeps one part per layer.
+      new Stepper({
+        label: t("look.accessory"),
+        values: [NONE, ...o.accessories],
+        value: this.wornAccessory(),
+        text: named("accessory"),
+        onChange: (v) => {
+          const others = this.look.accessories.filter((a) => !o.accessories.includes(a));
+          this.look = { ...this.look, accessories: v === NONE ? others : [v, ...others] };
+          this.recompose();
+          this.react("page");
+        },
+      }),
     ];
 
     this.lookPanel = new Panel(this.ctx, 6, 8, 150, 254, {
@@ -339,26 +352,9 @@ export class CreatorScreen extends Screen {
     const lp = this.lookPanel.page;
     this.list = new List(this.ctx, lp.x + 4, lp.y + 6, {
       w: lp.w - 8,
-      visible: 5,
+      visible: this.steppers.length,
       rowH: 26,
       rows: this.steppers,
-    });
-    const accessory = (id: string) => (on: boolean) => {
-      const rest = this.look.accessories.filter((a) => a !== id);
-      this.look = { ...this.look, accessories: on ? [...rest, id] : rest };
-      this.recompose();
-      this.react("page");
-    };
-    const cy = lp.y + 6 + 130 + 8;
-    this.glasses = new Checkbox(this.ctx, lp.x + 10, cy, {
-      label: tMaybe(`look.${o.accessories[0]}`) ?? o.accessories[0] ?? "",
-      checked: this.look.accessories.includes(o.accessories[0] ?? ""),
-      onChange: accessory(o.accessories[0] ?? ""),
-    });
-    this.goggles = new Checkbox(this.ctx, lp.x + 74, cy, {
-      label: tMaybe(`look.${o.accessories[1]}`) ?? o.accessories[1] ?? "",
-      checked: this.look.accessories.includes(o.accessories[1] ?? ""),
-      onChange: accessory(o.accessories[1] ?? ""),
     });
     const random = new Button(this.ctx, lp.x + 8, lp.y + lp.h - 9 - 23, {
       label: t("creator.random"),
@@ -367,7 +363,7 @@ export class CreatorScreen extends Screen {
       h: 23,
       onPress: () => this.randomize(),
     });
-    this.lookPanel.add([this.list, this.glasses, this.goggles, random]);
+    this.lookPanel.add([this.list, random]);
 
     // Majors.
     this.majorPanel = new Panel(this.ctx, 324, 8, 150, 254, { title: t("creator.major") });
@@ -461,7 +457,7 @@ export class CreatorScreen extends Screen {
       sound: "confirm",
       onPress: () => void this.confirm(),
     });
-    this.submit.setY(270 - 8 - 23);
+    this.submit.setY(270 - 6 - 23);
     this.center.add([turnL, turnR, this.name, this.nameTick, this.nameNote.obj, this.submit]);
     this.refreshSubmit();
 
@@ -477,7 +473,7 @@ export class CreatorScreen extends Screen {
 
   protected enter(): void {
     this.hooks.dim(0.45);
-    this.hooks.look?.(-34);
+    this.hooks.look?.(-52);
     this.lookPanel.open();
     this.majorPanel.open();
     this.center.setVisible(true).setAlpha(0);
@@ -536,16 +532,20 @@ export class CreatorScreen extends Screen {
 
   private randomize(): void {
     this.look = randomLook(this.meta);
-    const values: (keyof DollLook)[] = ["body", "hair", "hairColor", "face", "uniform"];
-    this.steppers.forEach((s, i) => {
-      s.value = String(this.look[values[i] as keyof DollLook]);
+    const { body, hair, hairColor, face, uniform } = this.look;
+    [body, hair, hairColor, face, uniform, this.wornAccessory()].forEach((v, i) => {
+      const row = this.steppers[i];
+      if (row) row.value = v;
     });
     this.list.setRows(this.steppers);
-    const o = lookOptions(this.meta);
-    this.glasses.checked = this.look.accessories.includes(o.accessories[0] ?? "");
-    this.goggles.checked = this.look.accessories.includes(o.accessories[1] ?? "");
     this.recompose();
     this.react("spin");
+  }
+
+  /** The accessory-layer part being worn, or none. */
+  private wornAccessory(): string {
+    const o = lookOptions(this.meta);
+    return this.look.accessories.find((a) => o.accessories.includes(a)) ?? NONE;
   }
 
   private pickMajor(m: Major): void {
@@ -666,6 +666,16 @@ export class CreatorScreen extends Screen {
     this.nameTick.setVisible(false);
     if (!name) {
       this.nameState = "empty";
+      this.refreshSubmit();
+      return;
+    }
+    // The shared rule answers at once; only a well-formed name is worth asking the server about.
+    const bad = checkName(name);
+    if (bad) {
+      // One syllable in is a name being written, not a wrong one.
+      const writing = [...name].length < 2 && /^[가-힣A-Za-z0-9]*$/.test(name);
+      this.nameState = writing ? "empty" : "bad";
+      if (!writing) this.nameNote.set(t(`error.${bad}` as TextKey));
       this.refreshSubmit();
       return;
     }
