@@ -24,6 +24,8 @@ export interface StackOptions {
   db: Db;
   executor: Executor;
   secret: string;
+  /** Social's `vacate` and `announce`, for permanent bans of a club's 짱. */
+  clubs?: ModerationDeps["clubs"];
   /** Seams for tests; the defaults reach the live rooms. */
   evict?: ModerationDeps["evict"];
   system?: ModerationDeps["system"];
@@ -46,6 +48,7 @@ export async function createModerationStack(o: StackOptions) {
         return world !== undefined;
       }),
     notify: (id, change) => worldRoom()?.notify(id, change),
+    ...(o.clubs ? { clubs: o.clubs } : {}),
   });
   const auth = createAdminAuth(o.db, o.secret);
   const reads = createReads(o.db);

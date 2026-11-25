@@ -25,6 +25,8 @@ import type { Db } from "../db/index.ts";
 import type { Executor, Queryable } from "../economy/executor.ts";
 import { MAX_STACK } from "../economy/ops.ts";
 import { live } from "../live/current.ts";
+import type { ClubChange } from "../social/clubs.ts";
+import type { Tx } from "../social/tx.ts";
 import { record, target } from "./audit.ts";
 import { adminMutes } from "./mutes.ts";
 
@@ -60,13 +62,24 @@ export interface ModerationDeps {
   system(line: Omit<SystemLine, "id" | "at">, toCharacterId?: string): boolean;
   /** An item or currency change the player did not ask for, sent if they are online. */
   notify(characterId: string, change: ChangeNotice): void;
+  /**
+   * Clubs (social `vacate` and `announce`): a permanent ban hands a 짱's club on or disbands it,
+   * inside the ban's transaction. Without it (tests) clubs are left alone.
+   */
+  clubs?: {
+    vacate(characterId: string, on: { tx: Tx }): Promise<ClubChange | null>;
+    announce(change: ClubChange): void;
+  };
 }
 
 /** After a commit: what happens outside the database. */
 type After = () => void | Promise<void>;
 
 export interface BanOptions {
+  /** Recorded and shown to the player (`moderation.banned`), unless `told` says otherwise. */
   reason: string;
+  /** What the player is told instead of `reason` (a report's action keeps its note internal). */
+  told?: string;
   /** Null: until lifted. */
   minutes: number | null;
   /** Also ban every IP hash the account has signed up or logged in from. */
@@ -75,6 +88,7 @@ export interface BanOptions {
 
 export interface MuteOptions {
   reason: string;
+  told?: string;
   minutes: number | null;
 }
 
@@ -94,7 +108,10 @@ export interface ResolveInput {
   minutes: number | null;
   /** For ban. */
   ip: boolean;
+  /** Internal; never sent to anyone. */
   note: string;
+  /** What the reported player is told, for any action but `none`. */
+  told: string;
 }
 
 // Checks ---------------------------------------------------------------------------------------
@@ -183,7 +200,7 @@ const endsAt = (minutes: number | null) =>
 export function createModeration(deps: ModerationDeps) {
   const { db, executor } = deps;
 
-  async function run(work: (tx: Queryable) => Promise<ModResult<{ after?: After }>>) {
+  async function run(work: (tx: Tx) => Promise<ModResult<{ after?: After }>>) {
     const out = await db.transaction(async (tx) => work(tx));
     if (out.ok && out.after) await out.after();
     if (!out.ok) return out;
@@ -198,7 +215,11 @@ export function createModeration(deps: ModerationDeps) {
     return rows[0] as { id: string; status: string; signup_ip_hash: string } | undefined;
   }
 
-  async function banIn(tx: Queryable, adminId: string, accountId: string, o: BanOptions) {
+  const characterOfAccount = async (tx: Queryable, accountId: string) =>
+    (await tx.execute(sql`select id from characters where account_id = ${accountId}`)).rows[0]
+      ?.id as string | undefined;
+
+  async function banIn(tx: Tx, adminId: string, accountId: string, o: BanOptions) {
     const account = await lockAccount(tx, accountId);
     if (!account) return fail("not_found");
     let ips: string[] = [];
@@ -215,14 +236,45 @@ export function createModeration(deps: ModerationDeps) {
     const ban = rows[0] as { id: string; ends_at: string | null };
     await tx.execute(sql`update accounts set status = 'banned' where id = ${accountId}`);
     await tx.execute(sql`delete from sessions where account_id = ${accountId}`);
+    const characterId = await characterOfAccount(tx, accountId);
+    // A permanent ban leaves no 짱 behind: the club passes on or disbands with the ban. A timed
+    // ban leaves the club as it is.
+    const club =
+      o.minutes === null && characterId && deps.clubs
+        ? await deps.clubs.vacate(characterId, { tx })
+        : null;
     await record(tx, {
       adminId,
       action: "ban",
       target: target.account(accountId),
       reason: o.reason,
-      detail: { ban: Number(ban.id), minutes: o.minutes, ips: ips.length },
+      detail: {
+        ban: Number(ban.id),
+        minutes: o.minutes,
+        ips: ips.length,
+        ...(club ? { club: club.club, disbanded: club.gone === true } : {}),
+      },
     });
-    return { ok: true as const, after: () => deps.evict(accountId, CLOSE_BANNED) };
+    const told = o.told ?? o.reason;
+    return {
+      ok: true as const,
+      after: () => {
+        // The line goes out on the world socket before it closes, so the client can say why.
+        if (characterId) {
+          deps.system(
+            ban.ends_at === null
+              ? { key: "moderation.banned-permanent", params: { reason: told } }
+              : {
+                  key: "moderation.banned",
+                  params: { until: new Date(ban.ends_at).getTime(), reason: told },
+                },
+            characterId,
+          );
+        }
+        deps.evict(accountId, CLOSE_BANNED);
+        if (club) deps.clubs?.announce(club);
+      },
+    };
   }
 
   async function muteIn(tx: Queryable, adminId: string, characterId: string, o: MuteOptions) {
@@ -244,22 +296,41 @@ export function createModeration(deps: ModerationDeps) {
       ok: true as const,
       after: async () => {
         await adminMutes.refresh(db, characterId);
-        // The player learns the action and its end, never the reason or who asked.
+        // The player learns the action, its end and the reason they are told; never who asked.
         const until = adminMutes.until(characterId);
+        const reason = o.told ?? o.reason;
         deps.system(
-          Number.isFinite(until) ? { key: "muted", params: { until } } : { key: "muted" },
+          {
+            key: "moderation.muted",
+            params: Number.isFinite(until) ? { until, reason } : { reason },
+          },
           characterId,
         );
       },
     };
   }
 
-  async function kickIn(tx: Queryable, adminId: string, accountId: string, reason: string) {
+  async function kickIn(
+    tx: Queryable,
+    adminId: string,
+    accountId: string,
+    reason: string,
+    told = reason,
+  ) {
     const account = await lockAccount(tx, accountId);
     if (!account) return fail("not_found");
     await tx.execute(sql`delete from sessions where account_id = ${accountId}`);
+    const characterId = await characterOfAccount(tx, accountId);
     await record(tx, { adminId, action: "kick", target: target.account(accountId), reason });
-    return { ok: true as const, after: () => deps.evict(accountId, CLOSE_KICKED) };
+    return {
+      ok: true as const,
+      after: () => {
+        if (characterId) {
+          deps.system({ key: "moderation.kicked", params: { reason: told } }, characterId);
+        }
+        deps.evict(accountId, CLOSE_KICKED);
+      },
+    };
   }
 
   return {
@@ -357,7 +428,13 @@ export function createModeration(deps: ModerationDeps) {
           },
         });
         // Its own operation in the live world, which logs (never throws) when it fails.
-        return { ok: true, after: () => live()?.events.chatStrike(found.sender_id) };
+        return {
+          ok: true,
+          after: async () => {
+            deps.system({ key: "moderation.strike" }, found.sender_id);
+            await live()?.events.chatStrike(found.sender_id);
+          },
+        };
       }),
 
     /**
@@ -439,17 +516,23 @@ export function createModeration(deps: ModerationDeps) {
         if (!report) return fail("not_found");
         if (report.state !== "open") return fail("already_handled");
         if (r.state === "dismissed" && r.action !== "none") return fail("bad_request");
+        if (r.action !== "none" && !r.told) return fail("bad_request");
         const reason = `report #${reportId}${r.note ? `: ${r.note}` : ""}`;
         let after: After | undefined;
         if (r.action !== "none") {
           if (!report.account_id) return fail("not_found");
           const done =
             r.action === "mute"
-              ? await muteIn(tx, adminId, report.target_id, { reason, minutes: r.minutes })
+              ? await muteIn(tx, adminId, report.target_id, {
+                  reason,
+                  told: r.told,
+                  minutes: r.minutes,
+                })
               : r.action === "kick"
-                ? await kickIn(tx, adminId, report.account_id, reason)
+                ? await kickIn(tx, adminId, report.account_id, reason, r.told)
                 : await banIn(tx, adminId, report.account_id, {
                     reason,
+                    told: r.told,
                     minutes: r.minutes,
                     ip: r.ip,
                   });

@@ -134,6 +134,12 @@ export async function reportScreen(ctx: Ctx, id: string): Promise<Node> {
             h(
               "div",
               { class: "row" },
+              h("input", {
+                name: "told",
+                class: "wide",
+                placeholder: "reason, shown to the player",
+                maxlength: 500,
+              }),
               h("input", { name: "note", class: "wide", placeholder: "note", maxlength: 500 }),
               h("button", { type: "submit" }, "Close report"),
             ),
@@ -147,6 +153,7 @@ export async function reportScreen(ctx: Ctx, id: string): Promise<Node> {
               minutes,
               ip: d.get("ip") === "on",
               note: d.get("note") ?? "",
+              told: d.get("told") ?? "",
             });
             ctx.reload();
             return "Closed";

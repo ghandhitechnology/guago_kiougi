@@ -105,14 +105,10 @@ const CURRENCY: Record<string, string> = {
 };
 
 const minutesOf = (v: FormDataEntryValue | null) => (v ? Number(v) : null);
-const reasonInput = () =>
-  h("input", {
-    name: "reason",
-    class: "wide",
-    placeholder: "reason",
-    required: true,
-    maxlength: 500,
-  });
+/** Mute, kick and ban reasons reach the player in the 운영진's line (`moderation.*`). */
+const TOLD = "reason, shown to the player";
+const reasonInput = (placeholder = "reason") =>
+  h("input", { name: "reason", class: "wide", placeholder, required: true, maxlength: 500 });
 
 function activeBan(p: Player): Sanction | undefined {
   const now = Date.now();
@@ -159,7 +155,7 @@ function actions(ctx: Ctx, p: Player): Node {
           { class: "row" },
           [
             select("minutes", MUTE_FOR, "60"),
-            reasonInput(),
+            reasonInput(TOLD),
             h("button", { type: "submit", class: "danger" }, "Mute"),
           ],
           async (d) => {
@@ -190,7 +186,7 @@ function actions(ctx: Ctx, p: Player): Node {
         );
   const kick = form(
     { class: "row" },
-    [reasonInput(), h("button", { type: "submit", class: "danger" }, "Kick")],
+    [reasonInput(TOLD), h("button", { type: "submit", class: "danger" }, "Kick")],
     async (d) => {
       await post(`/players/${id}/kick`, { reason: d.get("reason") });
       return done("Session closed")();
@@ -218,7 +214,7 @@ function actions(ctx: Ctx, p: Player): Node {
         [
           select("minutes", BAN_FOR, "10080"),
           h("label", null, h("input", { type: "checkbox", name: "ip" }), "and its IPs"),
-          reasonInput(),
+          reasonInput(TOLD),
           h("button", { type: "submit", class: "danger" }, "Ban"),
         ],
         async (d) => {

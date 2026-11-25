@@ -54,6 +54,11 @@ const admin = await createModerationStack({
   db,
   executor: economy.executor,
   secret: config.serverSecret,
+  // Social is made below; a ban only reaches these after start.
+  clubs: {
+    vacate: (id, on) => social.vacate(id, on),
+    announce: (change) => social.announce(change),
+  },
 });
 const auth = createAuthService({
   db,

@@ -266,7 +266,8 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     if (b.state !== "resolved" && b.state !== "dismissed") throw bad();
     if (!actions.includes(b.action as ReportAction)) throw bad();
     const note = b.note === undefined || b.note === "" ? "" : cleanReason(b.note);
-    if (note === null) throw bad();
+    const told = b.told === undefined || b.told === "" ? "" : cleanReason(b.told);
+    if (note === null || told === null) throw bad();
     done(
       await moderation.resolveReport(req.admin.id, n, {
         state: b.state,
@@ -274,6 +275,7 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
         minutes: minutes(b),
         ip: b.ip === true,
         note,
+        told,
       }),
     );
     return { ok: true };
