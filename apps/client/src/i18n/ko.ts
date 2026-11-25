@@ -1,0 +1,112 @@
+/**
+ * Korean copy. Voices: the school office (notices and errors) speaks in 합니다체; the player's
+ * own buttons are short verbs; each class senior speaks in 반말.
+ */
+export const ko = {
+  "title.login": "등교하기",
+  "title.signup": "입학하기",
+
+  "login.title": "등교",
+  "login.id": "아이디",
+  "login.password": "비밀번호",
+  "login.submit": "등교",
+  "login.lost": "비밀번호 분실",
+
+  "signup.title": "입학 원서",
+  "signup.id": "아이디",
+  "signup.password": "비밀번호",
+  "signup.age": "만 14세 이상입니다",
+  "signup.submit": "제출",
+
+  "code.title": "복구 코드",
+  "code.body": "비밀번호를 잊으면 이 코드로만 되찾을 수 있습니다. 다시 보여 드리지 않습니다.",
+  "code.copy": "복사",
+  "code.copied": "복사했습니다.",
+  "code.done": "받아 적었습니다",
+
+  "recover.title": "분실 신고",
+  "recover.id": "아이디",
+  "recover.code": "복구 코드",
+  "recover.password": "새 비밀번호",
+  "recover.submit": "재발급",
+  "recover.done": "비밀번호를 바꿨습니다.",
+
+  "creator.look": "외모",
+  "creator.major": "전공",
+  "creator.name": "이름",
+  "creator.submit": "등교",
+  "creator.random": "아무거나",
+  "creator.leave.title": "나가기",
+  "creator.leave.body": "쓰던 학생부를 버리고 교문 밖으로 나갑니다.",
+  "creator.leave.yes": "나가기",
+  "creator.leave.no": "계속 쓰기",
+
+  "look.body": "피부",
+  "look.hair": "머리",
+  "look.hairColor": "머리색",
+  "look.face": "얼굴",
+  "look.uniform": "교복",
+  "look.glasses": "안경",
+  "look.goggles": "고글",
+
+  "skin.fair": "21호",
+  "skin.warm": "23호",
+  "skin.deep": "25호",
+
+  "hair.crop": "단정",
+  "hair.spiky": "까치집",
+  "hair.bob": "단발",
+  "hair.long": "생머리",
+  "hair.ponytail": "포니테일",
+  "hair.curly": "곱슬",
+
+  "hairColor.black": "흑발",
+  "hairColor.brown": "갈색",
+  "hairColor.chestnut": "밤색",
+  "hairColor.blond": "금발",
+  "hairColor.red": "빨강",
+  "hairColor.silver": "은발",
+  "hairColor.blue": "파랑",
+  "hairColor.pink": "분홍",
+  "hairColor.green": "초록",
+  "hairColor.violet": "보라",
+
+  "face.bright": "밝음",
+  "face.sleepy": "졸림",
+  "face.sharp": "승부",
+
+  "uniform.blazer": "동복",
+  "uniform.shirt": "하복",
+
+  "major.math": "수학",
+  "major.physics": "물리",
+  "major.chemistry": "화학",
+  "major.biology": "생명",
+  "major.earth": "지구과학",
+
+  "major.math.mechanic": "증명 스택",
+  "major.physics.mechanic": "운동량",
+  "major.chemistry.mechanic": "반응 표",
+  "major.biology.mechanic": "증식",
+  "major.earth.mechanic": "예보",
+
+  "major.math.line": "같은 놈을 열 번 맞히면 증명 끝. 그다음은 Q.E.D.야.",
+  "major.physics.line": "세게 밀어. 날아가서 부딪히는 것까지 다 내 데미지야.",
+  "major.chemistry.line": "산이랑 염기만 외워. 나머진 섞으면 알아서 터져.",
+  "major.biology.line": "하나가 둘 되고, 둘이 넷 돼. 혼자 싸울 일은 없어.",
+  "major.earth.line": "기다려. 늦게 오는 예보일수록 크게 온다.",
+
+  "error.login_taken": "이미 있는 아이디입니다.",
+  "error.bad_credentials": "아이디나 비밀번호가 맞지 않습니다.",
+  "error.rate_limited": "너무 자주 두드렸습니다. 잠시 뒤에 다시 오십시오.",
+  "error.name_taken": "같은 이름의 학생이 이미 있습니다.",
+  "error.name_invalid": "학생부에 올릴 수 없는 이름입니다.",
+  "error.signup_limit": "오늘은 이 교문으로 더 받지 않습니다.",
+  "error.age_required": "만 14세 이상만 입학할 수 있습니다.",
+  "error.weak_password": "비밀번호는 8자 이상이어야 합니다.",
+  "error.offline": "교무실이 응답하지 않습니다.",
+  "error.unknown": "교무실에서 서류를 잃어버렸습니다. 다시 내 주십시오.",
+  "error.id_required": "아이디를 적어 주십시오.",
+  "error.code_required": "복구 코드를 적어 주십시오.",
+  "error.name_required": "이름을 적어 주십시오.",
+} as const;
