@@ -20,7 +20,7 @@ import {
  * read as weight. Electricity is the violet of a plasma ball, so no 물리 effect is ever confused
  * with the red of an enemy.
  */
-const PHYS: Legend = {
+export const PHYS: Legend = {
   ".": null,
   o: "plum.deep",
   d: "plum.dark",
@@ -40,8 +40,8 @@ const PHYS: Legend = {
   ",": "plum.light",
   ":": "stone.light",
 };
-const LONE = "*',:";
-const fx = { group: "combat", outline: false, palette: PHYS, lone: LONE } as const;
+export const PHYS_LONE = "*',:";
+const fx = { group: "combat", outline: false, palette: PHYS, lone: PHYS_LONE } as const;
 
 // 홀리데이 일반물리 ---------------------------------------------------------------------------
 
@@ -50,7 +50,7 @@ const fx = { group: "combat", outline: false, palette: PHYS, lone: LONE } as con
  * showing under it. The book is drawn at angle `a` with light fixed at the top left, so every
  * turn keeps the same light.
  */
-function tome(a: number): Pic {
+export function tome(a: number): Pic {
   const s = 18;
   const c = 9;
   const hw = 6.2;
@@ -95,7 +95,7 @@ function tome(a: number): Pic {
   return clean(out);
 }
 
-const TOME: Legend = { ...PHYS, Y: "gold.light", G: "gold.mid", q: "stone.deep" };
+export const TOME: Legend = { ...PHYS, Y: "gold.light", G: "gold.mid", q: "stone.deep" };
 
 const tomeSprite = sprite({
   name: "fx-tome",
@@ -409,7 +409,7 @@ const boltDiag = sprite({
 });
 
 /** Where the chain touches a target: a white star, a plum ring with diagonal sparks, embers. */
-function node(k: number): Pic {
+export function node(k: number): Pic {
   const s = 15;
   const c = 7;
   const pic = Pic.blank(s, s);
