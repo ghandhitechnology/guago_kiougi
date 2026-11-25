@@ -1385,7 +1385,8 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom, S
 
   autoWalks(sessionId: string): boolean {
     const p = this.pawns.get(sessionId)?.player;
-    return !!p && MODE_AUTO[p.mode].move;
+    // A body whose page is gone plays itself in 완전 자동 until it comes back.
+    return !!p && MODE_AUTO[p.away ? Mode.Auto : p.mode].move;
   }
 
   inDuel(sessionId: string): boolean {

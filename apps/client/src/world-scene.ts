@@ -1,10 +1,8 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { type BuiltMap, narrative, simRules, snapshotReaderForMap } from "@guago/content";
+import { type BuiltMap, narrative, snapshotReaderForMap } from "@guago/content";
 import {
-  AIM_MESSAGE,
   type Caught,
-  castFlag,
   type DoorRattle,
   type DoorRefusal,
   distanceToArea,
@@ -12,49 +10,40 @@ import {
   type Facing,
   type Halt,
   INPUT_MESSAGE,
-  InputFlag,
   type Interaction,
   MAP_MESSAGES,
-  MAX_AIM,
   type MapState,
-  MODE_MESSAGE,
   type NpcLine,
   NULL_SINK,
   nearestUsable,
   PLAYER_RADIUS,
-  PLAYER_SPEED,
-  type PlayerState,
   POS_SCALE,
   portalAt,
-  Q,
   SNAPSHOT_MESSAGE,
   type SnapshotReader,
+  type SnapshotSink,
   STORY_MESSAGES,
   shutDoorAhead,
   TILE_SIZE,
   type Transfer,
   type Usable,
-  WireMinion,
-  WirePlayer,
   type WireSelf,
   type ZoneUpdate,
 } from "@guago/shared";
 import * as Phaser from "phaser";
-import { MonsterActor, PlayerActor } from "./actors.ts";
-import { artMeta, composeLook, createSpriteAnims, defaultLook, loadArt } from "./art.ts";
+import { artMeta, createSpriteAnims } from "./art.ts";
 import { CameraRig } from "./camera.ts";
 import { sampleMove } from "./controls/move.ts";
 import { MARK_DEPTH } from "./depths.ts";
-import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import { playEmote } from "./emotes.ts";
 import type { WorldEntry } from "./entry.ts";
 import { Curtain } from "./fade.ts";
-import { FightKeys } from "./fight-keys.ts";
-import { FightSketch } from "./fight-sketch.ts";
+import { FightView } from "./fight/index.ts";
+import { bindFight } from "./hud/fight.ts";
 import { hud } from "./hud/store.ts";
 import { t, tMaybe } from "./i18n/index.ts";
 import { KeyboardMove } from "./input.ts";
-import { ServerClock, Track } from "./interp.ts";
+import { ServerClock } from "./interp.ts";
 import { ensureMap, enteredMap, mapReady, wallsOf } from "./map-data.ts";
 import { type MapSeat, stayConnected } from "./net.ts";
 import { NpcActor, npcArt, speakerName } from "./npc.ts";
@@ -76,7 +65,6 @@ import { emitWorld, onWorld } from "./world-events.ts";
 import type { WorldLink } from "./world-link.ts";
 import { playWorld } from "./world-sound.ts";
 
-const PLAYER_RIG = "student";
 /** The camera frames the body, not the feet. */
 const CHEST_PX = 10;
 /**
@@ -92,6 +80,13 @@ const RATTLE_COOLDOWN_MS = 1200;
 const HEAR_PX = 220;
 /** A door this close starts loading the map behind it. */
 const NEAR_DOOR_PX = 56;
+/**
+ * In a field only this many students nearest the player wear name plates, chosen this often, and
+ * none standing so close that their plates would cover the player.
+ */
+const NAMED_IN_FIELD = 4;
+const NAMED_CLEAR_PX = 32;
+const NAMED_EVERY_MS = 500;
 /** Development only: `?cold` turns that off, to time a door whose map loads behind the curtain. */
 const PREFETCH = !(import.meta.env.DEV && new URLSearchParams(location.search).has("cold"));
 const KO = narrative.NARRATIVE.ko;
@@ -109,13 +104,6 @@ interface Transition {
   readonly marks: Record<string, number>;
 }
 
-interface Remote<A> {
-  readonly track: Track;
-  actor: A;
-  /** The look the actor wears, for players. */
-  look?: string;
-}
-
 /** The map the player stands on, and everything drawn for it. */
 interface Here {
   readonly room: Room<unknown, MapState>;
@@ -128,6 +116,9 @@ interface Here {
   readonly walls: { collision: BuiltMap["collision"] };
   /** Doors the Page clock keeps shut, as the server last said. */
   closed: ReadonlySet<string>;
+  /** Every body of the room's fight, drawn from its snapshots, the player's own included. */
+  readonly fight: FightView;
+  readonly unbindHud: () => void;
   readonly patrols: Patrols | undefined;
   /** What the prompt can point at: the server's own list, by the same rule. */
   readonly usable: (Usable & {
@@ -142,39 +133,37 @@ interface Here {
  * The walking world: the map the server seated the player in, every entity in view, the
  * player's own character predicted under the keys, the camera on it, and the doors between
  * maps. Rendering, input, prediction, camera, bubbles and the curtain live in their own
- * modules; this scene wires them to the room.
+ * modules, and every body with the fight around it is the fight view's (`fight/`); this scene
+ * wires them to the room.
  */
 export class WorldScene extends Phaser.Scene {
   private meta!: ArtMetadata;
-  private look!: string;
   private camera: CameraRig | undefined;
   private keys!: KeyboardMove;
   private readonly clock = new ServerClock();
-  private readonly monsters = new Map<string, Remote<MonsterActor>>();
-  private readonly players = new Map<string, Remote<PlayerActor>>();
   /** The fight snapshot as this client holds it (`fight/wire.ts`), one per room joined. */
   private reader: SnapshotReader | undefined;
+  /** Reads snapshots until the fight view is up: only the own body matters then. */
+  private readonly early: SnapshotSink = { ...NULL_SINK, self: (me) => this.onSelf(me) };
   /** Waiting for the first Self record of a room just joined. */
   private selfWaiters: ((me: WireSelf) => void)[] = [];
-  private selfSlot = -1;
   private mode = 1;
-  private sketch: FightSketch | undefined;
   /** The story's scenes on the map shown (`story/`): they hold the keys and the camera. */
   private readonly story = new StoryLink(() => this.entry?.character.name ?? "");
   private storyCamera = false;
   private storyDriven = false;
   private modeDriven = false;
   private storyFacing: Facing | undefined;
-  private fightKeys: FightKeys | undefined;
   private self: SelfMover | undefined;
-  private selfActor: PlayerActor | undefined;
+  /** Where the predicted body is drawn this frame. */
+  private drawn: { x: number; y: number; facing: Facing } | undefined;
   private selfId: string | undefined;
+  /** Session ids with a name plate up, so a student who leaves takes theirs along. */
+  private readonly plates = new Set<string>();
   private live = false;
   private lastTime: number | undefined;
   /** Who is playing, handed over by the front end; absent when the scene runs on its own. */
   private entry: WorldEntry | undefined;
-  /** The player's own look, composited from the character; others wear their own. */
-  private selfLook: string | undefined;
 
   private curtain!: Curtain;
   private overlays!: WorldOverlays;
@@ -218,20 +207,14 @@ export class WorldScene extends Phaser.Scene {
     this.entry = data.account && data.character ? (data as WorldEntry) : undefined;
   }
 
-  /** The art every map shares; each map's own art loads when the server seats us there. */
+  /** The art every map and every fight shares; each map's own art loads when the server seats us there. */
   preload(): void {
-    loadArt(this, { atlases: ["core", "effects"] });
+    FightView.preload(this);
   }
 
   create(): void {
     this.meta = artMeta(this);
     createSpriteAnims(this, this.meta);
-    this.look = composeLook(this, this.meta, PLAYER_RIG, defaultLook(this.meta, PLAYER_RIG)).look;
-    if (this.entry) {
-      const look = normalizeLook(this.meta, this.entry.character.look);
-      composeDoll(this, this.meta, look);
-      this.selfLook = dollLook(look);
-    }
     this.curtain = new Curtain(this, true);
     this.overlays = new WorldOverlays(this);
     worldView.overlays = this.overlays;
@@ -271,6 +254,15 @@ export class WorldScene extends Phaser.Scene {
         },
         replay: (scene: string) => this.story.replay(scene),
       };
+      // The test shortcut's hooks for recordings and measurements (`fight/dev.ts`).
+      if (new URLSearchParams(location.search).has("fight")) {
+        void import("./fight/dev.ts").then((d) =>
+          d.installFightDev({
+            scene: this,
+            current: () => this.here && { fight: this.here.fight, room: this.here.room },
+          }),
+        );
+      }
     }
   }
 
@@ -278,11 +270,12 @@ export class WorldScene extends Phaser.Scene {
 
   /** A room is joined. Callbacks go on at once; the map is shown once it and the body are in. */
   private arrive(seat: MapSeat): () => void {
-    const { room } = seat;
+    const { room, seating } = seat;
     this.room = room;
     this.live = true;
-    this.reader = undefined;
-    this.selfSlot = -1;
+    // A door is a new room: a new reader, sized for its map, which reads every snapshot from the
+    // first, in order.
+    this.reader = snapshotReaderForMap(seating.map);
     room.onStateChange((state) => {
       if (this.room === room) this.onPatch(state);
     });
@@ -360,8 +353,13 @@ export class WorldScene extends Phaser.Scene {
     this.steps = new StepSounds(shown.surfaceAt);
     preloadFor(map.id);
     enterSoundscape(soundscapeFor(map.id, map.time));
-    const untier = onQualityTier((t) => view.setTier(t));
+    const untier = onQualityTier((t) => {
+      view.setTier(t);
+      this.here?.fight.setTier(t);
+    });
     enteredMap(this, map.id);
+    // The cast's atlases load with the map: their animations are made now, before anyone stands.
+    createSpriteAnims(this, this.meta);
     const npcs = new Map<string, NpcActor>();
     for (const [key, n] of room.state.npcs) {
       const art = npcArt(this.meta, n.speaker);
@@ -406,6 +404,29 @@ export class WorldScene extends Phaser.Scene {
     // Guards on their beats and townspeople on their walks (`patrols.ts`).
     const rounds = [...map.patrols, ...map.walks];
     const patrols = rounds.length > 0 ? new Patrols(this, this.meta, view, rounds) : undefined;
+    this.selfId = room.sessionId;
+    this.camera = new CameraRig(this.cameras.main, map.w * T, map.h * T);
+    const x = me.x / POS_SCALE;
+    const y = me.y / POS_SCALE;
+    this.camera.jumpTo(x, y - CHEST_PX);
+    const self = new SelfMover(walls, (input) => {
+      if (this.room === room) room.send(INPUT_MESSAGE, encodeInput(input));
+    });
+    self.onServer(me);
+    this.self = self;
+    this.drawn = undefined;
+    // Every body in the room comes from its fight snapshots; the HUD's bars and books follow it.
+    const reader = this.reader;
+    if (!reader) return;
+    const fight = FightView.attach(this, view, room, reader, {
+      self: () => this.drawn,
+      mover: self,
+      onSelf: (s) => this.onSelf(s),
+      tier: view.qualityTier,
+      field: map.zones.some((z) => z.kind === "monsters"),
+      onStep: (fx, fy, mine) => this.steps?.step(fx, fy, worldView.self, mine),
+    });
+    const unbindHud = bindFight(fight.hud);
     this.here = {
       room,
       map,
@@ -417,17 +438,9 @@ export class WorldScene extends Phaser.Scene {
       walls,
       closed,
       patrols,
+      fight,
+      unbindHud,
     };
-    this.selfId = room.sessionId;
-    this.camera = new CameraRig(this.cameras.main, map.w * T, map.h * T);
-    const x = me.x / POS_SCALE;
-    const y = me.y / POS_SCALE;
-    this.camera.jumpTo(x, y - CHEST_PX);
-    this.self = new SelfMover(walls, (input) => {
-      if (this.room === room) room.send(INPUT_MESSAGE, encodeInput(input));
-    });
-    this.self.onServer(me);
-    this.startFight(room, walls);
     this.selfInside = portalAt(map.portals, x, y);
     this.doorAt = undefined;
     this.roomZone = map.zones.find((z) => z.kind === "room" && this.zones.includes(z.id))?.id;
@@ -480,40 +493,6 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  /** The fight keys (Space, 1 to 6, Tab, the mouse to aim) and, in development, the sketch. */
-  private startFight(room: Room<unknown, MapState>, walls: Here["walls"]): void {
-    if (import.meta.env.DEV) this.sketch = new FightSketch(this, walls, 9000);
-    this.fightKeys = new FightKeys(
-      {
-        // A scene holding the keys holds these too.
-        dodge: () => {
-          if (!this.story.holding) this.self?.queue(InputFlag.Dodge);
-        },
-        cast: (slot) => {
-          if (this.mode === 3 && !this.story.holding) this.self?.queue(castFlag(slot));
-        },
-        cycleMode: () => {
-          if (!this.story.holding) room.send(MODE_MESSAGE, [(this.mode + 1) % 4]);
-        },
-        aim: (at) => {
-          const me = this.selfActor?.body;
-          if (!at || !me) return room.send(AIM_MESSAGE, []);
-          const clamp = (v: number) => Math.max(-MAX_AIM, Math.min(MAX_AIM, Math.round(v)));
-          room.send(AIM_MESSAGE, [clamp(at.x - me.x), clamp(at.y - me.y)]);
-        },
-      },
-      (cx, cy) => {
-        const canvas = this.game.canvas.getBoundingClientRect();
-        if (cx < canvas.left || cy < canvas.top || cx > canvas.right || cy > canvas.bottom)
-          return null;
-        const cam = this.cameras.main;
-        const x = ((cx - canvas.left) / canvas.width) * cam.width + cam.scrollX;
-        const y = ((cy - canvas.top) / canvas.height) * cam.height + cam.scrollY;
-        return { x, y };
-      },
-    );
-  }
-
   /** Takes down everything drawn for the map being left. */
   private clearMap(): void {
     this.story.leaveMap();
@@ -527,18 +506,16 @@ export class WorldScene extends Phaser.Scene {
       const speaker = here?.room.state.npcs.get(key)?.speaker;
       if (speaker) worldUi.npcGone(speaker);
     }
-    for (const sid of this.players.keys()) this.overlays.remove(sid);
-    if (this.selfId) this.overlays.remove(this.selfId);
-    for (const r of [...this.monsters.values(), ...this.players.values()]) r.actor.destroy();
-    this.monsters.clear();
-    this.players.clear();
-    this.selfActor?.destroy();
-    this.selfActor = undefined;
+    for (const sid of this.plates) {
+      this.overlays.remove(sid);
+      worldView.others.delete(sid);
+    }
+    this.plates.clear();
+    // A door taking the player out mid-fight: the fight goes with the map, behind the curtain.
+    here?.unbindHud();
+    here?.fight.detach();
     this.self = undefined;
-    this.fightKeys?.dispose();
-    this.fightKeys = undefined;
-    this.sketch?.clear();
-    this.sketch = undefined;
+    this.drawn = undefined;
     this.aim(undefined);
     here?.patrols?.destroy();
     here?.untier();
@@ -580,8 +557,8 @@ export class WorldScene extends Phaser.Scene {
     playWorld("door.open", { volume: 0.6 });
     void this.curtain.close();
     const at = this.doorAt;
-    const drawn = this.selfActor?.body;
     const check = () => {
+      const drawn = this.drawn;
       if (this.doorAt !== at) return;
       // The drawn body may lead the server's after a stall: wait while the server's catches up.
       const s = this.serverSelf;
@@ -602,9 +579,8 @@ export class WorldScene extends Phaser.Scene {
   // Patches and messages ------------------------------------------------------------------
 
   private onPatch(state: MapState): void {
-    for (const [slot, p] of state.players) {
+    for (const p of state.players.values()) {
       if (p.sid !== this.selfId) continue;
-      this.selfSlot = Number(slot);
       this.mode = p.mode;
       // In 완전 자동 and 스킬 수동 the server walks the body; knocked out, nothing moves it.
       this.modeDriven = p.mode === 0 || p.mode === 2 || p.down > 0;
@@ -620,63 +596,24 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /**
-   * One tick of the fight: the own body for prediction, then every other player and monster the
-   * snapshot holds. Every message is read in order, even before the map is shown; minions,
-   * effects and events are the presentation's to draw.
+   * One tick of the fight. Every message is read in order from the join on, even before the map
+   * is shown: the own body for prediction until the fight view is up, then everything through it.
    */
   private onSnapshot(room: Room<unknown, MapState>, bytes: Uint8Array): void {
-    // The room's full state arrives before its first snapshot, so the map is known here.
-    this.reader ??= snapshotReaderForMap(room.state.map);
-    const reader = this.reader;
-    reader.read(bytes, {
-      ...NULL_SINK,
-      self: (me) => this.onSelf(me),
-      fx: (f) => this.sketch?.spawn(f, reader.tick),
-      fxEnd: (fx) => this.sketch?.end(fx),
-    });
-    const tick = reader.tick;
-    this.clock.observe(tick, performance.now());
+    // Through a door the old map stays drawn until the new one is up: its fight reads nothing more.
     const here = this.here;
-    if (!here) return;
-    const rules = simRules();
-    const seated = new Set<string>();
-    const monsters = new Set<string>();
-    for (const m of reader.members.values()) {
-      const x = m.qx / Q;
-      const y = m.qy / Q;
-      if (m.kind === WirePlayer) {
-        const p = room.state.players.get(String(m.slot));
-        if (m.slot === this.selfSlot || !p?.sid || p.sid === this.selfId) continue;
-        seated.add(p.sid);
-        this.dressed(p).track.push(tick, x, y, (m.state & 3) as Facing);
-      } else if (m.kind !== WireMinion) {
-        const id = String(m.id);
-        let r = this.monsters.get(id);
-        if (!r) {
-          const kind = rules.monsters[m.kind];
-          if (!kind) continue;
-          const elite = `${kind.sprite}-elite`;
-          const sprite = m.state & 32 && this.meta.sprites[elite] ? elite : kind.sprite;
-          r = { track: new Track(), actor: new MonsterActor(this, this.meta, sprite) };
-          here.view.addEntity(r.actor.body);
-          this.monsters.set(id, r);
-        }
-        monsters.add(id);
-        r.track.push(tick, x, y, (m.state & 16 ? 3 : 2) as Facing);
-      }
-    }
-    this.prune(this.monsters, monsters);
-    for (const sid of this.players.keys()) {
-      if (seated.has(sid)) continue;
-      this.overlays.remove(sid);
-      worldView.others.delete(sid);
-    }
-    this.prune(this.players, seated);
+    const reader = this.reader;
+    if (!reader) return;
+    if (here?.room === room) here.fight.read(bytes);
+    else reader.read(bytes, this.early);
+    this.clock.observe(reader.tick, performance.now());
   }
 
   /** The server's word on the own body: prediction reconciles, and a patrol's catch lands. */
   private onSelf(me: WireSelf): void {
     if (this.selfWaiters.length > 0) for (const w of this.selfWaiters.splice(0)) w(me);
+    // The mover walks the map on screen; the room behind a door has its own body.
+    if (this.here?.room !== this.room) return;
     this.self?.onServer(me);
     this.serverSelf = { x: me.x / POS_SCALE, y: me.y / POS_SCALE };
     if (
@@ -688,57 +625,6 @@ export class WorldScene extends Phaser.Scene {
       this.camera?.jumpTo(this.serverSelf.x, this.serverSelf.y - CHEST_PX);
       this.holding = false;
       void this.curtain.open(160);
-    }
-  }
-
-  /**
-   * Another player's view, made or dressed again: everyone wears their own look, and a body whose
-   * look has not synced yet wears the default until it arrives.
-   */
-  private dressed(p: PlayerState): Remote<PlayerActor> {
-    const here = this.here;
-    // Schema fields are accessors, so a spread would drop them: read each one.
-    const l = p.look;
-    const look = l?.body
-      ? normalizeLook(this.meta, {
-          body: l.body,
-          hair: l.hair,
-          hairColor: l.hairColor,
-          face: l.face,
-          uniform: l.uniform,
-          accessories: [...l.accessories],
-        })
-      : undefined;
-    const lookId = look ? dollLook(look) : this.look;
-    let r = this.players.get(p.sid);
-    if (!r) {
-      if (look) composeDoll(this, this.meta, look);
-      r = { track: new Track(), actor: this.playerActor(lookId), look: lookId };
-      here?.view.addEntity(r.actor.body);
-      this.players.set(p.sid, r);
-      this.overlays.plate(p.sid, p.name, "player");
-      worldView.others.set(p.sid, { kind: "player", x: 0, y: 0, name: p.name });
-    } else if (r.look !== lookId) {
-      if (look) composeDoll(this, this.meta, look);
-      here?.view.removeEntity(r.actor.body);
-      r.actor.destroy();
-      r.actor = this.playerActor(lookId);
-      r.look = lookId;
-      here?.view.addEntity(r.actor.body);
-      this.overlays.plate(p.sid, p.name, "player");
-    }
-    return r;
-  }
-
-  private prune<A extends { readonly body: Phaser.GameObjects.Sprite; destroy(): void }>(
-    views: Map<string, Remote<A>>,
-    live: { has(id: string): boolean },
-  ): void {
-    for (const [id, r] of views) {
-      if (live.has(id)) continue;
-      this.here?.view.removeEntity(r.actor.body);
-      r.actor.destroy();
-      views.delete(id);
     }
   }
 
@@ -816,7 +702,12 @@ export class WorldScene extends Phaser.Scene {
 
   /** Plays an emote on the body of the player in session `sid` of this map room. */
   private emote(sid: string, id: string): void {
-    const body = sid === this.selfId ? this.selfActor?.body : this.players.get(sid)?.actor.body;
+    const here = this.here;
+    if (!here) return;
+    let body: Phaser.GameObjects.Sprite | undefined;
+    for (const [slot, p] of here.room.state.players) {
+      if (p.sid === sid) body = here.fight.studentSprite(Number(slot));
+    }
     if (!body) return;
     const word = tMaybe(`emote.${id}`);
     if (word) this.overlays.say(sid, word);
@@ -853,7 +744,7 @@ export class WorldScene extends Phaser.Scene {
     const T = TILE_SIZE;
     const cx = Math.round((rect.x + rect.w / 2) * T);
     const top = rect.y * T;
-    const me = this.selfActor?.body;
+    const me = this.drawn;
     const near = !me || Math.hypot(me.x - cx, me.y - top) < HEAR_PX;
     if (!mine && !near) return;
     this.quiet = { key: `thing:${id}`, until: performance.now() + 700 };
@@ -876,13 +767,7 @@ export class WorldScene extends Phaser.Scene {
 
   // Frames --------------------------------------------------------------------------------
 
-  private playerActor(look = this.look, self = false): PlayerActor {
-    const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
-    actor.onStep = (x, y) => this.steps?.step(x, y, worldView.self, self);
-    return actor;
-  }
-
-  override update(time: number): void {
+  override update(time: number, delta: number): void {
     const dt = this.lastTime === undefined ? 0 : Math.min(250, time - this.lastTime);
     this.lastTime = time;
     const here = this.here;
@@ -895,44 +780,98 @@ export class WorldScene extends Phaser.Scene {
     // one still go out: the server has to see the step into the door too.
     const drawn = this.self?.frame(dt, move, this.live);
     if (drawn && here && this.camera) {
-      if (!this.selfActor) {
-        this.selfActor = this.playerActor(this.selfLook, true);
-        here.view.addEntity(this.selfActor.body, { focus: true });
-        this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
-        if (this.entry && this.selfId) {
-          this.overlays.plate(this.selfId, this.entry.character.name, "self");
-        }
-      }
-      const moved = Math.hypot(drawn.x - this.selfActor.body.x, drawn.y - this.selfActor.body.y);
-      this.selfActor.update(drawn.x, drawn.y, this.storyFacing ?? drawn.facing, dt);
+      const was = this.drawn;
+      if (!was) this.camera.jumpTo(drawn.x, drawn.y - CHEST_PX);
+      const moved = was ? Math.hypot(drawn.x - was.x, drawn.y - was.y) : 0;
+      // A scene may turn the player and hold the camera.
+      this.drawn = { x: drawn.x, y: drawn.y, facing: this.storyFacing ?? drawn.facing };
       if (!this.storyCamera) this.camera.follow(drawn.x, drawn.y - CHEST_PX, drawn.facing, dt);
       worldView.self = { x: drawn.x, y: drawn.y };
-      if (this.selfId) this.overlays.move(this.selfId, drawn.x, drawn.y);
       this.watchDoors(here.map, drawn.x, drawn.y, drawn.facing, moved, dt);
       this.aimPrompt(here, drawn.x, drawn.y);
     }
     this.story.update();
 
-    const t = this.clock.renderTime(time);
     // Guards stand where the server had them at the time everyone else is drawn at.
-    here?.patrols?.update(t);
-    for (const { track, actor } of this.monsters.values()) {
-      const at = track.at(t);
-      actor.update(at.x, at.y, at.facing as Facing, dt);
-    }
-    for (const [sid, { track, actor }] of this.players) {
-      const at = track.at(t);
-      if (!at.fresh) this.clock.starved++;
-      actor.update(at.x, at.y, at.facing as Facing, dt);
-      this.overlays.move(sid, at.x, at.y);
-      const seen = worldView.others.get(sid);
-      if (seen) {
-        seen.x = at.x;
-        seen.y = at.y;
-      }
-    }
+    here?.patrols?.update(this.clock.renderTime(time));
     for (const npc of here?.npcs.values() ?? []) npc.update(dt);
+    if (!here) return;
+    // The fight draws every body after the camera has moved, then plates and the minimap follow.
+    here.fight.update(time, delta);
+    this.platesFrame(here);
   }
+
+  /** Name plates over every student and their dots on the minimap, from the fight's bodies. */
+  private platesFrame(here: Here): void {
+    const players = here.room.state.players;
+    const seen = this.seenPlates;
+    seen.clear();
+    // In a field the player's own plate would lie under their feet where the hits land; the ring
+    // there marks them instead. A crowd's plates would bury the fight, so only the students
+    // nearest the player wear theirs, chosen again twice a second so plates do not flicker.
+    const field = here.map.zones.some((z) => z.kind === "monsters");
+    const now = performance.now();
+    if (field && now - this.namedAt > NAMED_EVERY_MS) {
+      this.namedAt = now;
+      this.pickNamed(here);
+    }
+    here.fight.forEachStudent((slot, x, y, self) => {
+      const p = players.get(String(slot));
+      if (!p?.sid) return;
+      seen.add(p.sid);
+      if (!self) {
+        const dot = worldView.others.get(p.sid);
+        if (dot) {
+          dot.x = x;
+          dot.y = y;
+        } else worldView.others.set(p.sid, { kind: "player", x, y, name: p.name });
+      }
+      const named = self ? !field : !field || this.named.has(p.sid);
+      if (!named) {
+        if (this.plates.delete(p.sid)) this.overlays.remove(p.sid);
+        return;
+      }
+      if (!this.plates.has(p.sid)) {
+        this.plates.add(p.sid);
+        const name = self ? (this.entry?.character.name ?? p.name) : p.name;
+        this.overlays.plate(p.sid, name, self ? "self" : "player");
+      }
+      this.overlays.move(p.sid, x, y);
+    });
+    for (const sid of this.plates) {
+      if (seen.has(sid)) continue;
+      this.plates.delete(sid);
+      this.overlays.remove(sid);
+    }
+    for (const sid of worldView.others.keys()) {
+      if (!seen.has(sid) && worldView.others.get(sid)?.kind === "player")
+        worldView.others.delete(sid);
+    }
+  }
+
+  /** The students nearest the player in a field, who keep their name plates. */
+  private pickNamed(here: Here): void {
+    const me = this.drawn;
+    const near = this.nearScratch;
+    near.length = 0;
+    const players = here.room.state.players;
+    here.fight.forEachStudent((slot, x, y, self) => {
+      const sid = players.get(String(slot))?.sid;
+      if (self || !sid || !me) return;
+      const d = Math.hypot(x - me.x, y - me.y);
+      if (d > NAMED_CLEAR_PX) near.push({ sid, d });
+    });
+    near.sort((a, b) => a.d - b.d);
+    this.named.clear();
+    for (let i = 0; i < Math.min(NAMED_IN_FIELD, near.length); i++) {
+      this.named.add((near[i] as { sid: string }).sid);
+    }
+  }
+
+  private readonly named = new Set<string>();
+  private namedAt = 0;
+  private readonly nearScratch: { sid: string; d: number }[] = [];
+  private readonly seenPlates = new Set<string>();
 
   /** Doors as the prediction meets them: the curtain starts on the step in. */
   private watchDoors(
@@ -1015,15 +954,15 @@ export class WorldScene extends Phaser.Scene {
       map: here.map,
       view: here.view,
       curtain: this.curtain,
-      playerBody: () => this.selfActor?.body,
-      posePlayer: (anim) => this.selfActor?.pose(anim) ?? false,
+      playerBody: () => this.here?.fight.selfSprite(),
+      posePlayer: (anim) => this.here?.fight.poseSelf(anim) ?? false,
       facePlayer: (dir) => {
         this.storyFacing = dir === undefined ? undefined : facings[dir];
       },
       takeCamera: (on) => {
         if (this.storyCamera === on) return;
         this.storyCamera = on;
-        const me = this.selfActor?.body;
+        const me = this.drawn;
         if (!on && me) this.camera?.handBack(me.x, me.y - CHEST_PX);
       },
       panTo: (x, y, ms) => {
@@ -1069,8 +1008,7 @@ export class WorldScene extends Phaser.Scene {
       corrections: this.self?.corrections ?? 0,
       worstError: this.self?.worstError ?? 0,
       starved: this.clock.starved,
-      players: this.players.size,
-      monsters: this.monsters.size,
+      fight: this.here?.fight.stats(),
       map: this.here?.map.id,
       channel: this.here?.channel,
       npcs: this.here?.npcs.size ?? 0,
@@ -1081,7 +1019,7 @@ export class WorldScene extends Phaser.Scene {
         waiting: this.story.waitingOn,
         holding: this.story.holding,
       },
-      self: this.selfActor ? { x: this.selfActor.body.x, y: this.selfActor.body.y } : undefined,
+      self: this.drawn,
       scroll: { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY },
     };
   }

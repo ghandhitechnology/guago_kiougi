@@ -133,6 +133,7 @@ export const EM_LAB = book<ChainAttack>({
       specials: [{ kind: "fork", count: 2 }],
     } satisfies ChainAttack,
     levels: [],
+    cues: { hit: "evo-maxwell" },
   },
 });
 
@@ -214,6 +215,7 @@ export const MOMENTUM_BOOK = book<DashAttack>({
       specials: [{ kind: "elastic" }],
     } satisfies DashAttack,
     levels: [],
+    cues: { hit: "evo-elastic" },
   },
 });
 

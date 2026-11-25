@@ -17,6 +17,7 @@ import {
   MAP_MESSAGES,
   MAP_ROOM,
   MapState,
+  MODE_MESSAGE,
   MOVE_MAX,
   NULL_SINK,
   POS_SCALE,
@@ -36,13 +37,14 @@ import { type AuthService, createAuthService } from "./auth/service.ts";
 import { channels } from "./channels.ts";
 import { createDb, type Db } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
+import { dbModes } from "./fight/carry.ts";
 import { invariants } from "./invariants.ts";
 import { LiveClock } from "./live/clock.ts";
 import { provideLive } from "./live/current.ts";
 import { createLive, type Live } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { studentLooks } from "./looks.ts";
-import { checkMapRooms, type MapRoom } from "./map-room.ts";
+import { checkMapRooms, type MapRoom, provideFightServices } from "./map-room.ts";
 import { places } from "./places.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
 import { story } from "./story/director.ts";
@@ -243,6 +245,8 @@ beforeAll(async () => {
       },
     },
   });
+  // Control modes stored with the character, as the server's entry point provides them.
+  provideFightServices({ modes: dbModes(db) });
   const port = await freePort();
   await server.listen(port);
   base = `http://127.0.0.1:${port}`;
@@ -623,6 +627,36 @@ describe("two pages of one account", () => {
     // The second page keeps its seat.
     expect(await whereIs(id)).toEqual(["campus-yard"]);
     expect(b.connection.isOpen).toBe(true);
+    await b.leave();
+  });
+});
+
+describe("a page that closes without leaving", () => {
+  it("leaves the next page its own control mode, not the 완전 자동 the dropped body played in", async () => {
+    const { jar } = await player("ownmode");
+    const own = (r: Room<unknown, MapState>) =>
+      [...r.state.players.values()].find((p) => p.sid === r.sessionId);
+    const first = (await enter(base, jar)).seating as Entry;
+    const a = await sdk(base, jar).consumeSeatReservation(first.seat, MapState);
+    a.onMessage("*", () => {});
+    a.reconnection.enabled = false;
+    await waitFor(() => own(a) !== undefined);
+    // 완전 수동, chosen and stored.
+    a.send(MODE_MESSAGE, [3]);
+    await waitFor(() => own(a)?.mode === 3);
+    // The page closes without a word: its body plays itself in 완전 자동 for the reconnection.
+    const yard = matchMaker.getLocalRoomById(a.roomId) as MapRoom;
+    (yard.clients[0]?.ref as { terminate(): void } | undefined)?.terminate();
+    await waitFor(() => yard.clients.length === 0);
+    expect(yard.autoWalks(a.sessionId)).toBe(true);
+    // The next page enters within the window and gets the body back walking by its keys.
+    const second = (await enter(base, jar)).seating as Entry;
+    const b = await sdk(base, jar).consumeSeatReservation(second.seat, MapState);
+    b.onMessage("*", () => {});
+    await waitFor(() => own(b) !== undefined);
+    expect(own(b)?.mode).toBe(3);
+    const here = matchMaker.getLocalRoomById(b.roomId) as MapRoom;
+    expect(here.autoWalks(b.sessionId)).toBe(false);
     await b.leave();
   });
 });

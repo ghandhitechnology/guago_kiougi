@@ -89,7 +89,7 @@ export const PERIODIC_TABLE = book<ProjectileAttack>({
     { at: 30, add: { impactRadius: 6 } },
     { at: 70, add: { count: 1 } },
   ],
-  cues: { body: "atk-element", hit: "fx-flask-shatter" },
+  cues: { body: "atk-element", hit: "fx-hit-light" },
   evolution: {
     id: "mendeleev",
     attack: {
@@ -179,7 +179,7 @@ export const LAB_REPORT = book<ConeAttack>({
     { at: 50, add: { range: 12 } },
     { at: 75, add: { damage: 0.2 } },
   ],
-  cues: { body: "fx-label", hit: "fx-flame", area: "fx-combust" },
+  cues: { body: "atk-fuel-spray", hit: "fx-label", area: "fx-combust" },
   evolution: {
     id: "thermite",
     attack: {

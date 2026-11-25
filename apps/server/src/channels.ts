@@ -251,11 +251,15 @@ class Channels {
     return accounts.size;
   }
 
-  /** Whether a ticket's seat can still be taken. */
+  /**
+   * Whether a ticket's seat can still be taken: reserved, not consumed, and not a dropped page's
+   * seat held for its reconnection, which only that page may come back to (handed to a new page,
+   * it would take over the dropped body still playing itself in 완전 자동).
+   */
   private pending(t: Ticket): boolean {
     const room = matchMaker.getLocalRoomById(t.roomId) as Room | undefined;
     const reserved = room && reservedSeats(room)[t.seating.seat.sessionId];
-    return reserved !== undefined && !reserved[2];
+    return reserved !== undefined && !reserved[2] && !reserved[3];
   }
 
   private async create(map: string, monsters?: number): Promise<Channel> {
