@@ -66,7 +66,6 @@ export function noticeTitle(n: Pick<NoticeView, "template" | "cadence">): string
 class BoardPage {
   private readonly ctx: Ctx;
   private readonly root: Phaser.GameObjects.Container;
-  private readonly size: { w: number; h: number };
   private readonly notes: Phaser.GameObjects.Container;
   private readonly clock: Phaser.GameObjects.Container;
   private readonly said: SaidLine;
@@ -76,7 +75,6 @@ class BoardPage {
 
   constructor(ctx: Ctx, parent: Phaser.GameObjects.Container, size: { w: number; h: number }) {
     this.ctx = ctx;
-    this.size = size;
     const s = ctx.scene;
     this.root = s.add.container(0, 0);
     parent.add(this.root);
