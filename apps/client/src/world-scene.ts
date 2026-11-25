@@ -25,7 +25,6 @@ import { CameraRig } from "./camera.ts";
 import { devMap, drawDevMap } from "./dev-map.ts";
 import { composeDoll, dollLook, normalizeLook } from "./doll.ts";
 import type { WorldEntry } from "./entry.ts";
-import { Footsteps } from "./footsteps.ts";
 import { drawGround } from "./ground.ts";
 import { KeyboardMove } from "./input.ts";
 import { ServerClock, Track } from "./interp.ts";
@@ -52,7 +51,6 @@ export class WorldScene extends Phaser.Scene {
   private look!: string;
   private camera!: CameraRig;
   private keys!: KeyboardMove;
-  private footsteps: Footsteps | undefined;
   private readonly clock = new ServerClock();
   private readonly monsters = new Map<string, Remote<MonsterActor>>();
   private readonly players = new Map<string, Remote<PlayerActor>>();
@@ -96,7 +94,6 @@ export class WorldScene extends Phaser.Scene {
     } else {
       drawGround(this, this.meta, LAWN);
       drawProps(this, this.meta, LAWN);
-      this.footsteps = new Footsteps(this, this.meta, LAWN);
     }
     const { w, h } = this.walls.collision;
     const spawn = dev ? (dev.spawns.main ?? LAWN.spawn) : LAWN.spawn;
@@ -170,7 +167,6 @@ export class WorldScene extends Phaser.Scene {
 
   private playerActor(look = this.look): PlayerActor {
     const actor = new PlayerActor(this, this.meta, PLAYER_RIG, look, PLAYER_SPEED);
-    actor.onStep = (x, y) => this.footsteps?.step(x, y);
     return actor;
   }
 
