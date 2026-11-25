@@ -3,14 +3,19 @@
  * to one club take turns: a kick and a leave, a hand-over and a promotion, a disband and a join
  * each run one after the other, and the second sees what the first did. What no lock order can
  * promise, the schema does: one club per character (the key of `club_members`), the 짱 always a
- * member (a deferred foreign key), every capped list behind a counter CHECK, and a join into a
- * disbanded club fails its foreign key.
+ * member (a deferred foreign key), and every capped list behind a counter CHECK. A disbanded
+ * club keeps its row; every change finds it through `lockClub`, which takes live clubs only.
+ *
+ * Whatever removes a character (a ban that deletes it, account deletion) calls `vacate` first:
+ * the deferred key refuses to delete a 짱 and leave the club without one.
  */
 import { checkEmblem } from "@guago/content";
 import {
   type Applicant,
   CLUB_FOUND_LEVEL,
   CLUB_INVITE_DAYS,
+  CLUB_INVITES_IN_CAP,
+  CLUB_INVITES_OUT_CAP,
   CLUB_NOTICES_CAP,
   CLUB_PAGE,
   type ClubAction,
@@ -46,6 +51,7 @@ interface ClubRow {
   jacket: string;
   emblem: Emblem;
   memberCount: number;
+  inviteCount: number;
 }
 
 const clubRow = (r: Record<string, unknown>): ClubRow => ({
@@ -58,6 +64,7 @@ const clubRow = (r: Record<string, unknown>): ClubRow => ({
   jacket: r.jacket_color as string,
   emblem: r.emblem as Emblem,
   memberCount: Number(r.member_count),
+  inviteCount: Number(r.invite_count),
 });
 
 const time = (v: unknown) => new Date(v as string).getTime();
@@ -263,7 +270,19 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
             Number(member.rows[0].club_id) === club.id ? "in_club" : "target_in_club",
           );
         }
-        if (silent) return { club: club.id };
+        if (silent) {
+          // Nothing is stored, but the caps a stored invite would meet answer the same way,
+          // so a full club or a full inbox never tells the inviter they are blocked.
+          const held = await tx.execute(sql`
+            select club_invites as n from social_counts where character_id = ${target}`);
+          if (
+            club.inviteCount >= CLUB_INVITES_OUT_CAP ||
+            Number(held.rows[0]?.n ?? 0) >= CLUB_INVITES_IN_CAP
+          ) {
+            throw new Refuse("invites_full");
+          }
+          return { club: club.id };
+        }
         const expires = new Date(now() + CLUB_INVITE_DAYS * 24 * 3600 * 1000);
         await tx.execute(sql`
           insert into club_invites (club_id, character_id, invited_by, expires_at)
@@ -324,6 +343,41 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
       if (done instanceof Refuse) return done;
       if ("taken" in done) return new Refuse("target_in_club");
       if (take) await dropApplications(applicant, done.club);
+      return done;
+    },
+
+    /**
+     * Takes a character out of its club for good, before whatever removes the character. A 짱
+     * hands the club to the longest-serving 부짱, else the longest-serving 부원; a 짱 alone
+     * disbands it; anyone else just leaves. Pass `tx` to run inside the deleting transaction.
+     * Returns the change for the hub, or null when the character was in no club.
+     */
+    async vacate(characterId: string, on: { tx?: Tx } = {}): Promise<ClubChange | null> {
+      const work = async (tx: Tx): Promise<ClubChange | null> => {
+        let mine: Awaited<ReturnType<typeof lockMine>>;
+        try {
+          mine = await lockMine(tx, characterId);
+        } catch (error) {
+          if (error instanceof Refuse) return null;
+          throw error;
+        }
+        const { club, rank } = mine;
+        if (rank === "leader") {
+          const { rows } = await tx.execute(sql`
+            select character_id from club_members
+            where club_id = ${club.id} and character_id <> ${characterId}
+            order by (rank = 'vice') desc, joined_at, character_id limit 1`);
+          const heir = rows[0]?.character_id as string | undefined;
+          if (!heir) return disbandLocked(tx, club);
+          await tx.execute(sql`update clubs set leader_id = ${heir} where id = ${club.id}`);
+        }
+        await tx.execute(sql`
+          delete from club_members where character_id = ${characterId} and club_id = ${club.id}`);
+        return { club: club.id, moved: [characterId] };
+      };
+      if (on.tx) return work(on.tx);
+      const done = await transact(db, work);
+      if (done instanceof Refuse) throw done;
       return done;
     },
 
@@ -465,19 +519,19 @@ export function createClubStore(db: Db, fees: FeePath, options: ClubOptions) {
       };
     },
 
+    /** The club as members see it. One connection at a time, so a read never takes three. */
     async view(clubId: number): Promise<ClubView | null> {
-      const [club, members, notices] = await Promise.all([
-        db.execute(sql`select * from clubs where id = ${clubId} and disbanded_at is null`),
-        db.execute(sql`
-          select c.id, c.name, c.major, c.level, m.rank, m.joined_at from club_members m
-          join characters c on c.id = m.character_id
-          where m.club_id = ${clubId} order by m.joined_at, c.id`),
-        db.execute(sql`
-          select n.id, n.body, n.created_at, c.id as author_id, c.name as author_name
-          from club_notices n join characters c on c.id = n.author_id
-          where n.club_id = ${clubId} order by n.created_at desc, n.id desc`),
-      ]);
+      const club = await db.execute(sql`
+        select * from clubs where id = ${clubId} and disbanded_at is null`);
       if (!club.rows[0]) return null;
+      const members = await db.execute(sql`
+        select c.id, c.name, c.major, c.level, m.rank, m.joined_at from club_members m
+        join characters c on c.id = m.character_id
+        where m.club_id = ${clubId} order by m.joined_at, c.id`);
+      const notices = await db.execute(sql`
+        select n.id, n.body, n.created_at, c.id as author_id, c.name as author_name
+        from club_notices n join characters c on c.id = n.author_id
+        where n.club_id = ${clubId} order by n.created_at desc, n.id desc`);
       const row = clubRow(club.rows[0]);
       return {
         id: row.id,
