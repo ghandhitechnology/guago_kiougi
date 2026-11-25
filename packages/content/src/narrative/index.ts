@@ -4,6 +4,7 @@
  */
 import { CODEX, CODEX_KO } from "./codex.ts";
 import { CUTSCENES, CUTSCENES_KO } from "./cutscenes.ts";
+import { DUEL_COPY } from "./duel.ts";
 import { EGG_BARKS, EGG_DESCRIPTIONS, EGGS, EGGS_KO } from "./eggs.ts";
 import { HELP_COPY } from "./help.ts";
 import { BARKS, DESCRIPTIONS, HUB_KO } from "./hub.ts";
@@ -32,7 +33,7 @@ function merge(...tables: Strings[]): Strings {
   return out;
 }
 
-/** Live-world copy (급식, school rules, notices, refusals, social, trade, moderation). */
+/** Live-world copy (급식, school rules, notices, refusals, social, trade, moderation, duels). */
 const COPY: readonly CopyPart[] = [
   MEALS_COPY,
   SCHOOL_LIFE_COPY,
@@ -41,6 +42,7 @@ const COPY: readonly CopyPart[] = [
   SOCIAL_COPY,
   TRADE_COPY,
   MODERATION_COPY,
+  DUEL_COPY,
 ];
 const parts = <K extends Exclude<keyof CopyPart, "ko">>(k: K) =>
   COPY.flatMap((p) => (p[k] ?? []) as NonNullable<CopyPart[K]>[number][]);
