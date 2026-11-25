@@ -14,7 +14,13 @@
     "format": "biome check --write .",
     "test": "vitest run",
     "art:build": "pnpm --filter @guago/art build",
-    "art:sheet": "pnpm --filter @guago/art sheet"
+    "art:sheet": "pnpm --filter @guago/art sheet",
+    "test:db": "vitest run --config vitest.db.config.ts",
+    "db:start": "node apps/server/src/db/local.ts start",
+    "db:stop": "node apps/server/src/db/local.ts stop",
+    "db:reset": "node apps/server/src/db/local.ts reset",
+    "db:migrate": "node --env-file-if-exists=.env apps/server/src/db/migrate.ts",
+    "db:generate": "pnpm --filter @guago/server exec drizzle-kit generate"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
