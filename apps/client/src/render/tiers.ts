@@ -6,7 +6,10 @@ export type Tier = "low" | "medium" | "high";
 
 export const TIERS: readonly Tier[] = ["low", "medium", "high"];
 
-/** What each tier draws. Lighting, banding, the grade and blob shadows are on at every tier. */
+/**
+ * What each tier draws. On at every tier: the light map with its bands, per-sprite light, the
+ * grade, blob shadows, the rift's spill, lip glow and pulse, glowing windows and lamps.
+ */
 export interface TierSettings {
   /** Dithered seams between light bands; off leaves hard steps. */
   readonly dither: boolean;
@@ -26,10 +29,8 @@ export interface TierSettings {
   readonly ditherCutaway: boolean;
   /** Canopies and crowns wave a pixel at a time. */
   readonly foliageWobble: boolean;
-  /** Halos around glowing lamps, windows and screens. */
+  /** Banded halos around lamps and floodlights. */
   readonly halos: boolean;
-  /** Bloom on additive effects; off draws them additively without bloom. */
-  readonly bloom: boolean;
 }
 
 export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
@@ -45,7 +46,6 @@ export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
     ditherCutaway: false,
     foliageWobble: false,
     halos: true,
-    bloom: false,
   },
   medium: {
     dither: true,
@@ -59,7 +59,6 @@ export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
     ditherCutaway: true,
     foliageWobble: false,
     halos: true,
-    bloom: false,
   },
   high: {
     dither: true,
@@ -73,7 +72,6 @@ export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
     ditherCutaway: true,
     foliageWobble: true,
     halos: true,
-    bloom: true,
   },
 };
 

@@ -134,7 +134,8 @@ interface Glow {
   readonly prop: Phaser.GameObjects.Sprite;
   /** The prop's glowing pixels, drawn just above it and never darkened. */
   readonly overlay: Phaser.GameObjects.Sprite;
-  readonly halo: Phaser.GameObjects.Image;
+  /** Only props that stand at one of the map's lights (lamps, floodlights) carry a halo. */
+  readonly halo: Phaser.GameObjects.Image | null;
   readonly bounds: Rect;
   /** How much of the prop glows, per frame name: lit pixels, and their centre. */
   readonly frames: ReadonlyMap<string, { n: number; cx: number; cy: number }>;
@@ -862,12 +863,16 @@ export class MapView {
       frames.set(name, { n, cx: flip ? W - cx : cx, cy: n > 0 ? sy / n + 0.5 : 0 });
       most = Math.max(most, n);
     }
-    const halo = new Phaser.GameObjects.Image(this.scene, 0, 0, TEX.halo);
-    halo
-      .setBlendMode(Phaser.BlendModes.ADD)
-      .setTint(paletteColor(this.meta, "gold.pale"))
-      .setVisible(false);
-    this.glowLayer.add(halo);
+    const lamp = this.map.lights.some(
+      (l) => !l.paint?.region && Math.hypot(l.at[0] - prop.x, l.at[1] - prop.y) < 48,
+    );
+    let halo: Phaser.GameObjects.Image | null = null;
+    if (lamp) {
+      halo = new Phaser.GameObjects.Image(this.scene, 0, 0, TEX.halo);
+      halo.setBlendMode(Phaser.BlendModes.ADD);
+      halo.setTint(paletteColor(this.meta, "gold.pale")).setVisible(false);
+      this.glowLayer.add(halo);
+    }
     this.glows.push({ prop, overlay, halo, bounds, frames, most, level: 0 });
   }
 
@@ -1168,6 +1173,7 @@ export class MapView {
       if (g.overlay.frame.name !== g.prop.frame.name)
         g.overlay.setFrame(g.prop.frame.name, false, false);
       g.overlay.setVisible(screen && g.prop.visible);
+      if (!g.halo) continue;
       const on = screen && g.prop.visible && this.tier.halos && g.level > 0 && !!info;
       g.halo.setVisible(on);
       if (!on || !info) continue;

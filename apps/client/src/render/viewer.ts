@@ -4,8 +4,9 @@
  * server, from `?view=<map id>`).
  *
  * URL: `view` map id, `tier` low|medium|high (else the probe decides), `light`
- * screen|object|off, `n` wandering sprites, `path` 1 for the scripted camera path, `hud` 0 to
- * hide the readout, `at` x,y to centre on.
+ * screen|object|off, `n` wandering sprites (`crowd` 1 keeps them on screen), `path` 1 for the
+ * scripted camera path at `speed` pixels a second, `hud` 0 to hide the readout, `at` x,y to
+ * centre on, `hide` layers to hide, `steps`, `sharp` and `snap` to tune the light.
  * Keys: arrows move the camera, 1–8 toggle layers, L lighting, T tier, G grade, N/M add or
  * remove 50 wanderers, P path, H readout.
  */
@@ -227,7 +228,7 @@ export class ViewerScene extends Phaser.Scene {
   private spawnHero(): void {
     const [x, y] = this.path[0] as readonly [number, number];
     const hero = this.makeWalker("player", x, y);
-    hero.speed = 42;
+    hero.speed = Number(this.params.get("speed") ?? 42);
     this.view.addEntity(hero.sprite, { focus: true });
     hero.light = this.view.attachLight(hero.sprite, {
       radius: 34,
