@@ -1,8 +1,14 @@
 /**
  * The admin audit log (PLAN §12 "Audit log", §20 `admin_actions`). Every admin action writes one
- * row, inside the action's own transaction wherever the action is a database change. There is
- * only `record` and `listAudit`: no update or delete path exists, and the table's trigger
- * refuses both.
+ * row, inside the action's own transaction wherever the action is a database change.
+ *
+ * What "append-only" covers: the code has only `record` and `listAudit`, no update or delete
+ * path; and triggers refuse UPDATE, DELETE and TRUNCATE from every role, the server's own
+ * included, so no code bug or SQL slip through the server's pool changes a row.
+ * What it does not cover: the server connects as the role that ran the migrations and owns the
+ * table, so that role can still disable the triggers, drop the table or edit rows with them
+ * off. Anyone holding the database credentials can rewrite the log. Closing that needs a
+ * migration role that owns the table and an app role with INSERT and SELECT only (DECISIONS.md).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";

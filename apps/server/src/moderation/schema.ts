@@ -2,8 +2,8 @@
  * Tables for moderation and the admin tool (PLAN §12 "Moderation", §20 `admin_actions`, §22
  * "Admin: separate login"). Kept apart from `db/schema.ts`; `drizzle.config.ts` reads both.
  *
- * Admins are their own accounts, never a flag on a player account. `admin_actions` is append-only:
- * the code has no update or delete path, and a trigger (migration) refuses both.
+ * Admins are their own accounts, never a flag on a player account. `admin_actions` is append-only
+ * as far as `audit.ts` says, and no further: see there.
  */
 import { sql } from "drizzle-orm";
 import {

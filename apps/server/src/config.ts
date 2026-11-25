@@ -1,3 +1,4 @@
+import { networkInterfaces } from "node:os";
 import { CHANNEL_SEATS, CLOCK_MAX_RATE, MAP_SEATS, SERVER_PORT } from "@guago/shared";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -69,19 +70,33 @@ export function readConfig(env: Record<string, string | undefined> = process.env
   };
 }
 
+/** Tailscale's interface: `tailscale0` on Linux, a `utun` device on macOS. */
+const TAILSCALE_INTERFACE = /^(tailscale\d*|utun\d+)$/;
+
 /**
- * Where the admin listener may bind: loopback, or an address on the Tailscale network
- * (100.64.0.0/10, fd7a:115c:a1e0::/48). Never a wildcard or a public address (PLAN §22 "reachable
- * only over Tailscale").
+ * Where the admin listener may bind: loopback, or this machine's own Tailscale address: in
+ * Tailscale's ranges (100.64.0.0/10, fd7a:115c:a1e0::/48) and on Tailscale's interface, since
+ * some hosts use 100.64.0.0/10 for a private network of their own. Never a wildcard or a public
+ * address (PLAN §22 "reachable only over Tailscale").
  */
-export function isAdminBindable(host: string): boolean {
+export function isAdminBindable(
+  host: string,
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): boolean {
   if (host === "127.0.0.1" || host === "::1" || host === "localhost") return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 100 && b >= 64 && b <= 127 && v4.slice(1).every((n) => Number(n) <= 255);
-  }
-  return /^fd7a:115c:a1e0:/i.test(host);
+  const inRange = v4
+    ? Number(v4[1]) === 100 &&
+      Number(v4[2]) >= 64 &&
+      Number(v4[2]) <= 127 &&
+      v4.slice(1).every((n) => Number(n) <= 255)
+    : /^fd7a:115c:a1e0:/i.test(host);
+  if (!inRange) return false;
+  return Object.entries(interfaces).some(
+    ([name, addresses]) =>
+      TAILSCALE_INTERFACE.test(name) &&
+      (addresses ?? []).some((a) => a.address.toLowerCase() === host.toLowerCase()),
+  );
 }
 
 export type Config = ReturnType<typeof readConfig>;
