@@ -12,7 +12,7 @@ import {
   MAX_TRADE_AMOUNT,
   type OpError,
   type Purse,
-  saleTax,
+  purchaseTax,
   stackCategory,
   TRADABLE_STACK,
   TRADE,
@@ -367,7 +367,10 @@ const buy: PartyOpDef<Requests["listing.buy"]> = {
     if (req.qty > listing.qty) return refuse("listing_qty");
     const total = listing.unitPrice * BigInt(req.qty);
     if (has(buyer, "pinecone") < total) return refuse("listing_funds");
-    const tax = saleTax(total);
+    // Taxed on the running total: rounding up per purchase would let the buyer's split choose
+    // the seller's tax.
+    const soldBefore = BigInt(listing.listedQty - listing.qty) * listing.unitPrice;
+    const tax = purchaseTax(soldBefore, total);
 
     const buys = [entry("pinecone", -total, TRADE_KEYS.board)];
     const sells = [

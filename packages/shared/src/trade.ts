@@ -76,6 +76,14 @@ export const listingFee = (total: bigint) => percentUp(total, TRADE.board.feePer
 export const saleTax = (total: bigint) => percentUp(total, TRADE.board.taxPercent);
 
 /**
+ * The tax on one purchase from a listing that has already sold `soldBefore` worth: the tax on
+ * the listing's running total less what earlier purchases paid. However a buyer splits a listing,
+ * the seller pays `saleTax` of what sold, exactly as for one whole purchase.
+ */
+export const purchaseTax = (soldBefore: bigint, total: bigint) =>
+  saleTax(soldBefore + total) - saleTax(soldBefore);
+
+/**
  * Stacks a player may trade or list by quantity: 잉크, 제본 재료, 낱장 and 자판기 goods. 상점
  * and 탐구 토큰 are earned, never traded.
  */

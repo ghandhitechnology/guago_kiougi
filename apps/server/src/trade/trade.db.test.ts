@@ -547,6 +547,20 @@ describe("매점 게시판 under racing requests", () => {
     expect(snapshot?.items.some((i) => i.id === item)).toBe(false);
   });
 
+  it("a buyer's split cannot raise the seller's tax: ten single purchases pay what one would", async () => {
+    const eco = economy();
+    const [seller, buyer] = [await student(eco), await student(eco)];
+    await fund(eco, seller, { ink: 10, pinecone: 100 });
+    await fund(eco, buyer, { pinecone: 100 });
+    const price = 2n;
+    const listing = await listed(eco, seller, { stack: "ink", qty: 10, unitPrice: String(price) });
+    const before = await pinecones(seller);
+    for (let i = 0; i < 10; i++)
+      expect((await buy(eco, buyer, listing, String(price), 1)).ok).toBe(true);
+    const whole = price * 10n;
+    expect((await pinecones(seller)) - before).toBe(whole - saleTax(whole));
+  });
+
   it("ten listings at most, the fee is never refunded, an expired listing cannot be bought", async () => {
     const eco = economy();
     const seller = await student(eco);
