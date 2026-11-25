@@ -177,9 +177,13 @@ describe("수행평가 board", () => {
     const quest = `daily:${day}:0`;
     await complete(w, c.id, quest);
 
+    // Three processes, two claims each: they meet at the database's character lock.
+    const executors = [w.economy.executor, rival(w), rival(w)];
     const results = await Promise.all(
-      Array.from({ length: 6 }, () =>
-        w.economy.executor.execute(c.id, randomUUID(), "quest.claim", { quest }),
+      Array.from({ length: 6 }, (_, i) =>
+        (executors[i % 3] as typeof w.economy.executor).execute(c.id, randomUUID(), "quest.claim", {
+          quest,
+        }),
       ),
     );
     expect(results.filter((r) => r.ok)).toHaveLength(1);
@@ -274,8 +278,11 @@ describe("벌점 and 상점", () => {
     // Four 상점 against three 벌점 left: one spare in the wallet.
     expect(wallet.rows[0].merit_points).toBe("1");
 
-    // Ten patrol catches at once: +2 each, sent home exactly once on reaching 20.
-    await Promise.all(Array.from({ length: 10 }, () => w.live.events.patrolCaught(c.id)));
+    // Ten patrol catches at once from two server processes: +2 each, home exactly once at 20.
+    const other = await world();
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => (i % 2 ? other : w).live.events.patrolCaught(c.id)),
+    );
     r = await row(c.id);
     expect([r.demerits, r.expulsions, r.patrol_catches]).toEqual([0, 1, 10]);
     expect(r.titles).toEqual(expect.arrayContaining(["went-home", "caught"]));
@@ -304,8 +311,7 @@ describe("자습 pool", () => {
     await w.live.left(c.id, "world", "s1", false);
     const started = (await row(c.id)).pool_started_at;
     expect(started).not.toBeNull();
-    // The same logout again is the same operation; a replaced seat is no logout at all.
-    await w.live.left(c.id, "world", "s1", false);
+    // A replaced seat is no logout at all.
     await w.live.left(c.id, "world", "s0", true);
     expect((await row(c.id)).pool_started_at).toEqual(started);
 
@@ -638,5 +644,46 @@ describe("도움 notices", () => {
     if ("refused" in second) throw new Error(second.refused);
     expect(await w.live.board.take(helper.id, second.notice)).toMatchObject({ ok: true });
     expect((await row(helper.id)).merits).toBe(0);
+  });
+});
+
+describe("sessions", () => {
+  const logout = (session: string) => ({
+    session,
+    place: "hub" as const,
+    measured: null,
+    floorLeader: false,
+  });
+
+  it("one logout raced from two processes under its id starts one pool", async () => {
+    const w = await world();
+    const c = await character(w);
+    expect(
+      (await w.economy.executor.execute(c.id, "login:s1", "live.login", { session: "s1" })).ok,
+    ).toBe(true);
+    const [a, b] = await Promise.all([
+      w.economy.executor.execute(c.id, "logout:s1", "live.logout", logout("s1")),
+      rival(w).execute(c.id, "logout:s1", "live.logout", logout("s1")),
+    ]);
+    expect(a).toEqual(b);
+    expect(a.ok).toBe(true);
+    const ops = await db.pool.query(
+      "select count(*)::int as n from operations where character_id = $1 and op_id = 'logout:s1'",
+      [c.id],
+    );
+    expect(ops.rows[0].n).toBe(1);
+  });
+
+  it("an old session's logout that lands after the new login starts no pool", async () => {
+    const w = await world();
+    const c = await character(w);
+    await w.live.joined(c, "world", "old");
+    // A new login on another process finishes while the old seat's leave is still on its way.
+    expect((await rival(w).execute(c.id, "login:new", "live.login", { session: "new" })).ok).toBe(
+      true,
+    );
+    w.clock.step(HOUR_MS);
+    await w.live.left(c.id, "world", "old", false);
+    expect((await row(c.id)).pool_started_at).toBeNull();
   });
 });
