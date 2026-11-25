@@ -102,6 +102,8 @@ export interface BookArt {
   readonly extra: string | null;
   /** Seconds the trail its attack leaves lies (판 구조론's plates grind that long), or 0. */
   readonly trail: number;
+  /** The trail's radius, px: where it really lies around the strike's start. */
+  readonly trailRadius: number;
 }
 
 /**
@@ -285,7 +287,8 @@ export class Catalog {
       turns: body === "fx-graph-beam" || body === "evo-fourier",
       bare: cues?.body === "",
       extra,
-      trail: trailOf(attack),
+      trail: trailOf(attack).duration,
+      trailRadius: trailOf(attack).radius,
     };
   }
 
@@ -367,10 +370,11 @@ function shapeOf(def: (typeof BOOKS)[number] | undefined): BookShape {
   }
 }
 
-/** Seconds the trail an attack's specials leave lies, or 0. */
-function trailOf(attack: Attack | null | undefined): number {
-  for (const sp of attack?.specials ?? []) if (sp.kind === "trail") return sp.trail.duration;
-  return 0;
+/** How long and how wide the trail an attack's specials leave lies, or zeros. */
+function trailOf(attack: Attack | null | undefined): { duration: number; radius: number } {
+  for (const sp of attack?.specials ?? [])
+    if (sp.kind === "trail") return { duration: sp.trail.duration, radius: sp.trail.radius };
+  return { duration: 0, radius: 0 };
 }
 
 function real(meta: ArtMetadata, name: string): string | null {

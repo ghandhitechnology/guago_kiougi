@@ -18,6 +18,7 @@ import {
   PLAYER_RADIUS,
   POS_SCALE,
   portalAt,
+  reachTo,
   SNAPSHOT_MESSAGE,
   type SnapshotReader,
   type SnapshotSink,
@@ -390,15 +391,19 @@ export class WorldScene extends Phaser.Scene {
     // Every body in the room comes from its fight snapshots; the HUD's bars and books follow it.
     const reader = this.reader;
     if (!reader) return;
+    const field = map.zones.some((z) => z.kind === "monsters");
     const fight = FightView.attach(this, view, room, reader, {
       self: () => this.drawn,
       mover: self,
       onSelf: (s) => this.onSelf(s),
       tier: view.qualityTier,
-      field: map.zones.some((z) => z.kind === "monsters"),
+      field,
       onStep: (fx, fy, mine) => this.steps?.step(fx, fy, worldView.self, mine),
+      useDistance: () => this.useDistance(),
     });
-    const unbindHud = bindFight(fight.hud);
+    // The fight's bars and books belong where a fight can happen: a field with monsters, or a
+    // floor where duels and boss fights are held. A town shows the student, not their kit.
+    const unbindHud = field || map.arenas.length > 0 ? bindFight(fight.hud) : () => {};
     this.here = {
       room,
       map,
@@ -686,6 +691,9 @@ export class WorldScene extends Phaser.Scene {
   private interact(): void {
     const room = this.room;
     if (!room || !this.here || this.holding || !this.live) return;
+    // E is one key for two things: a knocked-out ally nearer than what E would use is revived
+    // (the fight's keys hold that), and only otherwise is the thing used.
+    if (this.here.fight.reviveDistance() <= this.useDistance()) return;
     this.asking = true;
     room.send(MAP_MESSAGES.interact, [++this.interactN]);
   }
@@ -876,6 +884,15 @@ export class WorldScene extends Phaser.Scene {
     const key = target && `${target.kind}:${target.id}`;
     const hushed = key === this.quiet.key && performance.now() < this.quiet.until;
     this.aim(target && !hushed ? target : undefined);
+  }
+
+  /** How far the thing E would use is from the drawn player, px; infinite when there is none. */
+  private useDistance(): number {
+    const here = this.here;
+    const me = this.drawn;
+    if (!here || !me || this.holding) return Number.POSITIVE_INFINITY;
+    const target = nearestUsable(here.usable, me.x, me.y);
+    return target ? reachTo(target, me.x, me.y) : Number.POSITIVE_INFINITY;
   }
 
   private aimed: string | undefined;

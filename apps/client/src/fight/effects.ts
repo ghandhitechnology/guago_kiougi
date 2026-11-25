@@ -1202,8 +1202,7 @@ export class Effects {
     const line = a.kind === FxKind.Mark ? a.flags === 1 : a.length > 0;
     const enemy = a.kind === FxKind.Danger;
     // A fault stays after its last strike until it has closed, plates for their trail's time.
-    const after = line && !enemy ? Math.max(FLASH, this.faultTicks(a)) : FLASH;
-    const total = delay + repeats * period + after;
+    const total = this.markTicks(a);
     if (t >= total) return true;
     // Strikes: the first at `delay`, then every `period`.
     const since = t - delay;
@@ -1341,41 +1340,8 @@ export class Effects {
       return;
     }
     const grind = fault.anims.get("grind");
-    let faultSet: LineAnim | undefined = grind;
-    let idx = 0;
-    if (grind) idx = Math.floor(((t - a.a) * TICK_MS * grind.fps) / 1000);
-    else {
-      // The crack of the latest strike: open once, then close once, then gone.
-      const open = fault.anims.get("open");
-      const close = fault.anims.get("close");
-      const secs = (sinceStrike * TICK_MS) / 1000;
-      const openSecs = open ? (open.full[0]?.length ?? 0) / Math.max(1, open.fps) : 0;
-      if (secs < openSecs) {
-        faultSet = open;
-        idx = Math.floor(secs * (open?.fps ?? 1));
-      } else if (secs < fault.secs) {
-        faultSet = close;
-        idx = Math.floor((secs - openSecs) * (close?.fps ?? 1));
-      }
-    }
-    if (faultSet)
-      this.layLine(
-        a,
-        LINE_SLOTS,
-        fault,
-        faultSet,
-        a.x,
-        a.y,
-        a.length,
-        1,
-        idx,
-        Layer.Ground,
-        true,
-        1,
-        a.alpha,
-        null,
-      );
-    else this.hideRange(a, LINE_SLOTS, 2 * LINE_SLOTS);
+    if (grind) this.plates(a, t, sinceStrike, fault, grind);
+    else this.crack(a, sinceStrike, fault);
     // Stones jump out along the line as it breaks.
     if (struck && sinceStrike < 0.5 && a.pulses > a.variant) {
       a.variant = a.pulses;
@@ -1394,6 +1360,101 @@ export class Effects {
         );
       }
     }
+  }
+
+  /** The crack of the latest strike: open once, then close once, then gone. */
+  private crack(a: Active, sinceStrike: number, fault: LineArt): void {
+    const open = fault.anims.get("open");
+    const close = fault.anims.get("close");
+    const secs = (sinceStrike * TICK_MS) / 1000;
+    const openSecs = open ? (open.full[0]?.length ?? 0) / Math.max(1, open.fps) : 0;
+    let set: LineAnim | undefined;
+    let idx = 0;
+    if (secs < openSecs) {
+      set = open;
+      idx = Math.floor(secs * (open?.fps ?? 1));
+    } else if (secs < fault.secs) {
+      set = close;
+      idx = Math.floor((secs - openSecs) * (close?.fps ?? 1));
+    }
+    if (set) {
+      this.layLine(
+        a,
+        LINE_SLOTS,
+        fault,
+        set,
+        a.x,
+        a.y,
+        a.length,
+        1,
+        idx,
+        Layer.Ground,
+        true,
+        1,
+        a.alpha,
+        null,
+      );
+    } else this.hideRange(a, LINE_SLOTS, 2 * LINE_SLOTS);
+  }
+
+  /**
+   * 판 구조론's plates. The whole fault grinds open for a beat on each strike and fades; then the
+   * plates lie only where the trail really is (its circle round the line's start, `trailRadius`)
+   * for the trail's time, fading out over its last stretch, so one cast never leaves a line
+   * across the screen and the oldest of several gives way to the newest.
+   */
+  private plates(a: Active, t: number, sinceStrike: number, fault: LineArt, grind: LineAnim): void {
+    const idx = Math.floor(((t - a.a) * TICK_MS * grind.fps) / 1000);
+    const secs = (sinceStrike * TICK_MS) / 1000;
+    const beat = 0.6;
+    if (secs < beat) {
+      const fade = a.alpha * (1 - secs / beat);
+      this.layLine(
+        a,
+        LINE_SLOTS,
+        fault,
+        grind,
+        a.x,
+        a.y,
+        a.length,
+        1,
+        idx,
+        Layer.Ground,
+        true,
+        1,
+        fade,
+        null,
+      );
+    } else this.hideRange(a, LINE_SLOTS, 2 * LINE_SLOTS);
+    const r = Math.max(8, a.art?.trailRadius ?? 24);
+    const left = ((this.markTicks(a) - t) * TICK_MS) / 1000;
+    const alpha = a.alpha * clamp01(left / 1.2) * clamp01(secs / 0.15);
+    const ux = Math.cos(a.angle);
+    const uy = Math.sin(a.angle);
+    this.layLine(
+      a,
+      2 * LINE_SLOTS,
+      fault,
+      grind,
+      a.x - ux * r,
+      a.y - uy * r,
+      2 * r,
+      1,
+      idx,
+      Layer.Ground,
+      true,
+      1,
+      alpha,
+      null,
+    );
+  }
+
+  /** Ticks a mark lives from its spawn: the delay, its repeats and what lies after the last. */
+  private markTicks(a: Active): number {
+    const repeats = a.kind === FxKind.Mark ? a.count : 0;
+    const line = a.kind === FxKind.Mark ? a.flags === 1 : a.length > 0;
+    const after = line && a.kind !== FxKind.Danger ? Math.max(FLASH, this.faultTicks(a)) : FLASH;
+    return Math.max(1, a.a) + repeats * Math.max(1, a.period) + after;
   }
 
   /**

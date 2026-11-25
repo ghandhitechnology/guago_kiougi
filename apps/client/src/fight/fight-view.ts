@@ -89,6 +89,11 @@ export interface FightOptions {
   readonly selfBar?: boolean;
   /** The 쉬는 시간 banner. Default true. */
   readonly banners?: boolean;
+  /**
+   * How far the thing the interact key would use is, px. E revives a knocked-out ally only when
+   * the ally is at least as near; otherwise the key is the world's.
+   */
+  readonly useDistance?: () => number;
 }
 
 /** Atlases the fight draws from, besides the map's. */
@@ -627,7 +632,8 @@ export class FightView {
     this.ctx.sound.self(art.cast);
   }
 
-  private revive(): void {
+  /** The knocked-out ally nearest the player within reach, or null. */
+  private downedAlly(): Body | null {
     let best: Body | null = null;
     let bestD = REVIVE_REACH;
     for (const b of this.bodies.byId.values()) {
@@ -638,7 +644,22 @@ export class FightView {
         best = b;
       }
     }
-    if (best) this.room.send(REVIVE_MESSAGE, [best.slot]);
+    return best;
+  }
+
+  /** How far the knocked-out ally E would revive is, px; infinite when nobody is in reach. */
+  reviveDistance(): number {
+    const b = this.downedAlly();
+    return b ? Math.hypot(b.x - this.ctx.selfX, b.y - this.ctx.selfY) : Number.POSITIVE_INFINITY;
+  }
+
+  private revive(): void {
+    const best = this.downedAlly();
+    if (!best) return;
+    // The thing the key would use is nearer: the key is the world's.
+    const use = this.options.useDistance?.() ?? Number.POSITIVE_INFINITY;
+    if (this.reviveDistance() > use) return;
+    this.room.send(REVIVE_MESSAGE, [best.slot]);
   }
 
   // Moments ------------------------------------------------------------------------------------
