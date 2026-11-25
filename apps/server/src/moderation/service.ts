@@ -60,6 +60,8 @@ export interface ModerationDeps {
   evict(accountId: string, code: number): void;
   /** A system line to everyone, or to one character when online. False when the world is down. */
   system(line: Omit<SystemLine, "id" | "at">, toCharacterId?: string): boolean;
+  /** Whether the world room is up to carry a notice. */
+  worldOnline(): boolean;
   /** An item or currency change the player did not ask for, sent if they are online. */
   notify(characterId: string, change: ChangeNotice): void;
   /**
@@ -240,6 +242,33 @@ export function createModeration(deps: ModerationDeps) {
     return rows.map((r) => r.ip_hash as string);
   }
 
+  /**
+   * The +3 벌점 of a strike, by the living world under the strike's id (idempotent there), then
+   * marked taken. A false or missing world leaves it for the sweep to try again.
+   */
+  async function applyDemerit(strikeId: number, characterId: string): Promise<void> {
+    const taken = await live()?.events.chatStrike(characterId, String(strikeId));
+    if (taken) {
+      await db.execute(
+        sql`update filter_strikes set demerit_at = now() where id = ${strikeId} and demerit_at is null`,
+      );
+    }
+  }
+
+  let keptAt = 0;
+  /**
+   * Chat is kept 90 days (PLAN §12), and so is what moderation copied out of it or learned
+   * about addresses: a strike's text is blanked and an account's address older than that is
+   * forgotten. Once an hour.
+   */
+  async function keepNinetyDays(): Promise<void> {
+    if (Date.now() - keptAt < 3600_000) return;
+    keptAt = Date.now();
+    await db.execute(sql`
+      update filter_strikes set body = '' where body <> '' and line_at < now() - interval '90 days'`);
+    await db.execute(sql`delete from account_ips where last_seen < now() - interval '90 days'`);
+  }
+
   async function banIn(tx: Tx, adminId: string, accountId: string, o: BanOptions) {
     const account = await lockAccount(tx, accountId);
     if (!account) return fail("not_found");
@@ -340,7 +369,13 @@ export function createModeration(deps: ModerationDeps) {
     if (!account) return fail("not_found");
     await tx.execute(sql`delete from sessions where account_id = ${accountId}`);
     const characterId = await characterOfAccount(tx, accountId);
-    await record(tx, { adminId, action: "kick", target: target.account(accountId), reason });
+    await record(tx, {
+      adminId,
+      action: "kick",
+      target: target.account(accountId),
+      reason,
+      detail: { told },
+    });
     return {
       ok: true as const,
       after: () => {
@@ -457,7 +492,7 @@ export function createModeration(deps: ModerationDeps) {
           ok: true,
           after: async () => {
             deps.system({ key: "moderation.strike" }, found.sender_id);
-            await live()?.events.chatStrike(found.sender_id, String(strike.id));
+            await applyDemerit(Number(strike.id), found.sender_id);
           },
         };
       }),
@@ -554,9 +589,11 @@ export function createModeration(deps: ModerationDeps) {
       }),
 
     /** A notice on the system channel. Audited first: no row, no notice. */
+    /** A notice on the system channel: recorded only when the world is there to send it. */
     async broadcast(adminId: string, text: string): Promise<ModResult> {
+      if (!deps.worldOnline()) return fail("offline");
       await record(db, { adminId, action: "broadcast", target: target.server, detail: { text } });
-      if (!deps.system({ key: "notice", text })) return fail("offline");
+      deps.system({ key: "notice", text });
       return { ok: true };
     },
 
@@ -623,14 +660,36 @@ export function createModeration(deps: ModerationDeps) {
 
     /** Accounts whose every ban has ended are active again. Run every minute. */
     async sweep(): Promise<number> {
-      const { rowCount } = await db.execute(sql`
-        update accounts a set status = 'active'
+      // Candidates first, then each under its account's lock: the lock waits for a ban being
+      // written now, and the re-check after it, a new statement, sees that ban. One statement
+      // would re-check the row against the snapshot it started with and lift the new ban.
+      const { rows } = await db.execute(sql`
+        select a.id from accounts a
         where a.status = 'banned'
           and exists (select 1 from account_bans b where b.account_id = a.id)
           and not exists (
             select 1 from account_bans b where b.account_id = a.id and b.lifted_at is null
               and (b.ends_at is null or b.ends_at > now()))`);
-      return rowCount ?? 0;
+      let lifted = 0;
+      for (const { id } of rows) {
+        lifted += await db.transaction(async (tx) => {
+          if (!(await lockAccount(tx, id as string))) return 0;
+          const still = await tx.execute(sql`
+            select 1 from account_bans where account_id = ${id as string} and lifted_at is null
+              and (ends_at is null or ends_at > now())`);
+          if (still.rows.length > 0) return 0;
+          await tx.execute(sql`update accounts set status = 'active' where id = ${id as string}`);
+          return 1;
+        });
+      }
+      // Strikes whose 벌점 the living world has not taken yet (it was down, or failed).
+      const pending = await db.execute(sql`
+        select id, character_id from filter_strikes
+        where demerit_at is null and at > now() - interval '7 days'
+        order by at limit 50`);
+      for (const r of pending.rows) await applyDemerit(Number(r.id), r.character_id as string);
+      await keepNinetyDays();
+      return lifted;
     },
 
     /**

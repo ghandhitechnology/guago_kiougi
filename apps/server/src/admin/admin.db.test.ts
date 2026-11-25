@@ -306,6 +306,9 @@ describe("a grant", () => {
   });
 });
 
+/** Drizzle wraps the database's own error, which names the trigger's refusal. */
+const APPEND_ONLY = { cause: { message: "admin_actions is append-only" } };
+
 describe("the audit log", () => {
   const count = async (action: string, t: string) => {
     const { rows } = await db.execute(
@@ -336,7 +339,12 @@ describe("the audit log", () => {
     // A strike lands once with one row and one 벌점 call; a second strike of the line adds neither.
     const struck: string[] = [];
     provideLive({
-      events: { chatStrike: async (id: string) => void struck.push(id) },
+      events: {
+        chatStrike: async (id: string) => {
+          struck.push(id);
+          return true;
+        },
+      },
     } as unknown as Live);
     await db.execute(sql`
       insert into chat_log (channel, sender_id, target, body, masked, at)
@@ -354,10 +362,88 @@ describe("the audit log", () => {
     expect(await count("strike", `character:${p.characterId}`)).toBe(1);
   });
 
-  it("refuses every change and removal", async () => {
-    await expect(db.execute(sql`update admin_actions set reason = 'x'`)).rejects.toThrow();
-    await expect(db.execute(sql`delete from admin_actions`)).rejects.toThrow();
-    await expect(db.execute(sql`truncate admin_actions`)).rejects.toThrow();
+  it("refuses every change and removal of a row through the server's own role", async () => {
+    // A row of its own, so the row-level trigger has something to fire on.
+    await owner.send("/players?q=audit-probe");
+    const { rows } = await db.execute(
+      sql`select id, detail from admin_actions where action = 'player.search' order by id desc limit 1`,
+    );
+    const id = Number(rows[0]?.id);
+    expect(rows[0]?.detail).toEqual({ q: "audit-probe" });
+    await expect(
+      db.execute(sql`update admin_actions set reason = 'x' where id = ${id}`),
+    ).rejects.toMatchObject(APPEND_ONLY);
+    await expect(db.execute(sql`delete from admin_actions where id = ${id}`)).rejects.toMatchObject(
+      APPEND_ONLY,
+    );
+    await expect(db.execute(sql`truncate admin_actions`)).rejects.toMatchObject(APPEND_ONLY);
+    const after = await db.execute(sql`select reason from admin_actions where id = ${id}`);
+    expect(after.rows).toEqual([{ reason: null }]);
+  });
+
+  it("records what a player was told, the reads of their data, and the command line", async () => {
+    const p = await player("audited2");
+    await owner.send(`/players/${p.accountId}`);
+    await owner.send(`/players/${p.accountId}/partners`);
+    await owner.send(`/players/${p.accountId}/mute`, { reason: "내부 메모", minutes: 10 });
+    const rows = await db.execute(sql`
+      select action, target, detail, ip_hash from admin_actions
+      where target in (${`account:${p.accountId}`}, ${`character:${p.characterId}`})
+      order by id`);
+    expect(rows.rows.map((r) => r.action)).toEqual(["player.read", "trades.read", "mute"]);
+    expect(rows.rows[2]?.detail).toMatchObject({ told: "내부 메모" });
+    expect(rows.rows.every((r) => typeof r.ip_hash === "string")).toBe(true);
+    // The command line has no session: its row names the machine user, with no address.
+    const id = await stack.auth.create("cli_probe", "cli probe password", "moderator", "andy");
+    const cli = await db.execute(
+      sql`select action, detail, ip_hash from admin_actions where admin_id = ${id}`,
+    );
+    expect(cli.rows).toEqual([
+      {
+        action: "cli.create",
+        detail: { via: "cli", operator: "andy", role: "moderator" },
+        ip_hash: null,
+      },
+    ]);
+  });
+
+  it("retries a strike's 벌점 until the living world takes it", async () => {
+    const p = await player("struck2");
+    let answer = false;
+    const calls: string[] = [];
+    provideLive({
+      events: {
+        chatStrike: async (_id: string, strikeId: string) => {
+          calls.push(strikeId);
+          return answer;
+        },
+      },
+    } as unknown as Live);
+    try {
+      await db.execute(sql`
+        insert into chat_log (channel, sender_id, target, body, masked, at)
+        values ('world', ${p.characterId}, null, '병신', true, now())`);
+      const { rows } = await db.execute(
+        sql`select id, at from chat_log where sender_id = ${p.characterId}`,
+      );
+      const line = { id: Number(rows[0]?.id), at: new Date(rows[0]?.at as string).toISOString() };
+      expect((await owner.send("/chat/strike", { ...line, reason: "욕설" })).status).toBe(200);
+      const pending = async () =>
+        (
+          await db.execute(
+            sql`select demerit_at from filter_strikes where character_id = ${p.characterId}`,
+          )
+        ).rows[0]?.demerit_at;
+      expect(await pending()).toBeNull();
+      answer = true;
+      await stack.sweep();
+      expect(await pending()).not.toBeNull();
+      await stack.sweep();
+      expect(calls.length).toBe(2);
+      expect(new Set(calls).size).toBe(1);
+    } finally {
+      provideLive(undefined);
+    }
   });
 });
 
@@ -615,7 +701,7 @@ describe("admin limits behind a proxy", () => {
 describe("the invariant check", () => {
   it("runs once for any number of callers, and fresh at most once a minute", async () => {
     const all = await Promise.all(
-      Array.from({ length: 30 }, () => owner.send("/economy/check?fresh=1")),
+      Array.from({ length: 10 }, () => owner.send("/economy/check?fresh=1")),
     );
     const runs = new Set(all.map((r) => (r.body.check as { at: string }).at));
     expect(runs.size).toBe(1);

@@ -34,6 +34,7 @@ export interface StackOptions {
   /** Seams for tests; the defaults reach the live rooms. */
   evict?: ModerationDeps["evict"];
   system?: ModerationDeps["system"];
+  worldOnline?: ModerationDeps["worldOnline"];
 }
 
 export async function createModerationStack(o: StackOptions) {
@@ -53,6 +54,7 @@ export async function createModerationStack(o: StackOptions) {
         return world !== undefined;
       }),
     notify: (id, change) => worldRoom()?.notify(id, change),
+    worldOnline: o.worldOnline ?? (() => worldRoom() !== undefined),
     ...(o.clubs ? { clubs: o.clubs } : {}),
   });
   const auth = createAdminAuth(o.db, o.secret);

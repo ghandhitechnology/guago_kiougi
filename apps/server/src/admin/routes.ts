@@ -115,12 +115,20 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
 
   // Players ------------------------------------------------------------------------------------
 
-  route("GET", "/players", async (req) => ({
-    players: await reads.search(req.query.get("q") ?? ""),
-  }));
+  route("GET", "/players", async (req) => {
+    const q = req.query.get("q") ?? "";
+    await record(db, {
+      adminId: req.admin.id,
+      action: "player.search",
+      target: "players",
+      detail: { q },
+    });
+    return { players: await reads.search(q) };
+  });
 
-  route("GET", "/players/:id", async (_req, [id]) => {
+  route("GET", "/players/:id", async (req, [id]) => {
     if (!isUuid(id)) throw bad();
+    await record(db, { adminId: req.admin.id, action: "player.read", target: target.account(id) });
     const player = await reads.player(id);
     if (!player) throw new HttpError(404, "not_found");
     return { player: { ...player, online: deps.online(id) } };
@@ -255,6 +263,12 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
   route("GET", "/reports", async (req) => {
     const state = req.query.get("state") ?? "open";
     if (!["open", "resolved", "dismissed"].includes(state)) throw bad();
+    await record(db, {
+      adminId: req.admin.id,
+      action: "reports.read",
+      target: "reports",
+      detail: { state },
+    });
     return { reports: await reads.reports(state) };
   });
 
@@ -370,6 +384,16 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     const player = who ? await findCharacter(who) : undefined;
     const counterpart = other ? await findCharacter(other) : undefined;
     if (counterpart && !player) throw bad();
+    await record(db, {
+      adminId: req.admin.id,
+      action: "trades.read",
+      target: player ? target.character(player) : "trades",
+      detail: {
+        ...(counterpart ? { with: counterpart } : {}),
+        ...(item ? { item } : {}),
+        ...(def ? { def } : {}),
+      },
+    });
     return {
       trades: await reads.trades({
         ...(player ? { player } : {}),
@@ -384,9 +408,16 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     };
   });
 
-  route("GET", "/players/:id/partners", async (_req, [id]) => {
+  route("GET", "/players/:id/partners", async (req, [id]) => {
     if (!isUuid(id)) throw bad();
-    return { partners: await reads.partners(await characterOf(id)) };
+    const characterId = await characterOf(id);
+    await record(db, {
+      adminId: req.admin.id,
+      action: "trades.read",
+      target: target.character(characterId),
+      detail: { partners: true },
+    });
+    return { partners: await reads.partners(characterId) };
   });
 
   route("GET", "/audit", async (req) => {

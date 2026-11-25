@@ -105,8 +105,17 @@ export function createAdminAuth(db: Db, secret: string) {
         await db.execute(sql`delete from admin_login_failures where id = ${attempt}`);
         return { ok: false, error: "rate_limited" };
       }
-      // A disabled admin gets the same answer as a wrong password.
+      // A disabled admin gets the same answer as a wrong password. A failure against a real
+      // admin is kept in the audit log, past the 15 minutes the failure counter holds it.
       if (!row || !matches || row.status !== "active") {
+        if (row) {
+          await record(db, {
+            adminId: row.id,
+            action: "login.failed",
+            target: `admin:${row.id}`,
+            detail: { disabled: row.status !== "active" },
+          });
+        }
         return { ok: false, error: "bad_credentials" };
       }
       await db.execute(
@@ -212,37 +221,72 @@ export function createAdminAuth(db: Db, secret: string) {
       });
     },
 
-    /** Command line only (`pnpm admin create`). */
-    async create(loginId: string, password: string, role: AdminRole): Promise<string> {
+    /**
+     * Command line only (`pnpm admin create`). `operator` is the machine user who ran it, for
+     * the audit row (the command line has no admin session; the row's admin is the one made).
+     */
+    async create(
+      loginId: string,
+      password: string,
+      role: AdminRole,
+      operator = "test",
+    ): Promise<string> {
       const passwordHash = await hashSecret(password);
-      const { rows } = await db.execute(sql`
-        insert into admin_accounts (login_id, password_hash, role)
-        values (${loginId}, ${passwordHash}, ${role}) returning id`);
-      return rows[0]?.id as string;
+      return db.transaction(async (tx) => {
+        const { rows } = await tx.execute(sql`
+          insert into admin_accounts (login_id, password_hash, role)
+          values (${loginId}, ${passwordHash}, ${role}) returning id`);
+        const id = rows[0]?.id as string;
+        await record(tx, {
+          adminId: id,
+          action: "cli.create",
+          target: `admin:${id}`,
+          detail: { via: "cli", operator, role },
+        });
+        return id;
+      });
     },
 
     /** Command line only. Ends the admin's session. */
-    async setPassword(loginId: string, password: string): Promise<boolean> {
+    async setPassword(loginId: string, password: string, operator: string): Promise<boolean> {
       const passwordHash = await hashSecret(password);
       return db.transaction(async (tx) => {
         const { rows } = await tx.execute(sql`
           update admin_accounts set password_hash = ${passwordHash} where login_id = ${loginId}
           returning id`);
-        if (!rows[0]) return false;
-        await tx.execute(sql`delete from admin_sessions where admin_id = ${rows[0].id}`);
+        const id = rows[0]?.id as string | undefined;
+        if (!id) return false;
+        await tx.execute(sql`delete from admin_sessions where admin_id = ${id}`);
+        await record(tx, {
+          adminId: id,
+          action: "cli.password",
+          target: `admin:${id}`,
+          detail: { via: "cli", operator },
+        });
         return true;
       });
     },
 
     /** Command line only. */
-    async setStatus(loginId: string, status: "active" | "disabled"): Promise<boolean> {
+    async setStatus(
+      loginId: string,
+      status: "active" | "disabled",
+      operator: string,
+    ): Promise<boolean> {
       return db.transaction(async (tx) => {
         const { rows } = await tx.execute(sql`
           update admin_accounts set status = ${status} where login_id = ${loginId} returning id`);
-        if (!rows[0]) return false;
+        const id = rows[0]?.id as string | undefined;
+        if (!id) return false;
         if (status === "disabled") {
-          await tx.execute(sql`delete from admin_sessions where admin_id = ${rows[0].id}`);
+          await tx.execute(sql`delete from admin_sessions where admin_id = ${id}`);
         }
+        await record(tx, {
+          adminId: id,
+          action: status === "disabled" ? "cli.disable" : "cli.enable",
+          target: `admin:${id}`,
+          detail: { via: "cli", operator },
+        });
         return true;
       });
     },
