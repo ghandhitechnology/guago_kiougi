@@ -40,6 +40,8 @@ beforeAll(() => {
   db = createDb(TEST_DATABASE_URL);
 });
 afterAll(async () => {
+  // The Page clock is one row every file shares: leave it as found, not weeks ahead.
+  await db.pool.query("truncate server_state, notebook cascade");
   await db.pool.end();
 });
 beforeEach(async () => {
