@@ -12,6 +12,7 @@ import type { OpHandler } from "./economy/handler.ts";
 import { MapRoom } from "./map-room.ts";
 import { allRooms } from "./metrics.ts";
 import { provideSeatServices } from "./seats.ts";
+import type { Trading } from "./trade/room.ts";
 import { provideWorldServices, WorldRoom } from "./world-room.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
@@ -38,7 +39,12 @@ export function createGameServer(
   settings: HttpSettings,
   looks: () => LookOptions,
   chat: { filter?: ChatFilter; log?: ChatSink } = {},
-  economy: { ops?: OpHandler; routes?: readonly ApiRoute[]; grants?: GrantBuffer } = {},
+  economy: {
+    ops?: OpHandler;
+    routes?: readonly ApiRoute[];
+    grants?: GrantBuffer;
+    trading?: Trading;
+  } = {},
 ) {
   const { grants } = economy;
   provideGrants(grants);
@@ -49,7 +55,11 @@ export function createGameServer(
     ...settings,
     ...(grants ? { onLeave: (id: string) => grants.flush(id) } : {}),
   });
-  provideWorldServices({ ...chat, ...(economy.ops ? { ops: economy.ops } : {}) });
+  provideWorldServices({
+    ...chat,
+    ...(economy.ops ? { ops: economy.ops } : {}),
+    ...(economy.trading ? { trading: economy.trading } : {}),
+  });
   const api = createApiHandler(auth, settings, looks, economy.routes);
 
   // Clients join rooms; they never create one on demand. Without `create`, the WorldRoom stays

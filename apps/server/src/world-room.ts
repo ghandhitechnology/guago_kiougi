@@ -18,7 +18,6 @@ import {
   NEAR_CHAT_TILES,
   OPS,
   type OpMessage,
-  type OpResult,
   opSchema,
   type PresenceEntry,
   type PresenceMessage,
@@ -35,6 +34,7 @@ import type { ChatLogRow, ChatSink } from "./chat/log.ts";
 import type { OpHandler } from "./economy/handler.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats } from "./seats.ts";
+import type { Trading } from "./trade/room.ts";
 
 /** Past this many handled messages a second, a client is flooding and is dropped for good. */
 const FLOOD_PER_SECOND = 20;
@@ -60,7 +60,7 @@ interface Member {
   characterId: string;
   entry: PresenceEntry;
   /** The last answers to this member's own requests, for replay after a reconnect. */
-  answers: { type: string; body: ChatLine | Refusal | OpResult }[];
+  answers: { type: string; body: unknown }[];
 }
 
 /** Filter strikes and buckets, by character: they outlive a reconnect or a second login. */
@@ -76,6 +76,8 @@ interface Services {
   log: ChatSink | undefined;
   /** Item and currency operations; without it the room does not take them (tests). */
   ops: OpHandler | undefined;
+  /** Direct trades and the 매점 게시판's reads (trade/room.ts). */
+  trading?: Trading | undefined;
 }
 
 let services: Services | undefined;
@@ -86,8 +88,14 @@ export function provideWorldServices(s: {
   filter?: ChatFilter;
   log?: ChatSink;
   ops?: OpHandler;
+  trading?: Trading;
 }): void {
-  services = { filter: s.filter ?? ChatFilter.fromFile(), log: s.log, ops: s.ops };
+  services = {
+    filter: s.filter ?? ChatFilter.fromFile(),
+    log: s.log,
+    ops: s.ops,
+    trading: s.trading,
+  };
 }
 
 function use(): Services {
@@ -134,6 +142,15 @@ export class WorldRoom extends Room {
         this.handle(op, opSchema(op), (client, message) => void this.operate(ops, client, message));
       }
     }
+    use().trading?.attach({
+      on: (type, schema, run) =>
+        this.handle(type, schema, (client, message) => {
+          const me = this.members.get(client.sessionId);
+          if (me) void run(me.characterId, message).then((a) => this.answer(me, a.type, a.body));
+        }),
+      member: (id) => this.byCharacter.get(id)?.entry,
+      send: (id, type, body) => this.byCharacter.get(id)?.client.send(type, body),
+    });
     this.unlisten = places.listen((characterId, mapId) => {
       const member = this.byCharacter.get(characterId);
       if (!member || member.entry.map === mapId) return;
@@ -156,6 +173,7 @@ export class WorldRoom extends Room {
       level: character.level,
       map: places.get(character.id)?.mapId ?? "",
     };
+    use().trading?.joined(character.id);
     const member: Member = { client, characterId: character.id, entry, answers: [] };
     this.members.set(client.sessionId, member);
     this.byCharacter.set(character.id, member);
@@ -169,6 +187,8 @@ export class WorldRoom extends Room {
   // The close code cannot tell a kick from an ordinary drop: Colyseus closes a stale socket with
   // the same error code when its owner reconnects first. So kicks are remembered by session.
   override onDrop(client: Client): void {
+    const dropped = this.members.get(client.sessionId);
+    if (dropped) use().trading?.left(dropped.characterId);
     if (this.kicked.has(client.sessionId) || !this.seats.mayReconnect(client)) return;
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
@@ -194,6 +214,7 @@ export class WorldRoom extends Room {
   override async onLeave(client: Client): Promise<void> {
     const member = this.members.get(client.sessionId);
     if (member) {
+      use().trading?.left(member.characterId);
       this.members.delete(client.sessionId);
       // A newer seat of the same character may already be in (after the eviction wait ran out).
       if (this.byCharacter.get(member.characterId) === member) {
@@ -213,6 +234,7 @@ export class WorldRoom extends Room {
   override async onDispose(): Promise<void> {
     if (current === this) current = undefined;
     this.unlisten?.();
+    use().trading?.detach();
     await use().log?.flush();
   }
 
@@ -288,7 +310,7 @@ export class WorldRoom extends Room {
   }
 
   /** Sends an answer to the member's own request and keeps it for replay. */
-  private answer(member: Member, type: string, body: ChatLine | Refusal | OpResult): void {
+  private answer(member: Member, type: string, body: unknown): void {
     member.answers.push({ type, body });
     if (member.answers.length > KEPT_ANSWERS) member.answers.shift();
     member.client.send(type, body);
