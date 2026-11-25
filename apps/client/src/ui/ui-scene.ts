@@ -50,6 +50,7 @@ export class UiScene extends Phaser.Scene {
     setWorldUiHost({
       say: (lines) => this.dialogue.say(lines),
       placeBanner: (name) => this.banner.show(name),
+      openBoard: () => this.world?.social?.openBoard(),
     });
     if (touchScreen()) new RotateCard(this);
     // Development checks drive the world's UI from the console; never in a production build.

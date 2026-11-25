@@ -22,6 +22,11 @@ export interface MenuTab {
   readonly order: number;
   /** Draws the tab's page into `page`, `size` across and down. Widgets go in `ctx.scope`. */
   build(ctx: Ctx, page: Phaser.GameObjects.Container, size: { w: number; h: number }): void;
+  /**
+   * A tab that is its own screen (the 대자보): choosing it closes the notebook and opens that
+   * screen instead of a page.
+   */
+  readonly launch?: () => void;
 }
 
 const tabs: MenuTab[] = [];
@@ -65,7 +70,10 @@ export class Notebook {
     const scene = this.scene;
     const scope = new FocusScope();
     const ctx: Ctx = { scene, scope };
-    const first = tabs.find((t) => t.id === tabId) ?? (tabs[0] as MenuTab);
+    const first =
+      tabs.find((t) => t.id === tabId && !t.launch) ??
+      tabs.find((t) => !t.launch) ??
+      (tabs[0] as MenuTab);
     this.current = first.id;
     // With one tab its name is the notebook's title; tabs appear once there are two.
     const titled = tabs.length === 1;
@@ -124,6 +132,11 @@ export class Notebook {
     const page = this.page;
     const panel = this.panel;
     if (!tab || !page || !panel || id === this.current) return;
+    if (tab.launch) {
+      this.close();
+      tab.launch();
+      return;
+    }
     this.current = id;
     turnPage(page, () => {
       page.removeAll(true);

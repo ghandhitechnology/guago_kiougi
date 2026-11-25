@@ -8,6 +8,7 @@ import { registerMenuTab } from "../menu/notebook.ts";
 import { worldView } from "../world/view.ts";
 import type { WorldLink } from "../world-link.ts";
 import { ask } from "./act.ts";
+import { Board } from "./board.ts";
 import { type CardTarget, PlayerCard } from "./card.ts";
 import { clubTab } from "./club.ts";
 import { friendsTab } from "./friends.ts";
@@ -26,11 +27,20 @@ export interface SocialUi {
   openCard(target: CardTarget): void;
   /** The emote wheel, for the HUD's phone button. */
   toggleWheel(): void;
+  /** The 대자보, from the menu or the board on the lounge wall. */
+  openBoard(): void;
   destroy(): void;
 }
 
 /** The session the notebook's social pages draw from; set while a player is in the world. */
-let current: { link: WorldLink; card: PlayerCard; whisper: (name: string) => void } | undefined;
+let current:
+  | {
+      link: WorldLink;
+      card: PlayerCard;
+      whisper: (name: string) => void;
+      openBoard: () => void;
+    }
+  | undefined;
 
 /**
  * Starts the social layer over the HUD: the player card, invite slips, party frames and the emote
@@ -46,7 +56,19 @@ export function startSocialUi(
     whisper,
     report: (target) => openReport(scene, link, target),
   });
-  current = { link, card, whisper };
+  let board: Board | undefined;
+  const openBoard = () => {
+    if (board) return;
+    card.close();
+    opts.hud.setVisible(false);
+    frames.setVisible(false);
+    board = new Board(scene, link, () => {
+      board = undefined;
+      opts.hud.setVisible(true);
+      frames.setVisible(true);
+    });
+  };
+  current = { link, card, whisper, openBoard };
   registerSocialTabs();
 
   let fighting = false;
@@ -86,10 +108,15 @@ export function startSocialUi(
         card.close();
         return true;
       }
+      if (board) {
+        board.close();
+        return true;
+      }
       return false;
     },
     openCard: (target) => card.open(target),
     toggleWheel: () => wheel.toggle(),
+    openBoard,
     destroy() {
       unfight();
       offSlips();
@@ -99,6 +126,7 @@ export function startSocialUi(
       frames.destroy();
       slips.destroy();
       wheel.destroy();
+      board?.close();
       if (current?.link === link) current = undefined;
     },
   };
@@ -115,6 +143,14 @@ function registerSocialTabs(): void {
     friendsTab(() => current?.link, { whisper: (name) => current?.whisper(name), card }),
   );
   registerMenuTab(clubTab(() => current?.link, { card }));
+  registerMenuTab({
+    id: "board",
+    label: t("board.title"),
+    icon: "menu/board",
+    order: 75,
+    build() {},
+    launch: () => current?.openBoard(),
+  });
 }
 
 /**

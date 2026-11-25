@@ -345,11 +345,13 @@ function cork(): string {
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   };
+  // Flecks come in pairs, as cork crumbs do, and leave most of the board plain.
   return grid(32, 32, (x, y) => {
-    const n = hash(x, y);
-    if (n < 0.1) return "a";
-    if (n < 0.16) return "c";
-    if (n < 0.2) return "f";
+    const n = hash(x >> 1, y);
+    const m = hash(x, y >> 1);
+    if (n < 0.035) return "a";
+    if (m < 0.03) return "c";
+    if (hash(x + 7, y + 3) < 0.025) return "f";
     return "E";
   });
 }

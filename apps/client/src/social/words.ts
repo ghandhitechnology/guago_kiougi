@@ -54,7 +54,8 @@ export function mapName(id: string): string {
 export function timeLeft(at: number, now = Date.now()): string {
   const ms = Math.max(0, at - now);
   const minutes = Math.ceil(ms / 60_000);
-  if (minutes >= 60 * 24) return t("time.days", { n: Math.floor(minutes / (60 * 24)) });
+  // Hours until three days are left, so a 48-hour post counts down by the hour.
+  if (minutes >= 60 * 72) return t("time.days", { n: Math.floor(minutes / (60 * 24)) });
   if (minutes >= 60) return t("time.hours", { n: Math.floor(minutes / 60) });
   return t("time.minutes", { n: Math.max(1, minutes) });
 }

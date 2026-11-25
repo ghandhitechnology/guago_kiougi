@@ -11,11 +11,13 @@ import type { DialogueLine } from "./dialogue.ts";
  * await worldUi.say([{ speaker: "hyunwoo", text: line }]); // a line from the narrative
  * worldUi.prompt({ x, y, kind: "talk" });                  // something in reach; undefined clears
  * worldUi.npc("sagam", "권 사감", x, y);                   // a cast member standing at their spot
+ * worldUi.openBoard();                                     // the 대자보 in the 쉼표 라운지, used
  * ```
  */
 export interface WorldUiHost {
   say(lines: readonly DialogueLine[]): Promise<number | undefined>;
   placeBanner(name: string): void;
+  openBoard?(): void;
 }
 
 let host: WorldUiHost | undefined;
@@ -28,6 +30,11 @@ export const worldUi = {
   /** Plays dialogue lines; resolves with the choice picked on the last line, if it had choices. */
   say(lines: readonly DialogueLine[]): Promise<number | undefined> {
     return host ? host.say(lines) : Promise.resolve(undefined);
+  },
+
+  /** The 대자보 screen, as when the player uses the board on the lounge wall. */
+  openBoard(): void {
+    host?.openBoard?.();
   },
 
   /** The place-name banner, on entering a map or a named room in it. */
