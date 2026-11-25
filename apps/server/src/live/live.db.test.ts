@@ -687,3 +687,22 @@ describe("sessions", () => {
     expect((await row(c.id)).pool_started_at).toBeNull();
   });
 });
+
+describe("board rows", () => {
+  it("are removed a week after they come down; story chapters stay", async () => {
+    const w = await world();
+    const c = await character(w);
+    await w.live.board.ensure(c.id);
+    const day = Math.floor((T0 + 4 * HOUR_MS) / DAY_MS);
+    w.clock.step(3 * DAY_MS);
+    await w.live.board.ensure(c.id);
+    w.clock.step(6 * DAY_MS);
+    await w.live.board.sweep();
+    const ids = (
+      await db.pool.query("select quest_id from quest_progress where character_id = $1", [c.id])
+    ).rows.map((r) => r.quest_id as string);
+    expect(ids.some((id) => id.startsWith(`daily:${day}:`))).toBe(false);
+    expect(ids.some((id) => id.startsWith(`daily:${day + 3}:`))).toBe(true);
+    expect(ids.some((id) => id.startsWith("story:"))).toBe(true);
+  });
+});

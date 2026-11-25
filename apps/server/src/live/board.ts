@@ -23,6 +23,7 @@ import {
   boardDay,
   boardWeek,
   catchUp,
+  DAY_MS,
   dayStart,
   HELP,
   type HelpNoticeView,
@@ -43,6 +44,9 @@ import type { ExecResult, Executor } from "../economy/executor.ts";
 import { type QuestRow, questFromDb, type StoredOffer, timeFromDb } from "../economy/rows.ts";
 import { helpQuestId, type PostedQuest } from "./ops.ts";
 import { noticeFromDb } from "./rows.ts";
+
+/** How long a notice's row is kept after it came down. */
+export const BOARD_KEEP_MS = 7 * DAY_MS;
 
 const NO_REWARD: QuestReward = { exp: 0, pinecone: 0, ink: 0, binding: 0, sheets: 0 };
 
@@ -417,6 +421,14 @@ export class Board {
     await this.db.execute(sql`
       update help_notices set state = 'cancelled'
       where state in ('open', 'taken') and expires_at <= ${new Date(this.ctx.now()).toISOString()}::timestamptz`);
+    // Board rows a week past coming down are gone, done or not: a finished notice stays
+    // claimable for that week. Story chapters never come down and are kept.
+    const cutoff = new Date(this.ctx.now() - BOARD_KEEP_MS).toISOString();
+    await this.db.execute(sql`
+      delete from quest_progress
+      where reset_at < ${cutoff}::timestamptz
+        and (quest_id like 'daily:%' or quest_id like 'weekly:%' or quest_id like 'repeat:%'
+          or quest_id like 'help:%')`);
   }
 }
 
