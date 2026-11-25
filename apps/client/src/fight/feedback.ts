@@ -86,6 +86,8 @@ export class Feedback {
   readonly mineThisMessage = new Set<number>();
   /** Counts for the readout. */
   readonly counts = { hits: 0, kills: 0, hurts: 0, stops: 0 };
+  /** The last own hits with their hitstop, for development checks; never drawn. */
+  readonly log: { t: number; target: number; flags: number; stop: number; amount: number }[] = [];
 
   constructor(ctx: FightContext, bodies: Bodies, effects: Effects, hooks: FeedbackHooks) {
     this.ctx = ctx;
@@ -158,6 +160,8 @@ export class Feedback {
                 : STOP.light;
       this.bodies.struck(b, stop, heavy || crit || kill || qed, h.kx, h.ky);
       this.counts.stops++;
+      if (this.log.length >= 64) this.log.shift();
+      this.log.push({ t: this.ctx.now, target: b.id, flags: f, stop, amount: h.amount });
     }
     if (h.proof > 0) {
       b.proof = h.proof;
@@ -177,8 +181,20 @@ export class Feedback {
       this.ctx.particles.burst(Bit.Spark, x, mid, 5, cat.color("stone.bright"), 110, 0);
       this.ctx.sound.cue("sfx.monster.rational.hit", x, y, true);
     } else if (!dot) {
+      // The spark sits on the near side of the target, toward the player, so the target's own
+      // white flash shows beside it instead of under it.
       const spark = crit ? "fx-hit-crit" : heavy || kill ? "fx-hit-heavy" : "fx-hit-light";
-      this.effects.oneShot(spark, `${spark}/hit`, x, mid, 1);
+      const ax = this.ctx.selfX - x;
+      const ay = this.ctx.selfY - y;
+      const ad = Math.hypot(ax, ay) || 1;
+      const off = crit ? 8 : heavy || kill ? 7 : 5;
+      this.effects.oneShot(
+        spark,
+        `${spark}/hit`,
+        x + (ax / ad) * off,
+        mid + (ay / ad) * off * 0.6 - 2,
+        1,
+      );
       this.ctx.particles.burst(
         Bit.Spark,
         x,

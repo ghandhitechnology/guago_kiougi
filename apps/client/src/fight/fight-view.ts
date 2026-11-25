@@ -91,6 +91,8 @@ const DEPTH_SCREEN = 28;
 const LOOKS_PER_FRAME = 2;
 const REVIVE_REACH = KNOCKOUT.reviveRange + 6;
 const DOWN_DIM = 0.28;
+/** An elite arriving this close shakes the screen; farther ones are heard and pointed at. */
+const ELITE_NEAR = 260;
 
 interface Look {
   sig: string;
@@ -152,7 +154,16 @@ export class FightView {
   private mapReady = false;
   private otherSoundAt = 0;
   /** Development numbers. */
-  readonly counters = { snapshots: 0, bytes: 0, frames: 0 };
+  readonly counters = {
+    snapshots: 0,
+    bytes: 0,
+    frames: 0,
+    phases: 0,
+    elites: 0,
+    levelUps: 0,
+    downs: 0,
+    revives: 0,
+  };
 
   /** Queues what the fight draws from on the scene's loader. */
   static preload(scene: Phaser.Scene): void {
@@ -593,6 +604,7 @@ export class FightView {
   // Moments ------------------------------------------------------------------------------------
 
   private phase(surge: boolean): void {
+    this.counters.phases++;
     const was = this.state.wave.phase;
     this.state.wave.phase = surge ? "surge" : "lull";
     this.state.wave.since = this.ctx.now;
@@ -614,6 +626,7 @@ export class FightView {
     const self = this.bodies.self;
     switch (kind) {
       case Priv.LevelUp:
+        this.counters.levelUps++;
         this.ctx.trauma.add(TRAUMA.levelUp);
         this.ctx.lights.flash(x, y - 10, cat.color("gold.light"), 70, 1.4, 600);
         if (self) {
@@ -623,12 +636,14 @@ export class FightView {
         }
         break;
       case Priv.Down:
+        this.counters.downs++;
         this.ctx.trauma.add(TRAUMA.down);
         this.ctx.sound.self("combat.knockout");
         this.ctx.particles.burst(Bit.Debris, x, y, 6, cat.color("stone.light"), 50, 1);
         this.effects.oneShot("fx-dodge-dust", "fx-dodge-dust/kick", x, y, 1);
         break;
       case Priv.Revive:
+        this.counters.revives++;
         this.ctx.sound.self("combat.revive");
         this.ctx.lights.flash(x, y - 10, cat.color("gold.pale"), 60, 1.3, 500);
         this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1);
@@ -644,13 +659,22 @@ export class FightView {
 
   /** An elite arrives: the brass and gong, a red shock ring, the ground jumps, an arrow if it is off screen. */
   private eliteArrived(b: Body | undefined, x: number, y: number): void {
+    this.counters.elites++;
     const cat = this.cat;
-    this.ctx.sound.self("sfx.monster.elite.spawn");
+    // One near the player takes the whole screen; a far one is a horn in the distance and an
+    // arrow at the edge, so a busy field does not shake every few seconds.
     const d = Math.hypot(x - this.ctx.selfX, y - this.ctx.selfY);
-    this.ctx.trauma.add(TRAUMA.elite * (d < 300 ? 1 : 0.6));
+    const near = d < ELITE_NEAR;
+    if (near) {
+      this.ctx.sound.self("sfx.monster.elite.spawn");
+      this.ctx.trauma.add(TRAUMA.elite);
+      this.ctx.lights.flash(x, y - 12, cat.color("plum.light"), 80, 1.5, 700);
+    } else {
+      this.ctx.sound.cue("sfx.monster.elite.spawn", x, y, false);
+      this.ctx.trauma.add(TRAUMA.elite * 0.2);
+    }
     this.effects.oneShot("tele-circle", "tele-circle/fire", x, y, 0.9, 1, undefined, 2.2, true);
-    this.ctx.particles.burst(Bit.Debris, x, y, 12, cat.color("clay.light"), 90, 2);
-    this.ctx.lights.flash(x, y - 12, cat.color("plum.light"), 80, 1.5, 700);
+    this.ctx.particles.burst(Bit.Debris, x, y, near ? 12 : 6, cat.color("clay.light"), 90, 2);
     if (b) {
       b.arriveAt = this.ctx.now;
       this.bodies.kick(b, -1.6);
@@ -670,7 +694,9 @@ export class FightView {
     this.counters.frames++;
     const rt = this.clock.at(performance.now());
     ctx.tick = rt;
-    ctx.ownTick = rt + this.clock.delay - 0.35;
+    // Own effects run on the newest snapshot, so a shot lands on the frame its hit arrives; never
+    // more than a quarter tick past what the server has said, so nothing overshoots its end.
+    ctx.ownTick = Math.min(rt + this.clock.delay, this.clock.newest + 0.25);
     const at = this.options.self?.();
     const selfBody = this.bodies.self;
     if (at) {

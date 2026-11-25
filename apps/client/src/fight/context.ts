@@ -19,9 +19,9 @@ export interface Restraint {
 }
 
 export const RESTRAINT: Readonly<Record<Tier, Restraint>> = {
-  low: { others: 0.4, otherSparks: 0, otherEffects: 40, particles: 150 },
-  medium: { others: 0.5, otherSparks: 0.25, otherEffects: 90, particles: 350 },
-  high: { others: 0.55, otherSparks: 0.5, otherEffects: 160, particles: 600 },
+  low: { others: 0.3, otherSparks: 0, otherEffects: 40, particles: 150 },
+  medium: { others: 0.36, otherSparks: 0.15, otherEffects: 90, particles: 350 },
+  high: { others: 0.42, otherSparks: 0.35, otherEffects: 160, particles: 600 },
 };
 
 /** What every part of the fight view shares. */

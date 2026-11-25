@@ -126,6 +126,7 @@ export class Effects {
     a.alpha = 1;
     a.chainN = 0;
     a.art = null;
+    a.variant = 0;
     return a;
   }
 
@@ -713,6 +714,42 @@ export class Effects {
     const sinceStrike = strikes === 0 ? -1 : since - (strikes - 1) * Math.max(1, a.period);
     const charging = strikes === 0 || (strikes <= repeats && sinceStrike > FLASH);
     const progress = strikes === 0 ? t / delay : 1;
+    if (line && !enemy && cat.has("forecast-dot")) {
+      // The player's 예보: an amber line traced dot by dot over the delay; when it lands the
+      // dots flash, the fault opens along it and stones jump out.
+      const gap = 6;
+      const n = Math.min(MAX_PIECES - 8, Math.max(2, Math.floor(a.length / gap)));
+      const cos = Math.cos(a.angle);
+      const sin = Math.sin(a.angle);
+      const lit = strikes > 0 ? n : Math.floor(progress * n);
+      const struck = strikes > 0 && !charging;
+      const fade = struck ? Math.max(0, Math.min(1, (FLASH - sinceStrike) / 3)) : 1;
+      for (let i = 0; i < n; i++) {
+        const p = this.piece(a, i, Layer.Ground);
+        const frame = struck
+          ? "forecast-dot/fire"
+          : i < lit
+            ? "forecast-dot/lit"
+            : "forecast-dot/dim";
+        show(p, COMBAT, frame, null);
+        p.s.setOrigin(0.5, 0).setAlpha(a.alpha * fade * (i < lit || struck ? 1 : 0.6));
+        const d = (i + 0.5) * gap;
+        p.s.setPosition(Math.round(a.x + cos * d), Math.round(a.y + sin * d - 2)).setVisible(true);
+      }
+      this.hideFrom(a, n);
+      if (struck && sinceStrike < 0.5 && a.pulses > (a.variant as number)) {
+        a.variant = a.pulses;
+        for (let k = 0; k < 6; k++) {
+          const f = (k + 0.5) / 6;
+          const x = a.x + cos * a.length * f;
+          const y = a.y + sin * a.length * f;
+          this.ctx.particles.burst(Bit.Debris, x, y, 2, this.ctx.cat.color("clay.mid"), 55, 2);
+          if (k % 2 === 0)
+            this.oneShot("fx-rock-hit", "fx-rock-hit/metamorphic", x, y - 4, a.alpha);
+        }
+      }
+      return false;
+    }
     if (line && enemy && cat.has("tell-dot")) {
       // A charge's path: dots every few pixels that never turn, lit from the monster outward
       // over the wind-up, all white for the strike.

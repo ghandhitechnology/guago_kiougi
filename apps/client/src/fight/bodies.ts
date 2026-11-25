@@ -30,19 +30,25 @@ const ARRIVE_MS = 380;
 const FADE_MS = 220;
 
 const DIRS = ["down", "up", "side", "side"] as const;
-/** `${dir}/${frame}` for every rig frame, made once so drawing a student allocates nothing. */
-const RIG_FRAMES: Readonly<Record<string, readonly string[]>> = (() => {
-  const names = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
-  const out: Record<string, string[]> = {};
-  for (const d of ["down", "up", "side"]) {
-    out[`${d}:idle`] = names("idle", 2).map((f) => `${d}/${f}`);
-    out[`${d}:walk`] = names("walk", 4).map((f) => `${d}/${f}`);
-    out[`${d}:attack`] = names("attack", 4).map((f) => `${d}/${f}`);
-    out[`${d}:hit`] = [`${d}/hit`];
-    out[`${d}:ko`] = [`${d}/ko`];
-  }
-  return out;
-})();
+/** Every rig frame name by facing and animation, made once so drawing a student allocates nothing. */
+interface RigFrames {
+  readonly idle: readonly string[];
+  readonly walk: readonly string[];
+  readonly attack: readonly string[];
+  readonly hit: readonly string[];
+  readonly ko: readonly string[];
+}
+const RIG_FRAMES: readonly RigFrames[] = DIRS.map((d) => {
+  const names = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => `${d}/${prefix}${i}`);
+  return {
+    idle: names("idle", 2),
+    walk: names("walk", 4),
+    attack: names("attack", 4),
+    hit: [`${d}/hit`],
+    ko: [`${d}/ko`],
+  };
+});
 /** Walk cycle length in px: four frames at 8 fps at the base 60 px/s. */
 const STRIDE = 30;
 const ATTACK_MS = 300;
@@ -106,6 +112,8 @@ export class Body {
   blink = false;
   stateAt = 0;
   aura: Phaser.GameObjects.Sprite | null = null;
+  /** The local player's ring on the ground. */
+  ring: Phaser.GameObjects.Sprite | null = null;
   stars: Phaser.GameObjects.Sprite | null = null;
   glow: Phaser.GameObjects.Sprite | null = null;
 
@@ -256,7 +264,7 @@ export class Bodies {
       s.setAlpha(owner ? 1 : this.ctx.restraint.others + 0.25);
     } else {
       b.texture = this.hooks.look(b.slot);
-      s.setTexture(b.texture, RIG_FRAMES["down:idle"]?.[0]);
+      s.setTexture(b.texture, RIG_FRAMES[0]?.idle[0]);
     }
   }
 
@@ -312,12 +320,13 @@ export class Bodies {
     if (b.cat === Cat.Monster) this.monsters--;
     else if (b.cat === Cat.Player) this.players--;
     if (this.self === b) this.self = null;
-    for (const extra of [b.aura, b.stars, b.glow]) {
+    for (const extra of [b.aura, b.ring, b.stars, b.glow]) {
       if (!extra) continue;
       this.ctx.view.removeEntity(extra);
       this.release(extra);
     }
     b.aura = null;
+    b.ring = null;
     b.stars = null;
     b.glow = null;
     if (b.inView) this.ctx.view.removeEntity(b.sprite);
@@ -535,25 +544,25 @@ export class Bodies {
     const s = b.sprite;
     const now = this.ctx.now;
     b.facing = b.self ? this.ctx.selfFacing : b.state & 3;
-    const dir = DIRS[b.facing] ?? "down";
+    const rig = RIG_FRAMES[b.facing] ?? (RIG_FRAMES[0] as RigFrames);
     const moved = Math.hypot(b.dx, b.dy);
     let frames: readonly string[] | undefined;
     let i = 0;
     const down = (b.state & PState.Down) !== 0;
     if (down) {
-      frames = RIG_FRAMES[`${dir}:ko`];
+      frames = rig.ko;
     } else if (now - b.attackAt < ATTACK_MS) {
-      frames = RIG_FRAMES[`${dir}:attack`];
+      frames = rig.attack;
       i = Math.min(3, Math.floor(((now - b.attackAt) / ATTACK_MS) * 4));
     } else if (now - b.hurtAt < HURT_MS) {
-      frames = RIG_FRAMES[`${dir}:hit`];
+      frames = rig.hit;
     } else if (moved > 0.02) {
       b.walk = (b.walk + moved) % STRIDE;
-      frames = RIG_FRAMES[`${dir}:walk`];
+      frames = rig.walk;
       i = Math.floor((b.walk / STRIDE) * 4);
       b.idleAt = now;
     } else {
-      frames = RIG_FRAMES[`${dir}:idle`];
+      frames = rig.idle;
       i = Math.floor((now - b.idleAt) / 500) % 2;
     }
     const tex = this.hooks.look(b.slot);
@@ -567,10 +576,22 @@ export class Bodies {
     s.setScale(1 + sq * 0.22, 1 - sq * 0.22);
     s.setFlipX(b.facing === 2);
     s.setPosition(Math.round(b.x + b.kickX), Math.round(b.y + b.kickY));
-    // Others fade a little so the local player always reads first.
+    // Others fade a little so the local player always reads first, who also stands in a ring.
     s.setAlpha(b.self ? 1 : 0.92);
+    if (b.self) this.selfRing(b);
     this.downMarks(b, down);
     void dtMs;
+  }
+
+  private selfRing(b: Body): void {
+    if (!b.ring) {
+      const r = this.sprite();
+      r.setTexture(COMBAT, this.ctx.cat.frame("self-ring")).setVisible(true).setAlpha(0.9);
+      this.ctx.view.addEntity(r, { shadow: false, lit: false });
+      b.ring = r;
+    }
+    // A hair above the feet in the sort, so the ring lies under its student.
+    b.ring.setPosition(Math.round(b.x), Math.round(b.y) - 0.02);
   }
 
   /** Stars over a downed student and the glow of a revive in progress. */
