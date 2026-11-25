@@ -1,0 +1,132 @@
+/**
+ * Korean copy. Voices: the school office (notices and errors) speaks in 합니다체; the player's
+ * own buttons are short verbs; each major's line is its senior's, in the register the voice
+ * bible (`packages/content/src/narrative/speakers.ts`) gives them.
+ */
+export const ko = {
+  "title.login": "등교하기",
+  "title.signup": "입학하기",
+
+  "login.title": "등교",
+  "login.id": "아이디",
+  "login.password": "비밀번호",
+  "login.submit": "등교",
+  "login.lost": "비밀번호 분실",
+
+  "signup.title": "입학 원서",
+  "signup.id": "아이디",
+  "signup.password": "비밀번호",
+  "signup.age": "만 14세 이상입니다",
+  "signup.submit": "제출",
+
+  "code.title": "복구 코드",
+  "code.body": "비밀번호를 잊으면 이 코드로만 되찾을 수 있습니다. 다시 보여 드리지 않습니다.",
+  "code.copy": "복사",
+  "code.copied": "복사했습니다.",
+  "code.done": "받아 적었습니다",
+
+  "recover.title": "분실 신고",
+  "recover.id": "아이디",
+  "recover.code": "복구 코드",
+  "recover.password": "새 비밀번호",
+  "recover.submit": "재발급",
+  "recover.done": "비밀번호를 바꿨습니다.",
+
+  "creator.look": "외모",
+  "creator.major": "전공",
+  "creator.name": "이름",
+  "creator.submit": "등교",
+  "creator.random": "아무거나",
+  "creator.leave.title": "나가기",
+  "creator.leave.body": "쓰던 학생부를 버리고 교문 밖으로 나갑니다.",
+  "creator.leave.yes": "나가기",
+  "creator.leave.no": "계속 쓰기",
+
+  "look.body": "피부",
+  "look.hair": "머리",
+  "look.hairColor": "머리색",
+  "look.face": "얼굴",
+  "look.uniform": "교복",
+  "look.accessory": "소품",
+
+  "accessory.none": "없음",
+  "accessory.glasses": "안경",
+  "accessory.goggles": "고글",
+
+  "skin.fair": "21호",
+  "skin.warm": "23호",
+  "skin.deep": "25호",
+
+  "hair.crop": "단정",
+  "hair.spiky": "까치집",
+  "hair.bob": "단발",
+  "hair.long": "생머리",
+  "hair.ponytail": "포니테일",
+  "hair.curly": "곱슬",
+
+  "hairColor.black": "흑발",
+  "hairColor.brown": "갈색",
+  "hairColor.chestnut": "밤색",
+  "hairColor.blond": "금발",
+  "hairColor.red": "빨강",
+  "hairColor.silver": "은발",
+  "hairColor.blue": "파랑",
+  "hairColor.pink": "분홍",
+  "hairColor.green": "초록",
+  "hairColor.violet": "보라",
+
+  "face.bright": "밝음",
+  "face.sleepy": "졸림",
+  "face.sharp": "승부",
+
+  "uniform.blazer": "동복",
+  "uniform.shirt": "하복",
+
+  "major.math": "수학",
+  "major.physics": "물리",
+  "major.chemistry": "화학",
+  "major.biology": "생명",
+  "major.earth": "지구과학",
+
+  "major.math.mechanic": "증명 스택",
+  "major.physics.mechanic": "운동량",
+  "major.chemistry.mechanic": "반응 표",
+  "major.biology.mechanic": "증식",
+  "major.earth.mechanic": "예보",
+
+  // 석지안 (반말): exact, says what is optimal and stops.
+  "major.math.line": "한 놈만 열 번 때려. 열 번째가 Q.E.D.야.",
+  // 배도윤 (반말): delighted by collisions, estimates with 대충.
+  "major.physics.line": "밀어서 날려. 날아간 놈이 뒤에 놈을 치면 그것도 대충 다 내 거야.",
+  // 한소율 (해요체): safety first, everything is a reaction in order.
+  "major.chemistry.line": "산을 묻히고 염기를 묻히세요. 순서만 지키면 알아서 반응해요.",
+  // 오여름 (반말): 얘네, counts, gentle.
+  "major.biology.line": "얘네가 둘로 나뉘면 넷이 되고, 넷이면 여덟이야. 혼자 싸울 일 없어.",
+  // 우태산 (반말): forecasts with -겠다, in seconds, few words.
+  "major.earth.line": "삼 초 기다리면 크게 오겠다. 오 초면 더 크겠다.",
+
+  "error.bad_request": "서류 양식이 맞지 않습니다. 다시 내 주십시오.",
+  "error.forbidden": "이 문으로는 들어올 수 없습니다.",
+  "error.unauthorized": "등교 기록이 없습니다. 다시 등교해 주십시오.",
+  "error.rate_limited": "너무 자주 두드렸습니다. 잠시 뒤에 다시 오십시오.",
+  "error.server_error": "교무실에 문제가 생겼습니다. 잠시 뒤에 다시 오십시오.",
+  "error.login_invalid": "아이디는 영문 소문자, 숫자, 밑줄로 4~16자입니다.",
+  "error.login_banned": "쓸 수 없는 아이디입니다.",
+  "error.login_taken": "이미 있는 아이디입니다.",
+  "error.weak_password": "비밀번호는 8자 이상이어야 합니다.",
+  "error.age_required": "만 14세 이상만 입학할 수 있습니다.",
+  "error.signup_limit": "오늘은 이 교문으로 더 받지 않습니다.",
+  "error.bad_credentials": "아이디나 비밀번호가 맞지 않습니다.",
+  "error.account_banned": "정학 처분 중인 계정입니다.",
+  "error.name_invalid": "이름은 한글, 영문, 숫자로 2~8자입니다.",
+  "error.name_banned": "학생부에 올릴 수 없는 이름입니다.",
+  "error.name_taken": "같은 이름의 학생이 이미 있습니다.",
+  "error.major_invalid": "그런 전공은 개설되지 않았습니다.",
+  "error.look_invalid": "교복 규정에 맞지 않습니다.",
+  "error.character_exists": "이미 학생부에 오른 계정입니다.",
+  "error.offline": "교무실이 응답하지 않습니다.",
+  "error.unknown": "교무실에서 서류를 잃어버렸습니다. 다시 내 주십시오.",
+  "error.id_required": "아이디를 적어 주십시오.",
+  "error.code_required": "복구 코드를 적어 주십시오.",
+  "error.name_required": "이름을 적어 주십시오.",
+} as const;
