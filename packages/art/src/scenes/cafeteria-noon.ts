@@ -176,7 +176,7 @@ export default scene({
     ...table(222, 182, "lunch", [["blazer"], null, ["curls"]], [null, ["summer"], ["club"]]),
     ...table(352, 182, "late", [["reader", true], ["bedhead"], null], [["curls"], null, null]),
     ...table(156, 252, "lunch", [null, ["curls"], ["blazer", true]], []),
-    ...table(286, 252, "empty", [null, null, null], []),
+    ...table(286, 252, "late", [null, null, null], []),
     { rig: "hyunwoo", look: "tired", dir: "down", anim: "remember", play: true, at: [404, 236] },
     { prop: "long-table", frame: "lunch", at: [420, 252] },
     { rig: "sagam", look: "duty", dir: "up", anim: "idle", play: true, at: [404, 122] },

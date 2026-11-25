@@ -530,6 +530,7 @@ function wallTop(kind: "outer" | "inner", size: number): string {
 const wallTops = overlay({
   name: "wall-top",
   palette,
+  themes: ["campus", "campus-night", "campus-dusk"],
   outer: wallTop("outer", 48),
   inner: wallTop("inner", 32),
 });
