@@ -5,6 +5,7 @@ import { type ArtIndex, checkMap, type MapRegistry } from "./check.ts";
 import type { BuiltMap, MapSource } from "./format.ts";
 // 가설관 and 증명관 interiors.
 import gaseol1f from "./gaseol-1f.ts";
+import gaseol2f from "./gaseol-2f.ts";
 import gaseol4f from "./gaseol-4f.ts";
 import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
 
@@ -25,6 +26,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   // 가설관 and 증명관 interiors.
   gaseolgwanStairs,
   gaseol1f,
+  gaseol2f,
   gaseol4f,
 ];
 
@@ -46,6 +48,12 @@ export const PLANNED_MAPS: ReadonlySet<string> = new Set([
   // 가설관 and 증명관 interiors: rooms and places their doors lead to before they exist.
   "gaseol-roof",
   "gaseol-b1",
+  "club-1",
+  "club-2",
+  "club-3",
+  "club-4",
+  "club-5",
+  "club-6",
 ]);
 
 /** Builds every map. */
