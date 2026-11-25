@@ -3,6 +3,7 @@ export * from "./attacks.ts";
 export * from "./board.ts";
 export * from "./books.ts";
 export * from "./classes.ts";
+export * from "./collision.ts";
 export * from "./combat-content.ts";
 export * from "./drops.ts";
 export * from "./economy.ts";
