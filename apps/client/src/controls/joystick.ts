@@ -3,6 +3,8 @@ import { stick } from "./move.ts";
 
 /** How far the knob travels from the base's centre, in game pixels. */
 const REACH = 16;
+/** Pushes shorter than this share of the reach do nothing; past it the walk speeds up evenly. */
+const DEADZONE = 0.22;
 const BASE = 48;
 const KNOB = 20;
 /** Where a thumb may start a stick: the left side of the screen, under every UI element. */
@@ -74,8 +76,11 @@ export class Joystick {
     const d = Math.hypot(dx, dy);
     const k = d > REACH ? REACH / d : 1;
     this.knob.setPosition(Math.round(dx * k), Math.round(dy * k));
-    stick.x = (dx * k) / REACH;
-    stick.y = (dy * k) / REACH;
+    // The stick's own deadzone: a resting thumb wobbles, and the wire takes any push at all.
+    const reach = (d * k) / REACH;
+    const scale = reach < DEADZONE ? 0 : (reach - DEADZONE) / (1 - DEADZONE) / Math.max(reach, 1e-6);
+    stick.x = ((dx * k) / REACH) * scale;
+    stick.y = ((dy * k) / REACH) * scale;
     stick.active = true;
   }
 

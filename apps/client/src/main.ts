@@ -6,6 +6,12 @@ import { typingOnPhone } from "./ui/keyboard-room.ts";
 import { UiScene } from "./ui/ui-scene.ts";
 import { WorldScene } from "./world-scene.ts";
 
+/** The map viewer replaces the game under the dev server when the URL asks for it. */
+const viewer =
+  import.meta.env.DEV && new URLSearchParams(location.search).has("view")
+    ? (await import("./render/viewer.ts")).ViewerScene
+    : null;
+
 const game = new Phaser.Game({
   type: Phaser.WEBGL,
   parent: "game",
@@ -18,7 +24,7 @@ const game = new Phaser.Game({
   audio: { noAudio: true },
   scale: { mode: Phaser.Scale.NONE },
   // Back to front; the UI scene stays on top of the world.
-  scene: [BootScene, FrontScene, WorldScene, UiScene],
+  scene: viewer ? [viewer] : [BootScene, FrontScene, WorldScene, UiScene],
 });
 
 /**

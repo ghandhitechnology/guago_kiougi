@@ -51,13 +51,46 @@ export function gridOf(
 
 const T = TILE_SIZE;
 
+/** Passes of contact resolution per call; an inside corner needs two, a notch a few more. */
+const PASSES = 8;
+/** How far to look for open ground when a centre has ended up inside a solid tile, in tiles. */
+const RESCUE_TILES = 4;
+
 /**
- * Pushes a circle out of every solid tile it overlaps and returns where it ends up.
+ * The walkable point nearest (x, y) at which a circle of radius `r` touches no solid tile: the
+ * nearest spot at least `r` inside a walkable tile. For a centre that is inside a solid tile,
+ * which only a spawn or a teleport can cause.
+ */
+function rescue(map: Collidable, x: number, y: number, r: number): { x: number; y: number } {
+  const cx = Math.floor(x / T);
+  const cy = Math.floor(y / T);
+  let best: { x: number; y: number } | undefined;
+  let bestD = Infinity;
+  for (let ring = 1; ring <= RESCUE_TILES && !best; ring++) {
+    for (let ty = cy - ring; ty <= cy + ring; ty++) {
+      for (let tx = cx - ring; tx <= cx + ring; tx++) {
+        if (isSolidTile(map, tx, ty)) continue;
+        const px = Math.min((tx + 1) * T - r, Math.max(tx * T + r, x));
+        const py = Math.min((ty + 1) * T - r, Math.max(ty * T + r, y));
+        const d = (px - x) ** 2 + (py - y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = { x: px, y: py };
+        }
+      }
+    }
+  }
+  return best ?? { x, y };
+}
+
+/**
+ * Pushes a circle out of the solid tiles it overlaps and returns where it ends up.
  *
- * A tile's side shared with another solid tile is not a face: the tile is treated as reaching on
- * through its neighbour. A circle sliding along a wall built from many tiles therefore meets one
- * flat face and never snags on the seams between them, while a free-standing corner stays a real
- * corner the circle rolls around.
+ * Each pass finds the single nearest solid point among the overlapped tiles, each tile taken as
+ * the square it is, and pushes straight away from it. Along a wall built from many tiles the
+ * nearest point always lies on the flat face, never on a corner at a seam, so a sliding body
+ * meets one smooth wall; a free-standing corner is a point the body rolls around; and in an
+ * inside corner the two faces push in turn, so nothing is ever pushed through a wall.
  */
 export function pushOut(
   map: Collidable,
@@ -66,8 +99,14 @@ export function pushOut(
   r: number,
 ): { x: number; y: number; hit: boolean } {
   let hit = false;
-  for (let pass = 0; pass < 4; pass++) {
-    let pushed = false;
+  if (isSolidTile(map, Math.floor(x / T), Math.floor(y / T))) {
+    ({ x, y } = rescue(map, x, y, r));
+    hit = true;
+  }
+  for (let pass = 0; pass < PASSES; pass++) {
+    let bestD2 = r * r;
+    let nx = 0;
+    let ny = 0;
     const tx0 = Math.floor((x - r) / T);
     const tx1 = Math.floor((x + r) / T);
     const ty0 = Math.floor((y - r) / T);
@@ -75,55 +114,29 @@ export function pushOut(
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         if (!isSolidTile(map, tx, ty)) continue;
-        const left = isSolidTile(map, tx - 1, ty) ? -Infinity : tx * T;
-        const right = isSolidTile(map, tx + 1, ty) ? Infinity : (tx + 1) * T;
-        const top = isSolidTile(map, tx, ty - 1) ? -Infinity : ty * T;
-        const bottom = isSolidTile(map, tx, ty + 1) ? Infinity : (ty + 1) * T;
-        const cx = Math.min(right, Math.max(left, x));
-        const cy = Math.min(bottom, Math.max(top, y));
-        const dx = x - cx;
-        const dy = y - cy;
+        const px = Math.min((tx + 1) * T, Math.max(tx * T, x));
+        const py = Math.min((ty + 1) * T, Math.max(ty * T, y));
+        let dx = x - px;
+        let dy = y - py;
         const d2 = dx * dx + dy * dy;
-        if (d2 >= r * r) continue;
-        if (d2 > 0) {
-          const d = Math.sqrt(d2);
-          const k = (r - d) / d;
-          x += dx * k;
-          y += dy * k;
-        } else {
-          // The centre is inside: leave through the nearest real face, if the tile has one.
-          let best = Infinity;
-          let nx = 0;
-          let ny = 0;
-          if (left !== -Infinity && x - left < best) {
-            best = x - left;
-            nx = left - r - x;
-            ny = 0;
-          }
-          if (right !== Infinity && right - x < best) {
-            best = right - x;
-            nx = right + r - x;
-            ny = 0;
-          }
-          if (top !== -Infinity && y - top < best) {
-            best = y - top;
-            nx = 0;
-            ny = top - r - y;
-          }
-          if (bottom !== Infinity && bottom - y < best) {
-            best = bottom - y;
-            nx = 0;
-            ny = bottom + r - y;
-          }
-          if (best === Infinity) continue;
-          x += nx;
-          y += ny;
+        if (d2 >= bestD2) continue;
+        if (d2 === 0) {
+          // On the tile's edge exactly: away from its middle.
+          dx = x - (tx + 0.5) * T;
+          dy = y - (ty + 0.5) * T;
         }
-        pushed = true;
-        hit = true;
+        bestD2 = d2;
+        nx = dx;
+        ny = dy;
       }
     }
-    if (!pushed) break;
+    if (bestD2 >= r * r) break;
+    const d = Math.sqrt(bestD2);
+    const len = Math.sqrt(nx * nx + ny * ny);
+    if (len === 0) break;
+    x += (nx / len) * (r - d);
+    y += (ny / len) * (r - d);
+    hit = true;
   }
   return { x, y, hit };
 }
