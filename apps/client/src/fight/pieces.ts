@@ -1,3 +1,4 @@
+import type { ArtMetadata } from "@guago/art";
 import * as Phaser from "phaser";
 import type { MapView, TelegraphOptions } from "../render/index.ts";
 import { COMBAT } from "./catalog.ts";
@@ -22,6 +23,8 @@ export interface Piece {
   inUse: boolean;
   /** A tell piece handed to the view as a telegraph. */
   glowing: boolean;
+  /** Each frame's blend mode, from its sprite's `blend` in the art metadata. */
+  readonly blends: ReadonlyMap<string, Phaser.BlendModes>;
 }
 
 /**
@@ -37,28 +40,38 @@ export class Pieces {
   private readonly tells: Piece[] = [];
   /** Pieces out right now, for the readout. */
   out = 0;
+  private readonly blends = new Map<string, Phaser.BlendModes>();
 
-  constructor(scene: Phaser.Scene, view: MapView) {
+  constructor(scene: Phaser.Scene, view: MapView, meta: ArtMetadata) {
     this.scene = scene;
     this.view = view;
+    for (const sp of Object.values(meta.sprites)) {
+      if (sp.blend !== "add") continue;
+      for (const f of sp.frames) this.blends.set(f, Phaser.BlendModes.ADD);
+    }
   }
 
   private list(layer: Layer): Piece[] {
     return layer === Layer.Glow ? this.glow : layer === Layer.Ground ? this.ground : this.tells;
   }
 
-  take(layer: Layer, additive = false): Piece {
+  /**
+   * A piece, reset: ×1, unturned, untinted, uncropped. Its blend follows the art each time
+   * `show` sets a frame, so a pooled piece never keeps another sprite's.
+   */
+  take(layer: Layer): Piece {
     let p = this.list(layer).pop();
     if (!p) {
       const s = new Phaser.GameObjects.Sprite(this.scene, -999, -999, COMBAT);
-      p = { s, layer, inUse: false, glowing: false };
+      p = { s, layer, inUse: false, glowing: false, blends: this.blends };
       if (layer === Layer.Glow) this.view.addEffect(s, false);
     }
     p.inUse = true;
     const s = p.s;
-    s.setBlendMode(additive ? Phaser.BlendModes.ADD : Phaser.BlendModes.NORMAL);
+    s.setBlendMode(Phaser.BlendModes.NORMAL);
     s.setVisible(true).setAlpha(1).setScale(1).setRotation(0).setFlipX(false).setFlipY(false);
     s.clearTint();
+    if (s.isCropped) s.setCrop();
     s.setOrigin(0.5, 0.5);
     if (layer === Layer.Ground) this.view.addEntity(s, { shadow: false, lit: false });
     this.out++;
@@ -99,7 +112,11 @@ export class Pieces {
   }
 }
 
-/** Sets a piece to a sprite's frame and plays one of its animations, from the start or not. */
+/**
+ * Sets a piece to a sprite's frame and plays one of its animations, from the start or not. The
+ * blend comes from the sprite's art every time: light and thin strokes add, sparks, bodies,
+ * pools, telegraphs and every enemy effect do not.
+ */
 export function show(
   p: Piece,
   atlas: string,
@@ -109,6 +126,28 @@ export function show(
 ): Phaser.GameObjects.Sprite {
   const s = p.s;
   if (s.texture.key !== atlas || s.frame.name !== frame) s.setTexture(atlas, frame);
+  const blend = p.blends.get(frame) ?? Phaser.BlendModes.NORMAL;
+  if (s.blendMode !== blend) s.setBlendMode(blend);
   if (anim) s.play(anim, !restart);
   return s;
+}
+
+/**
+ * Shows only the first `w` × `h` pixels of a piece's frame: the last, partial tile of a beam,
+ * bolt or lane is cut short, never squeezed. A full frame drops the crop.
+ */
+export function crop(p: Piece, w: number, h: number): void {
+  const s = p.s;
+  const fw = s.frame.realWidth;
+  const fh = s.frame.realHeight;
+  if (w >= fw && h >= fh) {
+    if (s.isCropped) s.setCrop();
+    return;
+  }
+  s.setCrop(
+    0,
+    0,
+    Math.max(1, Math.min(fw, Math.round(w))),
+    Math.max(1, Math.min(fh, Math.round(h))),
+  );
 }

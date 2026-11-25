@@ -16,7 +16,6 @@
  */
 import { HitFlag, HurtFlag, Priv } from "@guago/shared";
 import { type Bodies, type Body, Cat } from "./bodies.ts";
-import { COMBAT } from "./catalog.ts";
 import type { FightContext } from "./context.ts";
 import type { Active, Effects } from "./effects.ts";
 import { NumberStyle } from "./numbers.ts";
@@ -74,6 +73,8 @@ export interface FeedbackHooks {
   moment(kind: number): void;
   /** An elite arrived: the screen notices. */
   elite(b: Body | undefined, x: number, y: number): void;
+  /** Whether the local player wears the book with this id. */
+  wears(bookId: string): boolean;
 }
 
 export class Feedback {
@@ -180,7 +181,10 @@ export class Feedback {
     // Sparks: the class's colour, the hit's weight.
     const color = art?.color ?? cat.color("stone.bright");
     if (blocked) {
-      this.effects.oneShot("fx-shield-block", null, x, mid, 1);
+      // The block is drawn from the side the hit came from, one of eight.
+      const side = Math.atan2(this.ctx.selfY - y, this.ctx.selfX - x);
+      const aim = ((Math.round(side / (Math.PI / 4)) % 8) + 8) % 8;
+      this.effects.oneShot("fx-shield-block", `fx-shield-block/d${aim}`, x, mid, 1);
       this.ctx.particles.burst(Bit.Spark, x, mid, 5, cat.color("stone.bright"), 110, 0);
       this.ctx.sound.cue("sfx.monster.rational.hit", x, y, true);
     } else if (!dot) {
@@ -207,8 +211,12 @@ export class Feedback {
         crit ? 140 : 100,
         0,
       );
+      // A cone's own mark on each target it hits: 실험 보고서's label, 해부's bleed.
+      const own =
+        art?.kind === "cone" && art.hit && !art.hit.startsWith("fx-hit-") ? art.hit : null;
+      if (own) this.effects.cue(own, x, mid);
     }
-    if (collision) this.collision(b, h);
+    if (collision) this.collision(b, h, book);
 
     // Weight on the screen and in the room.
     if (!dot) {
@@ -223,8 +231,9 @@ export class Feedback {
                 ? TRAUMA.heavy
                 : TRAUMA.light,
       );
-      if (crit || kill || heavy)
-        this.ctx.lights.flash(x, mid, color, crit ? 40 : 30, crit ? 1.1 : 0.8, 160);
+      // Only the player's own crits light up (Q.E.D. lights with its burst); every other hit
+      // would fog the target it lands on.
+      if (crit && !qed) this.ctx.lights.strike(x, mid, color, 24, 0.6, 140);
       this.ctx.sound.hit(
         cls,
         true,
@@ -238,8 +247,11 @@ export class Feedback {
     }
   }
 
-  /** 물리 운동량: a launched monster struck another. Shock lines, plum sparks, a climbing chain. */
-  private collision(b: Body, h: Hit): void {
+  /**
+   * 물리 운동량: a launched monster struck another. The heavy spark as drawn, plum sparks thrown
+   * beside it along the knock, a climbing chain; 탄성 충돌 clacks.
+   */
+  private collision(b: Body, h: Hit, book: number): void {
     const now = this.ctx.now;
     this.chain = now - this.chainAt < CHAIN_MS ? Math.min(3, this.chain + 1) : 1;
     this.chainAt = now;
@@ -247,11 +259,15 @@ export class Feedback {
     const plum = cat.color("plum.light");
     const mid = (b.headY + b.y) / 2;
     const ang = Math.atan2(h.ky, h.kx);
-    this.effects.oneShot("fx-hit-heavy", "fx-hit-heavy/hit", b.x, mid, 1, Layer.Glow, plum);
+    this.effects.oneShot("fx-hit-heavy", "fx-hit-heavy/hit", b.x, mid, 1);
+    if (book >= 0 && this.effects.ownEvolved(book)) {
+      const evo = cat.book(book, true).hit;
+      if (evo && evo !== cat.book(book).hit) this.effects.oneShot(evo, null, b.x, mid, 1);
+    }
     this.ctx.particles.burst(
       Bit.Spark,
-      b.x,
-      mid,
+      b.x + Math.cos(ang) * 6,
+      mid + Math.sin(ang) * 4,
       4 + this.chain * 2,
       plum,
       120 + this.chain * 30,
@@ -262,7 +278,6 @@ export class Feedback {
     this.ctx.particles.burst(Bit.Debris, b.x, b.y, 2, cat.color("stone.light"), 50, 2);
     this.ctx.sound.collide(this.chain, b.x, b.y);
     this.hitTraumaAdd(TRAUMA.collision * this.chain);
-    this.ctx.lights.flash(b.x, mid, plum, 26 + this.chain * 6, 0.7 + this.chain * 0.2, 140);
   }
 
   /** The local player was hit. */
@@ -273,15 +288,7 @@ export class Feedback {
     const y = this.ctx.selfY;
     const cat = this.ctx.cat;
     if (flags & HurtFlag.Shielded && amount <= 0) {
-      this.effects.oneShot(
-        "fx-spark",
-        "fx-spark/hit",
-        x,
-        y - 12,
-        1,
-        Layer.Glow,
-        cat.color("sea.light"),
-      );
+      this.effects.oneShot("fx-spark", "fx-spark/hit", x, y - 12, 1);
       this.ctx.sound.self("sfx.reaction.neutralize");
       return;
     }
@@ -299,15 +306,7 @@ export class Feedback {
     this.ctx.sound.self(cue);
     this.ctx.sound.self("hit.physics.light");
     if (flags & (HurtFlag.Blast | HurtFlag.Slam)) {
-      this.effects.oneShot(
-        "fx-hit-heavy",
-        "fx-hit-heavy/hit",
-        x,
-        y - 10,
-        1,
-        Layer.Glow,
-        cat.color("red.light"),
-      );
+      this.effects.oneShot("fx-hit-heavy", "fx-hit-heavy/hit", x, y - 10, 1);
     }
   }
 
@@ -326,7 +325,6 @@ export class Feedback {
       mid,
       alpha,
       Layer.Glow,
-      undefined,
       b.elite ? 2 : 1,
     );
     const n = (b.elite ? 10 : 4) + Math.floor(Math.random() * 3);
@@ -344,22 +342,18 @@ export class Feedback {
     if (b.elite) {
       this.ctx.sound.cue(art.dieCue, b.x, b.y, true);
       if (mine) this.trauma(TRAUMA.elite * 0.6);
-      this.ctx.lights.flash(b.x, mid, cat.color("plum.light"), 60, 1.2, 320);
     }
-    void COMBAT;
   }
 
-  /** An effect of the local player's landed: heavy ones shake and light the ground. */
+  /** An effect of the local player's landed: heavy ones shake the ground. */
   impact(a: Active, x: number, y: number): void {
     if (!a.mine || !a.art) return;
     const kind = a.art.kind;
     if (kind === "telegraph") {
       this.trauma(TRAUMA.land * 1.4);
-      this.ctx.lights.flash(x, y, a.art.color, 54, 1.2, 260);
       this.ctx.particles.burst(Bit.Debris, x, y, 6, this.ctx.cat.color("clay.mid"), 70, 2);
     } else if (a.art.id === "holiday-physics") {
       this.trauma(TRAUMA.land);
-      this.ctx.lights.flash(x, y, a.art.color, 36, 0.9, 200);
       this.ctx.particles.burst(Bit.Debris, x, y, 4, this.ctx.cat.color("stone.light"), 60, 1);
     }
   }
@@ -369,22 +363,12 @@ export class Feedback {
     this.ctx.sound.cue("combat.telegraph.fire", a.x, a.y, true);
     const cat = this.ctx.cat;
     if (a.def === 5) {
-      const scale = Math.max(0.6, a.radius / 30);
-      this.effects.oneShot(
-        "fx-burst",
-        "fx-burst/blast",
-        a.x,
-        a.y,
-        1,
-        Layer.Ground,
-        undefined,
-        scale,
-        true,
-      );
+      this.effects.oneShot("fx-burst", "fx-burst/blast", a.x, a.y, 1, Layer.Ground, 1, true);
       this.ctx.particles.burst(Bit.Debris, a.x, a.y, 6, cat.color("clay.light"), 80, 2);
-      this.ctx.lights.flash(a.x, a.y - 6, cat.color("clay.light"), a.radius + 20, 1.2, 260);
     } else if (a.def === 9) {
-      const scale = Math.max(0.4, a.radius / 70);
+      // The slam's ring is drawn per radius: it runs out through the drawn sizes and stops at
+      // the one nearest the slam's (the enraged slam reaches the larger ones).
+      const stop = this.effects.nearest(cat.frames("fx-shockwave", "out"), a.radius);
       this.effects.oneShot(
         "fx-shockwave",
         "fx-shockwave/out",
@@ -392,12 +376,16 @@ export class Feedback {
         a.y,
         1,
         Layer.Ground,
-        undefined,
-        scale,
+        1,
         true,
+        0,
+        null,
+        stop,
       );
     } else if (a.def === 1) {
-      this.effects.oneShot("fx-dust", null, a.x, a.y, 1, Layer.Ground, undefined, 1, true);
+      // Dust kicked up behind the charger: drawn for a charge to the right, flipped for left.
+      const dust = this.effects.oneShot("fx-dust", null, a.x, a.y, 1, Layer.Ground, 1, true);
+      dust?.setFlipX(Math.cos(a.angle) < 0);
     }
     const d = Math.hypot(a.x - this.ctx.selfX, a.y - this.ctx.selfY);
     if (d < 120) this.trauma(0.12 * (1 - d / 120));
@@ -409,44 +397,30 @@ export class Feedback {
     const mine = owner === this.ctx.selfId && owner !== 0;
     const near = Math.hypot(x - this.ctx.selfX, y - this.ctx.selfY) < 260;
     if (kind < 16) {
+      // Reactions are drawn at the size they burst at, ×1. A burning one (연소) holds its fire
+      // for the burst's 0.6 s, then goes out.
       const r = cat.reactions[kind];
-      const scale = Math.max(1, radius / 24);
-      if (r?.vfx)
-        this.effects.oneShot(
-          r.vfx,
-          null,
-          x,
-          y,
-          mine ? 1 : 0.6,
-          Layer.Ground,
-          undefined,
-          scale,
-          true,
-        );
-      else {
-        this.effects.oneShot(
-          "fx-tome-impact",
-          "fx-tome-impact/land",
-          x,
-          y,
-          mine ? 1 : 0.6,
-          Layer.Glow,
-          cat.color("sea.light"),
-          scale,
-        );
-      }
+      const alpha = mine ? 1 : 0.6;
+      const vfx = r?.vfx ?? null;
+      const anims = vfx ? cat.meta.sprites[vfx]?.anims : undefined;
+      if (vfx && anims) {
+        const first = Object.keys(anims)[0] ?? "";
+        const out = anims.out ? `${vfx}/out` : null;
+        if (anims[first]?.loop)
+          this.effects.oneShot(vfx, null, x, y, alpha, Layer.Ground, 1, true, 600, out);
+        else this.effects.oneShot(vfx, null, x, y, alpha, Layer.Ground, 1, true);
+      } else this.effects.oneShot("fx-tome-impact", "fx-tome-impact/land", x, y, alpha);
       this.ctx.particles.burst(Bit.Spark, x, y - 6, mine ? 8 : 3, cat.color("sea.light"), 120, 0);
       if (mine || near) this.ctx.sound.cue(r?.sfx ?? "sfx.reaction.combustion", x, y, mine);
-      if (mine) {
-        this.trauma(0.18);
-        this.ctx.lights.flash(x, y, cat.color("sea.light"), radius + 16, 1, 260);
-      }
+      if (mine) this.trauma(0.18);
       return;
     }
     switch (kind) {
       case 16: {
-        // Q.E.D.
-        this.effects.oneShot("fx-qed", "fx-qed/burst", x, y - 14, mine ? 1 : 0.6, Layer.Glow);
+        // Q.E.D.: the big stamp when the local player's 증명 노트 is behind it.
+        const big = mine && this.hooks.wears("proof-note") && cat.has("fx-qed-big");
+        const qed = big ? "fx-qed-big" : "fx-qed";
+        this.effects.oneShot(qed, `${qed}/burst`, x, y - 14, mine ? 1 : 0.6);
         this.ctx.particles.burst(
           Bit.Spark,
           x,
@@ -456,29 +430,22 @@ export class Feedback {
           150,
           0,
         );
-        if (mine) {
-          this.ctx.lights.flash(x, y, cat.color("stone.bright"), 48, 1.3, 300);
-        } else if (near) this.ctx.sound.cue("sfx.signature.qed", x, y, false);
+        if (mine) this.ctx.lights.strike(x, y - 10, cat.color("stone.bright"), 24, 0.6, 200);
+        else if (near) this.ctx.sound.cue("sfx.signature.qed", x, y, false);
         return;
       }
       case 17: {
-        // A 치유형 healed its neighbours: a green ring that says "this one first".
-        this.ctx.particles.burst(Bit.Mote, x, y - 8, 8, cat.color("grass.light"), 30, 0);
-        this.effects.oneShot("fx-heal", null, x, y, 1, Layer.Glow);
+        // A 치유형 healed its neighbours: a rose glow that says "this one first". Green is
+        // 생명's, never a monster's.
+        this.ctx.particles.burst(Bit.Mote, x, y - 8, 8, cat.color("rose.light"), 30, 0);
+        this.effects.oneShot("fx-heal", "fx-heal/heal", x, y, 1, Layer.Glow, 1, false, 800);
         if (near) this.ctx.sound.cue("sfx.monster.element-water.attack", x, y, false);
         return;
       }
       case 18: {
         const b = this.bodies.get(owner);
         const at = b ?? { x, y };
-        this.effects.oneShot(
-          "fx-levelup",
-          "fx-levelup/burst",
-          at.x,
-          at.y,
-          mine ? 1 : 0.7,
-          Layer.Glow,
-        );
+        this.effects.oneShot("fx-levelup", "fx-levelup/burst", at.x, at.y, mine ? 1 : 0.7);
         this.ctx.particles.burst(
           Bit.Mote,
           at.x,
@@ -497,7 +464,7 @@ export class Feedback {
         return;
       }
       case 20: {
-        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow);
+        this.effects.oneShot("fx-revive", "fx-revive/glow", x, y, 1, Layer.Glow, 1, false, 1000);
         this.ctx.particles.burst(Bit.Mote, x, y - 10, 10, cat.color("gold.pale"), 40, 0);
         if (near) this.ctx.sound.cue("combat.revive", x, y, mine);
         return;
