@@ -155,9 +155,14 @@ export class Overlays {
         continue;
       }
       if (b.cat !== Cat.Monster) continue;
-      if (b.hp < 255 && (b.elite || b.hp > 0)) {
+      // Elites and bosses carry their health; any other monster shows a bar while the local
+      // player is hurting it, from the health its last hit left.
+      const own = b.mineUntil >= now && b.ownHp < 255 && b.ownHp > 0;
+      if (b.hp < 255 || own) {
+        const share = (b.hp < 255 ? b.hp : b.ownHp) / 255;
         const bar = this.bar(b.id);
-        this.placeBar(bar, b.x, b.headY - 7, ELITE_W, b.hp / 255, b.elite ? "elite" : "hp", dtMs);
+        const w = b.elite || b.hp < 255 ? ELITE_W : BAR_W - 4;
+        this.placeBar(bar, b.x, b.headY - 7, w, share, b.elite ? "elite" : "hp", dtMs);
       }
       if (b.mineUntil < now) continue;
       // The local player's own targets: their statuses and stacks.

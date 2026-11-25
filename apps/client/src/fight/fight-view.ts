@@ -135,9 +135,6 @@ export class FightView {
   private defaultLook = "";
   /** The local player's books by slot, as indices into the rules' book list. */
   private ownBooks: number[] = [];
-  private readonly castAt: number[] = [];
-  private readonly castSeconds: number[] = [];
-  private readonly lastCast: number[] = [];
   private rollAt = -1e9;
   private readonly ghosts: Phaser.GameObjects.Sprite[] = [];
   /** The local player's evolved books, by rules index. */
@@ -347,14 +344,7 @@ export class FightView {
     if (own) {
       this.ctx.selfClass = own.major || "math";
       const books = [...own.books].map((id) => this.cat.rules.books.indexOf(id));
-      if (books.join() !== this.ownBooks.join()) {
-        this.ownBooks = books;
-        for (let i = 0; i < books.length; i++) {
-          const def = BOOKS.find((b) => b.id === own?.books[i]);
-          const cd = (def?.attack as { cooldown?: number } | null)?.cooldown ?? 2;
-          this.castSeconds[i] ??= cd;
-        }
-      }
+      if (books.join() !== this.ownBooks.join()) this.ownBooks = books;
     }
     // Looks of everyone seated, composed a few a frame.
     for (const [slot, p] of state.players) {
@@ -442,21 +432,14 @@ export class FightView {
 
   private onFx(f: WireFx): void {
     this.effects.spawn(f, this.reader.tick);
-    if (this.ctx.selfId !== 0 && f.owner === this.ctx.selfId && f.kind !== 14) {
-      const slot = this.ownBooks.indexOf(f.def);
-      if (slot >= 0 && f.cast !== this.lastCast[slot]) {
-        const now = this.ctx.now;
-        const last = this.castAt[slot];
-        this.lastCast[slot] = f.cast;
-        // Auto casts fire the moment a book is ready: the gap between two is its cooldown.
-        if (last !== undefined) {
-          const gap = (now - last) / 1000;
-          const was = this.castSeconds[slot] ?? gap;
-          if (gap > 0.2 && gap < was * 1.25) this.castSeconds[slot] = was * 0.5 + gap * 0.5;
-        }
-        this.castAt[slot] = now;
-      }
-    }
+  }
+
+  /** Share of a book slot's cooldown left now, from the owner's `ready` and `cooldown` ticks. */
+  private cooldownLeft(slot: number): number {
+    const own = this.own;
+    const ready = own?.ready[slot] ?? 0;
+    const span = Math.max(1, own?.cooldown[slot] ?? 1);
+    return Math.max(0, Math.min(1, (ready - this.ctx.ownTick) / span));
   }
 
   private readonly hit = {
@@ -465,6 +448,7 @@ export class FightView {
     flags: 0,
     slot: 0,
     proof: 0,
+    hp: 255,
     kx: 0,
     ky: 0,
     count: 1,
@@ -477,6 +461,7 @@ export class FightView {
     x.flags = h.flags;
     x.slot = h.slot;
     x.proof = h.proof;
+    x.hp = h.hp;
     x.kx = h.kx;
     x.ky = h.ky;
     x.count = h.count;
@@ -557,9 +542,7 @@ export class FightView {
   }
 
   private bookReady(slot: number): boolean {
-    const at = this.castAt[slot];
-    if (at === undefined) return true;
-    return this.ctx.now - at >= (this.castSeconds[slot] ?? 1) * 1000 * 0.92;
+    return (this.own?.ready[slot] ?? 0) <= this.ctx.ownTick + 0.5;
   }
 
   private cast(slot: number): void {
@@ -887,16 +870,15 @@ export class FightView {
     while (s.books.length > this.ownBooks.length) s.books.pop();
     for (let i = 0; i < this.ownBooks.length; i++) {
       const art = this.cat.book(this.ownBooks[i] as number);
-      const seconds = this.castSeconds[i] ?? 1;
-      const at = this.castAt[i];
-      const left = at === undefined ? 0 : Math.max(0, 1 - (now - at) / (seconds * 1000));
+      const seconds = ((own.cooldown[i] ?? 0) * TICK_MS) / 1000;
+      const left = this.cooldownLeft(i);
       let book = s.books[i];
       if (!book || book.id !== art.id) {
         const icon = BOOKS.find((b) => b.id === art.id)?.cues.icon ?? `book/${art.id}`;
         book = { id: art.id, icon, cls: art.cls, ready: true, cooldown: 0, seconds };
         s.books[i] = book;
       }
-      book.ready = left <= 0.08;
+      book.ready = left <= 0;
       book.cooldown = left;
       book.seconds = seconds;
     }

@@ -220,9 +220,9 @@ export class Effects {
     a.own = own || enemy;
     a.mine = own;
     a.enemy = enemy;
-    // Bit 7 of `def` marks an evolved weapon once the wire carries it; the local player's own
-    // evolved books are known from its inventory meanwhile.
-    const evolved = !enemy && ((f.def & 128) !== 0 || (own && this.evolvedOwn.has(f.def & 127)));
+    // The record says whether the book is evolved; the player's own evolution shows from the
+    // moment its operation lands, a snapshot or two before the records start saying so.
+    const evolved = !enemy && (f.evolved || (own && this.evolvedOwn.has(f.def & 127)));
     a.art = enemy ? null : this.ctx.cat.book(f.def & 127, evolved);
     a.alpha = own || enemy ? 1 : this.ctx.restraint.others;
     if (a.predicted) {

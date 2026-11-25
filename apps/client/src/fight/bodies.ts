@@ -98,6 +98,8 @@ export class Body {
   arriveAt = 0;
   /** Hit by the local player until then, ms: its statuses and stacks show. */
   mineUntil = 0;
+  /** Health share after the local player's last hit on it (the hit record's), 255 unknown. */
+  ownHp = 255;
   proof = 0;
   proofAt = 0;
   // Students.
@@ -209,6 +211,7 @@ export class Bodies {
     b.lastFrame = -1;
     b.dying = 0;
     b.mineUntil = 0;
+    b.ownHp = 255;
     b.proof = 0;
     b.walk = Math.random() * STRIDE;
     b.idleAt = Math.random() * 1000;

@@ -58,6 +58,8 @@ export interface Hit {
   flags: number;
   slot: number;
   proof: number;
+  /** Target's health share after the tick's hits, 0 to 255. */
+  hp: number;
   kx: number;
   ky: number;
   count: number;
@@ -135,6 +137,7 @@ export class Feedback {
     const y = b.y;
     const mid = Math.round((b.headY + b.y) / 2);
     this.mineThisMessage.add(b.id);
+    b.ownHp = h.hp;
     if (kill) {
       this.counts.kills++;
       this.ctx.sound.kill(this.ctx.now);
