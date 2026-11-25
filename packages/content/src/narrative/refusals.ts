@@ -99,7 +99,7 @@ const OP: Readonly<Record<OpError, Line>> = {
   item_kind: ["narrator", "그 물건으로는 안 된다."],
   item_equipped: ["narrator", "장착 중인 물건이다. 먼저 빼야 한다."],
   unknown_def: ["narrator", "그런 물건은 없다."],
-  odds_changed: ["narrator", "그사이 확률이 바뀌었다. 다시 보고 할 것."],
+  odds_changed: ["narrator", "그사이 확률이 바뀌었다. 새 확률로 다시."],
   pool_empty: ["narrator", "쌓인 자습 시간이 없다."],
   quest_missing: ["narrator", "그 공지는 게시판에 없다."],
   quest_not_done: ["narrator", "아직 다 하지 않은 과제다."],
