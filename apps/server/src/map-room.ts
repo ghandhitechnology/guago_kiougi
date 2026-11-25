@@ -22,6 +22,7 @@ import {
   RECONNECT_SECONDS,
   removePlayer,
   type SimWorld,
+  skipTicks,
   step,
   TICK_MS,
   TILE_SIZE,
@@ -30,13 +31,12 @@ import { InterestGrid, type Viewer } from "./interest.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
 import { authenticateJoin, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { TickClock } from "./tick-clock.ts";
 
 /** Messages a second past which a client is dropped; inputs are 20 a second. */
 const MAX_MESSAGES_PER_SECOND = 120;
 /** How often each room logs its numbers. */
 const LOG_EVERY_MS = 30_000;
-/** Ticks the loop will run back to back to catch up after a stall before it lets time go. */
-const MAX_CATCH_UP = 3;
 /**
  * The loop wakes this often and steps whenever a tick is due. A 50 ms interval timer drifts late
  * by a millisecond or so each time and then has to double-step, so patches would leave up to a
@@ -75,8 +75,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   private readonly free: string[] = [];
   private seats!: RoomSeats;
   private readonly monsters = new Map<number, InstanceType<typeof MonsterState>>();
-  private acc = 0;
-  private lastLoop = 0;
+  private ticks!: TickClock;
 
   /** Only a browser with a live session and a character gets a seat. */
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
@@ -114,7 +113,7 @@ export class MapRoom extends Room<{ state: MapState }> {
     });
 
     // Patches go out right after each step, so every patch is exactly one tick of the world.
-    this.lastLoop = performance.now();
+    this.ticks = new TickClock(performance.now());
     this.setTimestep(() => this.loop(), POLL_MS);
     this.patchRate = 0;
     this.clock.setInterval(() => {
@@ -228,20 +227,17 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   private loop(): void {
     const now = performance.now();
-    this.acc = Math.min(this.acc + now - this.lastLoop, TICK_MS * MAX_CATCH_UP);
-    this.lastLoop = now;
-    if (this.acc < TICK_MS) return;
+    const { run, skip } = this.ticks.advance(now);
+    if (run === 0) return;
     const start = now;
     const cpu = process.threadCpuUsage();
-    let ticks = 0;
-    while (this.acc >= TICK_MS) {
-      this.acc -= TICK_MS;
+    // Ticks lost to a stall keep their numbers, so the stamps on patches keep wall time.
+    if (skip > 0) this.world = skipTicks(this.world, skip);
+    for (let i = 0; i < run; i++) {
       const inputs = new Map<string, MoveInput[]>();
       for (const [id, pawn] of this.pawns) inputs.set(id, pawn.queue.take());
       this.world = step(this.world, this.map, inputs);
-      ticks++;
     }
-    if (ticks === 0) return;
     this.sync();
     const patchStart = performance.now();
     this.broadcastPatch();

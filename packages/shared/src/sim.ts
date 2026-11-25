@@ -194,6 +194,11 @@ function stepMonsters(map: Collidable, world: SimWorld, roll: () => number): Sim
   });
 }
 
+/** Counts `n` ticks that were lost to a stall without simulating them: the world holds still. */
+export function skipTicks(world: SimWorld, n: number): SimWorld {
+  return { ...world, tick: world.tick + n };
+}
+
 /**
  * Advances the world one fixed tick: every player spends this tick's inputs in join order, then
  * the monsters wander. Pure: the world given is left untouched.
