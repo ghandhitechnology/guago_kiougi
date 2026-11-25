@@ -51,8 +51,10 @@ export interface FloorRoom {
   fence(arena: string, on: boolean): void;
   /** The character's duel kit at `mode` from what it wears, or undefined. */
   duelKit(characterId: string, mode: Mode): PlayerKit | undefined;
-  /** Its own kit, mode-free level and party, back after a match. */
+  /** Its own kit, level and party, back after a match. */
   unarm(characterId: string): void;
+  /** The control mode changed under the character (the living world counts full auto). */
+  modeChanged(characterId: string): void;
   /** Where people watch from: the gallery spot a player is put on when it must leave the floor. */
   readonly gallery: { x: number; y: number };
 }
@@ -302,6 +304,7 @@ export class FloorHost {
       p.level = DUEL_NORMS.level;
       p.casts = 0;
       this.room.world.setKit(p, kit);
+      this.room.modeChanged(id);
       const mark = marks.filter((k) => k.team === team)[used[team] ?? 0] ?? marks[0];
       used[team] = (used[team] ?? 0) + 1;
       entries.push({ player: p, team, mark: { x: mark?.x ?? 0, y: mark?.y ?? 0 } });

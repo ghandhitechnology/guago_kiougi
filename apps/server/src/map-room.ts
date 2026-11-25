@@ -766,6 +766,8 @@ export class MapRoom extends Room<{ state: MapState }> {
 
   /** Tells the living world the character is in these places (도감 school entries, notices). */
   private visit(characterId: string, ids: readonly string[]): void {
+    // Carried to a dueling floor and back is not going anywhere: a duel advances no quest.
+    if (this.duel?.fights(characterId)) return;
     const events = live()?.events;
     if (events) for (const id of ids) events.visit(characterId, id);
   }
@@ -1188,10 +1190,16 @@ export class MapRoom extends Room<{ state: MapState }> {
         if (!pawn) return;
         const p = pawn.player;
         p.party = partyOf(parties.of(id)?.id);
+        // A grant that landed during the match raised the recorded level.
+        if (pawn.loadout.level > p.level) p.level = pawn.loadout.level;
         pawn.mods = live()?.modifiers(id) ?? pawn.mods;
         p.expMult = pawn.mods.exp;
         this.world.setKit(p, this.kitOf(pawn, p.level));
         this.tellMode(pawn);
+      },
+      modeChanged: (id) => {
+        const pawn = this.pawnOf(id);
+        if (pawn) this.tellMode(pawn);
       },
       gallery: { x: gallery.x, y: gallery.y },
     };

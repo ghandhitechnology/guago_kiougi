@@ -14,6 +14,8 @@ import {
   DUEL_ACCEPT_SECONDS,
   DUEL_CHALLENGE_SECONDS,
   DUEL_CHALLENGES_IN_CAP,
+  DUEL_FLOORS_MAX,
+  DUEL_FORFEIT_WIN_SECONDS,
   DUEL_QUEUE_LOCK_SECONDS,
   duelMarks,
 } from "@guago/content";
@@ -223,6 +225,11 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
     if (!online(c.from) || inPending.has(c.from) || inMatch.has(c.from) || queued.has(c.from)) {
       endChallenge(c, "busy");
       return refused(type, m.n, "duel_target_busy");
+    }
+    // A block made since the challenge was sent ends it, without saying who blocked whom.
+    if (blockedEither(me, c.from)) {
+      endChallenge(c, "expired");
+      return refused(type, m.n, "duel_no_challenge");
     }
     if (!canDuelHere(me) || !canDuelHere(c.from)) return refused(type, m.n, "duel_not_here");
     leaveQueue(me, "found");
@@ -454,7 +461,7 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
 
   async function floorFor(fighters: readonly string[]): Promise<FloorHost | undefined> {
     let f = pickFloor(fighters);
-    if (f) return f;
+    if (f || floors.size >= DUEL_FLOORS_MAX) return f;
     // Every floor is taken: one more channel of the 새벽관, opened once however many wait.
     opening ??= rooms.openChannel(ARENA_MAP).finally(() => {
       opening = null;
@@ -511,7 +518,8 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
         const place = places.get(x);
         const at = place?.at();
         const from = place ? rooms.room(place.roomId) : undefined;
-        if (!place || !at || !from) {
+        // Knocked out, sent home or between maps since accepting: out, never carried off.
+        if (!place || !at || !from || place.mapId === HOME_MAP || !from.duelReady(x)) {
           floor.forfeit(x);
           return;
         }
@@ -565,13 +573,16 @@ export function createDueling({ records, rooms, everyMs = 1000 }: DuelingOptions
       if (!match) return;
       const all = [...match.sides[0], ...match.sides[1]];
       for (const id of all) push(id, { t: "over", id: m.id, result });
-      // Played by everyone in the match, won by the winning side's fighters who did not forfeit.
+      // Played by everyone in the match; won by the winning side's fighters who did not forfeit,
+      // and only when a round was fought out or the other side quit well into the fight: a
+      // concession before any real blow is no win to trade between friends.
+      const fought =
+        result.rounds.some((r) => r.end !== "forfeit") ||
+        result.seconds >= DUEL_FORFEIT_WIN_SECONDS;
       const rows = all.map((id) => {
         const f = result.fighters.find((x) => x.id === id);
-        return {
-          characterId: id,
-          won: result.winner > 0 && f?.team === result.winner && !f.forfeited,
-        };
+        const won = fought && result.winner > 0 && f?.team === result.winner && !f.forfeited;
+        return { characterId: id, won };
       });
       void records
         .add(rows)

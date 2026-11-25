@@ -53,6 +53,16 @@ export const DUEL_ARRIVE_SECONDS = 20;
 export const DUEL_RESULT_SECONDS = 6;
 /** Seconds a player who let a queued match lapse or refused it may not queue again. */
 export const DUEL_QUEUE_LOCK_SECONDS = 60;
+/**
+ * Floors held at once across the server: one per 새벽관 channel. A match finding every floor
+ * taken is called off (`no_floor`) rather than opening channel after channel.
+ */
+export const DUEL_FLOORS_MAX = 8;
+/**
+ * A match the other side forfeits counts as won only after this much fighting, unless a round
+ * was fought out first: conceding at once never hands a friend a win for the player card.
+ */
+export const DUEL_FORFEIT_WIN_SECONDS = 15;
 /** Challenges waiting on one player at once. */
 export const DUEL_CHALLENGES_IN_CAP = 5;
 
