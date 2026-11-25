@@ -15,6 +15,8 @@ const ui = { group: "ui", origin: [0, 0], anim: {} } as const;
 
 const LEGEND = {
   ...UI,
+  // Clay, for the spectrum's orange.
+  M: "clay.light",
   ...UI,
   // Sea, plum and grass, for grade rings and book covers.
   "1": "sea.deep",
@@ -174,6 +176,65 @@ const MATH = {
   ),
 };
 
+// 물리 ------------------------------------------------------------------------------------
+
+const PHYSICS = {
+  /** 역학 실험 키트: a pendulum on its pivot, mid-swing. */
+  "mechanics-kit": book(
+    PLUM_DEEP,
+    stack("wwwwwww", "...w...", "....w..", ".....w.", "....99.", "....99."),
+    [5, 4],
+  ),
+  /** 광학 노트: a prism, a beam in and a fan out. */
+  optics: book(PLUM, stack("...w...", "..w.w..", "ww...w.", "..wwwww", "......."), [5, 5]),
+  /** 운동량 문제집: a ball and the lines it leaves. */
+  "momentum-book": book(
+    PLUM_PALE,
+    stack("....88.", "88.8888", "...8888", "88.8888", "....88."),
+    [5, 5],
+  ),
+  /** 중력 탐구 보고서: the apple, falling. */
+  "gravity-report": book(
+    PLUM_DEEP,
+    stack("...hh..", "..xx...", ".xxxx..", ".xwxx..", "..xx...", ".......", "w.w.w.w"),
+    [5, 4],
+  ),
+
+  /** 프린키피아 사본: the tome's arc under a gilded band. */
+  principia: over(
+    evolved(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),
+    stack("YYYYYY", "gggggg"),
+    4,
+    9,
+  ),
+  /** 푸코 진자: the swing plane over a ring of pins. */
+  foucault: evolved(
+    PLUM_DEEP,
+    stack("...w...", "...w...", "...w...", "..999..", ".w.9.w.", "w.....w", ".wwwww."),
+    [5, 4],
+  ),
+  /** 맥스웰 방정식: the bolt inside its field. */
+  maxwell: evolved(
+    PLUM_PALE,
+    stack("8....88", ".8..88.", "8..88.8", ".88888.", "8.88..8", ".88..8.", "88....8"),
+    [5, 4],
+  ),
+  /** 스펙트럼: the prism and its seven colours. */
+  spectrum: evolved(
+    PLUM,
+    stack("..w..PP", ".w.wMM.", "ww..YY.", ".wwwHH.", "....44.", "....bb.", "....99."),
+    [5, 4],
+  ),
+  /** 탄성 충돌: two balls bouncing apart. */
+  elastic: evolved(PLUM_PALE, stack("88...88", "88...88", ".......", "w.w.w.w", "......."), [5, 5]),
+  /** 만유인력: the spiral of the well. */
+  "universal-gravitation": evolved(
+    PLUM_DEEP,
+    stack(".wwww..", "w....w.", "w.ww.w.", "w.w..w.", "w.www..", "w......", ".wwwww."),
+    [5, 4],
+  ),
+};
+
 const books = sprite({
   ...ui,
   name: "book",
@@ -182,6 +243,7 @@ const books = sprite({
   lone: "wqt",
   frames: {
     ...MATH,
+    ...PHYSICS,
     /** 홀리데이 일반물리: the heavy plum tome with its gold band and a thrown arc. */
     "holiday-physics": over(
       book(PLUM, stack("..ww...", ".w..w..", "w....w.", "w.....t"), [5, 3]),

@@ -270,3 +270,26 @@ export function put(dst: Pic, src: Pic | string, x: number, y: number, onto?: st
 export function recolor(p: Pic, from: string, to: string): Pic {
   return p.swap(from, to);
 }
+
+/**
+ * Directional frames: `n` drawings round the circle, frame `k` aimed at `k / n` of a turn
+ * (0 = right, clockwise with y down). For shapes that must not be rotated by the client, so
+ * thin lines never alias: the client picks the frame nearest its aim instead.
+ */
+export function aimed(n: number, draw: (angle: number) => Pic): Pic[] {
+  return Array.from({ length: n }, (_, k) => draw((k / n) * Math.PI * 2));
+}
+
+/** Frame names and anims for `aimed` sets: frames `${prefix}${dir}-${step}`, one anim per direction. */
+export function aimedFrames(
+  prefix: string,
+  sets: readonly (readonly Pic[])[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  sets.forEach((steps, dir) => {
+    steps.forEach((p, k) => {
+      out[`${prefix}${dir}-${k}`] = p.toString();
+    });
+  });
+  return out;
+}

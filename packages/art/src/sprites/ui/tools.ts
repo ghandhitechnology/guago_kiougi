@@ -163,6 +163,71 @@ const MATH_TOOLS = {
   })(),
 };
 
+const PHYSICS_TOOLS = {
+  /** 초시계: a brass-crowned stopwatch, its hand at the quarter. */
+  stopwatch: sealed(
+    "......YY",
+    ".....yYgG",
+    "......gG",
+    "...WWWWWW",
+    "..WWsssWWs",
+    ".WWs.q.sWWs",
+    ".Wsq..q.sWs",
+    ".Ws..qq.sWs",
+    ".Wsq.....Ws",
+    ".WWs.q..sWs",
+    "..WWsssWWs",
+    "...WWWWWs",
+    "....sssss",
+  ),
+  /** 프리즘: a glass prism, white light in, a spread of colour out. */
+  prism: sealed(
+    "",
+    "......5",
+    ".....545",
+    "....54445",
+    "....5443445",
+    "WW.54444345",
+    "..W544443345",
+    ".....5444333449",
+    "....544444333M9",
+    "...54444443333YM",
+    "..555555555555HY",
+    "..............4H",
+  ),
+  /** 스프링: a steel coil, compressed at one end. */
+  spring: sealed(
+    "",
+    "...SSSSSSSS",
+    "...sddddddS",
+    "....WWWWWW",
+    "...sddddddS",
+    "....WWWWWW",
+    "...sddddddS",
+    "....WWWWWW",
+    "...sddddddS",
+    "....WWWWWW",
+    "...sddddddS",
+    "...SSSSSSSS",
+  ),
+  /** 사과: the apple, a leaf on its stem. */
+  apple: sealed(
+    "",
+    ".......cff",
+    "......cffh",
+    "......c",
+    "...xxxcxxx",
+    "..xRRrrrrxx",
+    ".xRRrrrrrrxx",
+    ".xRrrrrrrrrx",
+    ".xrrrrrrrrxx",
+    ".xrrrrrrrrxx",
+    "..xrrrrrrxx",
+    "..xxrrrrxx",
+    "...xxxxxx",
+  ),
+};
+
 const tool = sprite({
   ...ui,
   name: "tool",
@@ -172,6 +237,7 @@ const tool = sprite({
   lone: "*Wy5",
   frames: {
     ...MATH_TOOLS,
+    ...PHYSICS_TOOLS,
     /** 컴퍼스: a drawing compass, needle leg and pencil leg. */
     compass: compass(),
     /** 모눈자: a clear ruler printed with a grid and ticks. */
