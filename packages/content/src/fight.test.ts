@@ -27,6 +27,7 @@ import {
   snapshotCells,
   snapshotReaderFor,
   spawnMonster,
+  startRevive,
   stepFight,
   TILE_SIZE,
 } from "@guago/shared";
@@ -529,6 +530,34 @@ describe("a reconnect", () => {
     let drops = 0;
     snapshotReaderFor(w.map).read(net.message(v).slice(), { ...NULL_SINK, drop: () => drops++ });
     expect(drops).toBe(1);
+  });
+});
+
+describe("reviving", () => {
+  it("needs the reviver to hold it, and works on one player at a time", () => {
+    const w = arena();
+    const r = w.addPlayer("r", 0, 200, 200, kitFor("math", ["wangdo"], 10), 10);
+    const a = w.addPlayer("a", 1, 210, 200, kitFor("math", ["wangdo"], 10), 10);
+    const b = w.addPlayer("b", 2, 200, 210, kitFor("math", ["wangdo"], 10), 10);
+    for (const q of [a, b]) {
+      q.hp = 0;
+      q.downAt = w.tick;
+    }
+    // Asked once and let go: no revive.
+    expect(startRevive(w, r, a)).toBe(true);
+    for (let t = 0; t < 60; t++) stepFight(w, new Map());
+    expect(a.down).toBe(true);
+    // Starting on b lets go of a.
+    startRevive(w, r, a);
+    startRevive(w, r, b);
+    expect(a.reviver).toBe(-1);
+    // Held: b gets up after the channel.
+    for (let t = 0; t < 60; t++) {
+      startRevive(w, r, b);
+      stepFight(w, new Map());
+    }
+    expect(b.down).toBe(false);
+    expect(a.down).toBe(true);
   });
 });
 

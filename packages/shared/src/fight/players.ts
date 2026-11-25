@@ -16,6 +16,11 @@ export type FightInputs = ReadonlyMap<string, readonly FightInput[]>;
 const REVIVE_TICKS = ticks(KNOCKOUT.reviveChannelSeconds);
 const REVIVE_WINDOW = ticks(KNOCKOUT.reviveWindowSeconds);
 const REVIVE_SAFE = ticks(KNOCKOUT.reviveInvulnerableSeconds);
+/**
+ * A revive is held: the reviver asks again at least this often (ticks), or it lets go. Full auto
+ * asks every think; a client sends `revive` while the key is held.
+ */
+export const REVIVE_HOLD = 12;
 /** A reviver may stand this much past the revive range while channelling. */
 const REVIVE_SLACK = 8;
 /** Regeneration lands in steps this many ticks apart, so health does not change every patch. */
@@ -142,7 +147,8 @@ function knockedOut(w: FightWorld, p: Player): void {
     const dx = r.x - p.x;
     const dy = r.y - p.y;
     const reach = KNOCKOUT.reviveRange + REVIVE_SLACK;
-    if (dx * dx + dy * dy > reach * reach) {
+    if (dx * dx + dy * dy > reach * reach || tick - p.reviveHeld > REVIVE_HOLD) {
+      // Walked off, or let go of the revive.
       p.reviver = -1;
     } else if (tick - p.reviveFrom >= REVIVE_TICKS) {
       p.downAt = -1;
@@ -179,9 +185,15 @@ export function startRevive(w: FightWorld, by: Player, target: Player): boolean 
   const dy = by.y - target.y;
   const reach = KNOCKOUT.reviveRange + REVIVE_SLACK;
   if (dx * dx + dy * dy > reach * reach) return false;
-  if (target.reviver === by.index) return true;
+  if (target.reviver === by.index) {
+    target.reviveHeld = w.tick;
+    return true;
+  }
   if (target.reviver >= 0) return false;
+  // One at a time: starting on someone lets go of anyone else.
+  for (const q of w.players) if (q.reviver === by.index) q.reviver = -1;
   target.reviver = by.index;
   target.reviveFrom = w.tick;
+  target.reviveHeld = w.tick;
   return true;
 }

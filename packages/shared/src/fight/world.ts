@@ -113,6 +113,8 @@ export class Player {
   /** A reviver channelling on this player, and since when. */
   reviver = -1;
   reviveFrom = 0;
+  /** Tick the reviver last asked to keep reviving. */
+  reviveHeld = 0;
   contactSafeUntil = 0;
   /** Aim offset from the feet, px, while `aiming`. */
   aimX = 0;
@@ -913,6 +915,7 @@ export function resetPlayer(p: Player): void {
   p.downAt = -1;
   p.reviver = -1;
   p.reviveFrom = 0;
+  p.reviveHeld = 0;
   p.contactSafeUntil = 0;
   p.aimX = 0;
   p.aimY = 0;
