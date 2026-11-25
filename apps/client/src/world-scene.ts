@@ -76,8 +76,8 @@ const HEAR_PX = 220;
 /** A door this close starts loading the map behind it. */
 const NEAR_DOOR_PX = 56;
 /**
- * In a field only this many students nearest the player wear name plates, chosen this often, and
- * none standing so close that their plates would cover the player.
+ * In a field only this many of the player's party nearest them wear name plates, chosen this
+ * often, and none standing so close that their plates would cover the player.
  */
 const NAMED_IN_FIELD = 4;
 const NAMED_CLEAR_PX = 32;
@@ -400,6 +400,7 @@ export class WorldScene extends Phaser.Scene {
       field,
       onStep: (fx, fy, mine) => this.steps?.step(fx, fy, worldView.self, mine),
       useDistance: () => this.useDistance(),
+      floors: map.arenas.length > 0,
     });
     // The fight's bars and books belong where a fight can happen: a field with monsters, or a
     // floor where duels and boss fights are held. A town shows the student, not their kit.
@@ -775,7 +776,7 @@ export class WorldScene extends Phaser.Scene {
     // nearest the player wear theirs, chosen again twice a second so plates do not flicker.
     const field = here.map.zones.some((z) => z.kind === "monsters");
     const now = performance.now();
-    if (field && now - this.namedAt > NAMED_EVERY_MS) {
+    if (now - this.namedAt > NAMED_EVERY_MS) {
       this.namedAt = now;
       this.pickNamed(here);
     }
@@ -813,17 +814,25 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  /** The students nearest the player in a field, who keep their name plates. */
+  /**
+   * In a field a crowd's plates would bury the fight: only the player's party wears theirs,
+   * at most the few nearest, and none standing so close that it would cover the player. The
+   * party also stands out of the crowd in the fight view.
+   */
   private pickNamed(here: Here): void {
+    const party = session.link?.social.party;
+    const allies = new Set<string>();
+    for (const m of party?.members ?? []) allies.add(m.name);
+    here.fight.setAllies(allies);
     const me = this.drawn;
     const near = this.nearScratch;
     near.length = 0;
     const players = here.room.state.players;
     here.fight.forEachStudent((slot, x, y, self) => {
-      const sid = players.get(String(slot))?.sid;
-      if (self || !sid || !me) return;
+      const p = players.get(String(slot));
+      if (self || !p?.sid || !me || !allies.has(p.name)) return;
       const d = Math.hypot(x - me.x, y - me.y);
-      if (d > NAMED_CLEAR_PX) near.push({ sid, d });
+      if (d > NAMED_CLEAR_PX) near.push({ sid: p.sid, d });
     });
     near.sort((a, b) => a.d - b.d);
     this.named.clear();

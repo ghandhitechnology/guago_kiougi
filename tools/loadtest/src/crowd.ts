@@ -34,7 +34,9 @@ import { signIn } from "./account.ts";
  *
  * Bots enter through `POST /api/enter` like the browser; `--map` seats them on that map when the
  * server runs with ALLOW_MAP_OPTION=1. `--mode 0` puts them in 완전 자동, where the server walks
- * them to the monsters: a field that keeps fighting with nobody to follow.
+ * them to the monsters: a field that keeps fighting with nobody to follow. `--spread 320` gives
+ * each bot its own patch of the field up to that far round the student, where it hunts on its own:
+ * a crowd spread across a surge instead of piled on one spot.
  */
 
 const { values } = parseArgs({
@@ -46,8 +48,10 @@ const { values } = parseArgs({
     revive: { type: "string", default: "1" },
     map: { type: "string", default: "" },
     mode: { type: "string", default: "1" },
+    spread: { type: "string", default: "0" },
   },
 });
+const SPREAD = Number(values.spread) || 0;
 
 const BOTS = Number(values.bots);
 const target = new URL(values.url);
@@ -80,7 +84,8 @@ class CrowdBot {
     // Sized before the first snapshot: every message is a delta against the one before.
     this.map = mapById(mapId);
     this.reader = snapshotReaderForMap(mapId);
-    this.ring = 50 + ((index * 37) % 100);
+    this.ring =
+      SPREAD > 0 ? 60 + ((index * 53) % Math.max(1, SPREAD - 60)) : 50 + ((index * 37) % 100);
     this.side = index % 2 === 0 ? 1 : -1;
     this.angle = index * 2.399963;
     room.reconnection.enabled = false;
@@ -157,6 +162,10 @@ class CrowdBot {
       } else this.steer(sx, sy);
       return;
     }
+    if (SPREAD > 0) {
+      this.patch(n, px, py, s);
+      return;
+    }
     if (sd > NEAR + this.ring * 0.4) {
       this.steer(sx, sy);
       return;
@@ -195,6 +204,44 @@ class CrowdBot {
     const gy = s.y + Math.sin(ang) * this.ring * 0.7 - py;
     if (Math.hypot(gx, gy) < 6) this.dir = [0, 0];
     else this.steer(gx, gy);
+  }
+
+  /** `--spread`: keep to this bot's own patch round the student and fight what comes into it. */
+  private patch(n: number, px: number, py: number, s: { x: number; y: number }): void {
+    const ang = this.angle + n * 0.0008 * this.side;
+    const hx = s.x + Math.cos(ang) * this.ring;
+    const hy = s.y + Math.sin(ang) * this.ring * 0.7;
+    if (Math.hypot(hx - px, hy - py) > 120) {
+      this.steer(hx - px, hy - py);
+      return;
+    }
+    let best = Number.POSITIVE_INFINITY;
+    let mx = 0;
+    let my = 0;
+    for (const m of this.reader.members.values()) {
+      if (m.kind >= WirePlayer) continue;
+      const x = m.qx / Q;
+      const y = m.qy / Q;
+      if (Math.hypot(x - hx, y - hy) > 100) continue;
+      const d = (x - px) ** 2 + (y - py) ** 2;
+      if (d < best) {
+        best = d;
+        mx = x - px;
+        my = y - py;
+      }
+    }
+    if (best < Number.POSITIVE_INFINITY) {
+      const d = Math.sqrt(best);
+      const ux = mx / (d || 1);
+      const uy = my / (d || 1);
+      const side = (Math.floor(n / 80) % 2 === 0 ? 1 : -1) * this.side;
+      if (d < 40) this.steer(-ux - uy * side * 0.6, -uy + ux * side * 0.6);
+      else if (d > 90) this.steer(ux, uy);
+      else this.steer(-uy * side, ux * side);
+      return;
+    }
+    if (Math.hypot(hx - px, hy - py) < 8) this.dir = [0, 0];
+    else this.steer(hx - px, hy - py);
   }
 
   tick(n: number, now: number): void {

@@ -175,6 +175,8 @@ interface Entity {
   readonly shadow: Phaser.GameObjects.Image | null;
   readonly focus: boolean;
   readonly lit: boolean;
+  /** Pixels added to its feet in the sort (`setEntityBias`). */
+  bias: number;
 }
 
 interface Telegraph {
@@ -485,7 +487,17 @@ export class MapView {
       shadow,
       focus: options.focus ?? false,
       lit: options.lit ?? true,
+      bias: 0,
     });
+  }
+
+  /**
+   * Moves an entity in the sort by `px` as if its feet were that much lower (positive: drawn over
+   * more of what stands near it). A crowd sorts behind the player and the monsters this way.
+   */
+  setEntityBias(obj: Phaser.GameObjects.GameObject, px: number): void {
+    const e = this.entities.get(obj);
+    if (e) e.bias = px;
   }
 
   /** Takes an entity out of the view with its lights. The object itself is not destroyed. */
@@ -1400,7 +1412,7 @@ export class MapView {
     const sun = this.sun;
     for (const e of this.entities.values()) {
       const { obj } = e;
-      obj.setDepth(obj.y + obj.x * 1e-5);
+      obj.setDepth(obj.y + e.bias + obj.x * 1e-5);
       const s = e.shadow;
       if (!s) continue;
       s.setVisible(obj.visible);

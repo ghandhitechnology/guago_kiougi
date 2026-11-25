@@ -16,6 +16,20 @@ import { type Point, Track } from "./track.ts";
 export const Cat = { Monster: 0, Player: 1, Minion: 2 } as const;
 export type Cat = (typeof Cat)[keyof typeof Cat];
 
+/**
+ * Who a student is to the local player in a fight. The crowd steps back (dimmed, cooler, sorted
+ * behind the monsters near them); the player's party and the other side of a duel do not.
+ */
+export const Rank = { Self: 0, Ally: 1, Other: 2, Fighter: 3 } as const;
+export type Rank = (typeof Rank)[keyof typeof Rank];
+
+/** The crowd's look in a fight: a cool shade multiplied in, a little see-through, sorted back. */
+const CROWD_TINT = 0xa4a8ba;
+const CROWD_ALPHA = 0.82;
+const CROWD_BIAS = -14;
+/** The local player sorts over what stands just in front of them. */
+const SELF_BIAS = 6;
+
 /** Player state bits on the wire. */
 export const PState = { Down: 4, Rolling: 8, Reviving: 16 } as const;
 
@@ -125,6 +139,9 @@ export class Body {
   /** Last fuse blink state, and when the current state began, ms. */
   blink = false;
   stateAt = 0;
+  /** Who this student is to the local player (`Rank`), and the rank its look was set for. */
+  rank: Rank = Rank.Other;
+  shownRank = -1;
   aura: Phaser.GameObjects.Sprite | null = null;
   /** The local player's ring on the ground. */
   ring: Phaser.GameObjects.Sprite | null = null;
@@ -167,6 +184,8 @@ export class Bodies {
   private readonly hooks: BodiesHooks;
   /** The local player's body, once the snapshot has shown it. */
   self: Body | null = null;
+  /** In a fight (a field or a duel floor) the crowd steps back; in town everyone looks alike. */
+  crowd = false;
   monsters = 0;
   players = 0;
 
@@ -196,6 +215,7 @@ export class Bodies {
     for (const b of this.byId.values()) {
       if (b.cat !== Cat.Player || b.self === (b.slot === slot)) continue;
       b.self = b.slot === slot;
+      b.shownRank = -1;
       if (b.self) this.self = b;
       else if (this.self === b) this.self = null;
     }
@@ -249,6 +269,8 @@ export class Bodies {
     b.downSince = 0;
     b.facing = m.state & 3;
     b.texture = "";
+    b.rank = b.self ? Rank.Self : Rank.Other;
+    b.shownRank = -1;
     b.arriveAt = b.cat === Cat.Monster && (m.state & 15) === MState.Arrive ? this.ctx.now : 0;
     this.byId.set(b.id, b);
     if (b.self) this.self = b;
@@ -653,11 +675,31 @@ export class Bodies {
     if (!this.ctx.scene.tweens.isTweening(s)) s.setScale(1 + sq * 0.22, 1 - sq * 0.22);
     s.setFlipX(b.facing === 2);
     s.setPosition(Math.round(b.x + b.kickX), Math.round(b.y + b.kickY));
-    // Others fade a little so the local player always reads first, who also stands in a ring.
-    s.setAlpha(b.self ? 1 : 0.92);
+    this.standing(b);
     if (b.self) this.selfRing(b);
     this.downMarks(b, down);
     void dtMs;
+  }
+
+  /**
+   * A student's place in the crowd: the local player over what stands just in front of them, the
+   * crowd dimmed and cooled and sorted behind the monsters near it, so the player and what
+   * threatens them read first. The tint is put back after every flash.
+   */
+  private standing(b: Body): void {
+    const rank = b.self ? Rank.Self : this.crowd ? b.rank : Rank.Ally;
+    const s = b.sprite;
+    if (rank !== b.shownRank) {
+      b.shownRank = rank;
+      const bias = rank === Rank.Self ? SELF_BIAS : rank === Rank.Other ? CROWD_BIAS : 0;
+      this.ctx.view.setEntityBias(s, bias);
+      if (!b.flashing) s.clearTint();
+    }
+    if (rank === Rank.Other) {
+      s.setAlpha(CROWD_ALPHA);
+      if (!b.flashing && b.flash <= 0 && s.tintTopLeft !== CROWD_TINT)
+        s.setTint(CROWD_TINT).setTintMode(Phaser.TintModes.MULTIPLY);
+    } else s.setAlpha(1);
   }
 
   private selfRing(b: Body): void {

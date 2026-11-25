@@ -18,6 +18,7 @@
  * controls, and keeps `state` for the HUD with `actions` for its buttons.
  */
 import type { Room } from "@colyseus/sdk";
+import type { HitClass } from "@guago/audio";
 import { BOOKS, FIELD_PACING, narrative } from "@guago/content";
 import {
   AIM_MESSAGE,
@@ -48,8 +49,8 @@ import { createSpriteAnims, loadArt } from "../art.ts";
 import { composeDoll, normalizeLook } from "../doll.ts";
 import type { MapView, Tier } from "../render/index.ts";
 import { TEX } from "../render/textures.ts";
-import { Bodies, type Body, Cat, PState } from "./bodies.ts";
-import { Catalog, COMBAT } from "./catalog.ts";
+import { Bodies, type Body, Cat, PState, Rank } from "./bodies.ts";
+import { Catalog, CLASS_RAMP, COMBAT } from "./catalog.ts";
 import { TickClock } from "./clock.ts";
 import { type FightContext, RESTRAINT } from "./context.ts";
 import { type ControlSink, FightKeys, MouseAim, nextMode } from "./controls.ts";
@@ -95,6 +96,8 @@ export interface FightOptions {
    * the ally is at least as near; otherwise the key is the world's.
    */
   readonly useDistance?: () => number;
+  /** The map has a floor for duels or boss fights: the crowd steps back there too. */
+  readonly floors?: boolean;
 }
 
 /** Atlases the fight draws from, besides the map's. */
@@ -287,6 +290,7 @@ export class FightView {
       streak: (mark) => this.streakMark(mark),
     });
     this.own = undefined;
+    this.bodies.crowd = (options.field ?? true) || (options.floors ?? false);
 
     this.sink = {
       enter: (m) => this.bodies.enter(m, this.reader.tick),
@@ -853,6 +857,7 @@ export class FightView {
     ctx.sound.lx = ctx.selfX;
     ctx.sound.ly = ctx.selfY;
     this.composeQueued();
+    if (this.counters.frames % 10 === 0) this.rankStudents();
     this.feedback.frame();
     this.controlsFrame(now);
     this.windups();
@@ -942,6 +947,7 @@ export class FightView {
         .setVisible(true);
       g.setOrigin(self.sprite.originX, self.sprite.originY);
     }
+    this.xrayFrame(self);
     if (self && rolling && since < DODGE.invulnerableSeconds * 1000) {
       // Untouchable: a white rim flicker every other frame.
       if (this.counters.frames % 4 < 2 && self.flash <= 0) {
@@ -953,6 +959,47 @@ export class FightView {
     } else if (self && since < DODGE.invulnerableSeconds * 1000 + 40 && self.flash <= 0) {
       self.sprite.clearTint();
     }
+  }
+
+  /** The local player's cut-out, drawn over whatever stands in front of them. */
+  private xray: Phaser.GameObjects.Sprite | null = null;
+
+  /**
+   * When a body stands in front of the local player and covers them, their outline in the class
+   * colour is drawn through it, so the player is never lost in a crowd.
+   */
+  private xrayFrame(self: Body | null): void {
+    let covered = false;
+    if (self && !self.down) {
+      for (const b of this.bodies.byId.values()) {
+        if (b === self || b.cat === Cat.Minion || b.dying) continue;
+        const dy = b.y - self.y;
+        if (dy <= 1 || dy > 18 || Math.abs(b.x - self.x) > 12) continue;
+        covered = true;
+        break;
+      }
+    }
+    if (!covered || !self) {
+      this.xray?.setVisible(false);
+      return;
+    }
+    let x = this.xray;
+    if (!x) {
+      x = new Phaser.GameObjects.Sprite(this.scene, 0, 0, COMBAT);
+      this.view.addEffect(x, false);
+      this.xray = x;
+    }
+    const s = self.sprite;
+    const ramp = CLASS_RAMP[this.ctx.selfClass as HitClass] ?? CLASS_RAMP.math;
+    x.setTexture(s.texture.key, s.frame.name)
+      .setOrigin(s.originX, s.originY)
+      .setFlipX(s.flipX)
+      .setScale(s.scaleX, s.scaleY)
+      .setPosition(s.x, s.y)
+      .setTint(this.cat.color(ramp[0]))
+      .setTintMode(Phaser.TintModes.FILL)
+      .setAlpha(0.4)
+      .setVisible(true);
   }
 
   private screenFrame(now: number, dt: number): void {
@@ -1137,6 +1184,37 @@ export class FightView {
     this.ctx.lights.setTier(tier);
   }
 
+  /** Names of the local player's party, who are not dimmed with the crowd. */
+  private allies: ReadonlySet<string> = new Set();
+  /** Session ids of everyone fighting on the duel floor this player is on. */
+  private fighters: ReadonlySet<string> = new Set();
+
+  /** The local player's party by name; they stand out of the crowd. */
+  setAllies(names: ReadonlySet<string>): void {
+    this.allies = names;
+  }
+
+  /** Who each student is to the local player: self, party, the other side of a duel, or crowd. */
+  private rankStudents(): void {
+    const players = this.room.state?.players;
+    if (!players) return;
+    for (const b of this.bodies.byId.values()) {
+      if (b.cat !== Cat.Player) continue;
+      if (b.self) {
+        b.rank = Rank.Self;
+        continue;
+      }
+      const p = players.get(String(b.slot));
+      b.rank = !p
+        ? Rank.Other
+        : this.fighters.has(p.sid)
+          ? Rank.Fighter
+          : this.allies.has(p.name)
+            ? Rank.Ally
+            : Rank.Other;
+    }
+  }
+
   /** Every student drawn this frame, the local player included: for name plates and the minimap. */
   forEachStudent(fn: (slot: number, x: number, y: number, self: boolean) => void): void {
     for (const b of this.bodies.byId.values()) {
@@ -1188,6 +1266,7 @@ export class FightView {
     this.ctx.lights.destroy();
     this.ctx.sound.stop();
     for (const g of this.ghosts) g.destroy();
+    this.xray?.destroy();
     this.evo?.done();
     this.bubble?.destroy();
     for (const a of this.arrows) a.destroy();
