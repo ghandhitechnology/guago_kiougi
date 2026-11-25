@@ -2,6 +2,7 @@ import { get, post } from "../api.ts";
 import { amount, form, h, select, table, td, when } from "../dom.ts";
 import type { Ctx } from "../nav.ts";
 import { type ChatLine, chatTable } from "./chat.ts";
+import { type IpPreview, ipOptions, ipPreview, ipScopeOf } from "./ipban.ts";
 import { MAJOR, type PlayerRow, statusCell } from "./players.ts";
 
 interface Sanction {
@@ -142,7 +143,7 @@ function sanctionsTable(p: Player): Node {
   return table(["", "From", "Until", "Reason", "By", ""], rows, "None");
 }
 
-function actions(ctx: Ctx, p: Player): Node {
+function actions(ctx: Ctx, p: Player, preview: IpPreview): Node {
   const id = p.accountId;
   const done = (what: string) => async () => {
     ctx.reload();
@@ -213,7 +214,7 @@ function actions(ctx: Ctx, p: Player): Node {
         { class: "row" },
         [
           select("minutes", BAN_FOR, "10080"),
-          h("label", null, h("input", { type: "checkbox", name: "ip" }), "and its IPs"),
+          ...ipOptions(preview),
           reasonInput(TOLD),
           h("button", { type: "submit", class: "danger" }, "Ban"),
         ],
@@ -221,7 +222,7 @@ function actions(ctx: Ctx, p: Player): Node {
           await post(`/players/${id}/ban`, {
             reason: d.get("reason"),
             minutes: minutesOf(d.get("minutes")),
-            ip: d.get("ip") === "on",
+            ip: ipScopeOf(d),
           });
           return done("Banned")();
         },
@@ -378,8 +379,15 @@ function inventoryView(ctx: Ctx, p: Player, inv: Inventory): Node {
   );
 }
 
+/** Ids from the address bar go into API paths only when they are ids. */
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export async function playerScreen(ctx: Ctx, accountId: string): Promise<Node> {
-  const { player: p } = await get<{ player: Player }>(`/players/${accountId}`);
+  if (!UUID.test(accountId)) return h("p", { class: "error" }, "Not found.");
+  const [{ player: p }, preview] = await Promise.all([
+    get<{ player: Player }>(`/players/${accountId}`),
+    ipPreview(accountId),
+  ]);
   const [chat, inv, partners] = p.characterId
     ? await Promise.all([
         get<{ lines: ChatLine[] }>(`/players/${accountId}/chat`),
@@ -423,7 +431,7 @@ export async function playerScreen(ctx: Ctx, accountId: string): Promise<Node> {
     null,
     h("h1", null, p.name ?? p.loginId),
     facts,
-    actions(ctx, p),
+    actions(ctx, p, preview),
     h("h2", null, "Bans and mutes"),
     sanctionsTable(p),
     h(
@@ -518,6 +526,7 @@ export async function playerScreen(ctx: Ctx, accountId: string): Promise<Node> {
 
 /** `#/character/<id>`: finds the account and opens its player page. */
 export async function characterRedirect(_ctx: Ctx, characterId: string): Promise<Node> {
+  if (!UUID.test(characterId)) return h("p", { class: "error" }, "Not found.");
   const { players } = await get<{ players: PlayerRow[] }>(
     `/players?q=${encodeURIComponent(characterId)}`,
   );

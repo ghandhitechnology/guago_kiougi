@@ -101,8 +101,12 @@ export interface AuthServiceOptions {
 
 /** What the auth paths ask moderation. `ip` is always the keyed IP hash, never an address. */
 export interface AuthGate {
-  /** True when an active ban covers this IP hash: signup, login and recovery are refused. */
-  ipBanned(ip: string): Promise<boolean>;
+  /**
+   * True when a ban in force covers this IP hash for this use: `signup` (a new account) or
+   * `login` (login, recovery and room joins of existing accounts, refused only by a ban whose
+   * admin chose to refuse every account on the address).
+   */
+  ipBanned(ip: string, use: "signup" | "login"): Promise<boolean>;
   /**
    * Called inside the transaction that opens a session (signup or login), so an IP ban can cover
    * the addresses the account has used.
@@ -218,13 +222,15 @@ export function createAuthService({
   return {
     characterOf,
     authenticateHash,
+    /** A room join from this IP hash is refused by a ban that refuses every account on it. */
+    joinRefused: async (ip: string) => (await gate?.ipBanned(ip, "login")) ?? false,
 
     async signup(
       req: SignupRequest,
       ip: string,
     ): Promise<Result<{ session: Session; recoveryCode: string }>> {
       if (isBannedName(req.loginId)) return fail("login_banned");
-      if (await gate?.ipBanned(ip)) return fail("account_banned");
+      if (await gate?.ipBanned(ip, "signup")) return fail("account_banned");
       // Cheap check first, so a limited IP costs no Argon2 work; re-checked under the lock below.
       if ((await signupsFrom(db, ip)) >= limit.signupsPerIpPerDay) return fail("signup_limit");
       const recovery = newRecoveryCode();
@@ -270,7 +276,7 @@ export function createAuthService({
       req: LoginRequest,
       from: Origin,
     ): Promise<Result<{ session: Session; account: Account; character: Character | null }>> {
-      if (await gate?.ipBanned(from.ip)) return fail("account_banned");
+      if (await gate?.ipBanned(from.ip, "login")) return fail("account_banned");
       const attempt = await beginAttempt(req.loginId, from);
       if (attempt === null) return fail("rate_limited");
       const [row] = await db.select().from(accounts).where(eq(accounts.loginId, req.loginId));
@@ -369,7 +375,7 @@ export function createAuthService({
 
     /** Sets a new password and replaces the spent recovery code with a fresh one. */
     async recover(req: RecoverRequest, from: Origin): Promise<Result<{ recoveryCode: string }>> {
-      if (await gate?.ipBanned(from.ip)) return fail("account_banned");
+      if (await gate?.ipBanned(from.ip, "login")) return fail("account_banned");
       const attempt = await beginAttempt(req.loginId, from);
       if (attempt === null) return fail("rate_limited");
       const [row] = await db.select().from(accounts).where(eq(accounts.loginId, req.loginId));

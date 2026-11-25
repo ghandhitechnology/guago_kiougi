@@ -12,6 +12,8 @@ import {
   checkMinutes,
   cleanNotice,
   cleanReason,
+  IP_SCOPES,
+  type IpScope,
   isUuid,
   type ModError,
   type Moderation,
@@ -70,6 +72,13 @@ function date(raw: string | null): Date | undefined {
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) throw bad();
   return d;
+}
+
+/** `none` unless the form named a scope; anything else is refused. */
+function ipScope(raw: unknown): IpScope {
+  if (raw === undefined || raw === false) return "none";
+  if (IP_SCOPES.includes(raw as IpScope)) return raw as IpScope;
+  throw bad();
 }
 
 function owner(req: AdminRequest): void {
@@ -151,15 +160,20 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
 
   route("POST", "/players/:id/ban", async (req, [id]) => {
     const b = obj(req.body);
-    if (!isUuid(id) || (b.ip !== undefined && typeof b.ip !== "boolean")) throw bad();
+    if (!isUuid(id)) throw bad();
     done(
       await moderation.ban(req.admin.id, id, {
         reason: reason(b),
         minutes: minutes(b),
-        ip: b.ip === true,
+        ip: ipScope(b.ip),
       }),
     );
     return { ok: true };
+  });
+
+  route("GET", "/players/:id/ip-preview", async (_req, [id]) => {
+    if (!isUuid(id)) throw bad();
+    return { preview: await moderation.ipPreview(id) };
   });
 
   route("POST", "/players/:id/unban", async (req, [id]) => {
@@ -273,7 +287,7 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
         state: b.state,
         action: b.action as ReportAction,
         minutes: minutes(b),
-        ip: b.ip === true,
+        ip: ipScope(b.ip),
         note,
         told,
       }),

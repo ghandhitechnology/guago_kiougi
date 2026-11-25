@@ -8,7 +8,7 @@ import { request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
-import { API, CLOSE_BANNED, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
+import { API, CLOSE_BANNED, ENTER_PATH, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGameServer } from "../app.ts";
@@ -177,7 +177,7 @@ describe("a ban", () => {
     const banned = await owner.send(`/players/${p.accountId}/ban`, {
       reason: "욕설 반복",
       minutes: null,
-      ip: true,
+      ip: "signup",
     });
     expect(banned.status).toBe(200);
     expect(await within(mapClosed, 3000, "the map seat to close")).toBe(CLOSE_BANNED);
@@ -210,7 +210,7 @@ describe("a ban", () => {
 
   it("ends by itself at its end time", async () => {
     const p = await player("banned2");
-    await owner.send(`/players/${p.accountId}/ban`, { reason: "도배", minutes: 60, ip: false });
+    await owner.send(`/players/${p.accountId}/ban`, { reason: "도배", minutes: 60 });
     await db.execute(sql`
       update account_bans set starts_at = now() - interval '2 hours', ends_at = now() - interval '1 hour'
       where account_id = ${p.accountId}`);
@@ -514,5 +514,66 @@ describe("a mute", () => {
     );
     expect(audit.rows[0]?.detail).toMatchObject({ body: "현질 하실 분 연락" });
     await room.leave();
+  });
+});
+
+describe("an IP ban", () => {
+  const login = (loginId: string, ip: string) =>
+    call(base, API.login, { body: { loginId, password: "ban test pass" }, ip });
+  const enterFrom = (jar: Jar, ip: string) =>
+    fetch(base + ENTER_PATH, {
+      method: "POST",
+      headers: {
+        cookie: cookieHeader(jar),
+        "content-type": "application/json",
+        "x-forwarded-for": ip,
+      },
+      body: "{}",
+    }).then((r) => r.status);
+
+  it("refuses new accounts from the address, and every account there only when asked", async () => {
+    const p = await player("ipban1");
+    const q = await player("ipban2");
+    // One dormitory, one address: q comes in from p's address too.
+    const qJar: Jar = {};
+    expect(remember(qJar, await login("ipban2", p.ip)).status).toBe(200);
+    const preview = await owner.send(`/players/${p.accountId}/ip-preview`);
+    expect(preview.body.preview).toEqual({ addresses: 1, otherAccounts: 1 });
+
+    await owner.send(`/players/${p.accountId}/ban`, {
+      reason: "도배",
+      minutes: null,
+      ip: "signup",
+    });
+    const fresh = { loginId: "ipban3", password: "ban test pass", ageConfirmed: true };
+    expect((await call(base, API.signup, { body: fresh, ip: p.ip })).body.error).toBe(
+      "account_banned",
+    );
+    expect(remember(qJar, await login("ipban2", p.ip)).status).toBe(200);
+    expect(await enterFrom(qJar, p.ip)).toBe(200);
+    expect(q.accountId).not.toBe(p.accountId);
+
+    await owner.send(`/players/${p.accountId}/unban`, { reason: "범위 변경" });
+    await owner.send(`/players/${p.accountId}/ban`, { reason: "도배", minutes: null, ip: "all" });
+    expect((await login("ipban2", p.ip)).body.error).toBe("account_banned");
+    expect(await enterFrom(qJar, p.ip)).toBe(403);
+    expect(await enterFrom(qJar, "10.4.4.4")).toBe(200);
+    await owner.send(`/players/${p.accountId}/unban`, { reason: "해제" });
+  });
+
+  it("reaches only the addresses of the last 30 days", async () => {
+    const p = await player("ipban4");
+    expect((await login("ipban4", "10.5.5.5")).status).toBe(200);
+    const count = async () =>
+      (
+        (await owner.send(`/players/${p.accountId}/ip-preview`)).body.preview as {
+          addresses: number;
+        }
+      ).addresses;
+    expect(await count()).toBe(2);
+    await db.execute(sql`
+      update account_ips set last_seen = now() - interval '40 days', first_seen = now() - interval '40 days'
+      where account_id = ${p.accountId} and ip_hash <> (select signup_ip_hash from accounts where id = ${p.accountId})`);
+    expect(await count()).toBe(1);
   });
 });

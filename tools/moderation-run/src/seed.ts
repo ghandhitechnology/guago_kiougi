@@ -265,7 +265,7 @@ await andy("/filter/add", { mode: "part", text: "골드팝니다", reason: "골�
 await andy("/filter/add", { mode: "allow", text: "시발점", reason: "수학 용어" });
 await andy("/broadcast", { text: "오늘 23시에 서버 점검이 있습니다. 10분 정도 걸려요." });
 const nerd = await account("물리덕후");
-await andy(`/players/${nerd}/ban`, { reason: "이동 속도 조작 확인", minutes: 10_080, ip: false });
+await andy(`/players/${nerd}/ban`, { reason: "이동 속도 조작 확인", minutes: 10_080 });
 await andy(`/players/${nerd}/inventory`);
 await andy(`/admins`);
 const minseo = ((await andy("/admins")).body.admins as { id: string; loginId: string }[]).find(

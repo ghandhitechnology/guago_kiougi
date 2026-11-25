@@ -82,9 +82,18 @@ export interface BanOptions {
   told?: string;
   /** Null: until lifted. */
   minutes: number | null;
-  /** Also ban every IP hash the account has signed up or logged in from. */
-  ip: boolean;
+  /**
+   * The addresses the account used in the last `IP_BAN_DAYS`: `none` leaves them alone,
+   * `signup` refuses new accounts from them, `all` also refuses logins and room joins of every
+   * account on them. A dormitory shares one address, so `signup` is the careful choice.
+   */
+  ip: IpScope;
 }
+
+export const IP_SCOPES = ["none", "signup", "all"] as const;
+export type IpScope = (typeof IP_SCOPES)[number];
+/** How far back an IP ban reaches into an account's addresses. */
+export const IP_BAN_DAYS = 30;
 
 export interface MuteOptions {
   reason: string;
@@ -107,7 +116,7 @@ export interface ResolveInput {
   /** For mute and ban; null is until lifted. */
   minutes: number | null;
   /** For ban. */
-  ip: boolean;
+  ip: IpScope;
   /** Internal; never sent to anyone. */
   note: string;
   /** What the reported player is told, for any action but `none`. */
@@ -219,20 +228,26 @@ export function createModeration(deps: ModerationDeps) {
     (await tx.execute(sql`select id from characters where account_id = ${accountId}`)).rows[0]
       ?.id as string | undefined;
 
+  /** The IP hashes the account signed up or logged in from in the last `IP_BAN_DAYS`. */
+  async function recentAddresses(q: Queryable, accountId: string): Promise<string[]> {
+    const { rows } = await q.execute(sql`
+      select ip_hash from account_ips
+      where account_id = ${accountId}
+        and last_seen > now() - make_interval(days => ${IP_BAN_DAYS})
+      union
+      select signup_ip_hash from accounts
+      where id = ${accountId} and created_at > now() - make_interval(days => ${IP_BAN_DAYS})`);
+    return rows.map((r) => r.ip_hash as string);
+  }
+
   async function banIn(tx: Tx, adminId: string, accountId: string, o: BanOptions) {
     const account = await lockAccount(tx, accountId);
     if (!account) return fail("not_found");
-    let ips: string[] = [];
-    if (o.ip) {
-      const { rows } = await tx.execute(sql`
-        select ip_hash from account_ips where account_id = ${accountId}
-        union select ${account.signup_ip_hash}`);
-      ips = rows.map((r) => r.ip_hash as string);
-    }
+    const ips = o.ip === "none" ? [] : await recentAddresses(tx, accountId);
     const { rows } = await tx.execute(sql`
       insert into account_bans (account_id, reason, told, ends_at, ip_hashes, ip_scope, admin_id)
       values (${accountId}, ${o.reason}, ${o.told ?? o.reason}, ${endsAt(o.minutes)},
-              ${sql.param(ips)}::text[], ${ips.length > 0 ? "all" : "none"}, ${adminId})
+              ${sql.param(ips)}::text[], ${ips.length > 0 ? o.ip : "none"}, ${adminId})
       returning id, ends_at`);
     const ban = rows[0] as { id: string; ends_at: string | null };
     await tx.execute(sql`update accounts set status = 'banned' where id = ${accountId}`);
@@ -253,6 +268,8 @@ export function createModeration(deps: ModerationDeps) {
         ban: Number(ban.id),
         minutes: o.minutes,
         ips: ips.length,
+        ipScope: ips.length > 0 ? o.ip : "none",
+        told: o.told ?? o.reason,
         ...(club ? { club: club.club, disbanded: club.gone === true } : {}),
       },
     });
@@ -616,12 +633,34 @@ export function createModeration(deps: ModerationDeps) {
       return rowCount ?? 0;
     },
 
+    /**
+     * What an IP ban of this account would cover, shown before it is confirmed: its recent
+     * addresses, and how many other accounts used them in the same days.
+     */
+    async ipPreview(accountId: string): Promise<{ addresses: number; otherAccounts: number }> {
+      const ips = await recentAddresses(db, accountId);
+      if (ips.length === 0) return { addresses: 0, otherAccounts: 0 };
+      const { rows } = await db.execute(sql`
+        select count(distinct account_id)::int as n from (
+          select account_id from account_ips
+          where ip_hash = any(${sql.param(ips)}::text[])
+            and last_seen > now() - make_interval(days => ${IP_BAN_DAYS})
+          union all
+          select id from accounts
+          where signup_ip_hash = any(${sql.param(ips)}::text[])
+            and created_at > now() - make_interval(days => ${IP_BAN_DAYS})
+        ) seen where account_id <> ${accountId}`);
+      return { addresses: ips.length, otherAccounts: Number(rows[0]?.n ?? 0) };
+    },
+
     /** For `createAuthService({ gate })`. */
     gate: {
-      async ipBanned(ip: string): Promise<boolean> {
+      async ipBanned(ip: string, use: "signup" | "login"): Promise<boolean> {
+        const scopes = use === "signup" ? ["signup", "all"] : ["all"];
         const { rows } = await db.execute(sql`
           select 1 from account_bans
           where ip_hashes @> array[${ip}]::text[] and lifted_at is null
+            and ip_scope = any(${sql.param(scopes)}::text[])
             and (ends_at is null or ends_at > now())
           limit 1`);
         return rows.length > 0;

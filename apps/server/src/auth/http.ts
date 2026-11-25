@@ -63,6 +63,24 @@ export function readCookie(header: string | null | undefined, name: string): str
 
 class BodyError extends Error {}
 
+/**
+ * The client's address: the socket's peer, or behind our own proxy (`trustProxy`) the last
+ * `X-Forwarded-For` hop, the one the proxy appended; earlier hops are whatever the client sent.
+ * Every path that keys on an address (limits, IP bans, room joins) reads it here.
+ */
+export function clientAddress(
+  forwarded: string | string[] | null | undefined,
+  remote: string | undefined,
+  trustProxy: boolean,
+): string {
+  if (trustProxy) {
+    const hops = String(forwarded ?? "").split(",");
+    const last = hops[hops.length - 1]?.trim();
+    if (last) return last;
+  }
+  return remote ?? "unknown";
+}
+
 /** What a route outside this file gets: the request, its session and ways to answer. */
 export interface RouteContext {
   method: string;
@@ -113,15 +131,8 @@ export function createApiHandler(
   const cookieName = sessionCookieName(settings.secureCookies);
   const deviceName = deviceCookieName(settings.secureCookies);
 
-  function clientIp(req: IncomingMessage): string {
-    if (settings.trustProxy) {
-      // The last hop is the one our own proxy appended; earlier ones are client-supplied.
-      const hops = String(req.headers["x-forwarded-for"] ?? "").split(",");
-      const last = hops[hops.length - 1]?.trim();
-      if (last) return last;
-    }
-    return req.socket.remoteAddress ?? "unknown";
-  }
+  const clientIp = (req: IncomingMessage) =>
+    clientAddress(req.headers["x-forwarded-for"], req.socket.remoteAddress, settings.trustProxy);
 
   function sessionCookie(session: Session | null): string {
     const parts = [
