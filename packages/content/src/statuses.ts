@@ -1,3 +1,6 @@
+import type { TextKey } from "./narrative/schema.ts";
+import { termKey } from "./narrative/study.ts";
+
 /**
  * Status effects. Every status stacks the same way: an application adds stacks up to
  * `maxStacks` and refreshes the duration of all of them. A damage-over-time status remembers the
@@ -17,6 +20,7 @@ export const STATUS_IDS = [
   "slow",
   "armorBreak",
   "infection",
+  "mark",
   "proof",
   "shield",
   "invulnerable",
@@ -27,7 +31,7 @@ export const DOT_INTERVAL = 0.5;
 
 export interface StatusDef {
   readonly id: StatusId;
-  readonly name: string;
+  readonly name: TextKey;
   /** Who it can sit on. */
   readonly on: "monster" | "player";
   readonly duration: number;
@@ -39,110 +43,39 @@ export interface StatusDef {
   /** Extra damage taken per stack, and armour removed per stack. */
   readonly damageTaken?: number;
   readonly armorLoss?: number;
-  /** Icon the client draws over the target. */
+  /** A shield's size as a share of the owner's max HP. */
+  readonly shield?: number;
+  /** Icon the client draws over the target, a frame of the `status` sprite. */
   readonly icon: string;
 }
 
-const defs: readonly StatusDef[] = [
-  {
-    id: "flammable",
-    name: "가연",
-    on: "monster",
-    duration: 6,
-    maxStacks: 1,
-    icon: "status/flammable",
-  },
-  {
-    id: "burn",
-    name: "불",
-    on: "monster",
-    duration: 3,
-    maxStacks: 1,
-    dot: 0.25,
-    icon: "status/burn",
-  },
-  {
-    id: "acid",
-    name: "산",
-    on: "monster",
-    duration: 4,
-    maxStacks: 5,
-    dot: 0.06,
-    icon: "status/acid",
-  },
-  {
-    id: "base",
-    name: "염기",
-    on: "monster",
-    duration: 6,
-    maxStacks: 1,
-    slow: 0.1,
-    icon: "status/base",
-  },
-  { id: "metal", name: "금속", on: "monster", duration: 6, maxStacks: 1, icon: "status/metal" },
-  {
-    id: "wet",
-    name: "수분",
-    on: "monster",
-    duration: 6,
-    maxStacks: 1,
-    slow: 0.1,
-    icon: "status/wet",
-  },
-  { id: "sodium", name: "나트륨", on: "monster", duration: 6, maxStacks: 1, icon: "status/sodium" },
-  {
-    id: "bleed",
-    name: "출혈",
-    on: "monster",
-    duration: 4,
-    maxStacks: 10,
-    dot: 0.05,
-    icon: "status/bleed",
-  },
-  {
-    id: "slow",
-    name: "둔화",
-    on: "monster",
-    duration: 2,
-    maxStacks: 1,
-    slow: 0.3,
-    icon: "status/slow",
-  },
-  {
-    id: "armorBreak",
-    name: "방어 감소",
-    on: "monster",
-    duration: 6,
-    maxStacks: 4,
-    damageTaken: 0.05,
-    armorLoss: 0.1,
-    icon: "status/armor-break",
-  },
-  {
-    id: "infection",
-    name: "감염",
-    on: "monster",
-    duration: 8,
-    maxStacks: 1,
-    dot: 0.08,
-    icon: "status/infection",
-  },
+type Def = Omit<StatusDef, "name" | "icon">;
+
+const defs: readonly Def[] = [
+  { id: "flammable", on: "monster", duration: 6, maxStacks: 1 },
+  { id: "burn", on: "monster", duration: 3, maxStacks: 1, dot: 0.25 },
+  { id: "acid", on: "monster", duration: 4, maxStacks: 5, dot: 0.06 },
+  { id: "base", on: "monster", duration: 6, maxStacks: 1, slow: 0.1 },
+  { id: "metal", on: "monster", duration: 6, maxStacks: 1 },
+  { id: "wet", on: "monster", duration: 6, maxStacks: 1, slow: 0.1 },
+  { id: "sodium", on: "monster", duration: 6, maxStacks: 1 },
+  { id: "bleed", on: "monster", duration: 4, maxStacks: 10, dot: 0.05 },
+  { id: "slow", on: "monster", duration: 2, maxStacks: 1, slow: 0.3 },
+  { id: "armorBreak", on: "monster", duration: 6, maxStacks: 4, damageTaken: 0.05, armorLoss: 0.1 },
+  { id: "infection", on: "monster", duration: 8, maxStacks: 1, dot: 0.08 },
+  /** 유전 가계도: passed on at death by the book's `spread` special. */
+  { id: "mark", on: "monster", duration: 6, maxStacks: 3, dot: 0.1 },
   /** 증명 스택: counted per attacker, see `PROOF`. Its duration is the gap allowed between hits. */
-  { id: "proof", name: "증명", on: "monster", duration: 2, maxStacks: 10, icon: "status/proof" },
-  { id: "shield", name: "보호막", on: "player", duration: 5, maxStacks: 1, icon: "status/shield" },
-  {
-    id: "invulnerable",
-    name: "무적",
-    on: "player",
-    duration: 2,
-    maxStacks: 1,
-    icon: "status/invulnerable",
-  },
+  { id: "proof", on: "monster", duration: 2, maxStacks: 10 },
+  { id: "shield", on: "player", duration: 5, maxStacks: 1, shield: 0.05 },
+  { id: "invulnerable", on: "player", duration: 2, maxStacks: 1 },
 ];
 
-export const STATUSES = Object.fromEntries(defs.map((d) => [d.id, d])) as Readonly<
-  Record<StatusId, StatusDef>
->;
+const icon = (id: string) => `status/${id.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+
+export const STATUSES = Object.fromEntries(
+  defs.map((d) => [d.id, { ...d, name: termKey("status", d.id), icon: icon(d.id) }]),
+) as Readonly<Record<StatusId, StatusDef>>;
 
 /** How much of a slow reaches an elite or a boss. */
 export const SLOW_RESIST = { normal: 1, elite: 0.5, boss: 0.25 } as const;
