@@ -7,7 +7,7 @@ import { pythagoreans } from "./pythagoreans.ts";
 import { zeno } from "./zeno.ts";
 
 export { AristotleMode } from "./aristotle.ts";
-export { CROTON_GRID, walkedDiagonal } from "./pythagoreans.ts";
+export { CROTON_GRID } from "./pythagoreans.ts";
 export { ZenoMode } from "./zeno.ts";
 
 export const BOSS_BRAINS: Readonly<Record<string, BossBrain>> = { pythagoreans, zeno, aristotle };
