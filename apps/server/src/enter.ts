@@ -10,8 +10,8 @@ import { ENTER_PATH, type Seating } from "@guago/shared";
 import { channels } from "./channels.ts";
 import { describeError } from "./db/index.ts";
 import { live } from "./live/current.ts";
-import { authenticateJoin, characterAfterMoves } from "./seats.ts";
-import { builtMap, HOME_MAP, START_MAP, validPlace } from "./world-maps.ts";
+import { authenticateJoin, characterAfterMoves, placeCharacter } from "./seats.ts";
+import { belongsOn, builtMap, spawnPlace } from "./world-maps.ts";
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 
@@ -101,17 +101,21 @@ export function enterRoute(): Middleware {
     if (!mapOptionAllowed() && !take(auth.accountId)) {
       return send(res, 429, { error: "rate_limited" });
     }
-    const character = await characterAfterMoves(auth.accountId, auth.characterId);
+    let character = await characterAfterMoves(auth.accountId, auth.characterId);
     if (!character) return send(res, 403, { error: "forbidden" });
     const chosen = choice.map ? builtMap(choice.map) : undefined;
-    const saved = validPlace(character.mapId, character.x, character.y).map.id;
+    if (chosen && chosen.id !== character.mapId) {
+      // Written first, so the room's join check finds the character where it chose to be.
+      const at = spawnPlace(chosen, "main");
+      await placeCharacter(character.id, chosen.id, at.x, at.y);
+      character = { ...character, mapId: chosen.id, x: at.x, y: at.y };
+    }
     // Sent home (명령퇴사) lands in the 집 until the time is up; after it, never there.
-    const home = live()?.homeUntil(character.id) != null;
-    const map = home ? HOME_MAP : (chosen?.id ?? (saved === HOME_MAP ? START_MAP : saved));
-    const seating: Seating = await channels.seat(
+    const sentHome = (await live()?.homeUntil(character.id)) != null;
+    const map = belongsOn(character, sentHome);
+    const seating: Seating = await channels.enter(
       map,
       auth,
-      {},
       choice.monsters ? { monsters: choice.monsters } : {},
     );
     send(res, 200, seating);

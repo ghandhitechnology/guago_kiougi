@@ -1,4 +1,11 @@
-import { type AuthContext, type Client, type Delayed, Room, ServerError } from "@colyseus/core";
+import {
+  type AuthContext,
+  type Client,
+  ClientState,
+  type Delayed,
+  Room,
+  ServerError,
+} from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import {
   type BuiltMap,
@@ -81,19 +88,22 @@ import {
   type ZoneUpdate,
   zonesAt,
 } from "@guago/shared";
-import { channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
+import { type ChannelRoom, channels, type MapRoomOptions, type SeatOptions } from "./channels.ts";
 import { clubActivity } from "./club-activity.ts";
 import { clubTags } from "./club-tags.ts";
 import { grants } from "./economy/grants.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
+import { invariants } from "./invariants.ts";
 import { live } from "./live/current.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { parties } from "./parties.ts";
 import { places } from "./places.ts";
-import { RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
+import { type RoomAuth, RoomSeats, SAVE_INTERVAL_MS } from "./seats.ts";
 import { TickClock } from "./tick-clock.ts";
 import {
+  belongsOn,
   builtMap,
+  clearSpot,
   describe,
   HOME_MAP,
   isDesk,
@@ -131,8 +141,15 @@ const VITALS_EVERY_MS = 500;
  * game clock with no signal, so the room asks; a kit is rebuilt only when a value changed.
  */
 const LIVE_EVERY_MS = 2_000;
-/** A seat whose player went through a door is closed if its socket is still open after this. */
-const MOVED_SOCKET_MS = 20_000;
+/**
+ * A socket whose player went through a door is closed if still open after this: the client takes
+ * its new seat at once, and an old connection kept open counts for nothing anyway.
+ */
+const MOVED_SOCKET_MS = 3000;
+/** A character goes through at most one door this often; a door walked into sooner waits. */
+const DOOR_EVERY_MS = 1000;
+/** When each character last went through a door, across the process's rooms. */
+const lastDoor = new Map<string, number>();
 /** Interact requests closer together than this are not answered. */
 const INTERACT_COOLDOWN_MS = 250;
 /** Pressing against a shut door rattles it at most this often per player. */
@@ -156,6 +173,16 @@ const HOME_EVERY_MS = 2000;
 /** Guards look every other tick; a player they caught is not seen again for this long. */
 const PATROL_EVERY_TICKS = 2;
 const CAUGHT_GRACE_TICKS = 80;
+/** Development and tests: how often each room checks that bodies and clients pair up. */
+const BODY_CHECK_MS = 2000;
+
+/** Every map room of this process, for the development checks across rooms. */
+const ROOMS = new Set<MapRoom>();
+
+/** Runs every room's body check now (tests call it at the moments that matter). */
+export function checkMapRooms(): void {
+  for (const room of ROOMS) room.checkBodies();
+}
 
 /** The step's party key for a party id. */
 function partyOf(id: number | undefined): string | null {
@@ -217,6 +244,8 @@ interface Pawn {
   atDesk: boolean;
   /** Tick until which patrols look past this player, after they were caught. */
   unseenUntil: number;
+  /** A meal at the 급식 counter is being served: one at a time. */
+  eating: boolean;
   /** Where the body stood before this tick's step, to tell a push against a shut door. */
   fromX: number;
   fromY: number;
@@ -283,7 +312,7 @@ type RoomMap = { -readonly [K in keyof FightMap]: FightMap[K] };
  * numbers, the cast and the shut doors. Doors, zones, the cast and patrols are worked out from the
  * step's positions after each tick.
  */
-export class MapRoom extends Room<{ state: MapState }> {
+export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   override state = new MapState();
   override maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
   override maxClients = MAP_SEATS;
@@ -315,6 +344,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   /** Tick the current surge began. */
   private surgeFrom = 0;
   private unlistenClubs: (() => void) | undefined;
+  /** Sessions whose body walked out through a door; their socket stays open a little while. */
+  private readonly moved = new Set<string>();
   private unlistenParties: (() => void) | undefined;
   /** Development commands that act inside the next tick (`GUAGO_DEV_COMMANDS=1`). */
   private readonly devActions: (() => void)[] = [];
@@ -334,7 +365,6 @@ export class MapRoom extends Room<{ state: MapState }> {
     // Its own walls: closed doors change them as the Page clock opens maps.
     this.map = { ...fightMapOf(def), collision: roomCollision(def).collision };
     this.patrols = def.patrols;
-    this.maxClients = Math.max(1, Math.min(MAP_SEATS, options.seats));
     this.graceMs = options.grace * 1000;
     const { w, h } = def.collision;
     if (w * TILE_SIZE > MAX_MAP_PX || h * TILE_SIZE > MAX_MAP_PX) {
@@ -424,6 +454,10 @@ export class MapRoom extends Room<{ state: MapState }> {
     // The living world is read every couple of seconds from memory, never on the tick.
     this.readLive();
     this.clock.setInterval(() => this.readLive(), LIVE_EVERY_MS);
+    if (invariants.on) {
+      ROOMS.add(this);
+      this.clock.setInterval(() => this.checkBodies(), BODY_CHECK_MS);
+    }
     // Made for a seat that may never be taken.
     this.emptied();
   }
@@ -585,6 +619,15 @@ export class MapRoom extends Room<{ state: MapState }> {
     return this.state.channel;
   }
 
+  /** Accounts with a body standing here: what fills a channel (`channels.occupancy`). */
+  accountsHere(): ReadonlySet<string> {
+    const out = new Set<string>();
+    for (const pawn of this.pawns.values()) {
+      if (!pawn.leaving) out.add((pawn.client.auth as RoomAuth).accountId);
+    }
+    return out;
+  }
+
   /** Ids of the characters standing here, for tests and tools. */
   get characterIds(): string[] {
     return [...this.pawns.values()].map((p) => p.character.id);
@@ -617,6 +660,9 @@ export class MapRoom extends Room<{ state: MapState }> {
     this.retireTimer = undefined;
     const character = await this.seats.join(client);
     try {
+      // A seat is good only for where the character belongs as it is taken: a ticket from before
+      // a door, an expel or another page's move is refused, and the client enters again.
+      if (!(await this.belongsHere(character))) throw new ServerError(409, "elsewhere");
       await this.seat(client, character, options);
     } catch (error) {
       // Nothing of a half-made seat stays behind: not the body, not the slot, not the account.
@@ -625,15 +671,31 @@ export class MapRoom extends Room<{ state: MapState }> {
       await this.seats.leave(client);
       throw error;
     }
+    // Sent home while the seat was being taken, the expel found no body to move: move it now.
+    if (this.def.id !== HOME_MAP && (await live()?.homeUntil(character.id)) != null) {
+      this.relocate(character.id, HOME_MAP, "main", "home");
+    }
+  }
+
+  /**
+   * Whether the character belongs on this map by its durable record (`belongsOn`): every seat,
+   * whether from entering, a door, the school moving them or a reconnection, is checked by it.
+   */
+  private async belongsHere(saved: Pick<Character, "id" | "mapId" | "x" | "y">): Promise<boolean> {
+    const sentHome = (await live()?.homeUntil(saved.id)) != null;
+    return belongsOn(saved, sentHome) === this.def.id;
   }
 
   /** Puts a joined character's body into the fight and the client's views around it. */
   private async seat(client: Client, character: Character, options: SeatOptions): Promise<void> {
     const id = client.sessionId;
-    const start =
+    if (invariants.on) oneBody(character.id, this);
+    const place =
       character.mapId === this.def.id
         ? validPlace(this.def.id, character.x, character.y)
         : spawnPlace(this.def, "main");
+    // Clear of the walls as they stand now, doors the Page clock shut included.
+    const start = { ...place, ...clearSpot(this.def, place.x, place.y, this.map) };
     const facing =
       Number.isInteger(options.facing) && (options.facing as number) >= 0
         ? (((options.facing as number) % 4) as Facing)
@@ -717,6 +779,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       lastRattle: 0,
       atDesk: false,
       unseenUntil: 0,
+      eating: false,
       fromX: player.x,
       fromY: player.y,
     };
@@ -755,23 +818,33 @@ export class MapRoom extends Room<{ state: MapState }> {
       pawn.queue.clear();
       pawn.player.away = true;
     }
-    if (!this.seats.mayReconnect(client)) return;
+    if (!this.seats.mayReconnect(client)) {
+      if (pawn) pawn.leaving = true;
+      return;
+    }
     this.seats.hold(client, this.allowReconnection(client, RECONNECT_SECONDS));
   }
 
-  override onReconnect(client: Client): void {
+  override async onReconnect(client: Client): Promise<void> {
     this.seats.reconnected(client);
-    const pawn = this.pawns.get(client.sessionId);
-    if (pawn) {
-      pawn.player.away = false;
-      pawn.net.fresh = true;
-      this.net.resendDrops(pawn.net);
-    }
     this.countBytes(client);
+    // Moved by the server while the socket was down (sent home, let back, walked out): there is
+    // no body here to come back to. The client enters again and lands where it belongs.
+    const pawn = this.pawns.get(client.sessionId);
+    if (!pawn || pawn.leaving || !(await this.belongsHere(pawn.character))) {
+      if (client.state !== ClientState.LEAVING) client.leave(CLOSE_MAP_CHANGED);
+      return;
+    }
+    pawn.player.away = false;
+    pawn.net.fresh = true;
+    this.net.resendDrops(pawn.net);
   }
 
   override async onLeave(client: Client): Promise<void> {
     places.leave(client.sessionId);
+    this.moved.delete(client.sessionId);
+    const pawn = this.pawns.get(client.sessionId);
+    if (pawn) pawn.leaving = true;
     if (this.clients.length === 0) this.emptied();
     // Saves the place, so the body stays in the world until the write is done.
     await this.seats.leave(client);
@@ -780,6 +853,7 @@ export class MapRoom extends Room<{ state: MapState }> {
   }
 
   override onDispose(): void {
+    ROOMS.delete(this);
     channels.forget(this.roomId);
     this.unlistenClubs?.();
     this.unlistenParties?.();
@@ -942,12 +1016,18 @@ export class MapRoom extends Room<{ state: MapState }> {
     }
     const doors = stepDoors(this.inside, walkers, this.def.portals);
     this.inside = new Map(doors.inside);
+    const now = Date.now();
     for (const { id, portal } of doors.entered) {
       const pawn = this.pawns.get(id);
       const p = this.def.portals[portal];
-      if (pawn && p?.built) void this.walkThrough(pawn, p.id, p.to, p.spawn);
+      if (!pawn || !p?.built) continue;
+      // Too soon after the last door: it counts as walked into again next tick, until it may open.
+      if (now - (lastDoor.get(pawn.character.id) ?? 0) < DOOR_EVERY_MS) {
+        this.inside.set(id, -1);
+        continue;
+      }
+      void this.walkThrough(pawn, p.id, p.to, p.spawn);
     }
-    const now = Date.now();
     for (const pawn of this.pawns.values()) {
       if (pawn.leaving) continue;
       const p = pawn.player;
@@ -1022,16 +1102,18 @@ export class MapRoom extends Room<{ state: MapState }> {
     const target = builtMap(to);
     if (!target) return;
     // The Page clock can close a map between the door check and the step.
-    if (this.closed.has(via)) {
+    if (this.closed.has(via) || live()?.isOpen(target.id) === false) {
       this.rattle(via, "portal", pawn.client.sessionId, "door_closed");
       return;
     }
     const { client } = pawn;
     const id = client.sessionId;
     const at = this.placeOf(id);
+    noteDoor(pawn.character.id);
     pawn.leaving = true;
     pawn.queue.clear();
     this.removeBody(id);
+    this.moved.add(id);
     const arrive = spawnPlace(target, spawn);
     let auth: Awaited<ReturnType<RoomSeats["moveOut"]>>;
     try {
@@ -1043,6 +1125,8 @@ export class MapRoom extends Room<{ state: MapState }> {
       }
       return;
     }
+    // Dropped meanwhile: the far side is written, and entering again lands there.
+    if (!this.clients.includes(client)) return;
     let seating: Awaited<ReturnType<typeof channels.seat>> | undefined;
     try {
       seating = await channels.seat(target.id, auth, { facing: arrive.facing });
@@ -1077,8 +1161,10 @@ export class MapRoom extends Room<{ state: MapState }> {
     const l = live();
     if (!l) return;
     for (const pawn of this.pawns.values()) {
-      if (pawn.leaving || l.homeUntil(pawn.character.id) !== null) continue;
-      this.relocate(pawn.character.id, START_MAP, "main", "school");
+      if (pawn.leaving) continue;
+      void l.homeUntil(pawn.character.id).then((until) => {
+        if (until === null) this.relocate(pawn.character.id, START_MAP, "main", "school");
+      });
     }
   }
 
@@ -1094,9 +1180,38 @@ export class MapRoom extends Room<{ state: MapState }> {
         pawn.player.facing,
       );
       back.net.fresh = true;
+      this.moved.delete(pawn.client.sessionId);
     } catch {
       // No free body: the client is told to enter again by its seat's eviction.
     }
+  }
+
+  /**
+   * Development and tests: every joined client has a body here, unless it just walked out through
+   * a door, and every body has its client or a reconnection held for it.
+   */
+  checkBodies(): void {
+    const where = `${this.def.id}#${this.state.channel}`;
+    for (const client of this.clients) {
+      const id = client.sessionId;
+      if (client.state !== ClientState.JOINED || this.pawns.has(id) || this.moved.has(id)) continue;
+      invariants.report(`client ${id} in ${where} has no body`);
+    }
+    for (const [id, pawn] of this.pawns) {
+      if (pawn.leaving || this.seats.holding(id)) continue;
+      if (!this.clients.some((c) => c.sessionId === id)) {
+        invariants.report(`body ${id} in ${where} has no client`);
+      }
+    }
+  }
+
+  /** Bodies of a character standing in this room, for the check across rooms. */
+  bodiesOf(characterId: string): number {
+    let n = 0;
+    for (const pawn of this.pawns.values()) {
+      if (pawn.character.id === characterId && !pawn.leaving) n++;
+    }
+    return n;
   }
 
   // The cast -----------------------------------------------------------------------------------
@@ -1205,7 +1320,13 @@ export class MapRoom extends Room<{ state: MapState }> {
     if (PLACE_THINGS.has(thing.id)) this.visit(who, [thing.id]);
     const l = live();
     if (MEAL_COUNTERS.has(thing.id) && l) {
-      return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+      if (pawn.eating) return { t: "none", n };
+      pawn.eating = true;
+      try {
+        return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+      } finally {
+        pawn.eating = false;
+      }
     }
     if (thing.kind === "locked") {
       this.rattle(thing.id, "thing", "", "door_locked");
@@ -1259,5 +1380,25 @@ export class MapRoom extends Room<{ state: MapState }> {
       y: back.y,
     } satisfies Caught);
     void live()?.events.patrolCaught(pawn.character.id);
+  }
+}
+
+/** Development and tests: a character about to be seated has no body anywhere else. */
+function oneBody(characterId: string, here: MapRoom): void {
+  for (const room of ROOMS) {
+    if (room.bodiesOf(characterId) > 0) {
+      invariants.report(
+        `character ${characterId} has a body in ${room.mapId}#${room.channel} while seated in ${here.mapId}#${here.channel}`,
+      );
+    }
+  }
+}
+
+/** Remembers a character's door; old entries go once there are many. */
+function noteDoor(characterId: string): void {
+  const now = Date.now();
+  lastDoor.set(characterId, now);
+  if (lastDoor.size > 10_000) {
+    for (const [id, at] of lastDoor) if (now - at > DOOR_EVERY_MS) lastDoor.delete(id);
   }
 }
