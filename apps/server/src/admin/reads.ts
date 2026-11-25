@@ -6,7 +6,6 @@ import { sql } from "drizzle-orm";
 import type { Db } from "../db/index.ts";
 import { type AuditReport, checkInvariants, dailyTotals } from "../economy/audit.ts";
 import { livePage } from "../economy/executor.ts";
-import { LEDGER_RAW_DAYS } from "../economy/ledger.ts";
 import { readInventory } from "../economy/reads.ts";
 import { mutes as muteStore } from "../moderation/mutes.ts";
 import { searchTrades, type TradeSearch, tradePartners } from "../trade/log.ts";
@@ -67,6 +66,9 @@ export interface ChatQuery {
   before?: Date;
   limit?: number;
 }
+
+/** How far back the trade partners table reaches (per trade for 90 days, then daily totals). */
+const PARTNER_DAYS = 365;
 
 /**
  * The invariant check reads whole tables. One run at a time serves every caller; a result is
@@ -471,10 +473,13 @@ export function createReads(db: Db) {
       }));
     },
 
-    /** Who this character trades with over the ledger's 90 days: mules and real-money patterns. */
+    /**
+     * Who this character traded with in the last year: mules and real-money patterns. Each
+     * trade is kept 90 days; past that the log's per-pair daily totals answer, whole days.
+     */
     async partners(characterId: string) {
       const to = new Date();
-      const from = new Date(to.getTime() - LEDGER_RAW_DAYS * 86_400_000);
+      const from = new Date(to.getTime() - PARTNER_DAYS * 86_400_000);
       const rows = await tradePartners(db, characterId, from, to);
       const names = await namesOf(rows.map((r) => r.partner));
       return rows.map((r) => ({ ...r, name: names.get(r.partner) ?? null }));

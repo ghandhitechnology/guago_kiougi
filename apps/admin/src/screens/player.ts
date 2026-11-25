@@ -503,7 +503,7 @@ export async function playerScreen(ctx: Ctx, accountId: string): Promise<Node> {
             "h2",
             null,
             h("a", { href: `#/trades?character=${p.characterId}` }, "Trade partners"),
-            h("span", { class: "muted" }, "  last 90 days"),
+            h("span", { class: "muted" }, "  last 365 days, past 90 days from daily totals"),
           ),
           table(
             ["Partner", ["Trades", "num"], ["솔방울 sent", "num"], ["솔방울 received", "num"], ""],
