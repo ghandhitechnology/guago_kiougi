@@ -362,7 +362,7 @@ export default [
   frames(
     "stage-curtain",
     { m: curtain("m"), l: curtain("l"), r: curtain("r") },
-    { origin: [0, 44 + 36], outline: false, lone: "y" },
+    { origin: [0, 46], outline: false, lone: "y" },
   ),
   still("wall-bars", wallBars, { origin: mounted([34, 46], 0) }),
   still("bed-screen", bedScreen, { shadow: boxShadow(40, 34, 1, 29, 38, 32) }),

@@ -8,6 +8,7 @@ import gaseol1f from "./gaseol-1f.ts";
 import gaseol2f from "./gaseol-2f.ts";
 import gaseol4f from "./gaseol-4f.ts";
 import gaseolgwanStairs from "./gaseolgwan-stairs.ts";
+import jeungmyeong from "./jeungmyeong.ts";
 
 export * from "./build.ts";
 export * from "./buildings.ts";
@@ -28,6 +29,7 @@ export const MAP_SOURCES: readonly MapSource[] = [
   gaseol1f,
   gaseol2f,
   gaseol4f,
+  jeungmyeong,
 ];
 
 /**
