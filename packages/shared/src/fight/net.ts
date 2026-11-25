@@ -330,7 +330,8 @@ export class FightNet {
         (p.rollLeft > 0 || (p.forceKeep && p.forceTicks > 0) ? 8 : 0) |
         (p.reviver >= 0 ? 16 : 0);
       const hp = p.hp <= 0 ? 0 : Math.max(1, Math.round((p.hp / p.kit.maxHp) * 255));
-      this.track(p.entity, WirePlayer, p.slot, p.x, p.y, state, hp, 0, false);
+      // Statuses and the hit flash only ever show on a duel's fighters.
+      this.track(p.entity, WirePlayer, p.slot, p.x, p.y, state, hp, p.statusMask, p.flash);
     }
 
     this.effects();
