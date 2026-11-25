@@ -893,6 +893,7 @@ export function bake(def: RigDef): RigDef {
   const lookName = Object.keys(def.looks)[0] as string;
   return rig({
     name,
+    ...(def.group ? { group: def.group } : {}),
     size: def.size,
     origin: def.origin as Vec2,
     directions: def.directions,
