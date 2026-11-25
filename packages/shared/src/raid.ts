@@ -31,7 +31,7 @@ export const RAID = {
    * putting this many same-level normal monsters' health a second into the pool (gates and the
    * shield included).
    */
-  floor: { players: 4, hoursPerDay: 2, normalsPerSecond: 0.5 },
+  floor: { players: 4, hoursPerDay: 2, normalsPerSecond: 1 },
   /** 토론 시간: 21:00 to 22:00 KST, +50% damage taken and the full mechanic set. */
   debate: { utcOffsetHours: 9, startHour: 21, endHour: 22, damageTaken: 1.5 },
   /** A full shield lets this share of damage through; objectives strip it. */

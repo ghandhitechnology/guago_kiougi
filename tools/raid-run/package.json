@@ -1,0 +1,16 @@
+{
+  "name": "@guago/raid-run",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node src/check.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  },
+  "dependencies": {
+    "@guago/content": "workspace:*",
+    "@guago/shared": "workspace:*"
+  }
+}

@@ -30,6 +30,7 @@ import {
   snapshotCells,
   snapshotReaderFor,
   spawnMonster,
+  startBoss,
   startRevive,
   stepFight,
   TILE_SIZE,
@@ -195,6 +196,50 @@ describe("combat replay", () => {
     expect(fight(4243, plan).digests.at(-1)).not.toEqual(first.digests.at(-1));
     expect(fight(4242, session(18, 1300)).digests.at(-1)).not.toEqual(first.digests.at(-1));
   });
+
+  it("replays a boss fight: 아리스토텔레스 through his 논제, every class and mode", () => {
+    const run = (seed: number, plan: FightInput[][][]) => {
+      const map = fightMapOf(mapById("p1-lyceum") as never);
+      const w = createFight(map, rules, null, seed);
+      const at = map.marks?.lectern ?? map.spawn;
+      const majors = Object.keys(STARTER_BOOKS);
+      for (let i = 0; i < 10; i++) {
+        const major = majors[i % majors.length] as keyof typeof STARTER_BOOKS;
+        const level = 30 + i * 2;
+        const p = w.addPlayer(
+          `p${i}`,
+          i,
+          at.x - 120 + (i % 5) * 60,
+          at.y + 90 + Math.floor(i / 5) * 50,
+          kitFor(major, STARTER_BOOKS[major], level),
+          level,
+        );
+        p.mode = MODES[i % 4] as Mode;
+      }
+      // A boss well below the class, so a short record runs through his 논제 on its own pool.
+      const b = startBoss(w, "aristotle", 6);
+      const digests: string[] = [];
+      plan.forEach((tick, t) => {
+        // 토론 시간 for a stretch: the full mechanic set.
+        b.debate = t >= 500 && t < 900;
+        const inputs = new Map<string, FightInput[]>();
+        tick.forEach((list, i) => {
+          inputs.set(`p${i}`, list);
+        });
+        stepFight(w, inputs);
+        if (t % 100 === 99) {
+          const boss = [b.phase, b.hp, b.max, b.shield, b.mode, b.strips, b.emptied, b.freed];
+          digests.push(`${digest(w)}|${boss.join(",")}`);
+        }
+      });
+      return { b, digests };
+    };
+    const plan = session(23, 1400);
+    const first = run(31, plan);
+    expect(run(31, plan).digests).toEqual(first.digests);
+    expect(run(32, plan.slice(0, 300)).digests.at(-1)).not.toEqual(first.digests[2]);
+    expect(first.b.phase).toBeGreaterThanOrEqual(3);
+  }, 15_000);
 
   it("decodes on every client to within the dead-reckoning bound, with nothing unresolved", () => {
     let net: FightNet | undefined;
