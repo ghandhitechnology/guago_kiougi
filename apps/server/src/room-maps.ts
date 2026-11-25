@@ -31,9 +31,8 @@ export const mapOptionAllowed = () => process.env.ALLOW_MAP_OPTION === "1";
 
 /** The map a room runs: the lawn unless a load test or a developer asked for another. */
 export function roomMapFor(options: { map?: unknown; monsters?: unknown } | undefined): RoomMap {
-  const lawn = all().get(LAWN.id) as RoomMap;
-  if (!mapOptionAllowed() || !options) return lawn;
-  const base = (typeof options.map === "string" && all().get(options.map)) || lawn;
+  if (!mapOptionAllowed() || !options) return LAWN;
+  const base = (typeof options.map === "string" && all().get(options.map)) || LAWN;
   const count = options.monsters;
   if (typeof count !== "number" || !Number.isInteger(count) || count < 0 || count > 300)
     return base;
