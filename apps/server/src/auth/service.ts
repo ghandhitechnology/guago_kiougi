@@ -5,6 +5,7 @@
 import {
   type Account,
   type ApiErrorCode,
+  type BanNotice,
   type Character,
   type CreateCharacterRequest,
   checkName,
@@ -46,7 +47,7 @@ export type Limits = typeof DEFAULT_LIMITS;
 /** Where new characters stand: where the story starts. */
 const start = startPlace();
 
-type Result<T> = { ok: true; value: T } | { ok: false; error: ApiErrorCode };
+type Result<T> = { ok: true; value: T } | { ok: false; error: ApiErrorCode; ban?: BanNotice };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (error: ApiErrorCode): { ok: false; error: ApiErrorCode } => ({ ok: false, error });
 
@@ -112,6 +113,8 @@ export interface AuthGate {
    * the addresses the account has used.
    */
   seen(tx: Pick<Db, "execute">, accountId: string, ip: string): Promise<void>;
+  /** The ban in force on an account, as its owner is told; null when none. */
+  banOf(accountId: string): Promise<BanNotice | null>;
 }
 
 export function createAuthService({
@@ -286,7 +289,11 @@ export function createAuthService({
       if (matches instanceof HashBusy) return fail("rate_limited");
       if (!row || !matches) return fail("bad_credentials");
       await clearAttempts(req.loginId, from);
-      if (row.status !== "active") return fail("account_banned");
+      if (row.status !== "active") {
+        // The password was right, so this is the owner: they are owed the reason and the end.
+        const ban = await gate?.banOf(row.id);
+        return { ok: false, error: "account_banned", ...(ban ? { ban } : {}) };
+      }
       // The session opens only if the hash just verified is still the account's: a recovery that
       // committed in between wins. The row lock also orders this against a racing recovery.
       const session = await db.transaction(async (tx) => {

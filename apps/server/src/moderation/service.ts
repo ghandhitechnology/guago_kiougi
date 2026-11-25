@@ -12,6 +12,7 @@
 import { BOOKS, TOOLS, VENDING } from "@guago/content";
 import {
   type Amounts,
+  type BanNotice,
   type ChangeNotice,
   CLOSE_BANNED,
   CLOSE_KICKED,
@@ -723,6 +724,19 @@ export function createModeration(deps: ModerationDeps) {
             and (ends_at is null or ends_at > now())
           limit 1`);
         return rows.length > 0;
+      },
+      async banOf(accountId: string): Promise<BanNotice | null> {
+        // The one that ends last: a ban until lifted before any timed one.
+        const { rows } = await db.execute(sql`
+          select coalesce(told, reason) as told, ends_at from account_bans
+          where account_id = ${accountId} and lifted_at is null
+            and (ends_at is null or ends_at > now())
+          order by ends_at desc nulls first limit 1`);
+        const r = rows[0] as { told: string; ends_at: string | null } | undefined;
+        if (!r) return null;
+        return r.ends_at === null
+          ? { key: "moderation.banned-permanent", reason: r.told }
+          : { key: "moderation.banned", until: new Date(r.ends_at).getTime(), reason: r.told };
       },
       async seen(tx: Queryable, accountId: string, ip: string): Promise<void> {
         await tx.execute(sql`

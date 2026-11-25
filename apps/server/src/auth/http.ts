@@ -222,6 +222,9 @@ export function createApiHandler(
       const parsed = parseLogin(await readJson(req));
       if (!parsed.ok) return error(res, parsed.error);
       const result = await auth.login(parsed.value, from(parsed.value.loginId));
+      if (!result.ok && result.ban) {
+        return send(res, STATUS.account_banned ?? 403, { error: result.error, ban: result.ban });
+      }
       if (!result.ok) return error(res, result.error);
       const { session, account, character } = result.value;
       return send(

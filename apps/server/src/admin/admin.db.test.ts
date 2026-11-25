@@ -23,7 +23,7 @@ import { evictAccount } from "../seats.ts";
 import { executorFees } from "../social/fees.ts";
 import { createSocial } from "../social/index.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
-import { joinMap } from "../test/enter.ts";
+import { enter, joinMap, sdk as mapSdk } from "../test/enter.ts";
 import { call, cookieHeader, type Jar, remember, waitFor, within } from "../test/http.ts";
 import { createModerationStack, type ModerationStack } from "./index.ts";
 
@@ -157,6 +157,33 @@ afterAll(async () => {
 });
 
 describe("a ban", () => {
+  it("holds by the account's status alone, sessions untouched", async () => {
+    const p = await player("gated1");
+    await db.execute(sql`update accounts set status = 'banned' where id = ${p.accountId}`);
+    expect((await call(base, API.me, { jar: p.jar, ip: p.ip })).status).toBe(401);
+    expect((await enter(base, p.jar)).status).toBe(401);
+    await expect(sdk(p.jar).joinOrCreate(WORLD_ROOM)).rejects.toBeDefined();
+    const login = await call(base, API.login, {
+      body: { loginId: "gated1", password: "ban test pass" },
+      ip: p.ip,
+    });
+    expect(login.body.error).toBe("account_banned");
+    await db.execute(sql`update accounts set status = 'active' where id = ${p.accountId}`);
+  });
+
+  it("refuses a seat reserved before it, as a door's handoff holds one", async () => {
+    for (const action of ["ban", "kick"] as const) {
+      const p = await player(`handoff${action}`);
+      const { seating } = await enter(base, p.jar);
+      expect(seating).toBeDefined();
+      const body = action === "ban" ? { reason: "이동 중", minutes: 60 } : { reason: "이동 중" };
+      expect((await owner.send(`/players/${p.accountId}/${action}`, body)).status).toBe(200);
+      await expect(
+        mapSdk(base, p.jar).consumeSeatReservation(seating?.seat as never),
+      ).rejects.toBeDefined();
+    }
+  });
+
   it("closes live seats and holds against login, the old cookie, a second tab and the reconnection", async () => {
     const p = await player("banned1");
     const world = await sdk(p.jar).joinOrCreate(WORLD_ROOM);
@@ -191,6 +218,8 @@ describe("a ban", () => {
       ip: "10.2.9.1",
     });
     expect(login.body.error).toBe("account_banned");
+    // The right password: the owner is told why, with the narrative's key.
+    expect(login.body.ban).toEqual({ key: "moderation.banned-permanent", reason: "욕설 반복" });
     // The IP hashes it came from take no new accounts or logins.
     const fresh = await call(base, API.signup, {
       body: { loginId: "banned1alt", password: "ban test pass", ageConfirmed: true },
@@ -452,6 +481,13 @@ describe("the admin API", () => {
     for (const path of ["/admin/api/me", "/admin/api/players", "/admin/"]) {
       expect((await fetch(`${base}${path}`)).status).toBe(404);
     }
+    // The living world's control route moved to the loopback metrics port: not here.
+    const live = await fetch(`${base}/admin/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cmd: "state" }),
+    });
+    expect(live.status).toBe(404);
     const login = await fetch(`${base}/admin/api/login`, {
       method: "POST",
       headers: { "content-type": "application/json", origin: admin },
