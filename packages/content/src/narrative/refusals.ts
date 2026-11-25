@@ -1,18 +1,22 @@
 /**
  * A line for every refusal code the server can answer with: the living world
- * (`LIVE_REFUSAL_CODES`), the WorldRoom's chat and social requests (`REFUSAL_CODES`) and item
- * and currency operations (`OP_ERRORS`). Each table is typed by its code list, so a new code
- * without a line fails the typecheck. Rule things are 권 사감's, money is the 자판기's or the
- * 매점부's, club things are the 짱's, the rest is the narrator. Each fits one toast row.
+ * (`LIVE_REFUSAL_CODES`), the WorldRoom's chat, social and 콜로세움 requests (`REFUSAL_CODES`),
+ * item and currency operations (`OP_ERRORS`) and a door that stays shut (`DoorRefusal`). Each
+ * table is typed by its code list, so a new code without a line fails the typecheck. Rule things
+ * and the 콜로세움 are 권 사감's, money is the 자판기's or the 매점부's, club things are the 짱's, a
+ * door to an era the Page clock has not opened is the cat's, the rest is the narrator. Each fits
+ * one toast row.
  *
  * Trade codes (`TRADE_ERRORS`) are both WorldRoom refusals (direct trade) and operation errors
  * (the 매점 게시판), so their lines are filed under both. A listing a blocked seller put up reads
  * `listing_missing`, the same as one that is gone, and nothing here hints at a block.
  *
- * Ids: `refusal.live.<code>`, `refusal.world.<code>`, `refusal.op.<code>`. A refusal's own
- * fields fill the slots: `until` as {time} for `muted`, `need` as {level} for `level`.
+ * Ids: `refusal.live.<code>`, `refusal.world.<code>`, `refusal.op.<code>`, `refusal.door.<code>`.
+ * A refusal's own fields fill the slots: `until` as {time} for `muted`, `need` as {level} for
+ * `level`, and for `duel_queue_locked` the clock moment `retryMs` from now as {time}.
  */
 import type {
+  DoorRefusal,
   DuelErrorCode,
   LiveRefusalCode,
   OpError,
@@ -65,12 +69,23 @@ const TRADE: Readonly<Record<TradeErrorCode, Line>> = {
   listing_qty: ["store", "남은 수량보다 많이 골랐어요."],
   listing_price: ["store", "값이 맞지 않아요. 다시 확인해 주세요."],
   listing_funds: ["store", "솔방울이 모자라요."],
-  listing_small: ["store", "그렇게 적게는 안 받아요. 조금 더 묶어서 와 주세요."],
-  listing_daily: ["store", "오늘 게시판 일은 여기까지예요. 내일 다시 와 주세요."],
+  listing_small: ["store", "매점 최저가보다 작은 거래예요. 압정이 아까워요."],
+  listing_daily: ["store", "오늘 쓸 영수증을 다 썼어요. 내일 다시 받아요."],
 };
 
-/** The 콜로세움's codes (`DUEL_ERRORS`) wait for their lines from the narrative writer. */
-const WORLD: Readonly<Record<Exclude<RefusalCode, DuelErrorCode>, Line>> = {
+/** The 콜로세움's own codes (`DUEL_ERRORS`): 권 사감 keeps its 명단 and its 점호. */
+const DUEL: Readonly<Record<DuelErrorCode, Line>> = {
+  duel_busy: ["sagam", "이미 잡힌 결투 일정이 있습니다."],
+  duel_target_busy: ["sagam", "결투 일정이 겹치는 학생이 있습니다."],
+  duel_not_here: ["sagam", "지금 서 있는 곳에서는 결투할 수 없습니다."],
+  duel_no_challenge: ["sagam", "그 신청서는 이미 처리되었습니다."],
+  duel_no_match: ["sagam", "그 점호는 이미 끝났습니다."],
+  duel_not_in: ["sagam", "빠질 결투 일정이 없습니다."],
+  duel_party_size: ["sagam", "3대3 명단에는 세 명까지만 오릅니다."],
+  duel_queue_locked: ["sagam", "{time}까지 결투 명단에 오를 수 없습니다."],
+};
+
+const WORLD: Readonly<Record<RefusalCode, Line>> = {
   ...TRADE,
   // Chat.
   empty: ["narrator", "아무 말도 쓰지 않았다."],
@@ -126,6 +141,7 @@ const WORLD: Readonly<Record<Exclude<RefusalCode, DuelErrorCode>, Line>> = {
   no_post: ["narrator", "그 글은 이미 떨어졌다."],
   not_allowed: ["sagam", "고정 공지는 층장만 붙일 수 있습니다."],
   unknown_emote: ["narrator", "모르는 동작이다."],
+  ...DUEL,
 };
 
 const OP: Readonly<Record<OpError, Line>> = {
@@ -173,7 +189,21 @@ const OP: Readonly<Record<OpError, Line>> = {
   drink_none: ["narrator", "가방에 에너지 드링크가 없다."],
 };
 
-const SLOTS_OF: Readonly<Record<string, readonly Slot[]>> = { muted: ["time"], level: ["level"] };
+/**
+ * A door pushed that will not open (`DoorRattle.why`): the map behind it is not built, the Page
+ * clock has not opened its era yet, or it is a locked hatch or door.
+ */
+const DOOR: Readonly<Record<DoorRefusal, Line>> = {
+  door_unbuilt: ["narrator", "문이 꿈쩍도 하지 않는다. 안쪽은 아직 조용하다."],
+  door_closed: ["entropy", "아직이다. 문틈으로 다른 시대 냄새가 난다."],
+  door_locked: ["narrator", "잠겨 있다. 손잡이만 차갑다."],
+};
+
+const SLOTS_OF: Readonly<Record<string, readonly Slot[]>> = {
+  muted: ["time"],
+  level: ["level"],
+  duel_queue_locked: ["time"],
+};
 
 function table(protocol: string, lines: Readonly<Record<string, Line>>): SystemMessage[] {
   const s = w.scope(protocol);
@@ -187,6 +217,11 @@ function table(protocol: string, lines: Readonly<Record<string, Line>>): SystemM
 }
 
 export const REFUSALS_COPY: CopyPart = {
-  system: [...table("live", LIVE), ...table("world", WORLD), ...table("op", OP)],
+  system: [
+    ...table("live", LIVE),
+    ...table("world", WORLD),
+    ...table("op", OP),
+    ...table("door", DOOR),
+  ],
   ko: w.ko,
 };

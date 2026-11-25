@@ -61,7 +61,7 @@ export const EGG_DESCRIPTIONS: readonly Description[] = [
     "electric-car",
     "prop",
     "전기차",
-    "실험동 1층. 바퀴가 둘 빠져 있고, 운전석에 쪽지가 붙어 있다.",
+    "실험동 앞. 바퀴가 둘 빠져 있고, 운전석에 쪽지가 붙어 있다.",
   ),
   prop(
     bed,
@@ -84,6 +84,22 @@ export const EGG_DESCRIPTIONS: readonly Description[] = [
     "실험동 3층 문",
     "열 때마다 삐 소리가 난다. 문틀에 바를 정 자가 빽빽하다.",
   ),
+];
+
+/**
+ * Map objects that carry an egg under the map's own id: the car pushed out in front of 실험동,
+ * the second 졸방대 with the graffiti on it, and the 보건실 bed.
+ */
+const alias = (id: string, of: string): Description => {
+  const d = EGG_DESCRIPTIONS.find((x) => x.id === of);
+  if (!d) throw new Error(`easter egg refers to missing ${of}`);
+  return { ...d, id };
+};
+
+export const EGG_PROPS: readonly Description[] = [
+  alias("ev", "electric-car"),
+  alias("standing-desk-2", "standing-desk-graffiti"),
+  alias("bed", "infirmary-bed"),
 ];
 
 const graffitiRows = [
@@ -144,7 +160,7 @@ export const EGGS: readonly EasterEgg[] = [
     id: "car-obituary",
     where: "electric-car",
     texts: [descKey("electric-car"), ...carNote],
-    nod: "A club-built vehicle that broke on its first ride and sat for years on an empty ground floor.",
+    nod: "A club-built vehicle that broke on its first ride, sat for years on an empty ground floor and was finally pushed outside.",
   },
   {
     id: "cozy-bed",
