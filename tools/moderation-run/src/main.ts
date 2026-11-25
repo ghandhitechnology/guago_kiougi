@@ -9,15 +9,8 @@
  */
 import { parseArgs } from "node:util";
 import type { Room } from "@colyseus/sdk";
-import {
-  API,
-  CLOSE_BANNED,
-  MAP_ROOM,
-  type Refusal,
-  WORLD_MESSAGES,
-  WORLD_ROOM,
-} from "@guago/shared";
-import { adminLogin, api, freshDatabase, run, say, signUp, startServer } from "./lib.ts";
+import { API, CLOSE_BANNED, type Refusal, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
+import { adminLogin, api, enterMap, freshDatabase, run, say, signUp, startServer } from "./lib.ts";
 
 const { values } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== "--"),
@@ -101,7 +94,7 @@ try {
 
   // The bot stands on its map (a live socket), and its world link drops: the server holds that
   // seat for the 30-second reconnection.
-  const map: Room = await bot.sdk().joinOrCreate(MAP_ROOM);
+  const map: Room = await enterMap(BASE, bot.jar);
   map.reconnection.enabled = false;
   const mapClosed = new Promise<number>((resolve) => map.onLeave((code) => resolve(code)));
   say(`bot joined its map room ${map.roomId}`);
@@ -115,10 +108,17 @@ try {
   const banned = await admin(`/players/${account}/ban`, {
     reason: "반복적인 욕설과 도배",
     minutes: null,
-    ip: true,
+    ip: "signup",
   });
-  check(banned.status === 200, "admin bans the bot until lifted, with its IPs");
-  const code = await mapClosed;
+  check(
+    banned.status === 200,
+    `admin bans the bot until lifted, refusing new signups from its address: ${banned.status} ${JSON.stringify(banned.body)}`,
+  );
+  // A run that fails must end, not wait for a close that never comes.
+  const code = await Promise.race([
+    mapClosed,
+    new Promise<number>((resolve) => setTimeout(() => resolve(-1), 5000)),
+  ]);
   check(code === CLOSE_BANNED, `bot's live map socket closed with code ${code} (CLOSE_BANNED)`);
 
   const reconnect = await bot

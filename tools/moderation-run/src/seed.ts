@@ -10,9 +10,9 @@
 import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import type { Room } from "@colyseus/sdk";
-import { API, MAP_ROOM, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
+import { API, WORLD_MESSAGES, WORLD_ROOM } from "@guago/shared";
 import pg from "pg";
-import { adminLogin, api, freshDatabase, run, say, signUp, startServer } from "./lib.ts";
+import { adminLogin, api, enterMap, freshDatabase, run, say, signUp, startServer } from "./lib.ts";
 
 const { values } = parseArgs({
   args: process.argv.slice(2).filter((a) => a !== "--"),
@@ -99,7 +99,7 @@ for (const b of bots) {
     world.onMessage(t, () => {});
   }
   rooms.set(b.name, world);
-  const map = await b.sdk().joinOrCreate(MAP_ROOM);
+  const map = await enterMap(BASE, b.jar);
   map.onMessage("*", () => {});
 }
 let n = 0;
