@@ -1,4 +1,10 @@
-import type { FieldRule, FightMap, TileRect } from "@guago/shared";
+import {
+  type FieldRule,
+  type FightMap,
+  type SnapshotReader,
+  snapshotReaderFor,
+  type TileRect,
+} from "@guago/shared";
 import { FIELDS, type FieldDef } from "./fields.ts";
 import { type BuiltMap, buildAllMaps } from "./maps/index.ts";
 import { LAWN, type MapDef } from "./maps/lawn.ts";
@@ -49,4 +55,14 @@ export function mapById(id: string): BuiltMap | MapDef | undefined {
 export function fieldOf(mapId: string, override?: string): FieldRule | null {
   const def: FieldDef | undefined = FIELDS.find((f) => f.id === (override || mapId));
   return def ? fieldRule(def) : null;
+}
+
+/**
+ * The fight snapshot reader for a room on map `mapId` (`MapState.map`): the one setup the browser,
+ * the load test bots and the tests share, so the map size can never be left out.
+ */
+export function snapshotReaderForMap(mapId: string): SnapshotReader {
+  const map = mapById(mapId);
+  if (!map) throw new Error(`no map ${mapId} to read a fight snapshot for`);
+  return snapshotReaderFor(map);
 }

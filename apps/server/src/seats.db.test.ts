@@ -6,12 +6,13 @@ import { createServer } from "node:net";
 import { ClientState, matchMaker } from "@colyseus/core";
 import type { Room, SeatReservation } from "@colyseus/sdk";
 import { API, CLOSE_SESSION_REPLACED, MAP_ROOM } from "@guago/shared";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createGameServer } from "./app.ts";
 import { type AuthService, createAuthService } from "./auth/service.ts";
 import { createDb, type Db } from "./db/index.ts";
+import { invariants } from "./invariants.ts";
 import { studentLooks } from "./looks.ts";
-import type { MapRoom } from "./map-room.ts";
+import { checkMapRooms, type MapRoom } from "./map-room.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
 import { enter, joinMap, sdk } from "./test/enter.ts";
@@ -110,6 +111,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await server.gracefullyShutdown(false);
   await db.pool.end();
+});
+
+afterEach(() => {
+  checkMapRooms();
+  expect(invariants.broken.splice(0)).toEqual([]);
 });
 
 beforeEach(async () => {

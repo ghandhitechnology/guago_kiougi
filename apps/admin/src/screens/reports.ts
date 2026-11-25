@@ -2,6 +2,7 @@ import { get, post, q } from "../api.ts";
 import { form, h, select, table, td, when } from "../dom.ts";
 import type { Ctx } from "../nav.ts";
 import { CHANNELS, type ChatLine, chatTable } from "./chat.ts";
+import { ipOptions, ipPreview, ipScopeOf } from "./ipban.ts";
 
 interface ReportRow {
   id: number;
@@ -99,7 +100,10 @@ export async function reportsScreen(ctx: Ctx): Promise<Node> {
 }
 
 export async function reportScreen(ctx: Ctx, id: string): Promise<Node> {
+  if (!/^\d{1,15}$/.test(id)) return h("p", { class: "error" }, "Not found.");
   const { report: r } = await get<{ report: Report }>(`/reports/${id}`);
+  const preview =
+    r.state === "open" && r.targetAccount ? await ipPreview(r.targetAccount) : undefined;
   const attached = table(
     ["Time", "Channel", "Text", "Filter"],
     r.context.lines.map((l) => [
@@ -129,7 +133,7 @@ export async function reportScreen(ctx: Ctx, id: string): Promise<Node> {
                 ["ban", "ban"],
               ]),
               select("minutes", DURATIONS, "1440"),
-              h("label", null, h("input", { type: "checkbox", name: "ip" }), "ban IPs"),
+              ...(preview ? ipOptions(preview) : []),
             ),
             h(
               "div",
@@ -151,7 +155,7 @@ export async function reportScreen(ctx: Ctx, id: string): Promise<Node> {
               state: d.get("state"),
               action,
               minutes,
-              ip: d.get("ip") === "on",
+              ip: ipScopeOf(d),
               note: d.get("note") ?? "",
               told: d.get("told") ?? "",
             });

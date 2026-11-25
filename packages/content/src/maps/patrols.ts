@@ -49,8 +49,21 @@ export function buildPatrol(p: PatrolSource): Patrol {
   };
 }
 
+/**
+ * A walk: someone in town going about a round of errands on a route (the water-carrier between
+ * the fountain and the street, the messenger across the square). A patrol with no eyes: the same
+ * route, pace and pauses, and nobody gets caught.
+ */
+export type WalkSource = Omit<PatrolSource, "cone">;
+export type Walk = Omit<Patrol, "cone">;
+
+export function buildWalk(w: WalkSource): Walk {
+  const { cone: _cone, ...rest } = buildPatrol({ ...w, cone: { length: 1, angle: 1 } });
+  return rest;
+}
+
 /** The waypoints walked in one full round, closing the loop. */
-function legs(p: Patrol): { x: number; y: number }[] {
+function legs(p: Walk): { x: number; y: number }[] {
   const pts = [...p.route];
   if (p.loop === "pingpong") pts.push(...[...p.route].reverse().slice(1));
   else if (pts.length > 1) pts.push(p.route[0] as { x: number; y: number });
@@ -58,7 +71,7 @@ function legs(p: Patrol): { x: number; y: number }[] {
 }
 
 /** Seconds one full round takes, pauses included. */
-export function roundTime(p: Patrol): number {
+export function roundTime(p: Walk): number {
   const pts = legs(p);
   let t = 0;
   for (let i = 0; i + 1 < pts.length; i++) {
@@ -80,7 +93,7 @@ export interface Pose {
  * Where the guard is at `t` seconds: walking a leg, or standing at the waypoint it reached,
  * already looking down the next leg. Deterministic, so every client draws the same guard.
  */
-export function patrolPose(p: Patrol, t: number): Pose {
+export function patrolPose(p: Walk, t: number): Pose {
   const pts = legs(p);
   const first = pts[0] ?? { x: 0, y: 0 };
   if (pts.length < 2) return { x: first.x, y: first.y, facing: 0 };

@@ -12,6 +12,8 @@ import {
   checkMinutes,
   cleanNotice,
   cleanReason,
+  IP_SCOPES,
+  type IpScope,
   isUuid,
   type ModError,
   type Moderation,
@@ -72,6 +74,13 @@ function date(raw: string | null): Date | undefined {
   return d;
 }
 
+/** `none` unless the form named a scope; anything else is refused. */
+function ipScope(raw: unknown): IpScope {
+  if (raw === undefined || raw === false) return "none";
+  if (IP_SCOPES.includes(raw as IpScope)) return raw as IpScope;
+  throw bad();
+}
+
 function owner(req: AdminRequest): void {
   if (req.admin.role !== "owner") throw new HttpError(403, "role");
 }
@@ -106,12 +115,20 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
 
   // Players ------------------------------------------------------------------------------------
 
-  route("GET", "/players", async (req) => ({
-    players: await reads.search(req.query.get("q") ?? ""),
-  }));
+  route("GET", "/players", async (req) => {
+    const q = req.query.get("q") ?? "";
+    await record(db, {
+      adminId: req.admin.id,
+      action: "player.search",
+      target: "players",
+      detail: { q },
+    });
+    return { players: await reads.search(q) };
+  });
 
-  route("GET", "/players/:id", async (_req, [id]) => {
+  route("GET", "/players/:id", async (req, [id]) => {
     if (!isUuid(id)) throw bad();
+    await record(db, { adminId: req.admin.id, action: "player.read", target: target.account(id) });
     const player = await reads.player(id);
     if (!player) throw new HttpError(404, "not_found");
     return { player: { ...player, online: deps.online(id) } };
@@ -151,15 +168,20 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
 
   route("POST", "/players/:id/ban", async (req, [id]) => {
     const b = obj(req.body);
-    if (!isUuid(id) || (b.ip !== undefined && typeof b.ip !== "boolean")) throw bad();
+    if (!isUuid(id)) throw bad();
     done(
       await moderation.ban(req.admin.id, id, {
         reason: reason(b),
         minutes: minutes(b),
-        ip: b.ip === true,
+        ip: ipScope(b.ip),
       }),
     );
     return { ok: true };
+  });
+
+  route("GET", "/players/:id/ip-preview", async (_req, [id]) => {
+    if (!isUuid(id)) throw bad();
+    return { preview: await moderation.ipPreview(id) };
   });
 
   route("POST", "/players/:id/unban", async (req, [id]) => {
@@ -241,6 +263,12 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
   route("GET", "/reports", async (req) => {
     const state = req.query.get("state") ?? "open";
     if (!["open", "resolved", "dismissed"].includes(state)) throw bad();
+    await record(db, {
+      adminId: req.admin.id,
+      action: "reports.read",
+      target: "reports",
+      detail: { state },
+    });
     return { reports: await reads.reports(state) };
   });
 
@@ -273,7 +301,7 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
         state: b.state,
         action: b.action as ReportAction,
         minutes: minutes(b),
-        ip: b.ip === true,
+        ip: ipScope(b.ip),
         note,
         told,
       }),
@@ -298,6 +326,27 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     const b = obj(req.body);
     if (typeof b.text !== "string" || b.text.length === 0 || b.text.length > 500) throw bad();
     return { result: filters.test(b.text) };
+  });
+
+  // 대자보 posts and club notices ------------------------------------------------------------
+
+  route("GET", "/posts", async (req) => {
+    await record(db, { adminId: req.admin.id, action: "posts.read", target: "posts" });
+    return await reads.posts();
+  });
+
+  route("POST", "/posts/board/:id/remove", async (req, [id]) => {
+    const n = Number(id);
+    if (!Number.isSafeInteger(n) || n < 1) throw bad();
+    done(await moderation.removePost(req.admin.id, n, reason(obj(req.body))));
+    return { ok: true };
+  });
+
+  route("POST", "/posts/notice/:id/remove", async (req, [id]) => {
+    const n = Number(id);
+    if (!Number.isSafeInteger(n) || n < 1) throw bad();
+    done(await moderation.removeClubNotice(req.admin.id, n, reason(obj(req.body))));
+    return { ok: true };
   });
 
   // Server -------------------------------------------------------------------------------------
@@ -335,6 +384,16 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     const player = who ? await findCharacter(who) : undefined;
     const counterpart = other ? await findCharacter(other) : undefined;
     if (counterpart && !player) throw bad();
+    await record(db, {
+      adminId: req.admin.id,
+      action: "trades.read",
+      target: player ? target.character(player) : "trades",
+      detail: {
+        ...(counterpart ? { with: counterpart } : {}),
+        ...(item ? { item } : {}),
+        ...(def ? { def } : {}),
+      },
+    });
     return {
       trades: await reads.trades({
         ...(player ? { player } : {}),
@@ -349,9 +408,16 @@ export function adminRoutes(deps: RouteDeps): AdminRoutes {
     };
   });
 
-  route("GET", "/players/:id/partners", async (_req, [id]) => {
+  route("GET", "/players/:id/partners", async (req, [id]) => {
     if (!isUuid(id)) throw bad();
-    return { partners: await reads.partners(await characterOf(id)) };
+    const characterId = await characterOf(id);
+    await record(db, {
+      adminId: req.admin.id,
+      action: "trades.read",
+      target: target.character(characterId),
+      detail: { partners: true },
+    });
+    return { partners: await reads.partners(characterId) };
   });
 
   route("GET", "/audit", async (req) => {

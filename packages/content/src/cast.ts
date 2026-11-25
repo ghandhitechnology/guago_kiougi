@@ -19,6 +19,11 @@ export interface CastArt {
    * spot their barks name, else the first spot listed.
    */
   readonly home?: string;
+  /**
+   * The map mark in `home` they work at, for a townsperson whose place is a mark (the potter's
+   * wheel, the barber's chair) rather than a speaker's spot. Their NPC spot goes on that mark.
+   */
+  readonly mark?: string;
 }
 
 export const CAST_ART: Readonly<Record<string, CastArt>> = {
@@ -53,5 +58,103 @@ export const CAST_ART: Readonly<Record<string, CastArt>> = {
     signature: "jot",
     home: "question-library",
   },
-  aristarchus: { kind: "rig", art: "aristarchus-campus", signature: "squint", home: "p1-agora" },
+  aristarchus: { kind: "rig", art: "aristarchus-campus", signature: "chalk", home: "p1-agora" },
+
+  // Page 1's people. Each one's `idle` is their work and loops by itself; the signature is the
+  // thing they do now and then. Also in the art: `squint` (아리스타르코스), `beans` (the bean
+  // watcher), `scared` and `relief` (the three helpers, on the way out and on arrival), `alert`
+  // and `catch` (the guard), `walk` for everyone.
+  "pythagorean-order": {
+    kind: "sprite",
+    art: "pythagorean-order",
+    signature: "count",
+    home: "p1-agora",
+  },
+  "pythagorean-bean": {
+    kind: "rig",
+    art: "pythagorean-bean",
+    signature: "beans",
+    home: "p1-agora",
+  },
+  "pythagorean-junior": {
+    kind: "rig",
+    art: "pythagorean-junior",
+    signature: "talk",
+    home: "p1-agora",
+    mark: "pythagorean-junior",
+  },
+  "lyceum-scribe": {
+    kind: "rig",
+    art: "lyceum-scribe",
+    signature: "talk",
+    home: "p1-agora",
+    mark: "lyceum-scribe",
+  },
+  "survey-helper": {
+    kind: "rig",
+    art: "survey-helper",
+    signature: "talk",
+    home: "p1-agora",
+    mark: "survey-helper",
+  },
+  "agora-potter": {
+    kind: "rig",
+    art: "agora-potter",
+    signature: "wipe",
+    home: "p1-agora",
+    mark: "potter",
+  },
+  "agora-barber": {
+    kind: "rig",
+    art: "agora-barber",
+    signature: "strop",
+    home: "p1-agora",
+    mark: "barber",
+  },
+  "agora-customer": { kind: "rig", art: "agora-customer", signature: "flinch", home: "p1-agora" },
+  "agora-cook": {
+    kind: "rig",
+    art: "agora-cook",
+    signature: "taste",
+    home: "p1-agora",
+    mark: "cook",
+  },
+  "agora-pointer": {
+    kind: "rig",
+    art: "agora-pointer",
+    signature: "shout",
+    home: "p1-agora",
+    mark: "argument-a",
+  },
+  "agora-counter": {
+    kind: "rig",
+    art: "agora-counter",
+    signature: "tally",
+    home: "p1-agora",
+    mark: "argument-b",
+  },
+  "agora-children": {
+    kind: "sprite",
+    art: "agora-children",
+    signature: "idle",
+    home: "p1-agora",
+    mark: "children",
+  },
+  "agora-fishmonger": {
+    kind: "rig",
+    art: "agora-fishmonger",
+    signature: "shout",
+    home: "p1-agora",
+    mark: "fish-seller",
+  },
+  "agora-water": { kind: "rig", art: "agora-water", signature: "steady", home: "p1-agora" },
+  "agora-sleeper": { kind: "rig", art: "agora-sleeper", signature: "wake", home: "p1-agora" },
+  "agora-sophist": { kind: "rig", art: "agora-sophist", signature: "flourish", home: "p1-agora" },
+  "agora-messenger": { kind: "rig", art: "agora-messenger", signature: "wave", home: "p1-agora" },
+  // The stands at 엘레아 and the 리케이온's lecture hall: `spectator-sit-a` to `-c` and
+  // `spectator-stand-a`, `-b` (`idle`, `cheer`) to scatter on the tiers, and `crowd-a` to `-c` as
+  // walking figures for an audience that faces its speaker.
+  "crowd-a": { kind: "rig", art: "crowd-a", signature: "cheer" },
+  "crowd-b": { kind: "rig", art: "crowd-b", signature: "cheer" },
+  "crowd-c": { kind: "rig", art: "crowd-c", signature: "cheer" },
 };

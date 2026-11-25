@@ -49,6 +49,19 @@ export type ApiErrorCode = (typeof API_ERRORS)[number];
 
 export interface ApiError {
   error: ApiErrorCode;
+  /** With `account_banned` on a login whose password was right: what the player is owed. */
+  ban?: BanNotice;
+}
+
+/**
+ * Why and until when an account is banned, as its owner is told: the narrative's
+ * `moderation.banned` ({time}, {reason}) or `moderation.banned-permanent` ({reason}).
+ */
+export interface BanNotice {
+  key: "moderation.banned" | "moderation.banned-permanent";
+  /** Ms since the epoch; absent for a ban until lifted. */
+  until?: number;
+  reason: string;
 }
 
 export const MAJORS = ["math", "physics", "chemistry", "biology", "earth"] as const;
@@ -157,12 +170,17 @@ export function normalizeRecoveryCode(raw: string): string {
   return raw.replace(/[\s-]/g, "").toUpperCase();
 }
 
+/*
+ * The game's own room close codes sit in 4020-4029. Colyseus uses 4000 (consented), 4001 (server
+ * shutdown), 4002 (closed with an error), 4003 (reconnection failed) and 4010 (may reconnect), so
+ * none of those may mean anything final here: a restart or a failed reconnection is a drop.
+ */
 /** Room close code sent to a client whose account joined somewhere else. Do not rejoin on it. */
-export const CLOSE_SESSION_REPLACED = 4001;
+export const CLOSE_SESSION_REPLACED = 4021;
 /** Room close code: an admin closed this session. The player may log in again. Do not rejoin on it. */
-export const CLOSE_KICKED = 4002;
+export const CLOSE_KICKED = 4022;
 /** Room close code: the account was banned. Its sessions are gone; logging in answers `account_banned`. */
-export const CLOSE_BANNED = 4003;
+export const CLOSE_BANNED = 4023;
 
 /** How a room link ends for good, by close code; anything else is a drop worth rejoining after. */
 export type LinkEnd = "replaced" | "kicked" | "banned";

@@ -1,3 +1,4 @@
+import { networkInterfaces } from "node:os";
 import { CHANNEL_SEATS, CLOCK_MAX_RATE, MAP_SEATS, SERVER_PORT } from "@guago/shared";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -43,6 +44,10 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     secureCookies:
       !(mode === "development" || mode === "test") || clientOrigin.startsWith("https:"),
     trustProxy: env.TRUST_PROXY === "1",
+    /** Development and load tests only: an entry may name its map (`enter.ts`). */
+    allowMapOption: env.ALLOW_MAP_OPTION === "1",
+    /** `dev` messages (spawn monsters, EXP, knock-outs) for recordings: local development only. */
+    devCommands: env.GUAGO_DEV_COMMANDS === "1",
     /** Keys the IP hashes and device cookies. The fallback is public and only good on localhost. */
     serverSecret: env.SERVER_SECRET || "local-development-only",
     serverSecretSet: Boolean(env.SERVER_SECRET),
@@ -61,25 +66,41 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     adminHost,
     adminPort,
     /** The origin the admin page is loaded from; state-changing requests must come from it. */
+    /** Behind `tailscale serve` on this machine: key admin limits on the user it names. */
+    adminTrustProxy: env.ADMIN_TRUST_PROXY === "1",
     adminOrigin:
       env.ADMIN_ORIGIN ||
       `http://${adminHost.includes(":") ? `[${adminHost}]` : adminHost}:${adminPort}`,
   };
 }
 
+/** Tailscale's interface: `tailscale0` on Linux, a `utun` device on macOS. */
+const TAILSCALE_INTERFACE = /^(tailscale\d*|utun\d+)$/;
+
 /**
- * Where the admin listener may bind: loopback, or an address on the Tailscale network
- * (100.64.0.0/10, fd7a:115c:a1e0::/48). Never a wildcard or a public address (PLAN §22 "reachable
- * only over Tailscale").
+ * Where the admin listener may bind: loopback, or this machine's own Tailscale address: in
+ * Tailscale's ranges (100.64.0.0/10, fd7a:115c:a1e0::/48) and on Tailscale's interface, since
+ * some hosts use 100.64.0.0/10 for a private network of their own. Never a wildcard or a public
+ * address (PLAN §22 "reachable only over Tailscale").
  */
-export function isAdminBindable(host: string): boolean {
+export function isAdminBindable(
+  host: string,
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): boolean {
   if (host === "127.0.0.1" || host === "::1" || host === "localhost") return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 100 && b >= 64 && b <= 127 && v4.slice(1).every((n) => Number(n) <= 255);
-  }
-  return /^fd7a:115c:a1e0:/i.test(host);
+  const inRange = v4
+    ? Number(v4[1]) === 100 &&
+      Number(v4[2]) >= 64 &&
+      Number(v4[2]) <= 127 &&
+      v4.slice(1).every((n) => Number(n) <= 255)
+    : /^fd7a:115c:a1e0:/i.test(host);
+  if (!inRange) return false;
+  return Object.entries(interfaces).some(
+    ([name, addresses]) =>
+      TAILSCALE_INTERFACE.test(name) &&
+      (addresses ?? []).some((a) => a.address.toLowerCase() === host.toLowerCase()),
+  );
 }
 
 export type Config = ReturnType<typeof readConfig>;
@@ -88,6 +109,12 @@ export const config = readConfig();
 
 /** Refuses settings a reachable server must not run with. Called once at server start. */
 export function assertServable(c: Config): void {
+  if (c.allowMapOption && !c.local) {
+    throw new Error("ALLOW_MAP_OPTION lets a client choose its map: local development only");
+  }
+  if (c.devCommands && !c.local) {
+    throw new Error("GUAGO_DEV_COMMANDS lets a client spawn monsters: local development only");
+  }
   if (!c.serverSecretSet && !c.local) {
     throw new Error(
       "SERVER_SECRET must be set unless NODE_ENV=development serves a localhost origin",

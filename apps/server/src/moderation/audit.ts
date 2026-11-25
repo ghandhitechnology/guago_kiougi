@@ -1,9 +1,16 @@
 /**
  * The admin audit log (PLAN §12 "Audit log", §20 `admin_actions`). Every admin action writes one
- * row, inside the action's own transaction wherever the action is a database change. There is
- * only `record` and `listAudit`: no update or delete path exists, and the table's trigger
- * refuses both.
+ * row, inside the action's own transaction wherever the action is a database change.
+ *
+ * What "append-only" covers: the code has only `record` and `listAudit`, no update or delete
+ * path; and triggers refuse UPDATE, DELETE and TRUNCATE from every role, the server's own
+ * included, so no code bug or SQL slip through the server's pool changes a row.
+ * What it does not cover: the server connects as the role that ran the migrations and owns the
+ * table, so that role can still disable the triggers, drop the table or edit rows with them
+ * off. Anyone holding the database credentials can rewrite the log. Closing that needs a
+ * migration role that owns the table and an app role with INSERT and SELECT only (DECISIONS.md).
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../economy/executor.ts";
 
@@ -23,7 +30,19 @@ export type AuditAction =
   | "report.resolve"
   | "chat.read"
   | "inventory.read"
-  | "admin.edit";
+  | "admin.edit"
+  | "post.remove"
+  | "notice.remove"
+  | "posts.read"
+  | "player.read"
+  | "player.search"
+  | "reports.read"
+  | "trades.read"
+  | "login.failed"
+  | "cli.create"
+  | "cli.password"
+  | "cli.enable"
+  | "cli.disable";
 
 export interface AuditEntry {
   adminId: string;
@@ -44,12 +63,20 @@ export const target = {
   server: "server",
 } as const;
 
+/**
+ * Who is acting, for every row written while an admin request is served: the admin listener
+ * runs each request inside it, so the address reaches the row without passing through every
+ * call. The command line runs outside it, and its rows carry no address.
+ */
+export const auditContext = new AsyncLocalStorage<{ ipHash: string }>();
+
 /** Writes one row. Returns false only when an operation id already has its row. */
 export async function record(q: Queryable, e: AuditEntry): Promise<boolean> {
+  const ip = auditContext.getStore()?.ipHash ?? null;
   const { rowCount } = await q.execute(sql`
-    insert into admin_actions (admin_id, action, target, reason, detail, op_id)
+    insert into admin_actions (admin_id, action, target, reason, detail, op_id, ip_hash)
     values (${e.adminId}, ${e.action}, ${e.target}, ${e.reason ?? null},
-            ${JSON.stringify(e.detail ?? {})}::jsonb, ${e.opId ?? null})
+            ${JSON.stringify(e.detail ?? {})}::jsonb, ${e.opId ?? null}, ${ip})
     on conflict (admin_id, op_id) where op_id is not null do nothing`);
   return (rowCount ?? 0) > 0;
 }

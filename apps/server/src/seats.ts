@@ -5,8 +5,8 @@
  */
 import { type AuthContext, type Client, ClientState, Deferred, ServerError } from "@colyseus/core";
 import { type Character, CLOSE_SESSION_REPLACED } from "@guago/shared";
-import { sessionTokenHash } from "./auth/crypto.ts";
-import { readCookie, sessionCookieName } from "./auth/http.ts";
+import { ipHash, sessionTokenHash } from "./auth/crypto.ts";
+import { clientAddress, readCookie, sessionCookieName } from "./auth/http.ts";
 import type { AuthService } from "./auth/service.ts";
 import { describeError } from "./db/index.ts";
 
@@ -23,6 +23,9 @@ interface Services {
   auth: AuthService;
   clientOrigin: string;
   secureCookies: boolean;
+  /** For the IP-ban check at join: how to read the client's address, and the hash key. */
+  trustProxy?: boolean;
+  serverSecret?: string;
   /**
    * Runs when a character leaves a room, before its seat is freed: pending grants land.
    * `replaced` is true when a newer session of the account already holds this slot.
@@ -61,7 +64,26 @@ export async function authenticateJoin(ctx: AuthContext): Promise<RoomAuth> {
   if (!me) throw new ServerError(401, "unauthorized");
   const character = await auth.characterOf(me.account.id);
   if (!character) throw new ServerError(403, "no_character");
+  await refuseBannedAddress(ctx);
   return { accountId: me.account.id, characterId: character.id, tokenHash };
+}
+
+/**
+ * An IP ban that refuses every account on an address holds at every room join (moderation).
+ * The address is the socket's peer (`/api/enter` passes its request) or, behind our own proxy,
+ * the hop it appended; Colyseus's matchmaking request carries neither without a proxy, and is
+ * then not checked.
+ */
+async function refuseBannedAddress(ctx: AuthContext): Promise<void> {
+  const { auth, trustProxy = false, serverSecret } = use();
+  if (!serverSecret) return;
+  const remote = (ctx.req as { socket?: { remoteAddress?: string } } | undefined)?.socket
+    ?.remoteAddress;
+  if (!trustProxy && !remote) return;
+  const address = clientAddress(ctx.headers.get("x-forwarded-for"), remote, trustProxy);
+  if (await auth.joinRefused(ipHash(address, serverSecret))) {
+    throw new ServerError(403, "account_banned");
+  }
 }
 
 /** Writes of a character's new place after a door, in flight, by character id. */
@@ -77,6 +99,11 @@ export async function characterAfterMoves(
 ): Promise<Character | null> {
   await moves.get(characterId)?.catch(() => {});
   return use().auth.characterOf(accountId);
+}
+
+/** Development entries only (`ALLOW_MAP_OPTION`): puts the character on a map it chose. */
+export function placeCharacter(characterId: string, mapId: string, x: number, y: number) {
+  return use().auth.saveCharacterPlace(characterId, mapId, x, y);
 }
 
 // One seat per account and slot, across rooms ------------------------------------------------
@@ -194,7 +221,7 @@ export class RoomSeats {
 
   /** Takes the account's seat (closing an older one) and loads the character fresh. */
   async join(client: Client): Promise<Character> {
-    const { accountId, tokenHash } = client.auth as RoomAuth;
+    const { accountId, characterId, tokenHash } = client.auth as RoomAuth;
     const seat: Seat = {
       client,
       characterId: "",
@@ -217,7 +244,8 @@ export class RoomSeats {
       // The session was checked at matchmaking; a logout or recovery since then voids the seat.
       const me = await auth.authenticateHash(tokenHash);
       if (me?.account.id !== accountId) throw new ServerError(401, "unauthorized");
-      const character = await auth.characterOf(accountId);
+      // A door this character is walking through, written meanwhile, decides where it stands.
+      const character = await characterAfterMoves(accountId, characterId);
       if (!character) throw new ServerError(403, "no_character");
       // A newer session may have taken the account while this one was loading.
       if (seat.evicted) throw new ServerError(409, "session_replaced");
@@ -242,6 +270,11 @@ export class RoomSeats {
   mayReconnect(client: Client): boolean {
     const seat = this.seats.get(client.sessionId);
     return seat !== undefined && !seat.evicted && !seat.moving;
+  }
+
+  /** Whether a dropped socket of this session may still come back. */
+  holding(sessionId: string): boolean {
+    return this.seats.get(sessionId)?.reconnection !== undefined;
   }
 
   hold(client: Client, reconnection: Reconnection): void {
