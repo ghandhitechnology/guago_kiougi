@@ -209,13 +209,32 @@ function show(src: HTMLCanvasElement, scale: number, bg: Backdrop): HTMLCanvasEl
   return c;
 }
 
-const players: {
-  c: HTMLCanvasElement;
-  frames: HTMLCanvasElement[];
-  fps: number;
-  scale: number;
-  bg: Backdrop;
-}[] = [];
+/**
+ * Views near the viewport. The sheet holds thousands of animated canvases and dozens of live
+ * scenes; only these are painted, so the page stays responsive however long it grows.
+ */
+const near = new Set<Element>();
+const nearby = new IntersectionObserver(
+  (entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) near.add(e.target);
+      else near.delete(e.target);
+    }
+  },
+  { rootMargin: "256px" },
+);
+
+interface Player {
+  readonly c: HTMLCanvasElement;
+  readonly frames: HTMLCanvasElement[];
+  readonly fps: number;
+  readonly scale: number;
+  readonly bg: Backdrop;
+  /** The frame on the canvas now, so a player repaints only when its frame changes. */
+  shown: number;
+}
+
+const players: Player[] = [];
 
 function player(
   frames: HTMLCanvasElement[],
@@ -225,16 +244,20 @@ function player(
 ): HTMLCanvasElement {
   const first = frames[0] as HTMLCanvasElement;
   const c = canvas(first.width * scale, first.height * scale);
-  players.push({ c, frames, fps, scale, bg });
+  players.push({ c, frames, fps, scale, bg, shown: -1 });
+  nearby.observe(c);
   return c;
 }
 
 function tick(now: number): void {
   for (const p of players) {
-    const f = p.frames[Math.floor((now / 1000) * p.fps) % p.frames.length] as HTMLCanvasElement;
+    if (!near.has(p.c)) continue;
+    const i = Math.floor((now / 1000) * p.fps) % p.frames.length;
+    if (i === p.shown) continue;
+    p.shown = i;
     const ctx = ctx2d(p.c);
     paintBackdrop(ctx, p.c.width, p.c.height, p.bg, 2 * p.scale);
-    ctx.drawImage(f, 0, 0, p.c.width, p.c.height);
+    ctx.drawImage(p.frames[i] as HTMLCanvasElement, 0, 0, p.c.width, p.c.height);
   }
   requestAnimationFrame(tick);
 }
@@ -351,6 +374,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
     }
     const crops = mapViews(map).map((v) => {
       const c = canvas(v.rect.w * 3, v.rect.h * 3);
+      nearby.observe(c);
       box.append(cell(c, `${v.name} ×3`));
       return { v, c, small: canvas(v.rect.w, v.rect.h) };
     });
@@ -365,6 +389,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
       last = step;
       for (const { map, crops } of views) {
         for (const { v, c, small } of crops) {
+          if (!near.has(c)) continue;
           put(small, renderScene(map.scene, meta, pixels, step / 10, v.rect));
           ctx2d(c).drawImage(small, 0, 0, c.width, c.height);
         }
@@ -389,7 +414,8 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
     r.append(cell(one, "×1"));
     box.append(cell(three, "×3"));
     s.append(box);
-    return { def, one, three };
+    nearby.observe(box);
+    return { def, box, one, three };
   });
   let last = -1;
   const paint = (now: number): void => {
@@ -398,6 +424,7 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
     if (step !== last) {
       last = step;
       for (const v of views) {
+        if (!near.has(v.box)) continue;
         const img = renderScene(v.def, meta, pixels, step / 10);
         if (step === 0 && img.warnings.length > 0) console.warn(v.def.name, img.warnings);
         put(v.one, img);
