@@ -61,6 +61,8 @@ export const PROPS = {
   "shackle-bench": { foot: [4, 1] },
   bonfire: { foot: [2, 1] },
   stalagmite: { foot: [1, 1] },
+  beans: { foot: [4, 2] },
+  monochord: { foot: [3, 1] },
 
   // The interior kit: furniture that blocks, by the floor it stands on. Chairs, stools, bags,
   // books and small things on the floor are walked around by eye, not blocked.
