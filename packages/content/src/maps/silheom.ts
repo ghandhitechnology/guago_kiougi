@@ -29,7 +29,7 @@ const sun = (cx: number, cap: number): LightSource => ({
   at: [cx + 14, mountY(cap) + 40],
   radius: 60,
   color: "gold.pale",
-  intensity: 0.45,
+  intensity: 0.7,
   paint: {
     bands: ["campus-lamp"],
     spill: {
@@ -59,7 +59,7 @@ const map: MapSource = {
   time: { clock: "09:40", phase: "morning", weather: "haze" },
   theme: "campus",
   sky: "ink.deep",
-  ambient: { color: "stone.bright", intensity: 0.9 },
+  ambient: { color: "stone.bright", intensity: 0.78, unlit: "campus" },
   plan: `
     ##################################
     #vvvv#|||||||||||||||||||||||||||#
@@ -238,7 +238,7 @@ const map: MapSource = {
       at: [144, 80],
       radius: 30,
       color: "plum.pale",
-      intensity: 0.35,
+      intensity: 0.2,
       paint: { bands: ["campus-lamp"], at: [144, 86], r: [26, 10], ragged: 2 },
     },
     // The laser on the interferometer.

@@ -224,7 +224,7 @@ const map: MapSource = {
   time: { clock: "07:10", phase: "morning", weather: "haze" },
   theme: "eco-morning",
   sky: "board.mid",
-  ambient: { color: "sea.pale", intensity: 0.9 },
+  ambient: { color: "sea.pale", intensity: 0.88 },
   plan: PLAN,
   legend: LEGEND,
   details,

@@ -59,6 +59,8 @@ const TRADE: Readonly<Record<TradeErrorCode, Line>> = {
   listing_qty: ["store", "남은 수량보다 많이 골랐어요."],
   listing_price: ["store", "값이 맞지 않아요. 다시 확인해 주세요."],
   listing_funds: ["store", "솔방울이 모자라요."],
+  listing_small: ["store", "그렇게 적게는 안 받아요. 조금 더 묶어서 와 주세요."],
+  listing_daily: ["store", "오늘 게시판 일은 여기까지예요. 내일 다시 와 주세요."],
 };
 
 const WORLD: Readonly<Record<RefusalCode, Line>> = {

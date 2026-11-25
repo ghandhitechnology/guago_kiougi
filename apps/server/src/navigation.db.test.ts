@@ -6,6 +6,7 @@
 import { createServer } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import type { Room } from "@colyseus/sdk";
+import { mapById } from "@guago/content";
 import {
   API,
   CLOSE_SESSION_REPLACED,
@@ -15,8 +16,13 @@ import {
   MAP_ROOM,
   MapState,
   MOVE_MAX,
+  NULL_SINK,
   POS_SCALE,
   type PresenceMessage,
+  SNAP_CELL_TILES,
+  SNAPSHOT_MESSAGE,
+  SnapshotReader,
+  TILE_SIZE,
   type Transfer,
   WORLD_MESSAGES,
   WORLD_ROOM,
@@ -130,9 +136,27 @@ function walkUpToDoor(room: Room<unknown, MapState>): Promise<Transfer> {
   ).finally(() => clearInterval(timer));
 }
 
+const readers = new WeakMap<Room<unknown, MapState>, SnapshotReader>();
+
+/** Reads a room's fight snapshots, where the client's own body comes (its Self record). */
+function follow(room: Room<unknown, MapState>): void {
+  const reader = new SnapshotReader();
+  readers.set(room, reader);
+  room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
+    if (reader.cols === 0) {
+      const map = mapById(room.state.map);
+      const cell = SNAP_CELL_TILES * TILE_SIZE;
+      reader.cols = Math.ceil(((map?.collision.w ?? 0) * TILE_SIZE) / cell);
+      reader.rows = Math.ceil(((map?.collision.h ?? 0) * TILE_SIZE) / cell);
+    }
+    reader.read(bytes, NULL_SINK);
+  });
+}
+
+/** The client's own body as the server last sent it, once it has. */
 function ownBody(room: Room<unknown, MapState>) {
-  for (const p of room.state.players.values()) if (p.sid === room.sessionId) return p;
-  return undefined;
+  const reader = readers.get(room);
+  return reader?.hasSelf ? reader.me : undefined;
 }
 
 async function savedPlace(characterId: string) {
@@ -213,6 +237,7 @@ describe("walking through a door", () => {
 
     const left = closed(room);
     const next = await sdk(base, jar).consumeSeatReservation(transfer.seat, MapState);
+    follow(next);
     next.onMessage("*", () => {});
     await room.leave();
     await new Promise((resolve) => next.onStateChange.once(resolve));
@@ -263,6 +288,7 @@ describe("walking through a door", () => {
     await new Promise((r) => setTimeout(r, 100));
     gate.open();
     const { room: there, seating } = await within(back, 5000, "entering again");
+    follow(there);
     there.onMessage("*", () => {});
     expect(seating.map).toBe("gaseolgwan-stairs");
     await waitFor(() => ownBody(there) !== undefined);

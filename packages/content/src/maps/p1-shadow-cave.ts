@@ -165,8 +165,17 @@ const lights: LightSource[] = [
     at: px(FIRE[0], FIRE[1] - 1),
     radius: 260,
     color: "gold.light",
-    intensity: 1.1,
-    flicker: { amount: 0.12, period: 0.6 },
+    intensity: 1.5,
+    flicker: { amount: 0.16, period: 0.6 },
+  },
+  // The fire thrown on the back wall: the brightest thing anyone in here has seen, the
+  // procession cutting it.
+  {
+    at: [30 * T, WALL_Y * T + 6],
+    radius: 170,
+    color: "gold.light",
+    intensity: 1.2,
+    flicker: { amount: 0.16, period: 0.6 },
   },
   // Noon at the end of the tunnel.
   {
@@ -180,8 +189,8 @@ const lights: LightSource[] = [
       at: [x * T + 8, y * T],
       radius: 56,
       color: "gold.light",
-      intensity: 0.6,
-      flicker: { amount: 0.2, period: 0.5 },
+      intensity: 1,
+      flicker: { amount: 0.22, period: 0.5 },
     }),
   ),
 ];
@@ -281,7 +290,7 @@ const map: MapSource = {
   time: { clock: "13:20", phase: "noon", weather: "clear" },
   theme: "field-night",
   sky: "ink.deep",
-  ambient: { color: "ink.dark", intensity: 0.35 },
+  ambient: { color: "ink.deep", intensity: 0.1, unlit: "greece" },
   plan: PLAN,
   legend: { ...GREEK_LEGEND, x: { terrain: null, solid: "#" } },
   backdrop: depth(),
