@@ -70,6 +70,32 @@ class Channels {
     });
   }
 
+  /**
+   * Reserves a seat in one given channel of `map` (a dueling floor, or the channel a fighter came
+   * from), past the seats newcomers may take; any channel when that one is gone or full.
+   */
+  seatIn(map: string, roomId: string, auth: RoomAuth, options: SeatOptions = {}): Promise<Seating> {
+    const fallback = () => this.seat(map, auth, options);
+    return this.locked(map, async () => {
+      const channel = (this.byMap.get(map) ?? []).find((c) => c.roomId === roomId);
+      const room = channel && (matchMaker.getLocalRoomById(roomId) as Room | undefined);
+      if (!channel || !room || room.hasReachedMaxClients()) return null;
+      try {
+        const seat = await matchMaker.reserveSeatFor(channel.cache, options, auth);
+        return { map, channel: channel.number, seat: ticket(seat) } satisfies Seating;
+      } catch {
+        return null;
+      }
+    }).then((seating) => seating ?? fallback());
+  }
+
+  /** Opens one more channel of `map` whatever the others hold: a dueling floor for a match. */
+  openExtra(map: string): Promise<void> {
+    return this.locked(map, async () => {
+      await this.create(map);
+    });
+  }
+
   /** The channels of a map with their players and reserved seats, lowest first. */
   list(map: string): { channel: number; roomId: string; clients: number }[] {
     return (this.byMap.get(map) ?? []).map((c) => ({
@@ -106,7 +132,7 @@ class Channels {
   private open(map: string): Channel | undefined {
     for (const c of this.byMap.get(map) ?? []) {
       const room = matchMaker.getLocalRoomById(c.roomId) as Room | undefined;
-      if (room && !room.hasReachedMaxClients()) return c;
+      if (room && !room.hasReachedMaxClients() && !crowded(room)) return c;
     }
     return undefined;
   }
@@ -152,6 +178,15 @@ class Channels {
 function pendingSeats(room: Room): number {
   // biome-ignore lint/complexity/useLiteralKeys: the field is private in the typings.
   return Object.keys(room["_reservedSeats"]).length;
+}
+
+/**
+ * A floor's map room seats a few more than `seats` for fighters on their way (`MapRoom.seatCap`);
+ * newcomers count against `seats` alone.
+ */
+function crowded(room: Room): boolean {
+  const cap = (room as Room & { seatCap?: number }).seatCap;
+  return cap !== undefined && room.clients.length + pendingSeats(room) >= cap;
 }
 
 function ticket(seat: Awaited<ReturnType<typeof matchMaker.reserveSeatFor>>): SeatTicket {
