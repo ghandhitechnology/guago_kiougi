@@ -149,6 +149,8 @@ export class Player {
   lastHurt = -1000;
   /** Connection dropped: the server plays it until it comes back. */
   away = false;
+  /** Multiplies every EXP this player earns: the server's modifiers (숙면, 졸음, 급식 …). */
+  expMult = 1;
   /** The kit at a new level; set by whoever seated the player. */
   rebuild: ((level: number) => PlayerKit) | null = null;
 
@@ -409,6 +411,8 @@ export const Ev = {
   Roll: 15,
   /** a player, b weapon slot, f cast id. */
   Cast: 16,
+  /** a credited player, c monster entity, d kind index, e level, f 1 elite / 2 boss / 0. */
+  Credit: 17,
 } as const;
 
 /** Bits of a Hit event's flags. */
@@ -819,6 +823,7 @@ export class FightWorld {
     p.party = null;
     p.minions = 0;
     p.expEarned = 0;
+    p.expMult = 1;
     p.away = false;
     p.aiX = 0;
     p.aiY = 0;

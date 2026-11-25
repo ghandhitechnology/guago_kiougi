@@ -656,8 +656,9 @@ export function monsterMaxHp(kind: MonsterKind, level: number, rank: number): nu
 }
 
 /** Adds EXP and levels up, rebuilding the kit at each new level. */
-export function gainExp(w: FightWorld, p: Player, amount: number): void {
-  if (amount <= 0) return;
+export function gainExp(w: FightWorld, p: Player, earned: number): void {
+  const amount = earned * p.expMult;
+  if (!(amount > 0)) return;
   p.exp += amount;
   p.expEarned += amount;
   let levelled = false;
@@ -713,6 +714,12 @@ export function settleKills(w: FightWorld, onKill: (m: Monster) => void): void {
       if (!p?.joined) continue;
       gainExp(w, p, exp * c.expMult * expFalloff(p.level, m.level));
       dropFor(w, p, m);
+      const credit = w.event(Ev.Credit);
+      credit.a = p.index;
+      credit.c = m.entity;
+      credit.d = m.kind.index;
+      credit.e = m.level;
+      credit.f = m.kind.behavior === Behavior.Golem ? 2 : m.elite ? 1 : 0;
       const heal = p.kit.killHeal + (weapon && lastKillerIs(m, p) ? weapon.healOnKill : 0);
       if (heal > 0 && !p.down) p.hp = Math.min(p.kit.maxHp, p.hp + heal * p.kit.maxHp);
     }

@@ -16,6 +16,7 @@ import {
   type Character,
   createFight,
   dressPlayer,
+  Ev,
   type FightInput,
   type FightMap,
   FightNet,
@@ -47,6 +48,7 @@ import {
 } from "@guago/shared";
 import { grants } from "./economy/grants.ts";
 import { buildOf, type Loadout, type Loadouts, starterLoadouts } from "./fight/loadout.ts";
+import { expMultiplier, fightFacts } from "./fight/seams.ts";
 import { RoomMetrics } from "./metrics.ts";
 import { places } from "./places.ts";
 import { mapOptionAllowed } from "./room-maps.ts";
@@ -69,6 +71,8 @@ const LOG_EVERY_MS = 30_000;
  * keeps every tick within a few milliseconds of its time.
  */
 const POLL_MS = 5;
+/** EXP modifiers are read this often. */
+const MODIFIERS_EVERY_MS = 2_000;
 /** Aim, mode and revive requests a client may send per second, after a small burst. */
 const RATES = { aim: [20, 10], mode: [2, 2], revive: [4, 4] } as const;
 
@@ -109,6 +113,8 @@ interface Pawn {
   loadout: Loadout;
   /** EXP below one, carried to the next grant: grants take whole numbers. */
   expCarry: number;
+  /** Tick it was seated, for "present for the whole surge". */
+  readonly since: number;
 }
 
 let loadouts: Loadouts = starterLoadouts;
@@ -171,6 +177,8 @@ export class MapRoom extends Room<{ state: MapState }> {
   private readonly free: string[] = [];
   private seats!: RoomSeats;
   private ticks!: TickClock;
+  /** Tick the current surge began. */
+  private surgeFrom = 0;
 
   /** Only a browser with a live session and a character gets a seat. */
   static override async onAuth(_token: string, _options: unknown, ctx: AuthContext) {
@@ -235,6 +243,77 @@ export class MapRoom extends Room<{ state: MapState }> {
         console.log(JSON.stringify({ metrics: this.metrics.snapshot() }));
     }, LOG_EVERY_MS);
     this.clock.setInterval(() => void this.seats.saveAll(), SAVE_INTERVAL_MS);
+    // EXP modifiers come from memory every couple of seconds, never on the tick.
+    this.clock.setInterval(() => {
+      for (const pawn of this.pawns.values())
+        pawn.player.expMult = expMultiplier(pawn.character.id);
+    }, MODIFIERS_EVERY_MS);
+  }
+
+  /** The step's events that other systems learn about (`fight/seams.ts`), all buffered. */
+  private tellFacts(): void {
+    const sink = fightFacts();
+    if (!sink) return;
+    const w = this.world;
+    const field = w.field?.id ?? this.mapId;
+    const of = (index: number) => {
+      const p = w.players[index];
+      return p?.joined ? this.pawns.get(p.id) : undefined;
+    };
+    for (let i = 0; i < w.eventCount; i++) {
+      const e = w.events[i];
+      if (!e) continue;
+      switch (e.type) {
+        case Ev.Credit: {
+          const pawn = of(e.a);
+          const kind = w.rules.monsters[e.d];
+          if (!pawn || !kind) break;
+          const rank = e.f === 2 ? "boss" : e.f === 1 ? "elite" : "normal";
+          sink.add({
+            kind: "kill",
+            characterId: pawn.character.id,
+            field,
+            monster: kind.id,
+            level: e.e,
+            rank,
+          });
+          break;
+        }
+        case Ev.Down:
+        case Ev.Wake: {
+          const pawn = of(e.a);
+          if (pawn)
+            sink.add({
+              kind: e.type === Ev.Down ? "down" : "wake",
+              characterId: pawn.character.id,
+              field,
+            });
+          break;
+        }
+        case Ev.Revive: {
+          const target = of(e.a);
+          const by = of(e.b);
+          if (target && by)
+            sink.add({ kind: "revive", characterId: by.character.id, target: target.character.id });
+          break;
+        }
+        case Ev.Phase:
+          if (e.d === 1) this.surgeFrom = w.tick;
+          else {
+            for (const pawn of this.pawns.values()) {
+              if (pawn.since > this.surgeFrom) continue;
+              const hit = pawn.player.lastHurt >= this.surgeFrom;
+              sink.add({ kind: "wave", characterId: pawn.character.id, field, hit });
+            }
+          }
+          break;
+      }
+    }
+    for (const g of w.grants) {
+      const pawn = this.pawns.get(g.player.id);
+      if (pawn)
+        sink.add({ kind: "collect", characterId: pawn.character.id, drop: g.drop.payload as Drop });
+    }
   }
 
   /** Reads a fighting character's loadout again and rebuilds its kit at its level. */
@@ -375,6 +454,7 @@ export class MapRoom extends Room<{ state: MapState }> {
       character,
       loadout,
       expCarry: 0,
+      since: this.world.tick,
       buckets: {
         aim: new Bucket(RATES.aim[0], RATES.aim[1]),
         mode: new Bucket(RATES.mode[0], RATES.mode[1]),
@@ -505,6 +585,7 @@ export class MapRoom extends Room<{ state: MapState }> {
         if (pawn) sink?.add(pawn.character.id, { exp: 0, drops: [g.drop.payload as Drop] });
       }
       for (const pawn of this.pawns.values()) this.handOverExp(pawn);
+      this.tellFacts();
       const s1 = performance.now();
       this.net.update();
       for (const client of this.clients) {
