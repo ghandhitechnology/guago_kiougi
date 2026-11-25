@@ -475,6 +475,45 @@ describe("the other behaviours hit what their shape covers", () => {
   });
 });
 
+describe("aim", () => {
+  it("never carries a book past its reach or through a wall", () => {
+    const w = arena();
+    const p = w.addPlayer("aimer", 0, 64, 64, kitFor("physics", ["em-lab"], 10), 10);
+    p.mode = Mode.Semi;
+    // The only monster is 500 px away along the aim; the chain reaches about 120.
+    const far = post(w, 64 + 400, 64 + 300);
+    p.aiming = true;
+    p.aimX = 400;
+    p.aimY = 300;
+    for (let t = 0; t < 200; t++) stepFight(w, new Map());
+    expect(far.hp).toBe(far.maxHp);
+    // Within reach but behind a wall: still nothing.
+    const open = gridOf(60, 40).collision;
+    const rows = open.rows.map((r) => `${r.slice(0, 8)}#${r.slice(9)}`);
+    const walled = createFight(
+      {
+        id: "walled",
+        collision: { ...open, rows },
+        spawn: { x: 32, y: 32 },
+        safe: [],
+        spawnZones: [],
+        eliteZones: [],
+      },
+      rules,
+      null,
+      1,
+    );
+    const q = walled.addPlayer("aimer", 0, 100, 100, kitFor("physics", ["em-lab"], 10), 10);
+    q.mode = Mode.Semi;
+    const behind = post(walled, 100 + 90, 100);
+    q.aiming = true;
+    q.aimX = 90;
+    q.aimY = 0;
+    for (let t = 0; t < 200; t++) stepFight(walled, new Map());
+    expect(behind.hp).toBe(behind.maxHp);
+  });
+});
+
 describe("tagging", () => {
   function credited(shareA: number): Set<number> {
     const w = arena();
