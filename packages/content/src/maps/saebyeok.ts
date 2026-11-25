@@ -56,7 +56,7 @@ const tube = (x: number, y: number, rx = 44, ry = 22): LightSource => ({
   at: [x, y],
   radius: rx,
   color: "stone.bright",
-  intensity: 0.5,
+  intensity: 0.34,
   paint: { bands: ["campus-dusk", "campus-glow"], at: [x, y], r: [rx, ry], ragged: 3 },
 });
 
@@ -66,7 +66,7 @@ const lights: LightSource[] = [
     at: [120, 84],
     radius: 56,
     color: "gold.light",
-    intensity: 0.6,
+    intensity: 1.1,
     paint: {
       bands: ["campus-lamp", "campus-dusk", "campus-glow"],
       spill: { top: [96, 144, 66], bottom: [80, 168, 112] },
@@ -83,9 +83,9 @@ const lights: LightSource[] = [
   tube(200, 260, 34, 22),
   tube(312, 220, 40, 30),
   // The galleries round the courtyard, and the courtyard under the moon.
-  tube(408, 240, 36, 60),
-  tube(808, 240, 36, 60),
-  tube(600, 350, 120, 16),
+  { ...tube(408, 240, 36, 60), color: "gold.light", intensity: 0.75 },
+  { ...tube(808, 240, 36, 60), color: "gold.light", intensity: 0.75 },
+  { ...tube(600, 350, 120, 16), color: "gold.light", intensity: 0.55 },
   {
     at: [600, 220],
     radius: 170,
@@ -102,7 +102,7 @@ const map: MapSource = {
   time: { clock: "23:55", phase: "night", weather: "sea-wind" },
   theme: "campus-night",
   sky: "ink.deep",
-  ambient: { color: "navy.dark", intensity: 0.42, unlit: "campus" },
+  ambient: { color: "navy.dark", intensity: 0.28, unlit: "campus" },
   plan: `
     #####################################################
     #|||||||||||||||||||||||||||||||||||||||||||||||||||#

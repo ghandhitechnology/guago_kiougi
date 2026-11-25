@@ -83,7 +83,7 @@ const sun = (cx: number): LightSource => ({
   at: [cx + 14, 104],
   radius: 64,
   color: "gold.pale",
-  intensity: 0.5,
+  intensity: 0.75,
   paint: {
     bands: ["campus", "campus-lamp"],
     spill: { top: [cx - 13, cx + 13, 66], bottom: [cx - 2, cx + 36, 148] },
@@ -122,7 +122,7 @@ const map: MapSource = {
   time: { clock: "12:40", phase: "noon", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "stone.pale", intensity: 0.86, unlit: "campus" },
+  ambient: { color: "stone.pale", intensity: 0.8, unlit: "campus" },
   plan: `
     ##########################################
     #||||||||||||||||||||||||||||||||||||||||#

@@ -64,6 +64,8 @@ export interface Light {
   level: number;
   /** A shaped light: its texture's place in the world and its strength per pixel. */
   shape: { readonly rect: Rect; readonly alpha: Uint8Array } | null;
+  /** Daylight through a window: never dimmed for a bright ambient. */
+  window: boolean;
 }
 
 interface Flash {
@@ -332,6 +334,7 @@ export class LightField {
       light.image.setTexture(key).setOrigin(0).setPosition(rect.x, rect.y);
     }
     light.shape = { rect, alpha };
+    light.window = paint?.spill !== undefined;
     return light;
   }
 
@@ -350,6 +353,7 @@ export class LightField {
       follows: null,
       level: 0,
       shape: null,
+      window: false,
     };
     this.lights.add(light);
     return light;
@@ -409,7 +413,7 @@ export class LightField {
       if (spec.flicker) k += spec.flicker.amount * wobble(t, spec.flicker.period, l.seed);
       if (l.follows) k *= 0.08 + 0.92 * l.follows();
       if (l.owner && (!allowed.has(l) || !l.owner.visible)) k = 0;
-      l.level = Math.max(0, Math.min(2, spec.intensity * k * this.scale));
+      l.level = Math.max(0, Math.min(2, spec.intensity * k * (l.window ? 1 : this.scale)));
       l.image.setTint(spec.color).setAlpha(l.level / 2);
       if (!l.shape) {
         const size = spec.radius * 2;
