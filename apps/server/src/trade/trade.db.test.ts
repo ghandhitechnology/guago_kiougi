@@ -1083,17 +1083,17 @@ describe("direct trade windows", () => {
       expect((await trades.handle(a, msg("trade.confirm", { session, version: 2 }))).ok).toBe(true);
       const before = await census();
       // b confirms version 2 while a takes the dear copy back out.
+      // Started in alternating order: the window takes them in arrival order, either way round.
       const racing = [
-        trades.handle(b, msg("trade.confirm", { session, version: 2 })),
-        trades.handle(
-          a,
-          msg("trade.offer", { session, items: [cheap], stacks: {}, pinecone: "0" }),
-        ),
+        () => trades.handle(b, msg("trade.confirm", { session, version: 2 })),
+        () =>
+          trades.handle(
+            a,
+            msg("trade.offer", { session, items: [cheap], stacks: {}, pinecone: "0" }),
+          ),
       ];
       if (rep % 2) racing.reverse();
-      const [first, second] = await Promise.all(racing);
-      void first;
-      void second;
+      await Promise.all(racing.map((start) => start()));
       const done = w.last(b, "done");
       if (done) {
         // The confirm went first: both copies, as confirmed, for the 1000.
