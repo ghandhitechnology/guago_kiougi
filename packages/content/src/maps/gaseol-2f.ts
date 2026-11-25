@@ -126,8 +126,8 @@ const sun = (x: number, row: number): Light => ({
 const sunSource = (x: number, row: number): LightSource => ({
   at: [x - 10, mountY(row) + 40],
   radius: 60,
-  color: "stone.bright",
-  intensity: 0.4,
+  color: "gold.pale",
+  intensity: 0.65,
   paint: sun(x, row),
 });
 
@@ -141,7 +141,7 @@ const map: MapSource = {
   time: { clock: "10:10", phase: "morning", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "stone.bright", intensity: 0.82 },
+  ambient: { color: "stone.bright", intensity: 0.76, unlit: "campus" },
   plan: PLAN,
   legend: {
     "#": { terrain: "terrazzo", solid: "#" },

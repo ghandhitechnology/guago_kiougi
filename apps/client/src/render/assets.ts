@@ -108,6 +108,17 @@ export function loadMap(scene: Phaser.Scene, id: string): void {
   atlases();
 }
 
+/**
+ * Queues atlases by name (effects and telegraphs live in `combat`, boss entrance pieces in
+ * `page1-bosses`), skipping loaded ones. Start the loader after calling.
+ */
+export function loadAtlases(scene: Phaser.Scene, names: readonly string[]): void {
+  for (const atlas of names) {
+    if (!scene.textures.exists(atlas))
+      scene.load.atlas(atlas, url(`${atlas}.png`), url(`${atlas}.json`));
+  }
+}
+
 /** Whether a built map exists for `id`. */
 export function mapExists(id: string): boolean {
   return has(`maps/${id}.json`);

@@ -16,9 +16,9 @@ const lights: LightSource[] = [
   // The lamp over the table, the kitchen's strip light, the TV's flicker.
   {
     at: [88, 140],
-    radius: 64,
+    radius: 70,
     color: "gold.pale",
-    intensity: 0.7,
+    intensity: 0.95,
     paint: { bands: ["campus", "campus-lamp"], at: [88, 140], r: [56, 34], ragged: 3 },
   },
   {
@@ -45,7 +45,7 @@ const map: MapSource = {
   time: { clock: "19:10", phase: "night", weather: "clear" },
   theme: "campus-dusk",
   sky: "ink.deep",
-  ambient: { color: "clay.dust", intensity: 0.72 },
+  ambient: { color: "clay.dust", intensity: 0.56, unlit: "campus" },
   plan: `
     ########################
     #||||||||||||||||||||||#

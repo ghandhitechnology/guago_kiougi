@@ -118,9 +118,7 @@ function east(x: number, y: number, len: number, w = 6): ShadowShape {
   };
 }
 
-const lights: LightSource[] = [
-  { at: [0, 6 * T], radius: 1400, color: "gold.light", intensity: 0.45 },
-];
+const lights: LightSource[] = [];
 
 const BENCHES: readonly [number, number, boolean][] = [
   [PLANE[0] - 6, PLANE[1] - 3, false],
@@ -313,7 +311,7 @@ const map: MapSource = {
   theme: "campus-golden",
   shade: "golden-shade",
   sky: "gold.pale",
-  ambient: { color: "gold.light", intensity: 1 },
+  ambient: { color: "gold.light", intensity: 0.96, sun: { dir: [0.55, 0.14], color: "gold.pale" } },
   plan: PLAN,
   legend: GREEK_LEGEND,
   backdrop: [
