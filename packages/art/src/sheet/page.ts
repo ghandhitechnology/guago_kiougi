@@ -480,6 +480,42 @@ function put(target: HTMLCanvasElement, img: { w: number; h: number; data: Array
   }
 }
 
+// Portraits ---------------------------------------------------------------------------------
+
+/**
+ * The cast review: every portrait's neutral face at ×1, then ×3, with the speaker's name, and
+ * every expression playing at ×3.
+ */
+{
+  const s = section("portraits", "portraits");
+  const names: Record<string, string> = await (await fetch("speakers.json")).json();
+  const list = Object.entries(meta.sprites).filter(([, sp]) => sp.atlas === "portraits");
+  for (const scale of [1, 3]) {
+    const r = row(s, `×${scale}`);
+    for (const [name, sp] of list) {
+      const neutral = sp.frames.find((f) => f.endsWith("/neutral")) ?? (sp.frames[0] as string);
+      r.append(
+        cell(
+          show(frameImage(sp.atlas, neutral), scale, meta.palette.ramps.ink?.dark ?? "checker"),
+          names[name] ?? name,
+        ),
+      );
+    }
+  }
+  const faces = row(s, "expressions");
+  for (const [name, sp] of list) {
+    for (const [anim, a] of Object.entries(sp.anims)) {
+      const imgs = a.frames.map((f) => frameImage(sp.atlas, f));
+      faces.append(
+        cell(
+          player(imgs, a.fps, 3, meta.palette.ramps.ink?.dark ?? "checker"),
+          `${names[name] ?? name} ${anim}`,
+        ),
+      );
+    }
+  }
+}
+
 // Sprites -----------------------------------------------------------------------------------
 
 {

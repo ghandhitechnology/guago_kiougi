@@ -22,6 +22,7 @@ import { crop, type Indexed, type Lut, Rgba, remap } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
 import { renderScene, SCREEN, type SceneAtlas, type SceneMeta } from "../scene.ts";
 import { SCENES } from "../scenes/index.ts";
+import type { CompiledSprite } from "../sprite.ts";
 import type { CompiledOverlay, CompiledTerrain } from "../terrain.ts";
 import { type BitmapFont, drawText, galmuriDir, loadBdf, textWidth } from "./font.ts";
 import { renderOverlayPatch, renderPatch } from "./sample.ts";
@@ -432,5 +433,60 @@ export function combatSheet(f: Fonts, art: readonly Compiled[]): Rgba {
     y += 12;
     s.mark(y);
   }
+  return s.done();
+}
+
+/**
+ * The cast review: every dialogue portrait's neutral face in one grid at ×1, then at ×3, each
+ * with its speaker's name, then every expression at ×3. Cover the names and every face should
+ * still be someone.
+ */
+export function portraitSheet(
+  f: Fonts,
+  art: readonly Compiled[],
+  names: Readonly<Record<string, string>>,
+): Rgba {
+  const portraits = art.filter(
+    (a): a is CompiledSprite => a.kind === "sprite" && a.group === "portraits",
+  );
+  const s = new Sheet(1200);
+  let y = 20;
+  const name = (p: CompiledSprite) => names[p.name] ?? p.name.replace(/^portrait-/, "");
+  const grid = (scale: number, label: boolean) => {
+    const cellW = Math.max(48 * scale, 72) + 16;
+    const cellH = 48 * scale + (label ? 22 : 8);
+    const perRow = Math.floor((s.c.w - 40) / cellW);
+    portraits.forEach((p, i) => {
+      const x = 20 + (i % perRow) * cellW;
+      const yy = y + Math.floor(i / perRow) * cellH;
+      const img = p.frames.get("neutral") ?? ([...p.frames.values()][0] as Indexed);
+      s.c.rect(x - 2, yy - 2, 48 * scale + 4, 48 * scale + 4, UI.edge);
+      s.c.rect(x, yy, 48 * scale, 48 * scale, UI.panel);
+      s.c.draw(img, x, yy, INDEX_RGB, scale);
+      if (label) drawText(s.c, f.label, name(p), x, yy + 48 * scale + 4, UI.text);
+    });
+    y += Math.ceil(portraits.length / perRow) * cellH + 12;
+  };
+  drawText(s.c, f.head, "portraits ×1", 20, y, UI.head);
+  y += 26;
+  grid(1, true);
+  drawText(s.c, f.head, "portraits ×3", 20, y, UI.head);
+  y += 26;
+  grid(3, true);
+  drawText(s.c, f.head, "expressions", 20, y, UI.head);
+  y += 26;
+  for (const p of portraits) {
+    drawText(s.c, f.label, name(p), 20, y, UI.text);
+    y += 16;
+    let x = 20;
+    for (const [frame, img] of p.frames) {
+      s.c.rect(x, y, 144, 144, UI.panel);
+      s.c.draw(img, x, y, INDEX_RGB, 3);
+      drawText(s.c, f.label, frame, x, y + 148, UI.dim);
+      x += 160;
+    }
+    y += 172;
+  }
+  s.mark(y);
   return s.done();
 }
