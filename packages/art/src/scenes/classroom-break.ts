@@ -130,7 +130,7 @@ export default scene({
       "books",
     ),
     // Up and about: one waving through the door, one with a delivery for the 교무실.
-    { rig: "student", look: "blazer", dir: "down", anim: "hello", play: true, at: [452, 236] },
+    { rig: "student", look: "blazer", dir: "down", anim: "wave", play: true, at: [452, 236] },
     { rig: "student", look: "gymbun", dir: "side", anim: "carry", play: true, at: [40, 238] },
     { prop: "bag", frame: "slump", at: [124, 236] },
     { prop: "bag", frame: "navy", at: [262, 258] },

@@ -5,7 +5,7 @@ import { UI } from "../../ui-legend.ts";
 /**
  * Emote icons (PLAN §12): the wheel of eight at 16×16, in the menu icons' style, and the
  * bubble over a character's head at 12×12, two frames each. Frame and animation names are the
- * emote ids: hello, clap, lol, sleepy, fighting, bow, dance, panic. The character half of each
+ * content ids in `EMOTES`: wave, clap, lol, sleepy, fighting, bow, dance, meltdown. The character half of each
  * emote is the student rig's animation of the same name.
  */
 const LEGEND = {
@@ -58,7 +58,7 @@ const emote = sprite({
   anim: {},
   frames: {
     /** 인사: a hand up, mid-wave. */
-    hello: inked(
+    wave: inked(
       stack(
         "................",
         "................",
@@ -199,7 +199,7 @@ const emote = sprite({
       ),
     ),
     /** 멘붕: D-1 on the calendar and the 수행평가 not started. */
-    panic: stack(
+    meltdown: stack(
       "...o.......o....",
       "..o*o.....o*o...",
       ".oooooooooooooo.",
@@ -227,7 +227,7 @@ const bubble = sprite({
   palette: LEGEND,
   lone: LONE,
   frames: {
-    hello0: inked(
+    wave0: inked(
       stack(
         "............",
         "....v.v.....",
@@ -243,7 +243,7 @@ const bubble = sprite({
         "............",
       ),
     ),
-    hello1: inked(
+    wave1: inked(
       stack(
         "............",
         ".....v.v....",
@@ -451,7 +451,7 @@ const bubble = sprite({
         "............",
       ),
     ),
-    panic0: inked(
+    meltdown0: inked(
       stack(
         "............",
         "....C.......",
@@ -467,7 +467,7 @@ const bubble = sprite({
         "............",
       ),
     ),
-    panic1: inked(
+    meltdown1: inked(
       stack(
         "............",
         "............",
@@ -485,14 +485,14 @@ const bubble = sprite({
     ),
   },
   anim: {
-    hello: { frames: ["hello0", "hello1"], fps: 4 },
+    wave: { frames: ["wave0", "wave1"], fps: 4 },
     clap: { frames: ["clap0", "clap1"], fps: 6 },
     lol: { frames: ["lol0", "lol1"], fps: 6 },
     sleepy: { frames: ["sleepy0", "sleepy1"], fps: 2 },
     fighting: { frames: ["fighting0", "fighting1"], fps: 4 },
     bow: { frames: ["bow0", "bow1"], fps: 2 },
     dance: { frames: ["dance0", "dance1"], fps: 4 },
-    panic: { frames: ["panic0", "panic1"], fps: 6 },
+    meltdown: { frames: ["meltdown0", "meltdown1"], fps: 6 },
   },
 });
 

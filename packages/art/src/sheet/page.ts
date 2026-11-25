@@ -587,7 +587,7 @@ function composite(
       const at = rig.anchors?.[`${layer}/${look.parts[layer]}/emblem`]?.[key];
       if (layer === "jacket" && look.crest && at) {
         const ictx = ctx2d(img);
-        for (const f of [`bg/${look.crest.bg}`, `symbol/${look.crest.symbol}`]) {
+        for (const f of [`shape/${look.crest.shape}`, `symbol/${look.crest.symbol}`]) {
           ictx.drawImage(frameImage("ui", `crest/${f}`), at[0], at[1]);
         }
       }
@@ -691,7 +691,16 @@ function composite(
     for (const face of rig.parts.face ?? []) {
       const look = { ...base, parts: { ...base.parts, face } };
       const r = row(faceBox, face);
-      for (const f of ["idle0", "attack1", "page0", "hit", "yawn0", "clap0", "sleepy0", "panic0"]) {
+      for (const f of [
+        "idle0",
+        "attack1",
+        "page0",
+        "hit",
+        "yawn0",
+        "clap0",
+        "sleepy0",
+        "meltdown0",
+      ]) {
         for (const dir of ["down", "side"]) r.append(show(frameOf(look, dir, f), 4, "checker"));
       }
     }
@@ -709,7 +718,7 @@ function composite(
     const looks = randomLooks({
       parts: rig.parts,
       slots: Object.fromEntries(Object.keys(meta.slots).map((n) => [n, slotsOf(n)])),
-      crests: { bg: crestKinds("bg"), symbol: crestKinds("symbol") },
+      crests: { shape: crestKinds("shape"), symbol: crestKinds("symbol") },
     });
     const lookBox = el("article");
     lookBox.append(el("h3", "name", "twenty random looks"));

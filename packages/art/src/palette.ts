@@ -224,20 +224,39 @@ const SLOT_OPTIONS = {
     orange: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
   },
   /**
-   * A club's second colour, for its emblem on the 과잠's back panel and in the club panel: ivory
-   * or any jacket colour.
+   * A club emblem's shape colour (`Emblem.shapeColor`): option names are the content's
+   * `EMBLEM_COLORS` ids, each a ramp's run from dark to light.
    */
   emblem: {
-    ivory: ["stone.dark", "stone.light", "stone.pale", "stone.bright"],
+    ink: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
+    stone: ["stone.dark", "stone.light", "stone.pale", "stone.bright"],
+    red: ["red.deep", "red.dark", "red.mid", "red.light"],
+    gold: ["gold.dark", "gold.mid", "gold.light", "gold.pale"],
+    grass: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
     navy: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
-    crimson: ["red.deep", "red.dark", "red.mid", "red.light"],
-    forest: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
-    violet: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
-    mustard: ["wood.dark", "gold.dark", "gold.mid", "gold.light"],
-    ash: ["ink.dark", "ink.mid", "ink.light", "stone.light"],
-    teal: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    plum: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
     rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
-    orange: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+    sea: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    wood: ["wood.deep", "wood.dark", "wood.mid", "wood.light"],
+    clay: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+    board: ["board.deep", "board.dark", "board.mid", "board.light"],
+    olive: ["olive.deep", "olive.dark", "olive.mid", "olive.light"],
+  },
+  /** The emblem symbol's colour (`Emblem.symbolColor`), from the same list. */
+  mark: {
+    ink: ["ink.deep", "ink.dark", "ink.mid", "ink.light"],
+    stone: ["stone.dark", "stone.light", "stone.pale", "stone.bright"],
+    red: ["red.deep", "red.dark", "red.mid", "red.light"],
+    gold: ["gold.dark", "gold.mid", "gold.light", "gold.pale"],
+    grass: ["grass.deep", "grass.dark", "grass.mid", "grass.light"],
+    navy: ["navy.deep", "navy.dark", "navy.mid", "navy.light"],
+    plum: ["plum.deep", "plum.dark", "plum.mid", "plum.light"],
+    rose: ["rose.deep", "rose.dark", "rose.mid", "rose.light"],
+    sea: ["sea.deep", "sea.dark", "sea.mid", "sea.light"],
+    wood: ["wood.deep", "wood.dark", "wood.mid", "wood.light"],
+    clay: ["clay.deep", "clay.dark", "clay.mid", "clay.light"],
+    board: ["board.deep", "board.dark", "board.mid", "board.light"],
+    olive: ["olive.deep", "olive.dark", "olive.mid", "olive.light"],
   },
   /** A cohort's colour, worn as the stripe across the 체육복: one per Page a 기수 signed up in. */
   cohort: {

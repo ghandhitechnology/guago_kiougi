@@ -130,7 +130,7 @@ const dance = (d: Dir, step: 0 | 1 | 2 | 3): Poses => {
 };
 
 /** 멘붕: hands on the head, the book on the floor, shaking. */
-const panic = (shake: number, buckle = 0): Poses => ({
+const meltdown = (shake: number, buckle = 0): Poses => ({
   torso: [shake, buckle],
   armR: "clutch",
   armL: "clutch",
@@ -240,10 +240,11 @@ export const frames: Readonly<Record<string, FramePose>> = {
   carry2: (d) => ({ ...stride(d, 2), ...both(d, "hold"), hand: "carry" }),
   carry3: (d) => ({ ...stride(d, 3), ...both(d, "hold"), hand: ["carry", 0, -1] }),
 
-  // The emote wheel (PLAN §12): 인사, 박수, ㅋㅋ, 졸림, 화이팅, 절, 춤, 멘붕.
-  hello0: (d) =>
+  // The emote wheel (PLAN §12), named by the content ids in `EMOTES`: 인사 wave, 박수 clap, ㅋㅋ lol,
+  // 졸림 sleepy, 화이팅 fighting, 절 bow, 춤 dance, 멘붕 meltdown.
+  wave0: (d) =>
     d === "side" ? { armR: "wave0", head: "shout" } : { armL: "wave0", head: "shout" },
-  hello1: (d) => (d === "side" ? { armR: "wave1" } : { armL: "wave1" }),
+  wave1: (d) => (d === "side" ? { armR: "wave1" } : { armL: "wave1" }),
   clap0: (d) => ({ ...both(d, "clap0"), head: "laugh" }),
   clap1: (d) => ({ ...both(d, "clap1"), head: "laugh", torso: [0, 1], hand: ["tuck", 0, 1] }),
   lol0: (d) => ({ ...both(d, "belly"), head: "laugh", torso: d === "side" ? [-1, 0] : [0, 0] }),
@@ -265,9 +266,9 @@ export const frames: Readonly<Record<string, FramePose>> = {
   dance1: (d) => dance(d, 1),
   dance2: (d) => dance(d, 2),
   dance3: (d) => dance(d, 3),
-  panic0: panic(-1),
-  panic1: panic(1),
-  panic2: panic(0, 1),
+  meltdown0: meltdown(-1),
+  meltdown1: meltdown(1),
+  meltdown2: meltdown(0, 1),
 };
 
 const once = (frames: string[], fps: number, jump?: number): Anim => ({
@@ -299,7 +300,7 @@ export const anims: Readonly<Record<string, Anim>> = {
   ),
   hold: { frames: ["hold0", "hold0", "hold1", "hold1"], fps: 2 },
   carry: { frames: ["carry0", "carry1", "carry2", "carry3"], fps: 8 },
-  hello: once(["hello0", "hello1", "hello0", "hello1", "hello0", "hello1", "idle0"], 6),
+  wave: once(["wave0", "wave1", "wave0", "wave1", "wave0", "wave1", "idle0"], 6),
   clap: once(["clap0", "clap1", "clap0", "clap1", "clap0", "clap1", "clap0", "clap1", "idle0"], 8),
   lol: once(["lol0", "lol1", "lol0", "lol1", "lol0", "lol1", "lol0", "lol1", "lol0", "idle0"], 8),
   sleepy: once(
@@ -326,8 +327,18 @@ export const anims: Readonly<Record<string, Anim>> = {
     ["dance0", "dance1", "dance2", "dance3", "dance0", "dance1", "dance2", "dance3", "idle0"],
     6,
   ),
-  panic: once(
-    ["panic0", "panic1", "panic0", "panic1", "panic2", "panic2", "panic0", "panic1", "idle0"],
+  meltdown: once(
+    [
+      "meltdown0",
+      "meltdown1",
+      "meltdown0",
+      "meltdown1",
+      "meltdown2",
+      "meltdown2",
+      "meltdown0",
+      "meltdown1",
+      "idle0",
+    ],
     8,
   ),
 };

@@ -3,8 +3,9 @@
  * whole set, and a small club. Pure, so both the build and the browser run it.
  */
 
+/** A club's back emblem, as the content's `Emblem` minus its colours (those are slots). */
 export interface Crest {
-  readonly bg: string;
+  readonly shape: string;
   readonly symbol: string;
 }
 
@@ -19,7 +20,7 @@ export interface Wardrobe {
   readonly parts: Readonly<Record<string, readonly string[]>>;
   /** Option names per swap slot. */
   readonly slots: Readonly<Record<string, readonly string[]>>;
-  readonly crests: { readonly bg: readonly string[]; readonly symbol: readonly string[] };
+  readonly crests: { readonly shape: readonly string[]; readonly symbol: readonly string[] };
 }
 
 /** A small deterministic generator, so the looks are the same on every build. */
@@ -57,7 +58,7 @@ export function randomLooks(w: Wardrobe, n = 20, seed = 2026): WornLook[] {
       parts,
       slots,
       ...(parts.jacket === "varsity"
-        ? { crest: { bg: any(w.crests.bg), symbol: any(w.crests.symbol) } }
+        ? { crest: { shape: any(w.crests.shape), symbol: any(w.crests.symbol) } }
         : {}),
     };
   });
@@ -69,27 +70,34 @@ const BASE = { shadow: "blob", body: "base", uniform: "blazer", book: "textbook"
 export const CLUB: readonly WornLook[] = [
   {
     parts: { ...BASE, jacket: "varsity", hair: "bun", face: "bright" },
-    slots: { skin: "fair", hair: "black", jacket: "navy", emblem: "ivory" },
-    crest: { bg: "shield", symbol: "setsquare" },
+    slots: { skin: "fair", hair: "black", jacket: "navy", emblem: "stone", mark: "navy" },
+    crest: { shape: "shield", symbol: "pi" },
   },
   {
     parts: { ...BASE, uniform: "gym", jacket: "varsity", hair: "buzz", face: "sharp" },
-    slots: { skin: "warm", hair: "brown", jacket: "crimson", emblem: "mustard", cohort: "gold" },
-    crest: { bg: "circle", symbol: "atom" },
+    slots: {
+      skin: "warm",
+      hair: "brown",
+      jacket: "crimson",
+      emblem: "gold",
+      mark: "red",
+      cohort: "gold",
+    },
+    crest: { shape: "circle", symbol: "atom" },
   },
   {
     parts: { ...BASE, uniform: "shirt", jacket: "varsity", hair: "braids", face: "shy" },
-    slots: { skin: "fair", hair: "pink", jacket: "forest", emblem: "ivory" },
-    crest: { bg: "hexagon", symbol: "flask" },
+    slots: { skin: "fair", hair: "pink", jacket: "forest", emblem: "stone", mark: "grass" },
+    crest: { shape: "hexagon", symbol: "flask" },
   },
   {
     parts: { ...BASE, uniform: "cardigan", jacket: "varsity", hair: "undercut", face: "cool" },
-    slots: { skin: "deep", hair: "silver", jacket: "violet", emblem: "rose" },
-    crest: { bg: "banner", symbol: "cat" },
+    slots: { skin: "deep", hair: "silver", jacket: "violet", emblem: "rose", mark: "plum" },
+    crest: { shape: "banner", symbol: "pinecone" },
   },
   {
     parts: { ...BASE, jacket: "varsity", hair: "spiky", face: "goofy", accessory: "headphones" },
-    slots: { skin: "warm", hair: "chestnut", jacket: "teal", emblem: "orange" },
-    crest: { bg: "pennant", symbol: "star" },
+    slots: { skin: "warm", hair: "chestnut", jacket: "teal", emblem: "clay", mark: "sea" },
+    crest: { shape: "star", symbol: "lightning" },
   },
 ];

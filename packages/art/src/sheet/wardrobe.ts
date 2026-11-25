@@ -5,7 +5,7 @@
  */
 import type { Compiled } from "../build/compile.ts";
 import { drawOrder, stackLayers } from "../layer-order.ts";
-import { DEEP_INDICES, previewLut, slotOf } from "../palette.ts";
+import { DEEP_INDICES, previewLut, SLOTS, slotOf } from "../palette.ts";
 import { CLEAR, crop, type Indexed, indexed, Rgba, stamp } from "../raster.ts";
 import type { CompiledRig } from "../rig.ts";
 import type { CompiledSprite } from "../sprite.ts";
@@ -52,8 +52,8 @@ export function wear(
       const withCrest = indexed(w, h);
       stamp(withCrest, img, 0, 0);
       if (at) {
-        const { bg, symbol } = look.crest;
-        for (const f of [`bg/${bg}`, `symbol/${symbol}`]) {
+        const { shape, symbol } = look.crest;
+        for (const f of [`shape/${shape}`, `symbol/${symbol}`]) {
           const part = f ? crests.frames.get(f) : undefined;
           if (part) stamp(withCrest, part, at[0], at[1]);
         }
@@ -118,35 +118,8 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
   const crests = art.find((a): a is CompiledSprite => a.kind === "sprite" && a.name === "crest");
   if (!rig) return {};
   const [w, h] = rig.size;
-  const slotNames = {
-    skin: ["fair", "warm", "deep"],
-    hair: [
-      "black",
-      "brown",
-      "chestnut",
-      "blond",
-      "red",
-      "silver",
-      "blue",
-      "pink",
-      "green",
-      "violet",
-    ],
-    jacket: ["navy", "crimson", "forest", "violet", "mustard", "ash", "teal", "rose", "orange"],
-    emblem: [
-      "ivory",
-      "navy",
-      "crimson",
-      "forest",
-      "violet",
-      "mustard",
-      "ash",
-      "teal",
-      "rose",
-      "orange",
-    ],
-    cohort: ["gold", "crimson", "green", "rose", "violet", "white"],
-  };
+  const slotNames = Object.fromEntries(SLOTS.map((slot) => [slot.name, Object.keys(slot.options)]));
+
   const base: WornLook = {
     parts: {
       shadow: "blob",
@@ -210,7 +183,7 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
   // Faces: six temperaments, each expression they share, front and profile.
   {
     const faces = optionsOf(rig, "face");
-    const poses = ["idle0", "attack1", "page0", "hit", "yawn0", "clap0", "sleepy0", "panic0"];
+    const poses = ["idle0", "attack1", "page0", "hit", "yawn0", "clap0", "sleepy0", "meltdown0"];
     const z = 6;
     const cw = 18 * z + 6;
     const b = new Board(20 + 2 * poses.length * cw + 40, 40 + faces.length * (10 * z + 30));
@@ -253,7 +226,7 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
     const looks = randomLooks({
       parts: Object.fromEntries(rig.layers.map((l) => [l, optionsOf(rig, l)])),
       slots: slotNames,
-      crests: { bg: kinds("bg"), symbol: kinds("symbol") },
+      crests: { shape: kinds("shape"), symbol: kinds("symbol") },
     });
     const z = 3;
     const per = 10;
@@ -314,8 +287,8 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
           uniform: "shirt",
           jacket: "varsity",
         },
-        slots: { skin: "deep", hair: "black", jacket: "crimson", emblem: "ivory" },
-        crest: { bg: "shield", symbol: "flame" },
+        slots: { skin: "deep", hair: "black", jacket: "crimson", emblem: "stone", mark: "red" },
+        crest: { shape: "shield", symbol: "flame" },
       },
     ];
     const anims = Object.entries(rig.anim);
@@ -399,10 +372,10 @@ export function wardrobeSheets(f: Fonts, art: readonly Compiled[]): Record<strin
       },
       {
         title: "과잠 colours",
-        looks: slotNames.jacket.map((jacket) => ({
+        looks: (slotNames.jacket ?? []).map((jacket) => ({
           parts: { ...base.parts, jacket: "varsity" },
-          slots: { ...base.slots, jacket, emblem: "ivory" },
-          crest: { bg: "circle", symbol: "pinecone" },
+          slots: { ...base.slots, jacket, emblem: "stone", mark: "wood" },
+          crest: { shape: "circle", symbol: "pinecone" },
         })),
       },
     ];
