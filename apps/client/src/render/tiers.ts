@@ -31,12 +31,19 @@ export interface TierSettings {
   readonly foliageWobble: boolean;
   /** Banded halos around lamps and floodlights. */
   readonly halos: boolean;
+  /**
+   * Frames between redraws of the buffer that lights each sprite from its feet: 1 every frame;
+   * 2 every other, which saves a second pass over every sprite on a slow device.
+   */
+  readonly feetEvery: number;
+  /** Enemy telegraphs throw their pulsing light on the ground (one light per telegraph). */
+  readonly telegraphLights: boolean;
 }
 
 export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
   low: {
     dither: false,
-    entityLights: 4,
+    entityLights: 3,
     particles: 0.5,
     weather: 24,
     riftHaze: false,
@@ -46,6 +53,8 @@ export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
     ditherCutaway: false,
     foliageWobble: false,
     halos: true,
+    feetEvery: 2,
+    telegraphLights: false,
   },
   medium: {
     dither: true,
@@ -59,6 +68,8 @@ export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
     ditherCutaway: true,
     foliageWobble: false,
     halos: true,
+    feetEvery: 1,
+    telegraphLights: true,
   },
   high: {
     dither: true,
@@ -72,6 +83,8 @@ export const TIER_SETTINGS: Readonly<Record<Tier, TierSettings>> = {
     ditherCutaway: true,
     foliageWobble: true,
     halos: true,
+    feetEvery: 1,
+    telegraphLights: true,
   },
 };
 

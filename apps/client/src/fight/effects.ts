@@ -55,6 +55,8 @@ const LINE_TILE: Readonly<Record<string, number>> = {
 const SPRAY_REACH = 60;
 const WIDE_REACH = 72;
 const NONE: readonly string[] = [];
+/** A telegraph piece drawn unlit at full strength that throws no light of its own. */
+const DARK_TELL: TelegraphOptions = { light: false };
 
 /**
  * One animation of a line strip in its sixteen aims (index = aim): the frames of a whole tile,
@@ -227,6 +229,8 @@ export class Active {
   variant = 0;
   /** The body's animation key, chosen once (a direction, a specimen, a face). */
   key = "";
+  /** A lane's one light, made the first time it is laid. */
+  light: TelegraphOptions | null = null;
 }
 
 /**
@@ -401,6 +405,7 @@ export class Effects {
     a.art = null;
     a.variant = 0;
     a.key = "";
+    a.light = null;
     return a;
   }
 
@@ -795,12 +800,12 @@ export class Effects {
   private carry(a: Active): void {
     const art = a.art;
     if (!art || !this.ctx.lights.dark) return;
-    const every = a.mine ? 3 : 8;
+    const every = a.mine ? 4 : 8;
     if ((this.frame + a.fx) % every !== 0) return;
     if (!a.mine && (this.ctx.restraint.otherSparks <= 0 || !this.ctx.lights.spare)) return;
     for (const p of a.pieces) {
       if (!p?.inUse || !p.s.visible) continue;
-      this.ctx.lights.glow(p.s.x, p.s.y, art.color, a.mine ? 24 : 16, a.mine ? 0.4 : 0.2, 120);
+      this.ctx.lights.glow(p.s.x, p.s.y, art.color, a.mine ? 22 : 16, a.mine ? 0.3 : 0.15, 110);
       return;
     }
   }
@@ -1565,8 +1570,20 @@ export class Effects {
       false,
       firing ? 1 : progress,
       a.alpha * fade,
-      scale === 2 ? this.laneLight2 : this.laneLight,
+      this.laneLightFor(a, scale),
     );
+  }
+
+  /**
+   * One light for a whole lane, lying along it from its middle tile: a lane of tiles each
+   * throwing its own light filled the light map for nothing. Made once per lane.
+   */
+  private laneLightFor(a: Active, scale: number): TelegraphOptions {
+    if (a.light) return a.light;
+    const base = scale === 2 ? this.laneLight2 : this.laneLight;
+    const radius = Math.max(base.radius ?? 12, a.length / 2 + 6 * scale);
+    a.light = { ...base, radius, squash: Math.min(0.9, (10 * scale) / radius + 0.15) };
+    return a.light;
   }
 
   /**
@@ -1768,6 +1785,9 @@ export class Effects {
     const shown = reveal >= 1 ? total : Math.min(total, 1 + Math.floor(reveal * total));
     const ux = Math.cos(a.angle);
     const uy = Math.sin(a.angle);
+    // The line's light hangs on its middle piece; the rest are telegraphs with none.
+    const lit = from + Math.floor(total / 2);
+    this.litPiece = light ? lit : -1;
     let k = 0;
     if (startCap) {
       const frames = set.cap[(aim + 8) % 16] ?? NONE;
@@ -1858,8 +1878,11 @@ export class Effects {
     const p = a.pieces[i];
     if (!p) return;
     p.s.setVisible(visible).setAlpha(alpha);
-    if (visible && light) this.pieces.tell(p, light);
+    if (visible && light) this.pieces.tell(p, i === this.litPiece ? light : DARK_TELL);
   }
+
+  /** The piece of the line being laid that carries its light, or -1. */
+  private litPiece = -1;
 
   /** Hides the pieces in [from, to). */
   private hideRange(a: Active, from: number, to: number): void {

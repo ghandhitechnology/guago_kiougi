@@ -69,6 +69,9 @@ export interface Light {
   shape: { readonly rect: Rect; readonly alpha: Uint8Array } | null;
   /** Daylight through a window: never dimmed for a bright ambient. */
   window: boolean;
+  /** A carried light's distance² from the screen's middle this frame, and whether it shines. */
+  rank: number;
+  allowed: boolean;
 }
 
 interface Flash {
@@ -170,6 +173,8 @@ export class LightField {
   private readonly ambientImage: Phaser.GameObjects.Image;
   private readonly grid: { w: number; h: number; walls: Uint8Array };
   private readonly flashes: Flash[] = [];
+  /** The carried lights by distance from the screen's middle, reused each frame. */
+  private readonly carried: Light[] = [];
   private readonly textureKeys: string[] = [];
   private region: {
     readonly light: RegionLight;
@@ -364,6 +369,8 @@ export class LightField {
       level: 0,
       shape: null,
       window: false,
+      rank: 0,
+      allowed: true,
     };
     this.lights.add(light);
     return light;
@@ -376,7 +383,13 @@ export class LightField {
 
   /** A burst of light that fades from its peak to nothing: a hit, a cast, a spark. */
   flash(x: number, y: number, spec: FlashSpec): void {
-    let f = this.flashes.find((k) => !k.live);
+    let f: Flash | undefined;
+    for (const k of this.flashes) {
+      if (!k.live) {
+        f = k;
+        break;
+      }
+    }
     if (!f) {
       if (this.flashes.length >= 512) return;
       const image = new Phaser.GameObjects.Image(this.scene, 0, 0, TEX.pool);
@@ -410,9 +423,22 @@ export class LightField {
   update(t: number, deltaMs: number, budget: number): void {
     const cx = this.camera.scrollX + this.camera.width / 2;
     const cy = this.camera.scrollY + this.camera.height / 2;
-    const carried = [...this.lights].filter((l) => l.owner);
-    carried.sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
-    const allowed = new Set(carried.slice(0, budget));
+    // The carried lights nearest the middle of the screen keep their light, up to the budget:
+    // ranked in a list kept between frames, so a frame of a fight makes no garbage.
+    const carried = this.carried;
+    carried.length = 0;
+    for (const l of this.lights) {
+      if (!l.owner) continue;
+      l.rank = (l.x - cx) * (l.x - cx) + (l.y - cy) * (l.y - cy);
+      let i = carried.length;
+      carried.push(l);
+      while (i > 0 && (carried[i - 1] as Light).rank > l.rank) {
+        carried[i] = carried[i - 1] as Light;
+        i--;
+      }
+      carried[i] = l;
+    }
+    for (let i = 0; i < carried.length; i++) (carried[i] as Light).allowed = i < budget;
     for (const l of this.lights) {
       if (l.owner) {
         l.x = l.owner.x + (l.spec.offset?.[0] ?? 0);
@@ -422,7 +448,7 @@ export class LightField {
       let k = 1;
       if (spec.flicker) k += spec.flicker.amount * wobble(t, spec.flicker.period, l.seed);
       if (l.follows) k *= 0.08 + 0.92 * l.follows();
-      if (l.owner && (!allowed.has(l) || !l.owner.visible)) k = 0;
+      if (l.owner && (!l.allowed || !l.owner.visible)) k = 0;
       l.level = Math.max(0, Math.min(2, spec.intensity * k));
       l.image.setTint(spec.color).setAlpha(l.level / 2);
       if (!l.shape) {

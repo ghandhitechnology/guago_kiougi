@@ -10,7 +10,7 @@ const BUDGET: Readonly<Record<Tier, number>> = { low: 4, medium: 10, high: 24 };
  */
 const DAY = { radius: 24, intensity: 0.6 } as const;
 /** What full darkness adds to the caps: a cast at night lights the ground around it. */
-const NIGHT = { radius: 32, intensity: 0.7 } as const;
+const NIGHT = { radius: 32, intensity: 0.5 } as const;
 
 /** Ambient at or above this is daylight; it is full dark this far below it. */
 const DAYLIGHT = 0.9;
@@ -84,7 +84,7 @@ export class FightLights {
       y,
       color,
       Math.min(this.capRadius, radius * (1 + 0.8 * k)),
-      Math.min(this.capIntensity, intensity * (1 + 2 * k)),
+      Math.min(this.capIntensity, intensity * (1 + 1.2 * k)),
       ms * (1 + 0.5 * k),
     );
   }

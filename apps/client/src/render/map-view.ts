@@ -96,6 +96,10 @@ export interface EntityOptions {
 }
 
 export interface TelegraphOptions {
+  /** Whether it throws a light at all (default true): one light can stand for a lane of tiles. */
+  readonly light?: boolean;
+  /** The light's height over its width; defaults to the sprite's shape. */
+  readonly squash?: number;
   /** The light the telegraph throws on the ground around it. Defaults to `red.light`. */
   readonly color?: number;
   /** Pixels; defaults to the sprite's half width plus a little. */
@@ -181,7 +185,9 @@ interface Entity {
 
 interface Telegraph {
   readonly sprite: Lit;
-  readonly light: Light;
+  /** Its pulsing light, and the spec the pulse writes into; null for a telegraph with none. */
+  readonly light: Light | null;
+  readonly spec: { radius: number; color: number; intensity: number; squash: number } | null;
   readonly intensity: number;
   readonly born: number;
 }
@@ -550,25 +556,25 @@ export class MapView {
     if (this.telegraphs.has(obj)) return;
     this.groundGlow.add(obj);
     const intensity = options.intensity ?? 0.9;
-    const light = this.makeLight(
-      {
+    let light: Light | null = null;
+    let spec: Telegraph["spec"] = null;
+    if (options.light !== false && this.tier.telegraphLights) {
+      spec = {
         radius: options.radius ?? obj.displayWidth / 2 + 10,
         color: options.color ?? paletteColor(this.meta, "red.light"),
         intensity,
-        squash: obj.displayHeight / Math.max(1, obj.displayWidth) + 0.1,
-      },
-      obj.x,
-      obj.y,
-      obj,
-    );
-    this.telegraphs.set(obj, { sprite: obj, light, intensity, born: this.time });
+        squash: options.squash ?? obj.displayHeight / Math.max(1, obj.displayWidth) + 0.1,
+      };
+      light = this.makeLight(spec, obj.x, obj.y, obj);
+    }
+    this.telegraphs.set(obj, { sprite: obj, light, spec, intensity, born: this.time });
     obj.once(Phaser.GameObjects.Events.DESTROY, () => this.removeTelegraph(obj));
   }
 
   removeTelegraph(obj: Phaser.GameObjects.GameObject): void {
     const t = this.telegraphs.get(obj);
     if (!t) return;
-    this.dropLight(t.light);
+    if (t.light) this.dropLight(t.light);
     this.groundGlow.remove(obj);
     this.telegraphs.delete(obj);
   }
@@ -834,15 +840,25 @@ export class MapView {
   }
 
   /** How a sprite is coded for the sprite light pass. */
+  /** The feet buffer's answer for one sprite, reused: asked for every sprite every frame. */
+  private readonly codeOut = { feetY: 0, unlit: false, shade: 0 };
+
   private code(obj: Phaser.GameObjects.GameObject): SpriteCode {
     const y = (obj as unknown as { y: number }).y;
+    const out = this.codeOut;
     const e = this.entities.get(obj);
     if (e) {
       const x = (obj as unknown as { x: number }).x;
-      return { feetY: y, unlit: !e.lit, shade: this.shadeAt(x, y) };
+      out.feetY = y;
+      out.unlit = !e.lit;
+      out.shade = this.shadeAt(x, y);
+      return out;
     }
     const c = this.codes.get(obj);
-    return { feetY: y + (c?.feet ?? 0), unlit: c?.unlit ?? false, shade: 0 };
+    out.feetY = y + (c?.feet ?? 0);
+    out.unlit = c?.unlit ?? false;
+    out.shade = 0;
+    return out;
   }
 
   /** A light at a prop that switches itself on and off follows the prop's frames. */
@@ -1350,20 +1366,22 @@ export class MapView {
     if (this.glitter) this.glitter.maxAliveParticles = Math.round(t.weather / 2);
     for (const s of this.shafts) s.setVisible(t.riftShafts);
     this.cutFoliage.wobble = t.foliageWobble ? 1 : 0;
+    this.feet.every = t.feetEvery;
   }
 
   // Per frame ---------------------------------------------------------------------------------
+
+  private readonly viewRect = { x: 0, y: 0, w: 0, h: 0 };
 
   private update(deltaMs: number): void {
     this.time += deltaMs / 1000;
     const t = this.time;
     const cam = this.camera;
-    const view: Rect = {
-      x: cam.scrollX - CULL_MARGIN,
-      y: cam.scrollY - CULL_MARGIN,
-      w: cam.width + 2 * CULL_MARGIN,
-      h: cam.height + 2 * CULL_MARGIN,
-    };
+    const view = this.viewRect;
+    view.x = cam.scrollX - CULL_MARGIN;
+    view.y = cam.scrollY - CULL_MARGIN;
+    view.w = cam.width + 2 * CULL_MARGIN;
+    view.h = cam.height + 2 * CULL_MARGIN;
     for (const p of this.placed) p.sprite.setVisible(overlaps(p.bounds, view));
     for (const d of this.drifts) {
       const f = ((((t + d.phase) / d.period) % 1) + 1) % 1;
@@ -1392,18 +1410,19 @@ export class MapView {
   private updateParticles(t: number, view: Rect): void {
     const seed = this.map.scene.seed;
     for (const p of this.particles) {
-      p.sprites.forEach((s, k) => {
-        if (!s.active) return;
+      for (let k = 0; k < p.sprites.length; k++) {
+        const s = p.sprites[k] as Phaser.GameObjects.Sprite;
+        if (!s.active) continue;
         const q = emitterParticle(p.emitter, seed, k, t);
         const x = Math.round(q.x);
         const y = Math.round(q.y);
         const inView = x >= view.x && y >= view.y && x < view.x + view.w && y < view.y + view.h;
         s.setVisible(inView);
-        if (!inView) return;
+        if (!inView) continue;
         const frame = p.frames[((q.hash % 7) + Math.floor(q.age * p.fps)) % p.frames.length];
         if (frame && s.frame.name !== frame) s.setFrame(frame, false, false);
         s.setPosition(x, y).setFlipX((q.hash & 1) === 1);
-      });
+      }
     }
   }
 
@@ -1412,7 +1431,9 @@ export class MapView {
     const sun = this.sun;
     for (const e of this.entities.values()) {
       const { obj } = e;
-      obj.setDepth(obj.y + e.bias + obj.x * 1e-5);
+      // Setting a depth re-sorts the layer; a body that has not moved keeps its place.
+      const depth = obj.y + e.bias + obj.x * 1e-5;
+      if (obj.depth !== depth) obj.setDepth(depth);
       const s = e.shadow;
       if (!s) continue;
       s.setVisible(obj.visible);
@@ -1430,8 +1451,8 @@ export class MapView {
 
   private updateTelegraphs(t: number): void {
     for (const g of this.telegraphs.values()) {
-      const pulse = 0.8 + 0.2 * Math.sin((t - g.born) * 9);
-      g.light.spec = { ...g.light.spec, intensity: g.intensity * pulse };
+      if (!g.spec) continue;
+      g.spec.intensity = g.intensity * (0.8 + 0.2 * Math.sin((t - g.born) * 9));
     }
   }
 

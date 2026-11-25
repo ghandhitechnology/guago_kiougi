@@ -178,6 +178,10 @@ interface Saved {
 export class FeetBuffer {
   readonly rt: Phaser.GameObjects.RenderTexture;
   private readonly saved: Saved[] = [];
+  private used = 0;
+  /** Frames between redraws: 1 every frame, 2 every other; 0 never (sprites lit where they are). */
+  every = 1;
+  private frame = 0;
   private readonly hiddenNow: Phaser.GameObjects.Components.Visible[] = [];
 
   private readonly camera: Phaser.Cameras.Scene2D.Camera;
@@ -208,6 +212,15 @@ export class FeetBuffer {
   /** Queues this frame's buffer: drawn during the frame, after the camera has moved. */
   queue(): void {
     const rt = this.rt;
+    if (this.every === 0) {
+      if (this.frame !== -1) rt.clear();
+      this.frame = -1;
+      return;
+    }
+    // On a slow device the buffer is redrawn every other frame: what moved since lights a pixel
+    // off at its edge for a frame, and the whole second pass of every sprite is saved.
+    if (this.frame < 0) this.frame = 0;
+    if (this.frame++ % this.every !== 0) return;
     rt.clear();
     rt.callback(() => this.encode());
     for (const layer of this.layers) if (layer.visible) rt.capture(layer, { camera: this.camera });
@@ -216,7 +229,7 @@ export class FeetBuffer {
 
   private encode(): void {
     const sy = worldScroll(this.camera)[1];
-    this.saved.length = 0;
+    this.used = 0;
     this.hiddenNow.length = 0;
     for (const layer of this.layers) {
       for (const obj of layer.getChildren()) {
@@ -233,15 +246,20 @@ export class FeetBuffer {
         const unlit = c.unlit || obj.tintMode !== Phaser.TintModes.MULTIPLY;
         const feet = Math.max(0, Math.min(65535, Math.round(c.feetY - sy) + LIGHT_MARGIN));
         const blue = unlit ? 64 : 128 + Math.round(127 * (1 - Math.max(0, Math.min(1, c.shade))));
-        this.saved.push({
-          obj,
-          mode: obj.tintMode,
-          tl: obj.tintTopLeft,
-          tr: obj.tintTopRight,
-          bl: obj.tintBottomLeft,
-          br: obj.tintBottomRight,
-          alpha: obj.alpha,
-        });
+        // Records are kept between frames: a frame of a crowd makes no garbage.
+        let rec = this.saved[this.used];
+        if (!rec) {
+          rec = { obj, mode: 0, tl: 0, tr: 0, bl: 0, br: 0, alpha: 1 };
+          this.saved.push(rec);
+        }
+        this.used++;
+        rec.obj = obj;
+        rec.mode = obj.tintMode;
+        rec.tl = obj.tintTopLeft;
+        rec.tr = obj.tintTopRight;
+        rec.bl = obj.tintBottomLeft;
+        rec.br = obj.tintBottomRight;
+        rec.alpha = obj.alpha;
         obj.setTintMode(Phaser.TintModes.FILL);
         obj.setTint(((feet & 255) << 16) | (((feet >> 8) & 255) << 8) | blue);
         obj.setAlpha(1);
@@ -250,13 +268,14 @@ export class FeetBuffer {
   }
 
   private restore(): void {
-    for (const s of this.saved) {
+    for (let i = 0; i < this.used; i++) {
+      const s = this.saved[i] as Saved;
       s.obj.setTintMode(s.mode);
       s.obj.setTint(s.tl, s.tr, s.bl, s.br);
       s.obj.setAlpha(s.alpha);
     }
     for (const v of this.hiddenNow) v.setVisible(true);
-    this.saved.length = 0;
+    this.used = 0;
     this.hiddenNow.length = 0;
   }
 

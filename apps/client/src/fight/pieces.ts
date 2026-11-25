@@ -69,6 +69,7 @@ export class Pieces {
     p.inUse = true;
     const s = p.s;
     s.setBlendMode(Phaser.BlendModes.NORMAL);
+    if (layer === Layer.Glow && s.depth !== 0) s.setDepth(0);
     s.setVisible(true).setAlpha(1).setScale(1).setRotation(0).setFlipX(false).setFlipY(false);
     s.clearTint();
     if (s.isCropped) s.setCrop();
@@ -127,7 +128,12 @@ export function show(
   const s = p.s;
   if (s.texture.key !== atlas || s.frame.name !== frame) s.setTexture(atlas, frame);
   const blend = p.blends.get(frame) ?? Phaser.BlendModes.NORMAL;
-  if (s.blendMode !== blend) s.setBlendMode(blend);
+  if (s.blendMode !== blend) {
+    s.setBlendMode(blend);
+    // In the air the added light sorts above the rest, so each blend draws in one run and a
+    // crowd's sparks do not switch blend modes sprite by sprite.
+    if (p.layer === Layer.Glow) s.setDepth(blend === Phaser.BlendModes.ADD ? 1 : 0);
+  }
   if (anim) s.play(anim, !restart);
   return s;
 }

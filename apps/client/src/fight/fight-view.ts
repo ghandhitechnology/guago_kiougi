@@ -1134,15 +1134,25 @@ export class FightView {
       }
     }
     if (!best?.art) return null;
-    return {
-      id: best.id,
-      monster: best.art.id,
-      elite: best.elite,
-      hp: best.hp < 255 ? best.hp / 255 : null,
-      x: best.x,
-      y: best.y,
-    };
+    // One record, rewritten each frame: the HUD reads it, and a frame makes no garbage.
+    const t = this.targetOut;
+    t.id = best.id;
+    t.monster = best.art.id;
+    t.elite = best.elite;
+    t.hp = best.hp < 255 ? best.hp / 255 : null;
+    t.x = best.x;
+    t.y = best.y;
+    return t;
   }
+
+  private readonly targetOut = {
+    id: 0,
+    monster: "",
+    elite: false,
+    hp: null as number | null,
+    x: 0,
+    y: 0,
+  };
 
   /**
    * The books the local player wears in their evolved form (book ids), from its inventory: its
