@@ -18,6 +18,8 @@ export const LIVE_MESSAGES = {
   helpTake: "quest.help.take",
   /** Client to server: `HelpCancel`, by the poster, while nobody has taken the notice. */
   helpCancel: "quest.help.cancel",
+  /** Client to server: `HelpDrop`, by the helper, giving a taken notice back. */
+  helpDrop: "quest.help.drop",
   /** Server to client: `LivePush`. */
   push: "live",
 } as const;
@@ -47,6 +49,7 @@ export interface HelpTake {
 }
 
 export type HelpCancel = HelpTake;
+export type HelpDrop = HelpTake;
 
 /** Why a living-world request was refused. The client owns the copy for each. */
 export const LIVE_REFUSAL_CODES = [
@@ -285,6 +288,7 @@ export const helpTakeSchema = schema<HelpTake>((v) => {
 });
 
 export const helpCancelSchema: WorldMessageSchema<HelpCancel> = helpTakeSchema;
+export const helpDropSchema: WorldMessageSchema<HelpDrop> = helpTakeSchema;
 
 /** Reads a player may make: a burst, then so many a second. */
 export const LIVE_RATE = { burst: 6, perSecond: 1 } as const;

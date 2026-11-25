@@ -120,6 +120,8 @@ export interface LiveRequests {
   };
   "live.helpTake": { notice: string; quest: PostedQuest };
   "live.helpCancel": { notice: string };
+  /** The helper gives a taken notice back: it is open again, their row ends unpaid. */
+  "live.helpDrop": { notice: string };
 }
 
 /** The 도움 row of a helper: `help:<notice id>`. */
@@ -614,12 +616,14 @@ export function liveOps(h: Helpers): Defs {
 
     "live.helpTake": {
       client: false,
-      rows: (req) => ({ live: { notice: req.notice, helpState: true } }),
+      rows: (req) => ({ quests: [req.quest.id], live: { notice: req.notice, helpState: true } }),
       currencies: () => [],
       apply(l, req, env) {
         const n = l.live.notice;
         if (n?.state !== "open" || n.expiresAt.getTime() <= env.now.getTime())
           return no("help_gone");
+        // A helper who gave this notice back does not take it again.
+        if (l.quests.has(req.quest.id)) return no("help_gone");
         if (n.posterId === l.character.id) return no("help_self");
         if (!mayHelp(l.character.level, n.posterLevel)) return no("help_helper_level");
         if (l.live.helping) return no("help_busy");
@@ -650,6 +654,25 @@ export function liveOps(h: Helpers): Defs {
         if (n.state !== "open") return no("help_gone");
         return ok({
           live: { notice: { update: { id: n.id, state: "cancelled", helperId: null } } },
+          outcome: { notice: n.id },
+        });
+      },
+    },
+
+    "live.helpDrop": {
+      client: false,
+      rows: (req) => ({ quests: [helpQuestId(req.notice)], live: { notice: req.notice } }),
+      currencies: () => [],
+      apply(l) {
+        const n = l.live.notice;
+        const q = l.quests.get(helpQuestId(n?.id ?? ""));
+        if (n?.state !== "taken" || n.helperId !== l.character.id || q?.state !== "active") {
+          return no("help_gone");
+        }
+        return ok({
+          // Claimed with nothing paid: the row is over and blocks taking the notice again.
+          quests: [{ ...q, state: "claimed", progress: q.target }],
+          live: { notice: { update: { id: n.id, state: "open", helperId: null } } },
           outcome: { notice: n.id },
         });
       },

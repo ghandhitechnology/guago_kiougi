@@ -352,7 +352,7 @@ export class Board {
     const n = noticeFromDb(r);
     const helper = await this.who(helperId);
     if (!helper) return { refused: "help_gone" };
-    return this.executor.execute(helperId, `help-take:${id}`, "live.helpTake", {
+    return this.executor.execute(helperId, `help-take:${id}:${randomUUID()}`, "live.helpTake", {
       notice: id,
       quest: {
         id: helpQuestId(id),
@@ -374,7 +374,15 @@ export class Board {
   }
 
   cancel(posterId: string, id: string): Promise<ExecResult> {
-    return this.executor.execute(posterId, `help-cancel:${id}`, "live.helpCancel", { notice: id });
+    return this.executor.execute(posterId, `help-cancel:${id}:${randomUUID()}`, "live.helpCancel", {
+      notice: id,
+    });
+  }
+
+  drop(helperId: string, id: string): Promise<ExecResult> {
+    return this.executor.execute(helperId, `help-drop:${id}:${randomUUID()}`, "live.helpDrop", {
+      notice: id,
+    });
   }
 
   /** Taken notices by helper, for routing events while they play. */

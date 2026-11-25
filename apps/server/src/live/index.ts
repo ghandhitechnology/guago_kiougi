@@ -33,6 +33,7 @@ import {
   FLOOR_LEADERS,
   type HelpTemplate,
   helpCancelSchema,
+  helpDropSchema,
   helpPostSchema,
   helpTakeSchema,
   LIVE_MESSAGES,
@@ -873,6 +874,19 @@ export function createLive(db: Db, o: LiveOptions) {
     if (view) push(characterId, { t: "help", notice: view });
   }
 
+  async function dropHelp(characterId: string, notice: string, n: number) {
+    const r = await board.drop(characterId, notice);
+    if (!r.ok)
+      return refuse(characterId, LIVE_MESSAGES.helpDrop, refusalOf[r.error] ?? "server_error", n);
+    notify(characterId, r);
+    helping.delete(characterId);
+    const view = await board.notice(notice);
+    if (view) {
+      push(characterId, { t: "help", notice: view });
+      push(view.poster.id, { t: "help", notice: view });
+    }
+  }
+
   const guarded =
     <T extends { n: number }>(
       type: string,
@@ -915,6 +929,13 @@ export function createLive(db: Db, o: LiveOptions) {
       schema: helpCancelSchema as WorldMessageSchema<unknown>,
       run: guarded<{ notice: string; n: number }>(LIVE_MESSAGES.helpCancel, (id, m) =>
         cancelHelp(id, m.notice, m.n),
+      ),
+    },
+    {
+      type: LIVE_MESSAGES.helpDrop,
+      schema: helpDropSchema as WorldMessageSchema<unknown>,
+      run: guarded<{ notice: string; n: number }>(LIVE_MESSAGES.helpDrop, (id, m) =>
+        dropHelp(id, m.notice, m.n),
       ),
     },
   ];

@@ -612,3 +612,31 @@ describe("상점 farming", () => {
     expect((await row(c.id)).merits).toBe(1 + 5);
   });
 });
+
+describe("도움 notices", () => {
+  it("a helper can give a notice back: it opens again, unpaid, and they are free", async () => {
+    const w = await world();
+    const poster = await character(w, 1);
+    const other = await character(w, 2);
+    const helper = await character(w, 30);
+    const next = await character(w, 30);
+    const posted = await w.live.board.post(poster.id, "help-revive");
+    if ("refused" in posted) throw new Error(posted.refused);
+    expect(await w.live.board.take(helper.id, posted.notice)).toMatchObject({ ok: true });
+    expect(await w.live.board.drop(helper.id, posted.notice)).toMatchObject({ ok: true });
+    expect((await w.live.board.quest(helper.id, helpQuestId(posted.notice)))?.state).toBe(
+      "claimed",
+    );
+    expect((await w.live.board.notice(posted.notice))?.state).toBe("open");
+    // The helper may not take it back, someone else may, and the first helper is free for another.
+    expect(await w.live.board.take(helper.id, posted.notice)).toMatchObject({
+      ok: false,
+      error: "help_gone",
+    });
+    expect(await w.live.board.take(next.id, posted.notice)).toMatchObject({ ok: true });
+    const second = await w.live.board.post(other.id, "help-revive");
+    if ("refused" in second) throw new Error(second.refused);
+    expect(await w.live.board.take(helper.id, second.notice)).toMatchObject({ ok: true });
+    expect((await row(helper.id)).merits).toBe(0);
+  });
+});
