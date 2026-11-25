@@ -1,3 +1,4 @@
+export * from "./collision.ts";
 export * from "./constants.ts";
 export * from "./growth.ts";
 export * from "./rng.ts";
