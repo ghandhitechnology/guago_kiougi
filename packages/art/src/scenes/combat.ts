@@ -1,4 +1,5 @@
 import { type Actor, type Doll, type Prop, scene } from "../scene.ts";
+import { laid } from "./fight.ts";
 
 /**
  * combat: one question, asked of every effect at once. Five students on a sunlit Greek field,
@@ -238,18 +239,14 @@ export default scene({
     ...TICKS,
     fx("fx-acid", 342, 242, { anim: "bubble", play: true }),
     fx("fx-tome-crater", 258, 224, { frame: "c1" }),
-    fx("fx-fault", 288, 112, { anim: "open", index: 2 }),
-    fx("fx-fault", 336, 112, { anim: "open", index: 2 }),
-    fx("fx-forecast", 196, 160, { anim: "warn", index: 3, play: true }),
-    fx("fx-forecast", 244, 160, { anim: "warn", index: 3, play: true }),
+    ...laid("fx-fault", "open", 288, 112, 0, 96, 16, { variants: 2, index: 2, start: true }),
+    ...laid("fx-forecast", "warn", 196, 160, 0, 96, 16, { variants: 2, index: 3, start: true }),
     fx("fx-combust", 344, 192, { anim: "burn", play: true }),
     fx("fx-elite-aura", 396, 214, { anim: "aura", play: true }),
     // Red: the 유리수 병사 is about to charge down this lane, and something has marked the
     // chemistry student.
-    fx("tele-line", 330, 178, { anim: "charge", play: true }),
-    fx("tele-line", 362, 178, { anim: "charge", play: true }),
-    fx("tele-line", 394, 178, { anim: "charge", play: true }),
-    fx("tele-circle", 62, 238, { frame: "t3" }),
+    ...laid("tele-line", "charge", 330, 178, 0, 96, 12, { play: true }),
+    fx("tele-circle", 62, 238, { frame: "r24-3" }),
   ],
   objects: [
     // The era at the field's edge.

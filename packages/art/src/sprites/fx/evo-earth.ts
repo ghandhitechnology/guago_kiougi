@@ -1,6 +1,22 @@
 import { sprite } from "../../format.ts";
-import { clean, ell, framesOf, names, Pic, paintAt, path, put, rng, turnCw } from "../../fx.ts";
-import { EARTH_LONE, ROCK, specimen } from "./earth.ts";
+import {
+  type Axis,
+  capFrames,
+  clean,
+  ell,
+  framesOf,
+  lineFrames,
+  names,
+  Pic,
+  paintAt,
+  path,
+  put,
+  rng,
+  turnCw,
+  upSide,
+  wrap,
+} from "../../fx.ts";
+import { EARTH_LONE, FL, ROCK, specimen } from "./earth.ts";
 import { cloud, SKY, tide, vent } from "./earth-kit.ts";
 
 /** 지구과학's evolved forms, in the `combat-evolved` atlas. */
@@ -8,58 +24,82 @@ const evo = { group: "combat-evolved", outline: false, palette: SKY, lone: EARTH
 
 /**
  * 판 구조론: the fault does not close; two plates grind past, the near one's edge diving under
- * the far one, and arrows of gold dust run toward the seam where things are pulled in. Tiles
- * along the fault like `fx-fault`.
+ * the far one, and arrows of gold dust run toward the seam where things are pulled in. Laid along
+ * the fault like `fx-fault`, at the nearest of sixteen aims, the far plate always on the side
+ * that faces up the screen.
  */
-function plates(k: number): Pic {
-  const w = 48;
-  const h = 32;
-  const pic = Pic.blank(w, h);
-  const seam = (x: number) => 16 + Math.sin((x + k * 4) * 0.25) * 1.2;
-  for (let x = 0; x < w; x++) {
-    const y0 = Math.round(seam(x));
-    // Far plate: lifted edge, lit top face.
-    pic.set(x, y0 - 4, "t");
-    pic.set(x, y0 - 3, "s");
-    for (let y = y0 - 2; y < y0; y++) pic.set(x, y, "a");
-    pic.set(x, y0, "K");
-    // The glowing gap and the near plate going under.
-    pic.set(x, y0 + 1, (x + k * 2) % 6 < 3 ? "l" : "d");
-    pic.set(x, y0 + 2, "K");
-    for (let y = y0 + 3; y < y0 + 5; y++) pic.set(x, y, "q");
-  }
+function plates(ax: Axis, k: number): Pic {
+  const up = upSide(ax);
+  const seam = (t: number) => 1.2 * Math.sin((Math.PI * 2 * (t + (k * FL) / 3)) / FL);
+  const pic = paintAt(ax.size, ax.size, (_x, _y, px, py) => {
+    const { t, n } = ax.of(px, py);
+    // Rows below the seam are positive, as on the screen for a line running right.
+    const z = -n * up - seam(t);
+    if (z < -4.5 || z >= 4.5) return null;
+    if (z < -3.5) return "t";
+    if (z < -2.5) return "s";
+    if (z < -0.5) return "a";
+    if (z < 0.5) return "K";
+    if (z < 1.5) return wrap(t + (k * FL) / 9, FL / 3) < FL / 6 ? "l" : "d";
+    if (z < 2.5) return "K";
+    return "q";
+  });
   // Pull arrows from both sides toward the seam.
-  for (let x = 4; x < w; x += 12) {
-    const off = (k * 2) % 6;
-    path(
-      pic,
-      [
-        [x - 2, 4 + off],
-        [x, 6 + off],
-        [x + 2, 4 + off],
-      ],
-      "d",
-    );
-    path(
-      pic,
-      [
-        [x + 4, 28 - off],
-        [x + 6, 26 - off],
-        [x + 8, 28 - off],
-      ],
-      "d",
-    );
-  }
-  return clean(pic, EARTH_LONE);
+  const off = (k * 2) % 6;
+  const arrow = (t: number, h: number, dir: 1 | -1) => {
+    const pts = [
+      ax.at(t - 2, up * (h + 2 * dir)),
+      ax.at(t, up * h),
+      ax.at(t + 2, up * (h + 2 * dir)),
+    ];
+    path(pic, pts, "d");
+  };
+  arrow(4, 10 - off, 1);
+  arrow(12, -10 + off, -1);
+  return pic;
 }
+
+const PLATE_ANIMS = { grind: { stages: [0, 1, 2], fps: 6 } } as const;
 
 const plateTectonics = sprite({
   ...evo,
   name: "evo-plate-tectonics",
-  size: [48, 32],
-  origin: [0, 16],
-  frames: framesOf("p", [0, 1, 2].map(plates)),
-  anim: { grind: { frames: names("p", 3), fps: 6, jump: 1 } },
+  size: [64, 64],
+  origin: [32, 32],
+  ...lineFrames(
+    { length: FL, canvas: 64, lone: EARTH_LONE, draw: (ax, k) => plates(ax, k) },
+    PLATE_ANIMS,
+  ),
+});
+
+/** Where the plates run out: the far plate broken off in steps, rubble past its end. */
+function platesEnd(ax: Axis, k: number): Pic {
+  const up = upSide(ax);
+  const pic = paintAt(ax.size, ax.size, (_x, _y, px, py) => {
+    const { t, n } = ax.of(px, py);
+    if (t < -2 || t >= 4) return null;
+    const z = -n * up;
+    const top = t < 0 ? -4.5 : t < 1.5 ? -3.5 : -2.5;
+    const bottom = t < 0 ? 4.5 : t < 1.5 ? 2.5 : 0.5;
+    if (z < top || z >= bottom) return null;
+    if (z < top + 1) return "t";
+    if (z < -0.5) return "a";
+    if (z < 0.5) return "K";
+    if (z < 1.5) return k === 1 ? "l" : "d";
+    if (z < 2.5) return "K";
+    return "q";
+  });
+  const [x, y] = ax.at(5, 0);
+  put(pic, ":.;\n.;.", x - 1, y - 1);
+  return pic;
+}
+
+const plateTectonicsEnd = sprite({
+  ...evo,
+  name: "evo-plate-tectonics-end",
+  size: [24, 24],
+  origin: [12, 12],
+  ...capFrames(24, platesEnd, PLATE_ANIMS, EARTH_LONE),
 });
 
 /**
@@ -166,15 +206,15 @@ const typhoonSprite = sprite({
  */
 const SPRING_R = [24, 48, 72, 96, 120, 144];
 function spring(r: number, outward: boolean): Pic {
-  const pic = tide(r, outward, 300);
-  if (r > 24) put(pic, tide(r - 24, outward, 300), 0, 0);
-  return pic;
+  const pic = tide(r, outward, 316);
+  if (r > 24) put(pic, tide(r - 24, outward, 316), 0, 0);
+  return clean(pic, EARTH_LONE);
 }
 const springTide = sprite({
   ...evo,
   name: "evo-spring-tide",
-  size: [300, 154],
-  origin: [150, 77],
+  size: [316, 162],
+  origin: [158, 81],
   frames: {
     ...Object.fromEntries(SPRING_R.map((r) => [`out${r}`, spring(r, true).toString()])),
     ...Object.fromEntries(SPRING_R.map((r) => [`in${r}`, spring(r, false).toString()])),
@@ -260,4 +300,7 @@ const stormCloud = sprite({
   anim: { drift: { frames: names("c", 3), fps: 4, jump: 1 } },
 });
 
-export default [plateTectonics, rockCycle, typhoonSprite, springTide, stratovolcano, stormCloud];
+export default [
+  plateTectonics,
+  plateTectonicsEnd,
+  rockCycle, typhoonSprite, springTide, stratovolcano, stormCloud];

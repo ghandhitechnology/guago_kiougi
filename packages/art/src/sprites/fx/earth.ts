@@ -1,9 +1,12 @@
 import { type Legend, sprite } from "../../format.ts";
 import {
+  type Axis,
+  capFrames,
   clean,
   ell,
   framesOf,
   line,
+  lineFrames,
   names,
   Pic,
   type Pt,
@@ -12,6 +15,8 @@ import {
   put,
   rng,
   turnCw,
+  upSide,
+  wrap,
 } from "../../fx.ts";
 import { shade } from "../../paint.ts";
 
@@ -47,79 +52,105 @@ const fx = { group: "combat", outline: false, palette: EARTH, lone: EARTH_LONE }
 
 // 지구는 둥글다 -------------------------------------------------------------------------------
 
-export const FW = 48;
+/** Tile length along the 예보 and the fault. */
+export const FL = 16;
 
 /**
  * 예보: the forecast traced on the ground where the fault will open, in five stages from a dotted
- * survey line to a trace that is all spikes. Tiles along the fault; the client stretches the
- * stage across the delay, and the last frame says it is about to break.
+ * survey line to a trace that is all spikes. Laid tile by tile along the line at the nearest of
+ * sixteen aims; the client steps the stage across the delay, and the last says it will break.
+ * The spikes lie across the line and the umber shadow under them falls straight down the
+ * screen, so the trace holds on sunlit dirt at every angle.
  */
-function forecast(k: number): Pic {
-  const h = 13;
-  const mid = 6;
-  const pic = Pic.blank(FW, h);
-  const amp = [0, 1, 2, 3.4, 4.4][k] as number;
-  const r = rng(31);
-  const trace: Pt[] = [[0, mid]];
-  for (let x = 3; x < FW - 2; x += 3) {
-    const spike = r() < 0.5 ? -1 : 1;
-    trace.push([x, mid + spike * amp * (0.4 + r() * 0.6)]);
-  }
-  trace.push([FW - 1, mid]);
+function forecast(ax: Axis, k: number, v: number): Pic {
+  const pic = Pic.blank(ax.size, ax.size);
+  const amp = [0, 1.4, 2.2, 3.4, 4.4][k] as number;
   if (k === 0) {
-    for (let x = 1; x < FW; x += 4) put(pic, "mm", x, mid);
+    for (let t = 1; t < FL; t += 4) {
+      const [x0, y0] = ax.at(t, 0);
+      const [x1, y1] = ax.at(t + 1.4, 0);
+      line(pic, x0, y0, x1, y1, "m");
+    }
   } else {
-    // Ticks across the line every eight pixels, like a survey.
-    for (let x = 4; x < FW; x += 8) line(pic, x, mid - 3, x, mid + 3, k >= 3 ? "d" : "o");
+    // Survey ticks across the line every eight pixels.
+    for (const t of [4, 12]) {
+      const [x0, y0] = ax.at(t, -3);
+      const [x1, y1] = ax.at(t, 3);
+      line(pic, x0, y0, x1, y1, k >= 3 ? "d" : "o");
+    }
+    const r = rng(31 + v * 6);
+    const pts: Pt[] = [ax.at(-2, 0), ax.at(0, 0)];
+    for (let i = 1; i < 6; i++) {
+      const spike = r() < 0.5 ? -1 : 1;
+      pts.push(ax.at((i * FL) / 6, spike * amp * (0.45 + r() * 0.55)));
+    }
+    pts.push(ax.at(FL, 0), ax.at(FL + 2, 0));
     const ink = k === 4 ? "W" : k >= 2 ? "l" : "m";
-    path(pic, trace, ink);
-    // From the third stage the trace is drawn twice, a pixel apart: it thickens as it nears.
-    if (k >= 2)
-      path(
-        pic,
-        trace.map(([x, y]) => [x, y + 1] as Pt),
-        k === 4 ? "p" : "m",
-        false,
-        ".",
-      );
+    path(pic, pts, ink);
+    // The trace is drawn twice, a pixel apart, so it reads as a stroke from the first stage.
+    path(
+      pic,
+      pts.map(([x, y]) => [x, y + 1] as Pt),
+      k === 4 ? "p" : k >= 2 ? "m" : "d",
+      false,
+      ".",
+    );
   }
-  // Umber under the trace so it holds on sunlit ground.
+  // Umber under every lit pixel so the trace holds on sunlit ground.
   const out = pic.clone();
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < FW; x++)
-      if (out.at(x, y) === "." && "mlWp".includes(pic.at(x, y - 1) ?? ".")) out.set(x, y, "o");
+  for (let y = 0; y < pic.h; y++)
+    for (let x = 0; x < pic.w; x++)
+      if (out.at(x, y) === "." && "mlWpd".includes(pic.at(x, y - 1) ?? ".")) out.set(x, y, "o");
   if (k === 4) {
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < FW; x++)
+    for (let y = 0; y < pic.h; y++)
+      for (let x = 0; x < pic.w; x++)
         if (pic.at(x, y) === "W" && out.at(x, y - 1) === ".") out.set(x, y - 1, "p");
   }
-  return clean(out);
+  return out;
 }
+
+const FORECAST_ANIMS = {
+  warn: { stages: [0, 1, 2, 3], fps: 2, loop: false },
+  break: { stages: [4, 3, 4], fps: 12 },
+} as const;
 
 const forecastSprite = sprite({
   ...fx,
   name: "fx-forecast",
-  size: [FW, 13],
-  origin: [0, 6],
-  frames: framesOf("f", [0, 1, 2, 3, 4].map(forecast)),
-  anim: {
-    warn: { frames: names("f", 4), fps: 2, loop: false, jump: 1 },
-    break: { frames: ["f4", "f3", "f4"], fps: 12, jump: 1 },
-  },
+  size: [48, 48],
+  origin: [24, 24],
+  ...lineFrames(
+    { length: FL, canvas: 48, variants: 2, lone: EARTH_LONE, draw: (ax, k, v) => forecast(ax, k, v) },
+    FORECAST_ANIMS,
+  ),
 });
 
-/** The crack's centre line, ending on the axis at both ends so strips join. */
-function crackLine(seed: number): Pt[] {
-  const r = rng(seed);
-  const pts: Pt[] = [[0, 16]];
-  for (let x = 4; x < FW - 3; x += 4 + Math.floor(r() * 3)) pts.push([x, 16 + (r() - 0.5) * 4]);
-  pts.push([FW - 1, 16]);
-  return pts;
+/** The 예보's ends: a surveyor's stake across the line, the trace dying into it. */
+function forecastEnd(ax: Axis, k: number): Pic {
+  const pic = Pic.blank(ax.size, ax.size);
+  const ink = k === 4 ? "W" : k >= 2 ? "l" : "m";
+  const [x0, y0] = ax.at(0, -4);
+  const [x1, y1] = ax.at(0, 4);
+  line(pic, x0, y0, x1, y1, ink);
+  const [a0, b0] = ax.at(-0.8, -4);
+  const [a1, b1] = ax.at(-0.8, 4);
+  line(pic, a0, b0, a1, b1, k >= 2 ? "m" : "d", ".");
+  const [hx, hy] = ax.at(0, 0);
+  put(pic, k >= 3 ? "WW\nWW" : "pp\npp", hx - 0.5, hy - 0.5);
+  const out = pic.clone();
+  for (let y = 0; y < pic.h; y++)
+    for (let x = 0; x < pic.w; x++)
+      if (out.at(x, y) === "." && "mlWpd".includes(pic.at(x, y - 1) ?? ".")) out.set(x, y, "o");
+  return out;
 }
 
-/** Half-width of the opened crack at x, wider in the middle of each strip. */
-const gape = (x: number, k: number): number =>
-  ([0.6, 2.2, 3.2, 1.6, 0.6, 0][k] as number) * (0.55 + 0.45 * Math.sin((Math.PI * x) / FW));
+const forecastEndSprite = sprite({
+  ...fx,
+  name: "fx-forecast-end",
+  size: [20, 20],
+  origin: [10, 10],
+  ...capFrames(20, forecastEnd, FORECAST_ANIMS, EARTH_LONE),
+});
 
 /** A slab tipped up beside the crack: a lit top face and a dark front face. */
 export function slab(pic: Pic, x: number, y: number, w: number, tall: number, side: -1 | 1): void {
@@ -133,83 +164,131 @@ export function slab(pic: Pic, x: number, y: number, w: number, tall: number, si
   }
 }
 
-/**
- * The fault opens: the crack splits along the traced line with gold light deep inside, slabs
- * tip up along both lips, then the slabs sink and the crack closes to a scar.
- */
-function fault(k: number): Pic {
-  const h = 28;
-  const pic = Pic.blank(FW, h);
-  const line0 = crackLine(9);
-  const yAt = (x: number): number => {
-    for (let i = 0; i + 1 < line0.length; i++) {
-      const a = line0[i] as Pt;
-      const b = line0[i + 1] as Pt;
-      if (x >= a[0] && x <= b[0]) return a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0] || 1);
-    }
-    return 16;
-  };
-  // Slabs behind the crack first, so the crack's near lip overlaps them.
-  const tall = [0, 4, 7, 3, 0, 0][k] as number;
-  if (tall > 0) {
-    const r = rng(17);
-    for (let x = 1; x < FW - 6; x += 7 + Math.floor(r() * 3)) {
-      const w = 4 + Math.floor(r() * 3);
-      slab(
-        pic,
-        x,
-        Math.round(yAt(x + w / 2) - gape(x, k) - 1),
-        w,
-        tall * (0.6 + r() * 0.5),
-        r() < 0.5 ? -1 : 1,
-      );
-    }
-  }
-  paintOverCrack(pic, yAt, k);
-  if (tall > 0) {
-    const r = rng(23);
-    for (let x = 4; x < FW - 6; x += 9 + Math.floor(r() * 4)) {
-      const w = 4 + Math.floor(r() * 2);
-      const y = Math.round(yAt(x + w / 2) + gape(x, k) + tall * 0.5 + 1);
-      slab(pic, x, y, w, tall * 0.5 * (0.6 + r() * 0.5), r() < 0.5 ? -1 : 1);
-    }
-  }
-  if (k === 5) {
-    const r = rng(4);
-    for (let x = 2; x < FW; x += 5 + Math.floor(r() * 4)) {
-      pic.set(x, Math.round(yAt(x) + (r() - 0.5) * 6), r() < 0.5 ? ":" : ";");
-    }
-  }
-  return clean(pic, EARTH_LONE);
-}
+/** The crack's half width by stage: hairline, split, open with light, closing, scar. */
+const GAPE = [0.6, 2.2, 3.2, 1.6, 0.6, 0];
+const TALL = [0, 4, 7, 3, 0, 0];
 
-function paintOverCrack(pic: Pic, yAt: (x: number) => number, k: number): void {
-  for (let x = 0; x < FW; x++) {
-    const c = yAt(x);
-    const g = gape(x, k);
-    if (k === 5) continue;
-    for (let y = 0; y < pic.h; y++) {
-      const d = Math.abs(y + 0.5 - c);
+/** Paints the crack over `pic` where `centre` and `half` say, in the colours of stage `k`. */
+function crack(
+  pic: Pic,
+  ax: Axis,
+  k: number,
+  centre: (t: number) => number,
+  half: (t: number) => number,
+  from: number,
+  to: number,
+): void {
+  if (k === 5) return;
+  for (let y = 0; y < pic.h; y++)
+    for (let x = 0; x < pic.w; x++) {
+      const { t, n } = ax.of(x, y);
+      if (t < from || t >= to) continue;
+      const g = half(t);
+      if (g <= 0) continue;
+      const d = Math.abs(n - centre(t));
       if (d > g + 0.9) continue;
       let ch = "K";
       if (k >= 1 && k <= 3 && d < g - 1.2) ch = k === 2 && d < g - 2.2 ? "W" : k === 3 ? "d" : "l";
       else if (k >= 1 && k <= 2 && d < g - 0.4) ch = "m";
-      if (y + 0.5 < c - g + 0.2 && k <= 3) ch = "K";
       pic.set(x, y, ch);
     }
-  }
 }
+
+/**
+ * The fault opens: the crack splits along the traced line with gold light deep inside, slabs
+ * tip up along both lips, then the slabs sink and the crack closes to a scar. Laid like the
+ * 예보; the two variants alternate so a long fault does not repeat. Slabs stand up the screen
+ * at every aim, the far one on the side that faces up.
+ */
+function fault(ax: Axis, k: number, v: number): Pic {
+  const pic = Pic.blank(ax.size, ax.size);
+  const r = rng(9 + v * 5);
+  const kinks = [0, (r() - 0.5) * 3, (r() - 0.5) * 3, (r() - 0.5) * 3, 0];
+  const centre = (t: number): number => {
+    const tt = wrap(t, FL);
+    const i = Math.min(3, Math.floor(tt / 4));
+    const f = (tt - i * 4) / 4;
+    return (kinks[i] as number) * (1 - f) + (kinks[i + 1] as number) * f;
+  };
+  const half = (t: number): number =>
+    (GAPE[k] as number) * (0.85 + 0.15 * Math.sin((Math.PI * 2 * t) / FL));
+  const tall = TALL[k] as number;
+  const up = upSide(ax);
+  if (tall > 0) {
+    const spots: [t: number, side: 1 | -1, w: number][] = v
+      ? [
+          [10, 1, 5],
+          [4, -1, 4],
+        ]
+      : [
+          [5, 1, 5],
+          [11, -1, 4],
+        ];
+    for (const [t, side, w] of spots) {
+      const far = side === 1;
+      const lip = half(t) + 1.5;
+      const [x, y] = ax.at(t, centre(t) + up * side * lip);
+      const h = tall * (far ? 0.7 + r() * 0.4 : 0.4 + r() * 0.2);
+      const base = far ? Math.round(y) : Math.round(y + h * 0.6);
+      slab(pic, Math.round(x - w / 2), base, w, h, r() < 0.5 ? -1 : 1);
+    }
+  }
+  crack(pic, ax, k, centre, half, -2, FL + 2);
+  if (k === 5) {
+    for (let t = 2; t < FL; t += 5) {
+      const [x, y] = ax.at(t, (r() - 0.5) * 5);
+      pic.set(Math.round(x), Math.round(y), r() < 0.5 ? ":" : ";");
+    }
+  }
+  return pic;
+}
+
+const FAULT_ANIMS = {
+  open: { stages: [0, 1, 2], fps: 14, loop: false },
+  close: { stages: [3, 4, 5], fps: 6, loop: false },
+} as const;
 
 const faultSprite = sprite({
   ...fx,
   name: "fx-fault",
-  size: [FW, 28],
-  origin: [0, 16],
-  frames: framesOf("c", [0, 1, 2, 3, 4, 5].map(fault)),
-  anim: {
-    open: { frames: ["c0", "c1", "c2"], fps: 14, loop: false, jump: 1 },
-    close: { frames: ["c3", "c4", "c5"], fps: 6, loop: false, jump: 1 },
-  },
+  size: [64, 64],
+  origin: [32, 32],
+  ...lineFrames(
+    { length: FL, canvas: 64, variants: 2, lone: EARTH_LONE, draw: (ax, k, v) => fault(ax, k, v) },
+    FAULT_ANIMS,
+  ),
+});
+
+/** Where the fault runs out: the crack narrowing to a point past the end, a chip beside it. */
+function faultEnd(ax: Axis, k: number): Pic {
+  const pic = Pic.blank(ax.size, ax.size);
+  const g = (GAPE[k] as number) * 0.85;
+  crack(
+    pic,
+    ax,
+    k,
+    () => 0,
+    (t) => (t <= 0 ? g : g * Math.max(0, 1 - t / 7)),
+    -3,
+    7,
+  );
+  if (k >= 1 && k <= 3) {
+    const [x, y] = ax.at(3, upSide(ax) * (g + 2.5));
+    put(pic, ".t.\ntsa\n.q.", x - 1, y - 1);
+  }
+  if (k === 5) {
+    const [x, y] = ax.at(1, 0);
+    put(pic, ":.;", x - 1, y);
+  }
+  return pic;
+}
+
+const faultEndSprite = sprite({
+  ...fx,
+  name: "fx-fault-end",
+  size: [32, 32],
+  origin: [16, 16],
+  ...capFrames(32, faultEnd, FAULT_ANIMS, EARTH_LONE),
 });
 
 /** Chips the fault throws: three stones, a quarter turn per frame. */
@@ -468,4 +547,12 @@ const rockHitSprite = sprite({
   ),
 });
 
-export default [forecastSprite, faultSprite, shard, rock, rockHitSprite];
+export default [
+  forecastSprite,
+  forecastEndSprite,
+  faultSprite,
+  faultEndSprite,
+  shard,
+  rock,
+  rockHitSprite,
+];
