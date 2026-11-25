@@ -1,6 +1,5 @@
-import type { Prop } from "../scene.ts";
 import { scene } from "../scene.ts";
-import { crowd, fx, mob, student } from "./fight.ts";
+import { crowd, fx, laid, mob, student } from "./fight.ts";
 
 /**
  * earth-kit: a class's whole kit judged together. 지구과학 is the class most at risk of going
@@ -13,10 +12,6 @@ import { crowd, fx, mob, student } from "./fight.ts";
 
 const BASE: [number, number] = [74, 150];
 const EVOLVED: [number, number] = [336, 146];
-
-/** A strip effect laid end to end along a line on the ground. */
-const strip = (prop: string, x: number, y: number, tiles: number, more: Partial<Prop> = {}) =>
-  Array.from({ length: tiles }, (_, i) => fx(prop, x + i * 48, y, more));
 
 export default scene({
   name: "earth-kit",
@@ -48,7 +43,7 @@ export default scene({
   `,
   details: [
     // Launch books, on the ground.
-    ...strip("fx-fault", 104, 212, 2, { anim: "open", index: 2 }),
+    ...laid("fx-fault", "open", 104, 212, 0, 96, 16, { variants: 2, index: 2, start: true }),
     fx("fx-forecast-ring", 192, 74, { anim: "warn", index: 3, play: true }),
     fx("fx-forecast-ring", 170, 250, { anim: "warn", index: 2, play: true }),
     fx("fx-crater", 128, 70, { frame: "c3" }),
@@ -57,7 +52,7 @@ export default scene({
     fx("fx-lava", 206, 252, { anim: "burn", play: true }),
     // Evolved forms, on the ground.
     fx("fx-typhoon", EVOLVED[0], EVOLVED[1], { anim: "turn", play: true }),
-    ...strip("evo-plate-tectonics", 250, 222, 2, { anim: "grind", play: true }),
+    ...laid("evo-plate-tectonics", "grind", 250, 222, 0, 96, 16, { play: true, start: true }),
     fx("evo-spring-tide", 430, 200, { frame: "out72" }),
     fx("evo-stratovolcano", 438, 254, { frame: "flow1", play: false }),
     fx("fx-forecast-ring", 412, 60, { anim: "warn", index: 3, play: true }),

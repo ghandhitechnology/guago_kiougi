@@ -1,5 +1,5 @@
 import type { LightSource, MapSource } from "./format.ts";
-import { GREEK_LEGEND, merge, px, settle, trees } from "./greek.ts";
+import { audience, GREEK_LEGEND, merge, px, settle, trees } from "./greek.ts";
 import type { Actor, Prop, Vec } from "./layers.ts";
 import { PlanGrid } from "./plan.ts";
 import { place } from "./props.ts";
@@ -164,6 +164,37 @@ const map: MapSource = {
         at: [x * T, 9 * T - 1],
         sort: 8 * T,
       }),
+    ),
+    // The crowd on the tiers: thin at the start, thick by the judges and toward the end, where
+    // everyone wants to see whether anyone ever arrives. A few stand at the back and on the walk.
+    ...audience(
+      [
+        ...[1, 2, 3, 4, 5].map((t) => ({
+          x0: 2 * T,
+          x1: (W - 1) * T,
+          y: 68 + 12 * t + 4,
+          sort: 8 * T + 2 + t,
+          // The stairs, and the judges' booth, which nobody stands in front of.
+          skip: (x: number) =>
+            (Math.floor(x / T) % 20 >= 10 && Math.floor(x / T) % 20 < 12) ||
+            Math.abs(x - 50 * T) < 44,
+        })),
+        { x0: 4 * T, x1: (W - 2) * T, y: 70, sort: 8 * T + 1, stand: true },
+        {
+          x0: 10 * T,
+          x1: (W - 2) * T,
+          y: (TRACK.bottom + 3) * T + 8,
+          sort: (TRACK.bottom + 3) * T + 8,
+          stand: true,
+        },
+      ],
+      (x) => {
+        const t = x / (W * T);
+        return (
+          0.18 + 0.5 * Math.exp(-(((t - 0.5) / 0.07) ** 2)) + 0.55 * Math.max(0, (t - 0.65) / 0.35)
+        );
+      },
+      1230,
     ),
     // The judges' stand in the middle of the tiers, its palms waiting for a winner.
     { prop: "judges-stand", at: [50 * T, 9 * T - 1], sort: 8 * T + 1 },

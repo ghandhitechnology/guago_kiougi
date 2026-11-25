@@ -3,17 +3,19 @@ import { WORLD_ROOM } from "@guago/shared";
 import { createModerationStack } from "./admin/index.ts";
 import { createGameServer } from "./app.ts";
 import { createAuthService } from "./auth/service.ts";
+import { background } from "./background.ts";
 import { ChatLog, maintainChatLog, startChatLogMaintenance } from "./chat/log.ts";
 import { assertServable, config } from "./config.ts";
 import { createDb } from "./db/index.ts";
 import { createEconomy } from "./economy/index.ts";
 import { startLedgerMaintenance } from "./economy/ledger.ts";
+import { dbModes } from "./fight/carry.ts";
 import { LiveClock } from "./live/clock.ts";
 import { provideLive, provideLivePage } from "./live/current.ts";
 import { createLive } from "./live/index.ts";
 import { PageClock } from "./live/page.ts";
 import { clubJackets, studentLooks } from "./looks.ts";
-import { fightLoadoutChanged } from "./map-room.ts";
+import { fightLoadoutChanged, provideFightServices } from "./map-room.ts";
 import { serveMetrics } from "./metrics-server.ts";
 import { evictAccount } from "./seats.ts";
 import { installShutdown, onShutdown } from "./shutdown.ts";
@@ -97,6 +99,8 @@ const server = createGameServer(
   },
   { channelSeats: config.channelSeats },
 );
+// Each character fights in the control mode it last chose.
+provideFightServices({ modes: dbModes(db) });
 // SIGTERM and SIGINT close every room (seats save places and flush grants), then these run.
 installShutdown(server);
 onShutdown("grants", () => economy.grants.flush());
@@ -121,7 +125,7 @@ setInterval(
   () => {
     auth.sweep().catch(() => {});
     economy.prune(live.progress.inflightIds()).catch(() => {});
-    void social.sweep();
+    background("social sweep", social.sweep());
   },
   10 * 60 * 1000,
 ).unref();

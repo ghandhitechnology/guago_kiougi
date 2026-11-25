@@ -93,15 +93,49 @@ const moltenIron = sprite({
   },
 });
 
-/** 멘델레예프의 꿈: the same cards bordered in gold, the table with no gaps left in it. */
+/**
+ * 멘델레예프의 꿈: the table came to him in a dream, so the cards come in one: a puffy white
+ * cloud round the gold-bordered card, two small bubbles trailing off it. The card still flips
+ * face to edge inside; the cloud stays, so the throw reads as a dream, not a rectangle.
+ */
+function dream(inner: Pic): Pic {
+  const w = 27;
+  const h = 25;
+  const puffs: [number, number, number][] = [
+    [13.5, 11.5, 8.5],
+    [6.5, 9.5, 4.6],
+    [10, 4.8, 4.6],
+    [17, 4.6, 4.8],
+    [21.5, 9.5, 4.4],
+    [20.5, 15.5, 4.4],
+    [13.5, 18, 4.6],
+    [7, 15.5, 4.2],
+  ];
+  const bubbles: [number, number, number][] = [
+    [3.2, 21, 1.9],
+    [0.9, 23.6, 1.1],
+  ];
+  const inside = (x: number, y: number, list: readonly [number, number, number][], grow = 0) =>
+    list.some(([cx, cy, r]) => Math.hypot(x - cx, y - cy) < r + grow);
+  const pic = paintAt(w, h, (x, y) => {
+    const any = [...puffs, ...bubbles];
+    if (!inside(x, y, any)) return null;
+    if (!inside(x, y, any, -1)) return "o";
+    // Shaded under each puff, pale sea where the cloud turns away.
+    return y > 17 || (x > 21 && y > 12) ? "s" : y > 15 ? "p" : "W";
+  });
+  put(pic, inner, 7, 6);
+  return clean(pic, CHEM_LONE);
+}
+
 const mendeleev = sprite({
   ...evo,
   name: "evo-mendeleev",
-  size: [13, 12],
-  origin: [6, 6],
+  size: [27, 25],
+  origin: [13, 12],
   frames: {
-    ...Object.fromEntries(ELEMENTS.map((e) => [e, card(e, "g", "G").toString()])),
-    edge: cardEdge("g", "G").toString(),
+    ...Object.fromEntries(ELEMENTS.map((e) => [e, dream(card(e, "g", "G")).toString()])),
+    edge: dream(cardEdge("g", "G")).toString(),
   },
   anim: Object.fromEntries(ELEMENTS.map((e) => [e, { frames: [e, "edge"], fps: 10, jump: 1 }])),
 });
@@ -151,7 +185,7 @@ function cluster(seed: number): Pic {
     const d = r() * 4.5;
     const x = 5 + Math.cos(a) * d;
     const y = 5 + Math.sin(a) * d;
-    put(pic, i % 3 === 0 ? ".l.\nlWl\n.l." : "pl\nlm", x, y);
+    put(pic, i % 3 === 0 ? ".l.\nl*l\n.dd" : i % 3 === 1 ? "pp\ndd" : "ll\ndd", x, y);
   }
   return clean(pic, CHEM_LONE);
 }
@@ -159,7 +193,6 @@ function cluster(seed: number): Pic {
 const avogadro = sprite({
   ...evo,
   name: "evo-avogadro",
-  blend: "add",
   size: [13, 13],
   origin: [6, 6],
   frames: framesOf("c", [3, 7, 11].map(cluster)),

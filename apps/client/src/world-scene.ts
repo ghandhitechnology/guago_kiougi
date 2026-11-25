@@ -1,6 +1,6 @@
 import type { Room } from "@colyseus/sdk";
 import type { ArtMetadata } from "@guago/art";
-import { type BuiltMap, mapById, narrative, simRules } from "@guago/content";
+import { type BuiltMap, narrative, simRules, snapshotReaderForMap } from "@guago/content";
 import {
   AIM_MESSAGE,
   type Caught,
@@ -26,9 +26,8 @@ import {
   POS_SCALE,
   portalAt,
   Q,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   shutDoorAhead,
   TILE_SIZE,
   type Transfer,
@@ -149,7 +148,7 @@ export class WorldScene extends Phaser.Scene {
   private readonly monsters = new Map<string, Remote<MonsterActor>>();
   private readonly players = new Map<string, Remote<PlayerActor>>();
   /** The fight snapshot as this client holds it (`fight/wire.ts`), one per room joined. */
-  private reader = new SnapshotReader();
+  private reader: SnapshotReader | undefined;
   /** Waiting for the first Self record of a room just joined. */
   private selfWaiters: ((me: WireSelf) => void)[] = [];
   private selfSlot = -1;
@@ -256,7 +255,7 @@ export class WorldScene extends Phaser.Scene {
     const { room } = seat;
     this.room = room;
     this.live = true;
-    this.reader = new SnapshotReader();
+    this.reader = undefined;
     this.selfSlot = -1;
     room.onStateChange((state) => {
       if (this.room === room) this.onPatch(state);
@@ -296,7 +295,7 @@ export class WorldScene extends Phaser.Scene {
       this.live = true;
       this.self?.resync();
       this.clock.reset();
-      this.reader.reset();
+      this.reader?.reset();
     });
     void this.enterMap(seat);
     return () => {
@@ -436,7 +435,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** Resolves with the player's own body once the fight snapshot carries it (its Self record). */
   private ownBody(_room: Room<unknown, MapState>): Promise<WireSelf | undefined> {
-    if (this.reader.hasSelf) return Promise.resolve({ ...this.reader.me });
+    if (this.reader?.hasSelf) return Promise.resolve({ ...this.reader.me });
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.selfWaiters = this.selfWaiters.filter((w) => w !== done);
@@ -588,14 +587,9 @@ export class WorldScene extends Phaser.Scene {
    * effects and events are the presentation's to draw.
    */
   private onSnapshot(room: Room<unknown, MapState>, bytes: Uint8Array): void {
+    // The room's full state arrives before its first snapshot, so the map is known here.
+    this.reader ??= snapshotReaderForMap(room.state.map);
     const reader = this.reader;
-    if (reader.cols === 0) {
-      const def = mapById(room.state.map);
-      if (!def) return;
-      const cell = SNAP_CELL_TILES * TILE_SIZE;
-      reader.cols = Math.ceil((def.collision.w * TILE_SIZE) / cell);
-      reader.rows = Math.ceil((def.collision.h * TILE_SIZE) / cell);
-    }
     reader.read(bytes, {
       ...NULL_SINK,
       self: (me) => this.onSelf(me),
