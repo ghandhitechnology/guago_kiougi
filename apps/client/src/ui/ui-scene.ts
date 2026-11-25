@@ -8,6 +8,7 @@ import { fight, watchFight } from "../hud/fight.ts";
 import { Hud } from "../hud/hud.ts";
 import { hud } from "../hud/store.ts";
 import { registerBag } from "../menu/bag.ts";
+import { registerCharacter } from "../menu/character.ts";
 import { Notebook } from "../menu/notebook.ts";
 import { onSignOut, registerSettings } from "../menu/settings.ts";
 import { session } from "../world/session.ts";
@@ -48,6 +49,7 @@ export class UiScene extends Phaser.Scene {
     setToaster(new Toaster(this));
     this.scene.bringToTop();
     registerBag();
+    registerCharacter();
     registerSettings();
     onSignOut(() => void this.signOut());
     this.dialogue = new DialogueBox(this);
@@ -59,7 +61,10 @@ export class UiScene extends Phaser.Scene {
     });
     if (touchScreen()) new RotateCard(this);
     // Development checks drive the world's UI from the console; never in a production build.
-    if (import.meta.env.DEV) (window as unknown as { __worldUi?: unknown }).__worldUi = worldUi;
+    if (import.meta.env.DEV) {
+      (window as unknown as { __worldUi?: unknown }).__worldUi = worldUi;
+      (window as unknown as { __guagoUi?: unknown }).__guagoUi = this;
+    }
     const unwatch = session.watch((s) => (s.entry ? this.enterWorld() : this.leaveWorld()));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unwatch();
