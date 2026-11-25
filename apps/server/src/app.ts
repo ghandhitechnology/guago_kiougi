@@ -27,7 +27,8 @@ const metrics: Middleware = (req, res, next) => {
     return res.end();
   }
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({ rooms: allRooms() }));
+  const { rss, heapUsed } = process.memoryUsage();
+  res.end(JSON.stringify({ rooms: allRooms(), memory: { rss, heapUsed } }));
 };
 
 /** The rooms and the `/api` routes on one HTTP server (PLAN §19), ready to `listen`. */

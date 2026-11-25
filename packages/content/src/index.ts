@@ -7,6 +7,7 @@ export * from "./combat-content.ts";
 export * from "./drops.ts";
 export * from "./economy.ts";
 export * from "./fields.ts";
+export * from "./fight-map.ts";
 export * from "./maps/index.ts";
 export * from "./modes.ts";
 export * from "./monsters.ts";

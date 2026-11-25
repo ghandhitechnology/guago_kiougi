@@ -509,6 +509,8 @@ export class FightWorld {
   removedCount = 0;
   readonly grants: Grant[] = [];
   readonly flow: FlowField;
+  /** Monsters spawned since the world began, for metrics. */
+  spawned = 0;
   /** Monsters killed this tick, handled after every hit has landed. */
   readonly dead: Monster[] = [];
   private nextEntity = 1;
@@ -663,6 +665,20 @@ export class FightWorld {
     e.x = 0;
     e.y = 0;
     return e;
+  }
+
+  /**
+   * An effect changed course in a way the client cannot foresee (a ricochet, a bounce, a merged
+   * pool): the wire ends the old record and sends it again from here under a new id.
+   */
+  reissueFx(e: Effect): void {
+    if (this.endedCount === this.ended.length) this.ended.push({ fx: 0, x: 0, y: 0 });
+    const rec = this.ended[this.endedCount++] as Ended;
+    rec.fx = e.fx;
+    rec.x = e.x;
+    rec.y = e.y;
+    e.fx = this.allocFx();
+    e.born = this.tick;
   }
 
   endFx(e: Effect): void {

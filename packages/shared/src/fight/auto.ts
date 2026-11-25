@@ -24,7 +24,9 @@ const NEAR = new Int32Array(64);
 /** How far a roll carries, for checking it does not end in a wall. */
 const ROLL_REACH = 40;
 /** Ticks between two choices of heading; dodges are checked every tick. */
-const THINK_TICKS = 2;
+const THINK_TICKS = 4;
+/** A new heading must beat the current one by this much to be taken. */
+const LOYALTY = 0.35;
 /** Re-pick where to look for monsters this often when nothing is in sight. */
 const EXPLORE_TICKS = 160;
 
@@ -172,7 +174,7 @@ export function autoPlay(w: FightWorld, p: Player, drive: boolean, dodge: boolea
     if (b === Behavior.Bomber && (m.state === MState.Rush || m.state === MState.Fuse)) weight = 3;
     else if (b === Behavior.Charger && m.state === MState.Windup) weight = 2;
     else if (b === Behavior.Golem) weight = 2.5;
-    const reach = (hurt ? keep * 1.8 : keep) + m.radius;
+    const reach = (hurt ? keep * 1.8 : keep * 0.85) + m.radius;
     if (d < reach && d > 1e-3) {
       const k = (1 - d / reach) ** 2 * weight * 2.2;
       gx += (dx / d) * k;
@@ -182,7 +184,7 @@ export function autoPlay(w: FightWorld, p: Player, drive: boolean, dodge: boolea
   if (closest && !hurt) {
     const dx = closest.x - p.x;
     const dy = closest.y - p.y;
-    if (closestD > keep + 10) {
+    if (closestD > keep * 1.3) {
       const k = Math.min(1, (closestD - keep) / 60);
       gx += (dx / closestD) * k;
       gy += (dy / closestD) * k;
@@ -222,7 +224,7 @@ export function autoPlay(w: FightWorld, p: Player, drive: boolean, dodge: boolea
   for (let i = 0; i < HEADINGS; i++) {
     const hx = HX[i] as number;
     const hy = HY[i] as number;
-    let score = (hx * gx + hy * gy) / g + 0.25 * (hx * p.aiX + hy * p.aiY);
+    let score = (hx * gx + hy * gy) / g + LOYALTY * (hx * p.aiX + hy * p.aiY);
     if (overlapsSolid(w.map, p.x + hx * 10, p.y + hy * 10, p.r)) score -= 2;
     const ax = p.x + hx * 16;
     const ay = p.y + hy * 16;

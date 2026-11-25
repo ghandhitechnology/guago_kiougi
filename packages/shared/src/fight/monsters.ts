@@ -30,7 +30,10 @@ import {
 const GAP = 2;
 /** Share of the gap between target and current velocity closed each tick: inertia that keeps a
  * crowd from shivering when it is pushed from several sides at once. */
-const STEER = 0.45;
+const STEER = 0.3;
+/** A monster turns to face the other way only once it walks that way faster than this, px per
+ * tick, so a crowd pushing back and forth does not flicker left and right. */
+const TURN_SPEED = 0.25;
 /** How hard neighbours push, as a share of the monster's own speed. */
 const SEPARATE = 0.9;
 /** Monsters closer than this to their target walk straight at it. */
@@ -59,6 +62,7 @@ export function spawnMonster(
   m.alive = true;
   m.entity = w.allocEntity();
   m.kind = kind;
+  w.spawned++;
   w.kindAlive[kind.index] = (w.kindAlive[kind.index] as number) + 1;
   m.level = kind.level > 0 ? kind.level : level;
   m.rank = kind.rank > 0 ? kind.rank : elite ? e.rank : 1;
@@ -521,8 +525,8 @@ export function stepMonsters(w: FightWorld, flow: FlowField): void {
     m.x = at.x;
     m.y = at.y;
     if (kind.behavior !== Behavior.Shielded) {
-      if (m.vx > 0.05) m.facing = Facing.Right;
-      else if (m.vx < -0.05) m.facing = Facing.Left;
+      if (m.vx > TURN_SPEED) m.facing = Facing.Right;
+      else if (m.vx < -TURN_SPEED) m.facing = Facing.Left;
     }
   }
 
@@ -534,8 +538,10 @@ export function stepMonsters(w: FightWorld, flow: FlowField): void {
     } else if (m.kind.behavior === Behavior.Charger && m.state !== MState.Move) {
       m.facing = m.aimX >= 0 ? Facing.Right : Facing.Left;
     } else if (m.target >= 0 && Math.abs(m.vx) <= 0.05) {
+      // Standing, it faces its target, once the target is clearly to one side.
       const p = w.players[m.target] as Player;
-      m.facing = p.x >= m.x ? Facing.Right : Facing.Left;
+      if (p.x > m.x + 6) m.facing = Facing.Right;
+      else if (p.x < m.x - 6) m.facing = Facing.Left;
     }
   }
 

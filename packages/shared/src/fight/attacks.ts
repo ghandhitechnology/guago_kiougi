@@ -579,10 +579,31 @@ function tracePath(
   wave: number,
   reflect: number,
 ): void {
-  const STEP = 4;
-  const SAMPLE = 8;
-  const max = Math.ceil(length / SAMPLE) + 4 + reflect * 2;
+  const max = Math.ceil(length / BEAM_SAMPLE) + 4 + reflect * 2;
   if (e.path.length < max * 2) e.path = new Float64Array(max * 2 + 16);
+  e.points = traceBeam((px, py) => w.wallAt(px, py), x, y, ang, length, amp, wave, reflect, e.path);
+}
+
+const BEAM_STEP = 4;
+const BEAM_SAMPLE = 8;
+
+/**
+ * A beam's path from (x, y): straight or a sine of `amp` and wavelength `wave` about its axis,
+ * the axis reflecting off walls `reflect` times and stopping at the next. Writes flat x,y pairs
+ * into `out` and returns how many points. The client traces the same path from a beam's spawn
+ * record, so it draws exactly what the server hit.
+ */
+export function traceBeam(
+  wall: (x: number, y: number) => boolean,
+  x: number,
+  y: number,
+  ang: number,
+  length: number,
+  amp: number,
+  wave: number,
+  reflect: number,
+  out: Float64Array,
+): number {
   let dx = Math.cos(ang);
   let dy = Math.sin(ang);
   let ax = x;
@@ -591,22 +612,23 @@ function tracePath(
   let left = reflect;
   let pts = 0;
   const put = (px: number, py: number) => {
-    if (pts * 2 + 1 >= e.path.length) return;
-    e.path[pts * 2] = px;
-    e.path[pts * 2 + 1] = py;
+    if (pts * 2 + 1 >= out.length) return;
+    out[pts * 2] = px;
+    out[pts * 2 + 1] = py;
     pts++;
   };
   put(x, y);
   let sinceSample = 0;
-  while (s < length) {
-    const nx = ax + dx * STEP;
-    const ny = ay + dy * STEP;
-    if (w.wallAt(nx, ny)) {
+  let guard = 0;
+  while (s < length && guard++ < 4096) {
+    const nx = ax + dx * BEAM_STEP;
+    const ny = ay + dy * BEAM_STEP;
+    if (wall(nx, ny)) {
       if (left <= 0) break;
       left--;
       // Reflect off the face it crossed.
-      const hx = w.wallAt(nx, ay);
-      const hy = w.wallAt(ax, ny);
+      const hx = wall(nx, ay);
+      const hy = wall(ax, ny);
       if (hx || !hy) dx = -dx;
       if (hy || !hx) dy = -dy;
       put(ax, ay);
@@ -615,16 +637,27 @@ function tracePath(
     }
     ax = nx;
     ay = ny;
-    s += STEP;
-    sinceSample += STEP;
-    if (sinceSample >= SAMPLE) {
+    s += BEAM_STEP;
+    sinceSample += BEAM_STEP;
+    if (sinceSample >= BEAM_SAMPLE) {
       sinceSample = 0;
       const off = amp > 0 && wave > 0 ? amp * Math.sin((Math.PI * 2 * s) / wave) : 0;
       put(ax - dy * off, ay + dx * off);
     }
   }
   put(ax, ay);
-  e.points = pts;
+  return pts;
+}
+
+/** Whether a shot or beam stops here on a map's grid: walls do, water does not. */
+export function flightWall(map: { collision: { w: number; h: number; rows: readonly string[] } }) {
+  const { w, h, rows } = map.collision;
+  return (x: number, y: number): boolean => {
+    const tx = Math.floor(x / 16);
+    const ty = Math.floor(y / 16);
+    if (tx < 0 || ty < 0 || tx >= w || ty >= h) return true;
+    return rows[ty]?.charCodeAt(tx) === 35;
+  };
 }
 
 function shoot(
@@ -1182,8 +1215,7 @@ function ricochet(w: FightWorld, p: Player, wp: Weapon, e: Effect, from: Monster
 
 /** A shot changed course in a way the client cannot foresee: it is sent again from here. */
 function redirected(w: FightWorld, e: Effect): void {
-  e.born = w.tick;
-  e.fx = w.allocFx();
+  w.reissueFx(e);
 }
 
 function stepLob(w: FightWorld, p: Player, wp: Weapon, e: Effect): void {
@@ -1531,16 +1563,18 @@ export function stepMinions(w: FightWorld): void {
       gx = target.x;
       gy = target.y;
     } else {
-      const a = (n.index * 2.4 + tick * 0.05) % (Math.PI * 2);
-      gx = p.x + Math.cos(a) * 18;
-      gy = p.y + Math.sin(a) * 18;
+      // Heel: each cell keeps its own spot around the owner and settles there.
+      const a = n.index * 2.4;
+      gx = p.x + Math.cos(a) * 16;
+      gy = p.y + Math.sin(a) * 12;
     }
     const dx = gx - n.x;
     const dy = gy - n.y;
     const d = Math.sqrt(dx * dx + dy * dy);
-    const speed = wp.speed * (1 + p.attackSpeed * 0.5);
-    const tvx = d > 1 ? (dx / d) * speed : 0;
-    const tvy = d > 1 ? (dy / d) * speed : 0;
+    // It slows as it arrives rather than overshooting and turning back.
+    const speed = wp.speed * (1 + p.attackSpeed * 0.5) * Math.min(1, d / 12);
+    const tvx = d > 2 ? (dx / d) * speed : 0;
+    const tvy = d > 2 ? (dy / d) * speed : 0;
     n.vx += (tvx - n.vx) * 0.4;
     n.vy += (tvy - n.vy) * 0.4;
     const at = slide(w.map, n.x, n.y, n.vx, n.vy, wp.radius);

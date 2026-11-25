@@ -5,19 +5,10 @@ import type { Character } from "./api.ts";
 export const OWNER_TAG = 1;
 
 /**
- * Synced map state. Positions are in 1/POS_SCALE pixels. Entities sit in view-gated collections:
- * a client receives only what its interest cells hold.
+ * Synced map state: who is here and what the owner needs of its own character. Everything that
+ * moves every tick (monsters, other players' bodies, effects) travels in the fight snapshot
+ * instead (`fight/wire.ts`). Positions are in 1/POS_SCALE pixels.
  */
-export const MonsterState = schema(
-  {
-    kind: t.string(),
-    x: t.uint16(),
-    y: t.uint16(),
-    facing: t.uint8(),
-  },
-  "Monster",
-);
-export type MonsterState = SchemaType<typeof MonsterState>;
 
 /** A student look as drawn by other clients; ids as in `Look` (api.ts). */
 export const LookState = schema(
@@ -43,14 +34,30 @@ export const PlayerState = schema(
   {
     /** Session id of the seat using this body; empty while the body is free. */
     sid: t.string(),
-    x: t.uint16(),
-    y: t.uint16(),
-    facing: t.uint8(),
-    /** Sequence number of the last input the server applied; sent to the owner only. */
-    seq: t.uint32().view(OWNER_TAG),
     name: t.string(),
     major: t.string(),
+    level: t.uint16(),
     look: LookState,
+    // The owner's own body and numbers; everyone else sees the body in the snapshot.
+    x: t.uint16().view(OWNER_TAG),
+    y: t.uint16().view(OWNER_TAG),
+    facing: t.uint8().view(OWNER_TAG),
+    /** Sequence number of the last input the server applied. */
+    seq: t.uint32().view(OWNER_TAG),
+    /** Walking speed in px/s, which the owner predicts with. */
+    speed: t.float32().view(OWNER_TAG),
+    hp: t.float32().view(OWNER_TAG),
+    maxHp: t.float32().view(OWNER_TAG),
+    shield: t.float32().view(OWNER_TAG),
+    exp: t.float32().view(OWNER_TAG),
+    /** Control mode, `CONTROL_MODES` index. */
+    mode: t.uint8().view(OWNER_TAG),
+    /** Tick it was knocked out, plus one; 0 while standing. */
+    down: t.uint32().view(OWNER_TAG),
+    /** Tick the dodge roll is ready again. */
+    dodgeReady: t.uint32().view(OWNER_TAG),
+    /** Equipped book ids by slot, for casting by hand. */
+    books: t.array("string").view(OWNER_TAG),
   },
   "Player",
 );
@@ -74,11 +81,11 @@ export function dressPlayer(player: PlayerState, character: Character): void {
 /** Player bodies a map room holds, which is also its seat count. */
 export const MAP_SEATS = 100;
 
-/** Keys of `monsters` are monster ids, keys of `players` are body slots ("0" to MAP_SEATS - 1). */
+/** Keys of `players` are body slots ("0" to MAP_SEATS - 1). */
 export const MapState = schema(
   {
-    tick: t.uint32(),
-    monsters: t.map(MonsterState).view(),
+    /** The map this room runs, so the client draws the right one. */
+    map: t.string(),
     players: t.map(PlayerState).view(),
   },
   "MapState",
