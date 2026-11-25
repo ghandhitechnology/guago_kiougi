@@ -348,7 +348,9 @@ export function createLive(db: Db, o: LiveOptions) {
       if (q) push(characterId, { t: "done", quest: noticeView(q) });
       if (id.startsWith("chore:")) {
         line("merit.cleaning", undefined, characterId);
-        void refreshRules(characterId);
+        void refreshRules(characterId).catch((e) =>
+          log(`rules refresh failed: ${describeError(e)}`),
+        );
       }
       if (id.startsWith("help:")) {
         const h = helping.get(characterId);
@@ -360,7 +362,10 @@ export function createLive(db: Db, o: LiveOptions) {
           push(characterId, { t: "help", notice: view });
           push(view.poster.id, { t: "help", notice: view });
         }
-        if (h) void refreshRules(characterId);
+        if (h)
+          void refreshRules(characterId).catch((e) =>
+            log(`rules refresh failed: ${describeError(e)}`),
+          );
       }
     }
     // The poster finished a quest a helper was helping with (`help-finish`).
@@ -478,6 +483,11 @@ export function createLive(db: Db, o: LiveOptions) {
       return "sent_home";
     }
     const t = now();
+    // One meal at a time (the operation refuses the rest): a full player costs no operation.
+    if ((online.get(characterId)?.rules.meal?.until ?? 0) > t) {
+      line("meal.full", undefined, characterId);
+      return "meal_full";
+    }
     const meal = mealOf(t);
     const result = await run(characterId, `meal:${randomUUID()}`, "live.meal", {
       meal: meal.id,
@@ -1167,8 +1177,21 @@ export function createLive(db: Db, o: LiveOptions) {
       const me = online.get(characterId);
       return me ? modifiers(me.rules, now()) : NO_MODIFIERS;
     },
-    /** Game ms until which the character is sent home, or null. */
-    homeUntil(characterId: string): number | null {
+    /**
+     * Game ms until which the character is sent home, or null. A character this process holds no
+     * time for is read from its row (`home_until`) and remembered, so a restart lets nobody out
+     * of the 집 early.
+     */
+    async homeUntil(characterId: string): Promise<number | null> {
+      if (!homeUntil.has(characterId)) {
+        const { rows } = await db.execute(
+          sql`select home_until from characters where id = ${characterId}`,
+        );
+        const saved = timeFromDb(rows[0]?.home_until)?.getTime();
+        if (saved !== undefined && saved > now() && !homeUntil.has(characterId)) {
+          homeUntil.set(characterId, saved);
+        }
+      }
       const until = homeUntil.get(characterId);
       return until !== undefined && until > now() ? until : null;
     },

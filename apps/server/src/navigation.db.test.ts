@@ -6,9 +6,10 @@
 import { createServer } from "node:net";
 import { matchMaker } from "@colyseus/core";
 import type { Room } from "@colyseus/sdk";
-import { mapById } from "@guago/content";
+import { snapshotReaderForMap } from "@guago/content";
 import {
   API,
+  CLOSE_MAP_CHANGED,
   CLOSE_SESSION_REPLACED,
   encodeInput,
   INPUT_MESSAGE,
@@ -19,25 +20,29 @@ import {
   NULL_SINK,
   POS_SCALE,
   type PresenceMessage,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
-  TILE_SIZE,
+  type SnapshotReader,
   type Transfer,
   WORLD_MESSAGES,
   WORLD_ROOM,
 } from "@guago/shared";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createGameServer } from "./app.ts";
 import { type AuthService, createAuthService } from "./auth/service.ts";
 import { channels } from "./channels.ts";
 import { createDb, type Db } from "./db/index.ts";
+import { createEconomy } from "./economy/index.ts";
+import { invariants } from "./invariants.ts";
+import { LiveClock } from "./live/clock.ts";
+import { provideLive } from "./live/current.ts";
+import { createLive, type Live } from "./live/index.ts";
+import { PageClock } from "./live/page.ts";
 import { studentLooks } from "./looks.ts";
-import type { MapRoom } from "./map-room.ts";
+import { checkMapRooms, type MapRoom } from "./map-room.ts";
 import { places } from "./places.ts";
 import { evictAccount, provideSeatServices } from "./seats.ts";
 import { TEST_DATABASE_URL } from "./test/db-setup.ts";
-import { joinMap, sdk } from "./test/enter.ts";
+import { enter, joinMap, sdk } from "./test/enter.ts";
 import { call, type Jar, remember, waitFor, within } from "./test/http.ts";
 
 const SETTINGS = {
@@ -52,6 +57,7 @@ let auth: AuthService;
 let server: ReturnType<typeof createGameServer>;
 let base: string;
 let nextIp = 1;
+let live: Live;
 
 /** Holds the next write of a character's place until `open` is called. */
 const gate = { armed: false, reached: false, open: () => {} };
@@ -140,14 +146,11 @@ const readers = new WeakMap<Room<unknown, MapState>, SnapshotReader>();
 
 /** Reads a room's fight snapshots, where the client's own body comes (its Self record). */
 function follow(room: Room<unknown, MapState>): void {
-  const reader = new SnapshotReader();
-  readers.set(room, reader);
   room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
-    if (reader.cols === 0) {
-      const map = mapById(room.state.map);
-      const cell = SNAP_CELL_TILES * TILE_SIZE;
-      reader.cols = Math.ceil(((map?.collision.w ?? 0) * TILE_SIZE) / cell);
-      reader.rows = Math.ceil(((map?.collision.h ?? 0) * TILE_SIZE) / cell);
+    let reader = readers.get(room);
+    if (!reader) {
+      reader = snapshotReaderForMap(room.state.map);
+      readers.set(room, reader);
     }
     reader.read(bytes, NULL_SINK);
   });
@@ -167,15 +170,51 @@ async function savedPlace(characterId: string) {
 const closed = (room: Room) =>
   new Promise<number>((resolve) => room.onLeave((code) => resolve(code)));
 
+/**
+ * The living world on the real clock, as a server process starts it: nothing about who is sent
+ * home is in memory until it is read or happens.
+ */
+async function startLive(): Promise<Live> {
+  const clock = new LiveClock({ realMs: Date.now(), gameMs: Date.now(), rate: 1 });
+  const page = new PageClock(db, clock);
+  await page.load(1);
+  let made: Live | undefined;
+  const economy = createEconomy(db, {
+    now: () => clock.date(),
+    page: page.live,
+    onApplied: (id, name, r) => made?.onApplied(id, name, r),
+  });
+  made = createLive(db, { clock, page, economy, world: () => undefined, log: () => {} });
+  return made;
+}
+
+/** 벌점 up to 명령퇴사, the way a patrol hands it out. */
+async function expel(characterId: string): Promise<void> {
+  for (let i = 0; i < 10; i++) await live.events.patrolCaught(characterId);
+}
+
+/** A seat that must be refused: the room does not take the character. */
+async function refused(seat: Transfer["seat"], jar: Jar): Promise<boolean> {
+  try {
+    const room = await sdk(base, jar).consumeSeatReservation(seat, MapState);
+    await room.leave();
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 beforeAll(async () => {
   db = createDb(TEST_DATABASE_URL);
   auth = createAuthService({ db, onSessionsRevoked: evictAccount });
+  live = await startLive();
+  provideLive(live);
   server = createGameServer(
     auth,
     SETTINGS,
     studentLooks,
     {},
-    {},
+    { live },
     { channelSeats: 2, emptyGraceSeconds: 1 },
   );
   provideSeatServices({
@@ -199,6 +238,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  provideLive(undefined);
   await server.gracefullyShutdown(false);
   await db.pool.end();
 });
@@ -209,6 +249,12 @@ beforeEach(async () => {
   // Every map room of the last test has closed after its grace.
   await waitFor(async () => (await matchMaker.query({ name: MAP_ROOM })).length === 0, 8000);
   await db.pool.query("truncate accounts, login_failures cascade");
+});
+
+afterEach(() => {
+  // No client was left without a body, no body without a client, no character in two rooms.
+  checkMapRooms();
+  expect(invariants.broken.splice(0)).toEqual([]);
 });
 
 describe("walking through a door", () => {
@@ -331,7 +377,171 @@ describe("walking through a door", () => {
   });
 });
 
+describe("a seat is good only where the character belongs", () => {
+  it("refuses a seat taken before an expel, so the 집 cannot be walked out of", async () => {
+    const { jar, id } = await player("homebody");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    // A second seat on the yard, taken while still allowed there.
+    const spare = (await enter(base, jar)).seating;
+    expect(spare?.map).toBe("campus-yard");
+    const home = new Promise<Transfer>((resolve) =>
+      room.onMessage(MAP_MESSAGES.transfer, (t: Transfer) => resolve(t)),
+    );
+    await expel(id);
+    const trip = await within(home, 5000, "the trip home");
+    expect(trip.map).toBe("home");
+    expect(await refused((spare as NonNullable<typeof spare>).seat, jar)).toBe(true);
+    expect(await whereIs(id)).toEqual([]);
+    const there = await sdk(base, jar).consumeSeatReservation(trip.seat, MapState);
+    there.onMessage("*", () => {});
+    await room.leave();
+    await waitFor(async () => (await whereIs(id)).length === 1);
+    expect(await whereIs(id)).toEqual(["home"]);
+    await there.leave();
+  });
+
+  it("keeps a player sent home there after a restart, before anything else loaded them", async () => {
+    const { jar, id } = await player("restarted");
+    const until = new Date(Date.now() + 10 * 60_000);
+    await db.pool.query(
+      "update characters set map_id = 'home', x = 344, y = 108, home_until = $2 where id = $1",
+      [id, until],
+    );
+    // A fresh process: nobody's 명령퇴사 is in memory.
+    provideLive(await startLive());
+    try {
+      const { room, seating } = await joinMap(base, jar);
+      room.onMessage("*", () => {});
+      expect(seating.map).toBe("home");
+      // The 집 looks every two seconds for players whose time is up; this one's is not.
+      let sentBack = false;
+      room.onMessage(MAP_MESSAGES.transfer, () => {
+        sentBack = true;
+      });
+      await new Promise((r) => setTimeout(r, 2600));
+      expect(sentBack).toBe(false);
+      expect(await whereIs(id)).toEqual(["home"]);
+      await room.leave();
+    } finally {
+      provideLive(live);
+    }
+  });
+
+  it("sends a player expelled between two rooms home, not on through the door", async () => {
+    const { jar, id } = await player("dodger");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    gate.armed = true;
+    const moving = walkUpToDoor(room);
+    await waitFor(() => gate.reached);
+    // Expelled while the door's write is held: no room holds a body to send home.
+    await expel(id);
+    gate.open();
+    const transfer = await moving;
+    expect(transfer.map).toBe("gaseolgwan-stairs");
+    expect(await refused(transfer.seat, jar)).toBe(true);
+    await room.leave();
+    const { room: there, seating } = await joinMap(base, jar);
+    there.onMessage("*", () => {});
+    expect(seating.map).toBe("home");
+    expect(await whereIs(id)).toEqual(["home"]);
+    await there.leave();
+  });
+
+  it("refuses a seat taken before the door when it evicts the page walking through", async () => {
+    const { jar, id } = await player("evictee");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    // Another page of the same session holds a seat on the yard from before the door.
+    const spare = (await enter(base, jar)).seating as NonNullable<
+      Awaited<ReturnType<typeof enter>>["seating"]
+    >;
+    expect(spare.map).toBe("campus-yard");
+    gate.armed = true;
+    walkUpToDoor(room).catch(() => {});
+    await waitFor(() => gate.reached);
+    // It takes that seat while the door's write is slow: the walking page is evicted mid-write.
+    const second = sdk(base, jar)
+      .consumeSeatReservation(spare.seat, MapState)
+      .then(
+        (r) => r,
+        () => undefined,
+      );
+    await new Promise((r) => setTimeout(r, 150));
+    gate.open();
+    const taken = await within(second, 5000, "the second page's answer");
+    expect(taken).toBeUndefined();
+    expect(await savedPlace(id)).toMatchObject({ map_id: "gaseolgwan-stairs" });
+    const { room: there, seating } = await joinMap(base, jar);
+    there.onMessage("*", () => {});
+    expect(seating.map).toBe("gaseolgwan-stairs");
+    expect(await whereIs(id)).toEqual(["gaseolgwan-stairs"]);
+    await there.leave();
+  });
+
+  it("closes a reconnection that comes back after the server moved the player away", async () => {
+    const { jar, id } = await player("roamer");
+    const { room } = await joinMap(base, jar);
+    room.onMessage("*", () => {});
+    room.reconnection.maxRetries = 3;
+    const yard = matchMaker.getLocalRoomById(room.roomId) as MapRoom;
+    // The SDK reconnects only a room that has been up a while.
+    await new Promise((r) => setTimeout(r, room.reconnection.minUptime + 200));
+    const end = new Promise<number | "reconnected">((resolve) => {
+      room.onReconnect(() => resolve("reconnected"));
+      room.onLeave((code) => resolve(code));
+    });
+    // The signal drops; the room holds the body for the reconnection.
+    (yard.clients[0]?.ref as { terminate(): void } | undefined)?.terminate();
+    await waitFor(() => yard.clients.length === 0);
+    // Meanwhile the school moves the player to the stairs.
+    expect(yard.relocate(id, "gaseolgwan-stairs", "gaseol-front", "school")).toBe(true);
+    await waitFor(async () => (await savedPlace(id)).map_id === "gaseolgwan-stairs");
+    const outcome = await within(end, 15_000, "the reconnection to settle");
+    if (outcome === "reconnected") {
+      expect(await within(closed(room), 5000, "the room to send it on")).toBe(CLOSE_MAP_CHANGED);
+    } else {
+      expect(outcome).toBe(CLOSE_MAP_CHANGED);
+    }
+    // Nobody stays connected to the yard without a body.
+    await waitFor(() => yard.clients.length === 0);
+    expect(yard.characterIds).toEqual([]);
+    const { room: there, seating } = await joinMap(base, jar);
+    there.onMessage("*", () => {});
+    expect(seating.map).toBe("gaseolgwan-stairs");
+    await there.leave();
+  });
+});
+
 describe("channels", () => {
+  it("count players, not spare tickets or sockets left behind at a door", async () => {
+    const a = await player("hoarder");
+    const b = await player("newcomer");
+    const c = await player("latecomer");
+    const ra = await joinMap(base, a.jar);
+    ra.room.onMessage("*", () => {});
+    // Asking to enter again and again holds one ticket: the same one comes back.
+    const first = (await enter(base, a.jar)).seating;
+    const again = (await enter(base, a.jar)).seating;
+    expect(again?.seat.sessionId).toBe(first?.seat.sessionId);
+    // Through the door, keeping the yard's socket open and never taking the far seat.
+    const end = closed(ra.room);
+    const door = await walkUpToDoor(ra.room);
+    // Two newcomers still find channel 1 of the yard, which holds two.
+    const rb = await joinMap(base, b.jar);
+    const rc = await joinMap(base, c.jar);
+    for (const r of [rb, rc]) r.room.onMessage("*", () => {});
+    expect([rb.seating.channel, rc.seating.channel]).toEqual([1, 1]);
+    // The socket left at the door is closed soon after.
+    expect(await within(end, 5000, "the old socket to close")).toBe(CLOSE_MAP_CHANGED);
+    await rb.room.leave();
+    await rc.room.leave();
+    // The spare ticket is for where the hoarder no longer belongs; the far seat is taken at last.
+    expect(await refused((first as NonNullable<typeof first>).seat, a.jar)).toBe(true);
+    await (await sdk(base, a.jar).consumeSeatReservation(door.seat, MapState)).leave();
+  });
+
   it("open the next channel when one is full, fill the lowest first and close when empty", async () => {
     const a = await player("chana");
     const b = await player("chanb");

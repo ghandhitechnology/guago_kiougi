@@ -466,7 +466,7 @@ export function createTrades({
   /** Closes the character's window, if any. */
   function end(characterId: string, reason: TradeCloseReason): void {
     const w = byCharacter.get(characterId);
-    if (w) void serial(w, async () => close(w, reason));
+    if (w) serial(w, async () => close(w, reason)).catch(() => {});
   }
 
   /** The clock and the distance, once a second. */

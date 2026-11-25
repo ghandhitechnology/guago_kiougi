@@ -13,7 +13,7 @@
  */
 import { parseArgs } from "node:util";
 import { Client, type Room } from "@colyseus/sdk";
-import { mapById } from "@guago/content";
+import { snapshotReaderForMap } from "@guago/content";
 import {
   DUEL_MESSAGES,
   type DuelEvent,
@@ -29,11 +29,9 @@ import {
   POS_SCALE,
   Q,
   type Seating,
-  SNAP_CELL_TILES,
   SNAPSHOT_MESSAGE,
-  SnapshotReader,
+  type SnapshotReader,
   TICK_MS,
-  TILE_SIZE,
   type Transfer,
   WirePlayer,
   type WireSelf,
@@ -74,7 +72,7 @@ class Bot {
   charName = "";
   world!: Room;
   map: Room<unknown, MapState> | undefined;
-  private reader = new SnapshotReader();
+  private reader: SnapshotReader | undefined;
   self = { x: 0, y: 0 };
   floor: FloorView | null = null;
   readonly pushes: DuelEvent[] = [];
@@ -139,7 +137,7 @@ class Bot {
       MapState,
     );
     room.reconnection.enabled = false;
-    this.reader = new SnapshotReader();
+    this.reader = undefined;
     const sink = {
       ...NULL_SINK,
       self: (s: WireSelf) => {
@@ -151,18 +149,11 @@ class Bot {
     };
     room.onMessage("*", () => {});
     room.onMessage(SNAPSHOT_MESSAGE, (bytes: Uint8Array) => {
-      // The reader needs the map's grid of interest cells before its first message.
-      if (this.reader.cols === 1 && room.state.map) {
-        const def = mapById(room.state.map);
-        const cell = SNAP_CELL_TILES * TILE_SIZE;
-        if (def) {
-          this.reader.cols = Math.ceil((def.collision.w * TILE_SIZE) / cell);
-          this.reader.rows = Math.ceil((def.collision.h * TILE_SIZE) / cell);
-        }
-      }
-      if (this.reader.cols === 1) return;
+      // The reader is made for the room's map before its first message.
+      if (!this.reader && room.state.map) this.reader = snapshotReaderForMap(room.state.map);
+      if (!this.reader) return;
       try {
-        this.reader.read(bytes, sink);
+        this.reader?.read(bytes, sink);
       } catch (error) {
         say(`${this.name} snapshot ${error instanceof Error ? error.stack : String(error)}`);
       }
@@ -241,7 +232,7 @@ class Bot {
   /** The perceived position of the body with this session id, if in view. */
   bodyOf(sid: string): { x: number; y: number } | undefined {
     const slot = this.slotOf(sid);
-    for (const m of this.reader.members.values()) {
+    for (const m of this.reader?.members.values() ?? []) {
       if (m.kind === WirePlayer && m.slot === slot) return { x: m.qx / Q, y: m.qy / Q };
     }
     return undefined;
@@ -250,7 +241,7 @@ class Bot {
   /** The network id of the body with this session id, if in view. */
   entityOf(sid: string): number | undefined {
     const slot = this.slotOf(sid);
-    for (const m of this.reader.members.values()) {
+    for (const m of this.reader?.members.values() ?? []) {
       if (m.kind === WirePlayer && m.slot === slot) return m.id;
     }
     return undefined;
@@ -259,7 +250,7 @@ class Bot {
   /** Every player body's network id in view. */
   playerEntities(): Set<number> {
     const out = new Set<number>();
-    for (const m of this.reader.members.values()) if (m.kind === WirePlayer) out.add(m.id);
+    for (const m of this.reader?.members.values() ?? []) if (m.kind === WirePlayer) out.add(m.id);
     return out;
   }
 

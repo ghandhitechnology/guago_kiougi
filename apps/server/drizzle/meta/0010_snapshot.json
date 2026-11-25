@@ -1,5 +1,5 @@
 {
-  "id": "02cf0119-78e5-45ea-a591-05ffb601dd1f",
+  "id": "1c94e8c8-7072-4927-90f1-715e488f8fe9",
   "prevId": "4f91261d-a27e-44e6-aa6f-84f7a0366032",
   "version": "7",
   "dialect": "postgresql",
@@ -1492,61 +1492,6 @@
         "conduct_ledger_amount_check": {
           "name": "conduct_ledger_amount_check",
           "value": "\"conduct_ledger\".\"amount\" <> 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.duel_records": {
-      "name": "duel_records",
-      "schema": "",
-      "columns": {
-        "character_id": {
-          "name": "character_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "played": {
-          "name": "played",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "won": {
-          "name": "won",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "duel_records_character_id_characters_id_fk": {
-          "name": "duel_records_character_id_characters_id_fk",
-          "tableFrom": "duel_records",
-          "tableTo": "characters",
-          "columnsFrom": ["character_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "duel_records_counts_check": {
-          "name": "duel_records_counts_check",
-          "value": "\"duel_records\".\"won\" >= 0 and \"duel_records\".\"won\" <= \"duel_records\".\"played\""
         }
       },
       "isRLSEnabled": false
@@ -4288,6 +4233,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "told": {
+          "name": "told",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "starts_at": {
           "name": "starts_at",
           "type": "timestamp with time zone",
@@ -4307,6 +4258,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::text[]"
+        },
+        "ip_scope": {
+          "name": "ip_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'none'"
         },
         "admin_id": {
           "name": "admin_id",
@@ -4408,6 +4366,10 @@
           "name": "account_bans_end_check",
           "value": "\"account_bans\".\"ends_at\" is null or \"account_bans\".\"ends_at\" > \"account_bans\".\"starts_at\""
         },
+        "account_bans_ip_scope_check": {
+          "name": "account_bans_ip_scope_check",
+          "value": "\"account_bans\".\"ip_scope\" in ('none', 'signup', 'all') and (\"account_bans\".\"ip_scope\" = 'none') = (cardinality(\"account_bans\".\"ip_hashes\") = 0)"
+        },
         "account_bans_lift_check": {
           "name": "account_bans_lift_check",
           "value": "(\"account_bans\".\"lifted_at\" is null) = (\"account_bans\".\"lift_reason\" is null) and (\"account_bans\".\"lifted_by\" is null or \"account_bans\".\"lifted_at\" is not null)"
@@ -4452,6 +4414,27 @@
           "columns": [
             {
               "expression": "ip_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "last_seen",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "account_ips_seen_idx": {
+          "name": "account_ips_seen_idx",
+          "columns": [
+            {
+              "expression": "last_seen",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -4612,6 +4595,12 @@
         },
         "op_id": {
           "name": "op_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip_hash": {
+          "name": "ip_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -5023,6 +5012,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "demerit_at": {
+          "name": "demerit_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -5064,6 +5059,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "filter_strikes_pending_idx": {
+          "name": "filter_strikes_pending_idx",
+          "columns": [
+            {
+              "expression": "at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"filter_strikes\".\"demerit_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5127,6 +5138,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "told": {
+          "name": "told",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "starts_at": {
           "name": "starts_at",

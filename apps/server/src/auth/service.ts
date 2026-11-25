@@ -5,6 +5,7 @@
 import {
   type Account,
   type ApiErrorCode,
+  type BanNotice,
   type Character,
   type CreateCharacterRequest,
   checkName,
@@ -46,7 +47,7 @@ export type Limits = typeof DEFAULT_LIMITS;
 /** Where new characters stand: where the story starts. */
 const start = startPlace();
 
-type Result<T> = { ok: true; value: T } | { ok: false; error: ApiErrorCode };
+type Result<T> = { ok: true; value: T } | { ok: false; error: ApiErrorCode; ban?: BanNotice };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (error: ApiErrorCode): { ok: false; error: ApiErrorCode } => ({ ok: false, error });
 
@@ -101,13 +102,19 @@ export interface AuthServiceOptions {
 
 /** What the auth paths ask moderation. `ip` is always the keyed IP hash, never an address. */
 export interface AuthGate {
-  /** True when an active ban covers this IP hash: signup, login and recovery are refused. */
-  ipBanned(ip: string): Promise<boolean>;
+  /**
+   * True when a ban in force covers this IP hash for this use: `signup` (a new account) or
+   * `login` (login, recovery and room joins of existing accounts, refused only by a ban whose
+   * admin chose to refuse every account on the address).
+   */
+  ipBanned(ip: string, use: "signup" | "login"): Promise<boolean>;
   /**
    * Called inside the transaction that opens a session (signup or login), so an IP ban can cover
    * the addresses the account has used.
    */
   seen(tx: Pick<Db, "execute">, accountId: string, ip: string): Promise<void>;
+  /** The ban in force on an account, as its owner is told; null when none. */
+  banOf(accountId: string): Promise<BanNotice | null>;
 }
 
 export function createAuthService({
@@ -218,13 +225,15 @@ export function createAuthService({
   return {
     characterOf,
     authenticateHash,
+    /** A room join from this IP hash is refused by a ban that refuses every account on it. */
+    joinRefused: async (ip: string) => (await gate?.ipBanned(ip, "login")) ?? false,
 
     async signup(
       req: SignupRequest,
       ip: string,
     ): Promise<Result<{ session: Session; recoveryCode: string }>> {
       if (isBannedName(req.loginId)) return fail("login_banned");
-      if (await gate?.ipBanned(ip)) return fail("account_banned");
+      if (await gate?.ipBanned(ip, "signup")) return fail("account_banned");
       // Cheap check first, so a limited IP costs no Argon2 work; re-checked under the lock below.
       if ((await signupsFrom(db, ip)) >= limit.signupsPerIpPerDay) return fail("signup_limit");
       const recovery = newRecoveryCode();
@@ -270,7 +279,7 @@ export function createAuthService({
       req: LoginRequest,
       from: Origin,
     ): Promise<Result<{ session: Session; account: Account; character: Character | null }>> {
-      if (await gate?.ipBanned(from.ip)) return fail("account_banned");
+      if (await gate?.ipBanned(from.ip, "login")) return fail("account_banned");
       const attempt = await beginAttempt(req.loginId, from);
       if (attempt === null) return fail("rate_limited");
       const [row] = await db.select().from(accounts).where(eq(accounts.loginId, req.loginId));
@@ -280,7 +289,11 @@ export function createAuthService({
       if (matches instanceof HashBusy) return fail("rate_limited");
       if (!row || !matches) return fail("bad_credentials");
       await clearAttempts(req.loginId, from);
-      if (row.status !== "active") return fail("account_banned");
+      if (row.status !== "active") {
+        // The password was right, so this is the owner: they are owed the reason and the end.
+        const ban = await gate?.banOf(row.id);
+        return { ok: false, error: "account_banned", ...(ban ? { ban } : {}) };
+      }
       // The session opens only if the hash just verified is still the account's: a recovery that
       // committed in between wins. The row lock also orders this against a racing recovery.
       const session = await db.transaction(async (tx) => {
@@ -369,7 +382,7 @@ export function createAuthService({
 
     /** Sets a new password and replaces the spent recovery code with a fresh one. */
     async recover(req: RecoverRequest, from: Origin): Promise<Result<{ recoveryCode: string }>> {
-      if (await gate?.ipBanned(from.ip)) return fail("account_banned");
+      if (await gate?.ipBanned(from.ip, "login")) return fail("account_banned");
       const attempt = await beginAttempt(req.loginId, from);
       if (attempt === null) return fail("rate_limited");
       const [row] = await db.select().from(accounts).where(eq(accounts.loginId, req.loginId));

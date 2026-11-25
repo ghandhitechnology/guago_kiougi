@@ -468,6 +468,21 @@ async function until(check: () => Promise<boolean>, ms = 3000): Promise<void> {
   }
 }
 
+describe("급식", () => {
+  it("serves one meal and answers a full player without another operation", async () => {
+    const meals: string[] = [];
+    const w = await world({ hooks: { afterLoad: (op) => void meals.push(op.name) } });
+    const c = await character(w);
+    await w.live.joined(c, "world", "m1");
+    meals.length = 0;
+    expect(await w.live.events.eat(c.id)).toBe("ok");
+    expect(await w.live.events.eat(c.id)).toBe("meal_full");
+    expect(await w.live.events.eat(c.id)).toBe("meal_full");
+    expect(meals.filter((m) => m === "live.meal")).toEqual(["live.meal"]);
+    await w.live.left(c.id, "world", "m1", false);
+  });
+});
+
 describe("week turnover", () => {
   /**
    * Three players earn 상점 and one eats, then the clock jumps two board weeks. The turnover is
