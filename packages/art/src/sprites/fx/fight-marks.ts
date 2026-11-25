@@ -25,15 +25,20 @@ const MARKS: Legend = {
 
 const fx = { group: "combat", outline: false, palette: MARKS } as const;
 
+/**
+ * A dot of a monster's charge lane: a hazard chip, red and dark red in diagonal stripes, so a run
+ * of them reads as danger tape and never as a player's trail. Lit for the wind-up, white-hot on
+ * the strike.
+ */
 const tellDot = sprite({
   ...fx,
   name: "tell-dot",
-  size: [4, 4],
-  origin: [2, 2],
+  size: [6, 6],
+  origin: [3, 3],
   frames: {
-    dim: ".oo.\nodmo\nomdo\n.oo.",
-    lit: ".oo.\nolmo\nomlo\n.oo.",
-    fire: ".dd.\ndWpd\ndpWd\n.dd.",
+    dim: ".oooo.\noddmmo\nodmmdo\nommddo\nomdddo\n.oooo.",
+    lit: ".oooo.\noddllo\nodlldo\nollddo\noldddo\n.oooo.",
+    fire: ".dddd.\ndppWWd\ndpWWpd\ndWWppd\ndWpppd\n.dddd.",
   },
   anim: { dim: { frames: ["dim"], fps: 1, loop: false } },
 });
