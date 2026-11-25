@@ -158,6 +158,8 @@ interface Pawn {
   atDesk: boolean;
   /** Tick until which patrols look past this player, after they were caught. */
   unseenUntil: number;
+  /** A meal at the 급식 counter is being served: one at a time. */
+  eating: boolean;
 }
 
 /** A cast member standing here, with what the room remembers about them. */
@@ -412,6 +414,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       lastRattle: 0,
       atDesk: false,
       unseenUntil: 0,
+      eating: false,
     };
     this.pawns.set(id, pawn);
     this.world = addPlayer(this.world, id, start.x, start.y);
@@ -888,7 +891,13 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     if (PLACE_THINGS.has(thing.id)) this.visit(who, [thing.id]);
     const l = live();
     if (MEAL_COUNTERS.has(thing.id) && l) {
-      return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+      if (pawn.eating) return { t: "none", n };
+      pawn.eating = true;
+      try {
+        return { t: "ate", n, id: thing.id, result: await l.events.eat(who) };
+      } finally {
+        pawn.eating = false;
+      }
     }
     if (thing.kind === "locked") {
       this.rattle(thing.id, "thing", "", "door_locked");

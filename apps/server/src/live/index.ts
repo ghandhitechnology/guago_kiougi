@@ -478,6 +478,11 @@ export function createLive(db: Db, o: LiveOptions) {
       return "sent_home";
     }
     const t = now();
+    // One meal at a time (the operation refuses the rest): a full player costs no operation.
+    if ((online.get(characterId)?.rules.meal?.until ?? 0) > t) {
+      line("meal.full", undefined, characterId);
+      return "meal_full";
+    }
     const meal = mealOf(t);
     const result = await run(characterId, `meal:${randomUUID()}`, "live.meal", {
       meal: meal.id,
