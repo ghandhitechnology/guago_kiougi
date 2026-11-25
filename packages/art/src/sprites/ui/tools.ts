@@ -1,6 +1,7 @@
 import { stack } from "../../draw.ts";
 import { sprite } from "../../format.ts";
-import { clean, grow, Pic, put } from "../../fx.ts";
+import { clean, grow, line, Pic, put } from "../../fx.ts";
+import { seal } from "../../paint.ts";
 import { UI } from "../../ui-legend.ts";
 
 /**
@@ -26,6 +27,22 @@ const TOOL = {
   c: "wood.dark",
   C: "wood.mid",
   E: "wood.light",
+  // Plum, sea dark and grass dark and pale, for the newer tools.
+  "6": "plum.deep",
+  "7": "plum.dark",
+  "8": "plum.mid",
+  "9": "plum.light",
+  "0": "plum.pale",
+  "2": "sea.dark",
+  f: "grass.dark",
+  j: "grass.pale",
+  // Ink pips.
+  q: "ink.dark",
+  // Clay.
+  K: "clay.dark",
+  L: "clay.mid",
+  M: "clay.light",
+  Q: "clay.pale",
   // Lone glints.
   "*": "stone.bright",
 } as const;
@@ -53,6 +70,99 @@ function tweezers(): string {
   return clean(grow(pic, "SdhH", "o"), "o").toString();
 }
 
+/**
+ * A tool drawn as fills only: every pixel on its silhouette (and round any hole) turns to ink,
+ * and stray single pixels fold into their neighbours. Rows and columns short of 16 are padded.
+ */
+function sealed(...rows: string[]): string {
+  const full = [...rows, ...Array.from({ length: 16 - rows.length }, () => "")];
+  const pic = Pic.of(full.map((r) => r.padEnd(16, ".")).join("\n"));
+  return clean(seal(pic, "o", "*"), "*Wy5o").toString();
+}
+
+/** A pen, a pipette or a handle: a thick stroke lit on its upper-left side. */
+function stroke(
+  pic: Pic,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  light: string,
+  mid: string,
+  dark: string,
+): Pic {
+  line(pic, x0 - 1, y0, x1 - 1, y1, light);
+  line(pic, x0, y0, x1, y1, mid);
+  line(pic, x0, y0 + 1, x1, y1 + 1, dark);
+  return pic;
+}
+
+const MATH_TOOLS = {
+  /** 계산기: navy body, a green readout, three rows of keys and a red one. */
+  calculator: sealed(
+    "",
+    "..oooooooooooo",
+    ".obbbbbbbbbbbbo",
+    ".obHHHHHHHHHHno",
+    ".obHFFHFFHFFHno",
+    ".obHHHHHHHHHHno",
+    ".onnnnnnnnnnnno",
+    ".onWWnWWnWWnRRo",
+    ".onssnssnssnxxo",
+    ".onnnnnnnnnnnno",
+    ".onWWnWWnWWnRRo",
+    ".onssnssnssnxxo",
+    ".onnnnnnnnnnnno",
+    ".oNNNNNNNNNNNNo",
+    "..oooooooooooo",
+  ),
+  /** 주사위: a white die on five, its shaded front below. */
+  dice: sealed(
+    "",
+    "..oooooooooooo",
+    ".oWWWWWWWWWWWso",
+    ".oWqqWWWWWWqqso",
+    ".oWqqWWWWWWqqso",
+    ".oWWWWWWWWWWWso",
+    ".oWWWWWqqWWWWso",
+    ".oWWWWWqqWWWWso",
+    ".oWWWWWWWWWWWso",
+    ".oWqqWWWWWWqqso",
+    ".oWqqWWWWWWqqso",
+    ".oWWWWWWWWWWWso",
+    ".osssssssssssso",
+    ".oSSSSSSSSSSSSo",
+    "..oooooooooooo",
+  ),
+  /** 삼각자: a clear navy set square, its window cut out, ticks on the long edge. */
+  "set-square": sealed(
+    "",
+    ".BB",
+    ".BbB",
+    ".BbbB",
+    ".BbBbB",
+    ".BbB.bB",
+    ".BbB..bB",
+    ".BbB...bB",
+    ".BbB....bB",
+    ".BbB.....bB",
+    ".BbBBBBBBBbB",
+    ".BbbbbbbbbbbB",
+    ".BNnNnNnNnNnnB",
+    ".BBBBBBBBBBBBBB",
+  ),
+  /** 빨간펜: the red pen, cap off, nib down to the left. */
+  "red-pen": (() => {
+    const pic = Pic.blank(16, 16);
+    stroke(pic, 13, 2, 7, 8, "R", "r", "x");
+    put(pic, "SS\nSs", 7, 7);
+    stroke(pic, 7, 9, 4, 12, "W", "p", "s");
+    put(pic, "rr\nr.", 2, 13);
+    put(pic, "X", 12, 1);
+    return clean(seal(grow(pic, "RrxSsWpsX", "o"), "o"), "*o").toString();
+  })(),
+};
+
 const tool = sprite({
   ...ui,
   name: "tool",
@@ -61,6 +171,7 @@ const tool = sprite({
   // Glints on metal and glass are single pixels by nature.
   lone: "*Wy5",
   frames: {
+    ...MATH_TOOLS,
     /** 컴퍼스: a drawing compass, needle leg and pencil leg. */
     compass: compass(),
     /** 모눈자: a clear ruler printed with a grid and ticks. */

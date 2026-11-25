@@ -70,6 +70,7 @@ if (values.png) {
         palette: paletteSheet(fonts),
         sprites: spriteSheet(fonts, art),
         combat: combatSheet(fonts, art),
+        "combat-evolved": combatSheet(fonts, art, "combat-evolved"),
         rigs: rigSheet(fonts, art),
         terrain: terrainSheet(fonts, art),
         ...uiSheets(art, built, sceneMeta, atlases),
