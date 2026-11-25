@@ -1,0 +1,509 @@
+import { cells, disc, grid, lit, stack, turn } from "../../draw.ts";
+import { type SpriteDef, sprite, variant } from "../../format.ts";
+import { UI } from "../../ui-legend.ts";
+
+/**
+ * Pieces for the social screens (PLAN §12, §13): the 학생증 a player card is printed on, the
+ * emote wheel and its eight icons, the party frame's crown, health fill and mode pips, the
+ * trade window's seal, and the 대자보: cork, its wooden frame, paper in four colours, the
+ * 층장's notice, thumbtacks and tape.
+ */
+const ui = { group: "ui", origin: [0, 0], anim: {} } as const;
+
+// 학생증 --------------------------------------------------------------------------------------
+
+/** A student ID: a navy band with a red stripe over cream card, corners rounded. */
+const idcard = sprite({
+  ...ui,
+  name: "idcard",
+  size: [12, 26],
+  slice: [3, 3, 22, 3],
+  palette: UI,
+  frames: {
+    idle: stack(
+      ".oooooooooo.",
+      "obbbbbbbbbbo",
+      ["onnnnnnnnnno", 16],
+      "oNNNNNNNNNNo",
+      "orrrrrrrrrro",
+      "oWWWWWWWWWWo",
+      ["oWppppppppso", 3],
+      "osssssssssso",
+      ".oooooooooo.",
+    ),
+  },
+});
+
+// Emotes ----------------------------------------------------------------------------------------
+
+/**
+ * A 12×12 icon from a fill mask: every clear pixel touching the fill (8 ways) becomes ink, and
+ * the mask is centred.
+ */
+function icon(mask: string): string {
+  const m = cells(mask);
+  const h = m.length;
+  const w = m[0]?.length ?? 0;
+  const ox = Math.floor((12 - w) / 2);
+  const oy = Math.floor((12 - h) / 2);
+  const at = (x: number, y: number) => {
+    const c = m[y - oy]?.[x - ox];
+    return c !== undefined && c !== "." ? c : undefined;
+  };
+  return grid(12, 12, (x, y) => {
+    const c = at(x, y);
+    if (c) return c;
+    const near = [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => at(x + dx, y + dy)));
+    return near ? "o" : ".";
+  });
+}
+
+const EMOTE_MASKS: Readonly<Record<string, string>> = {
+  // 인사: an open hand raised.
+  wave: stack(
+    ".y.y.y....",
+    ".y.y.y....",
+    ".y.y.y..y.",
+    ".yyyyy.yz.",
+    ".yyyyyyyz.",
+    ".yyyyyyz..",
+    ".yyyyyz...",
+    "..yyyzz...",
+    "..yyzz....",
+  ),
+  // 박수: two palms meeting.
+  clap: stack(
+    ".y.y..y.y.",
+    ".y.y..y.y.",
+    ".yyy..yyy.",
+    "yyyy..yyyy",
+    "yyyy..yyyy",
+    ".yyy..yyz.",
+    ".yyy..yyz.",
+    "..yyyyzz..",
+  ),
+  // ㅋㅋ.
+  lol: stack("RRRR.RRRR", "...R....R", "RRRR.RRRR", "...r....r", "...r....r", "...r....r"),
+  // 졸림: Z and a small z.
+  sleepy: stack(
+    "bbbbb.....",
+    "...bb.....",
+    "..bb......",
+    ".bb..nnnn.",
+    "bbbbb..nn.",
+    "......nn..",
+    ".....nnnn.",
+  ),
+  // 화이팅: a flame with a gold heart.
+  fighting: stack(
+    "....R.....",
+    "....RR....",
+    "...RRR..R.",
+    "...RRRR.RR",
+    "..RRRRRRR.",
+    ".rrrrgrrr.",
+    ".rrrgggrr.",
+    ".rrgggggr.",
+    "..rggggr..",
+    "...rrrr...",
+  ),
+  // 절: a head bowed low, eyes shut.
+  bow: stack(
+    "..hhhhhh..",
+    ".hhhhhhhh.",
+    "hhhhhhhhhh",
+    "hhhhhhhhhh",
+    "hyyyyyyyyh",
+    "yykkyykkyy",
+    ".yyyyyyyy.",
+    "..yyyyyy..",
+  ),
+  // 춤: two beamed notes.
+  dance: stack(
+    "...ffffff",
+    "...ffffff",
+    "...f....f",
+    "...f....f",
+    "...f....f",
+    ".fff..fff",
+    "ffff.ffff",
+    "ffff.ffff",
+    ".ff...ff.",
+  ),
+  // 멘붕: a spiral.
+  meltdown: stack(
+    ".44444444.",
+    "4........4",
+    "4.444444.4",
+    "4.4....4.4",
+    "4.4.44.4.4",
+    "4.4.4..4.4",
+    "4.4.4444.4",
+    "4.4......4",
+    "4.44444444",
+  ),
+};
+
+const emoteIcons = sprite({
+  ...ui,
+  name: "emote-icon",
+  size: [12, 12],
+  palette: {
+    ...UI,
+    y: "flesh.pale",
+    z: "flesh.light",
+    h: "ink.dark",
+    k: "flesh.deep",
+    f: "plum.light",
+    "4": "sea.mid",
+  },
+  frames: Object.fromEntries(Object.entries(EMOTE_MASKS).map(([id, m]) => [id, icon(m)])),
+});
+
+/** A slot of the emote wheel, and the slot under the pointer. */
+const wheelSlot = sprite({
+  ...ui,
+  name: "wheel-slot",
+  size: [24, 24],
+  palette: UI,
+  frames: {
+    idle: disc(
+      24,
+      [
+        [1, "o"],
+        [1, lit("W", "p", "s")],
+      ],
+      "p",
+    ),
+    hot: disc(
+      24,
+      [
+        [1, "o"],
+        [2, lit("y", "Y", "g")],
+      ],
+      "y",
+    ),
+  },
+});
+
+/** The hub the wheel turns about. */
+const wheelHub = sprite({
+  ...ui,
+  name: "wheel-hub",
+  size: [14, 14],
+  palette: UI,
+  frames: {
+    idle: disc(
+      14,
+      [
+        [1, "o"],
+        [1, lit("b", "n", "N")],
+      ],
+      "n",
+    ),
+  },
+});
+
+// Party ----------------------------------------------------------------------------------------
+
+const crown = sprite({
+  ...ui,
+  name: "crown",
+  size: [7, 5],
+  outline: false,
+  palette: UI,
+  frames: { idle: stack("Y..Y..Y", "YY.Y.YY", "YYYYYYY", "ggggggg", "GGGGGGG") },
+});
+
+/** The thin health fill of a party frame, and the empty groove of a member who is away. */
+const partyFill = sprite({
+  ...ui,
+  name: "party-fill",
+  size: [3, 3],
+  slice: [1, 1, 1, 1],
+  outline: false,
+  palette: UI,
+  frames: {
+    hp: stack("RRR", "rrR", "xxr"),
+    low: stack("eee", "RRe", "rrR"),
+  },
+});
+
+/** One pip per control mode, in the colour of the HUD's mode chip. */
+function pip(deep: string, light: string, mid: string): string {
+  return stack(
+    `.${deep}${deep}${deep}.`,
+    `${deep}${light}${light}${mid}${deep}`,
+    `${deep}${light}${mid}${mid}${deep}`,
+    `${deep}${mid}${mid}${mid}${deep}`,
+    `.${deep}${deep}${deep}.`,
+  );
+}
+
+const modePips = sprite({
+  ...ui,
+  name: "mode-pip",
+  size: [5, 5],
+  palette: { ...UI, "1": "sea.deep", "3": "sea.mid", "4": "sea.light" },
+  frames: {
+    auto: pip("1", "4", "3"),
+    semi: pip("o", "b", "n"),
+    skill: pip("u", "Y", "g"),
+    manual: pip("X", "R", "r"),
+  },
+});
+
+/** Away from the game: the power mark. */
+const offline = sprite({
+  ...ui,
+  name: "offline",
+  size: [7, 7],
+  outline: false,
+  palette: UI,
+  frames: {
+    idle: stack("...d...", ".d.d.d.", "d..d..d", "d.....d", "d.....d", ".d...d.", "..ddd.."),
+  },
+});
+
+// Trade ------------------------------------------------------------------------------------------
+
+/** The red seal a side presses to confirm, and the dashed ring where it will land. */
+function seal(on: boolean): string {
+  const d = 21;
+  const ring = disc(d, [[2, "r"]], ".");
+  if (!on) {
+    // Dashes of three pixels round a thin ring.
+    return grid(d, d, (x, y) => {
+      const r = Math.hypot(x + 0.5 - d / 2, y + 0.5 - d / 2);
+      if (r > d / 2 - 0.3 || r < d / 2 - 1.4) return ".";
+      return Math.floor(turn(x, y, d) * 16) % 2 === 0 ? "s" : ".";
+    });
+  }
+  const tick = cells(
+    stack(
+      ".............",
+      "...........rr",
+      "..........rrr",
+      ".........rrr.",
+      "rr......rrr..",
+      "rrr....rrr...",
+      ".rrr..rrr....",
+      "..rrrrrr.....",
+      "...rrrr......",
+      "....rr.......",
+    ),
+  );
+  const base = cells(ring);
+  tick.forEach((row, y) => {
+    row.forEach((c, x) => {
+      const line = base[y + 5];
+      if (c !== "." && line) line[x + 4] = c;
+    });
+  });
+  return base.map((r) => r.join("")).join("\n");
+}
+
+const seals = sprite({
+  ...ui,
+  name: "seal",
+  size: [21, 21],
+  outline: false,
+  palette: UI,
+  frames: { on: seal(true), off: seal(false) },
+});
+
+/** Two arrows passing each other: what goes, what comes. */
+const swap = sprite({
+  ...ui,
+  name: "swap",
+  size: [13, 11],
+  outline: false,
+  palette: UI,
+  frames: {
+    idle: stack(
+      ".........m...",
+      "..........m..",
+      "mmmmmmmmmmmm.",
+      "..........m..",
+      ".........m...",
+      ".............",
+      "...m.........",
+      "..m..........",
+      ".mmmmmmmmmmmm",
+      "..m..........",
+      "...m.........",
+    ),
+  },
+});
+
+// 대자보 ---------------------------------------------------------------------------------------
+
+/** Cork, tiled under the board: tan with dark and pale flecks scattered by a hash. */
+function cork(): string {
+  const hash = (x: number, y: number) => {
+    let h = (x * 374761393 + y * 668265263) ^ 0x5bf03635;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  return grid(32, 32, (x, y) => {
+    const n = hash(x, y);
+    if (n < 0.1) return "a";
+    if (n < 0.16) return "c";
+    if (n < 0.2) return "f";
+    return "E";
+  });
+}
+
+const corkTile = sprite({
+  ...ui,
+  name: "cork",
+  size: [32, 32],
+  outline: false,
+  lone: "acf",
+  palette: { ".": null, E: "wood.light", a: "wood.mid", c: "wood.pale", f: "clay.mid" },
+  frames: { idle: cork() },
+});
+
+/** The board's wooden frame: lit top left, a dark lip where it meets the cork. */
+const boardFrame = sprite({
+  ...ui,
+  name: "board-frame",
+  size: [12, 12],
+  slice: [4, 4, 4, 4],
+  palette: {
+    ".": null,
+    A: "wood.deep",
+    C: "wood.dark",
+    F: "wood.mid",
+    H: "wood.pale",
+  },
+  frames: {
+    idle: stack(
+      ".AAAAAAAAAA.",
+      "AHHHHHHHHHHA",
+      "AHFFFFFFFFCA",
+      "AHFAAAAAAFCA",
+      ["AHFA....AFCA", 4],
+      "AHFAAAAAAFCA",
+      "AHFFFFFFFFCA",
+      "ACCCCCCCCCCA",
+      ".AAAAAAAAAA.",
+    ),
+  },
+});
+
+/** Paper: fill, then the shade along the right and bottom edges, a fold or a tear. */
+function paper(style: "plain" | "fold" | "torn"): string {
+  return grid(12, 12, (x, y) => {
+    if (style === "fold" && x >= 8 && y <= 3) {
+      const u = x - 8;
+      if (u > y) return ".";
+      if (u === y) return "D";
+      return "S";
+    }
+    if (style === "torn" && x >= 8 && y >= 8) {
+      const cut = [11, 10, 10, 9][y - 8] as number;
+      if (x >= cut) return ".";
+      if (x === cut - 1) return "S";
+    }
+    if (x === 11 || y === 11) return "S";
+    return "F";
+  });
+}
+
+function paperSprite(name: string, fill: string, shade: string, edge: string): SpriteDef {
+  return sprite({
+    ...ui,
+    name,
+    size: [12, 12],
+    slice: [4, 4, 4, 4],
+    outline: false,
+    palette: { ".": null, F: fill, S: shade, D: edge },
+    frames: { plain: paper("plain"), fold: paper("fold"), torn: paper("torn") },
+  });
+}
+
+const papers = [
+  paperSprite("note-white", "stone.bright", "stone.pale", "stone.light"),
+  paperSprite("note-yellow", "gold.pale", "gold.light", "gold.mid"),
+  paperSprite("note-pink", "rose.pale", "rose.light", "rose.mid"),
+  paperSprite("note-blue", "navy.pale", "navy.light", "navy.mid"),
+];
+
+/** The 층장's notice: white paper ruled round in red, twice. */
+const notice = sprite({
+  ...ui,
+  name: "notice-paper",
+  size: [12, 12],
+  slice: [4, 4, 4, 4],
+  outline: false,
+  palette: UI,
+  frames: {
+    idle: stack(
+      "WWWWWWWWWWWp",
+      "WrrrrrrrrrrW".replace(/W$/, "p"),
+      "WrWWWWWWWWrp",
+      "WrWxxxxxxWrp",
+      ["WrWxWWWWxWrp", 4],
+      "WrWxxxxxxWrp",
+      "WrWWWWWWWWrp",
+      "Wrrrrrrrrrrp",
+      "pppppppppppp",
+    ),
+  },
+});
+
+/** A thumbtack seen from above: a round head lit top left. */
+const tackRed = sprite({
+  ...ui,
+  name: "tack-red",
+  size: [7, 6],
+  palette: { ".": null, o: "red.deep", L: "red.pale", M: "red.light", D: "red.mid" },
+  frames: {
+    idle: stack("..ooo..", ".oLMMo.", "oLLMMDo", "oMMMDDo", ".oDDDo.", "..ooo.."),
+  },
+});
+const tacks = [
+  tackRed,
+  variant(tackRed, { name: "tack-blue", recolor: { "red.*": "navy.*" } }),
+  variant(tackRed, { name: "tack-gold", recolor: { "red.*": "gold.*" } }),
+  variant(tackRed, { name: "tack-green", recolor: { "red.*": "grass.*" } }),
+];
+
+/** A strip of tape with torn ends. */
+const tape = sprite({
+  ...ui,
+  name: "tape",
+  size: [14, 6],
+  outline: false,
+  palette: UI,
+  frames: {
+    idle: stack(
+      "..pppppppppp..",
+      ".ppppppppppppp",
+      "pWWWWWWWWWWWWp",
+      ".ppppppppppppp",
+      "pppppppppppp..",
+      ".ssssssssss...",
+    ),
+  },
+});
+
+export default [
+  idcard,
+  emoteIcons,
+  wheelSlot,
+  wheelHub,
+  crown,
+  partyFill,
+  modePips,
+  offline,
+  seals,
+  swap,
+  corkTile,
+  boardFrame,
+  ...papers,
+  notice,
+  ...tacks,
+  tape,
+];
