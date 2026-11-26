@@ -9,6 +9,8 @@
  */
 import { compileKit, fightMapOf, raidBoss, STARTER_BOOKS, simRules } from "@guago/content";
 import {
+  applyBetween,
+  type Between,
   createFight,
   type FightWorld,
   MINUTE_MS,
@@ -411,6 +413,8 @@ describe("two channels of an arena", () => {
     const def = builtMap("p1-lyceum");
     if (!def) throw new Error("no lyceum");
     const world: FightWorld = createFight(fightMapOf(def), simRules(), null, seed);
+    // Records the arena queues, applied at the next tick's start as the room does.
+    const queued: Between[] = [];
     const arena = raidArena.create({
       world,
       def,
@@ -421,8 +425,9 @@ describe("two channels of an arena", () => {
       sendTo: () => false,
       // The players steer every tick.
       inputAt: () => world.tick,
+      between: (e) => queued.push(e),
     });
-    return { world, arena, def };
+    return { world, arena, def, queued };
   }
 
   it("share one pool and one phase: both report each tick, one character moves between them", async () => {
@@ -468,6 +473,7 @@ describe("two channels of an arena", () => {
       two.world.addPlayer("b", 0, at2.x, at2.y, kit, 100);
       const dealt = { a: 0, b: 0 };
       const tick = (c: typeof one) => {
+        for (const e of c.queued.splice(0)) applyBetween(c.world, e);
         stepFight(c.world);
         const boss = c.world.boss as unknown as { dealtBy: Float64Array };
         for (const p of c.world.players) {

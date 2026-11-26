@@ -8,14 +8,14 @@
 import { raidBossOn } from "@guago/content";
 import {
   BOSS_PLAYERS,
-  type Boss,
+  Boss,
+  type BossRecord,
   Ev,
   type FightWorld,
   isActive,
   MODE_AUTO,
   type Player,
   RAID,
-  startBoss,
   TICK_MS,
 } from "@guago/shared";
 import type { Encounter, EncounterHost, EncounterKind } from "../encounter.ts";
@@ -27,7 +27,6 @@ class Arena implements Encounter {
   private readonly host: EncounterHost;
   private readonly bossId: string;
   private readonly level: number;
-  private boss: Boss | null = null;
   private raid: Raid | null = null;
   /** Kind indices whose kills count as support: the boss's adds. */
   private readonly addKind: number;
@@ -49,33 +48,36 @@ class Arena implements Encounter {
     this.addKind = rule?.add ?? -1;
   }
 
+  /**
+   * After a tick: what this channel's players did goes to the shared raid, and the raid's numbers
+   * come back as a record the room applies at the next tick's start (`BossRecord`), so the world
+   * only changes at tick boundaries and a recorded arena fight replays.
+   */
   afterStep(): void {
     const w = this.host.world;
     const raid = raids()?.raidFor(this.bossId) ?? null;
+    const b =
+      w.boss instanceof Boss && w.boss.rule.id === this.bossId && !w.boss.freed ? w.boss : null;
+    if (b && this.raid && raid === this.raid) this.report(w, b, this.raid);
     // The raid this body belonged to is over (freed), or another run of the Page put up a new one.
-    if (this.boss && raid !== this.raid) {
-      if (!this.boss.freed) this.boss.free(w);
-      this.boss = null;
-    }
+    if (b && this.raid && raid !== this.raid) this.host.between(this.record(this.raid, true));
     this.raid = raid;
-    if (!raid) return;
-    if (!this.boss) {
-      const b = startBoss(w, this.bossId, this.level, { hp: raid.max, external: true });
-      if (raid.phase > 1) b.setPhase(w, raid.phase, raid.max, raid.shield);
-      b.sync(raid.hp, raid.max, raid.shield, raid.emptied);
-      b.debate = raid.debate;
-      this.boss = b;
-      return;
-    }
-    const b = this.boss;
-    this.report(w, b, raid);
-    if (raid.freed) {
-      b.free(w);
-      return;
-    }
-    if (raid.phase !== b.phase) b.setPhase(w, raid.phase, raid.max, raid.shield);
-    b.sync(raid.hp, raid.max, raid.shield, raid.emptied);
-    b.debate = raid.debate;
+    if (raid) this.host.between(this.record(raid, raid.freed));
+  }
+
+  private record(raid: Raid, freed: boolean): BossRecord {
+    return {
+      t: "boss",
+      id: this.bossId,
+      level: this.level,
+      phase: raid.phase,
+      hp: raid.hp,
+      max: raid.max,
+      shield: raid.shield,
+      emptied: raid.emptied,
+      debate: raid.debate,
+      freed,
+    };
   }
 
   /** This tick's damage, objectives, help and active time, to the shared raid. */
@@ -152,7 +154,6 @@ class Arena implements Encounter {
   }
 
   dispose(): void {
-    this.boss = null;
     this.raid = null;
   }
 }

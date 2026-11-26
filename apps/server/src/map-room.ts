@@ -584,6 +584,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private applyQueued(): void {
     if (this.between.length === 0) return;
     for (const e of this.between) {
+      if (e.t === "boss") {
+        applyBetween(this.world, e);
+        continue;
+      }
       const pawn = this.pawns.get(e.player);
       if (!pawn || pawn.leaving) continue;
       // A fighter's mode is set for the match (duel/floor.ts).
@@ -1005,6 +1009,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
         return true;
       },
       inputAt: (p) => pawnOf(p)?.inputAt ?? 0,
+      between: (e) => this.between.push(e),
     };
   }
 
