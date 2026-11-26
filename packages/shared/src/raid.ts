@@ -19,12 +19,10 @@ export const RAID = {
   /** Days a phase should take: an era 논제 about 4 to 5, a mid boss about 2. */
   targetDays: { era: 4.5, mid: 2 },
   /**
-   * Share of the server's damage a standing boss draws, until the window holds enough hours
-   * with a boss up to measure it.
+   * Share of the server's damage a standing boss draws, for a phase whose window holds less
+   * than six hours of a boss standing (a Page's first boss phase after field weeks).
    */
   bossShare: 0.3,
-  /** A measured share is never taken below this: a boss nobody fought says little. */
-  minShare: 0.02,
   /**
    * The smallest bar: what a small community deals in the target days, so a new or tiny server
    * never gets a phase that one visit empties. Four same-level players, two hours a day, each
@@ -87,25 +85,29 @@ export const NO_DAMAGE: DamageWindow = {
 };
 
 /**
- * A phase's HP (PLAN §10 HP calibration): the server's daily damage over the last 14 days, times
- * the share a standing boss draws from it, times the days the phase should take, never below the
- * floor. A server that grows or shrinks gets a bar sized to it; a new or tiny one stands on the
- * floor. `rate` is the Page clock's rate: the floor is fighting time, so it shrinks with the clock.
+ * A phase's HP (PLAN §10 HP calibration): the damage a standing boss takes in a Page day, from
+ * the server's last 14 days, times the days the phase should take, never below the floor. A
+ * server that grows or shrinks gets a bar sized to it; a new or tiny one stands on the floor.
+ * `rate` is the Page clock's rate: the floor is fighting time, so it shrinks with the clock.
  */
 export function calibrateHp(rank: RaidRank, level: number, window: DamageWindow, rate = 1): number {
+  const sized = bossDaily(window) * RAID.targetDays[rank];
+  return Math.round(Math.max(phaseFloor(rank, level, rate), sized));
+}
+
+/**
+ * The damage a standing boss takes in a Page day: what bosses took over the hours one stood,
+ * once the window holds six of them; before that, the server's daily damage (a few minutes of
+ * history stretched to six hours) times the share a standing boss is assumed to draw.
+ */
+export function bossDaily(window: DamageWindow): number {
+  if (window.standingMs >= RAID.minMeasuredMs)
+    return (Math.max(0, window.boss) / window.standingMs) * DAY_MS;
   const measured = Math.min(
     RAID.windowDays * DAY_MS,
     Math.max(RAID.minMeasuredMs, window.measuredMs),
   );
-  const daily = (Math.max(0, window.total) / measured) * DAY_MS;
-  const sized = daily * bossShareOf(window) * RAID.targetDays[rank];
-  return Math.round(Math.max(phaseFloor(rank, level, rate), sized));
-}
-
-/** The share of the server's damage a standing boss draws: measured when it can be. */
-export function bossShareOf(window: DamageWindow): number {
-  if (window.standingMs < RAID.minMeasuredMs || !(window.totalStanding > 0)) return RAID.bossShare;
-  return Math.min(1, Math.max(RAID.minShare, window.boss / window.totalStanding));
+  return (Math.max(0, window.total) / measured) * DAY_MS * RAID.bossShare;
 }
 
 /** The smallest a phase can be: the small community's damage over the target days (`RAID.floor`). */

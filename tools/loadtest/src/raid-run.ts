@@ -26,6 +26,7 @@ import {
   MapState,
   MODE_MESSAGE,
   type PageView,
+  RAID,
   RAID_TIER_NAMES,
   REPLAY_MESSAGE,
   type Seating,
@@ -255,7 +256,9 @@ async function phases(raid: string, rate: number): Promise<string[]> {
       [
         `  논제 ${p.phase}: calibrated HP ${Math.round(Number(p.max_hp)).toLocaleString()}`,
         `from ${Math.round(c.total).toLocaleString()} damage over ${(c.measuredMs / DAY_MS).toFixed(2)} days`,
-        share === null ? "(share assumed 0.3)" : `(boss share measured ${share.toFixed(2)})`,
+        share === null
+          ? `(share assumed ${RAID.bossShare})`
+          : `(the boss's own pace over ${(c.standingMs / DAY_MS).toFixed(2)} standing days)`,
         `· lasted ${(ms / DAY_MS).toFixed(2)} Page days (${(ms / rate / 1000).toFixed(0)} s real)`,
         `· tiers ${tiers.rows.map((t) => `${RAID_TIER_NAMES[Number(t.tier)] || "none"} ${t.n}`).join(", ")}`,
         `· paid ${tiers.rows.reduce((a, t) => a + Number(t.paid), 0)} characters, ${Number(tokens.rows[0]?.tokens ?? 0).toLocaleString()} 탐구 토큰 to ${tokens.rows[0]?.ops ?? 0} characters, ${loot.rows[0]?.n ?? 0} loot ledger rows`,
@@ -267,18 +270,33 @@ async function phases(raid: string, rate: number): Promise<string[]> {
 
 // 복습 ----------------------------------------------------------------------------------------
 
-/** One bot asks for a 복습 of `boss`, fights it in full auto, and comes back. */
+/** From the 증명관's door to under the story log's screen (`jeungmyeong` `screen`), in px. */
+const SCREEN_ROUTE = [
+  { x: 616, y: 904 },
+  { x: 248, y: 904 },
+  { x: 248, y: 872 },
+] as const;
+
+/** One bot walks to the story log's screen, asks for a 복습 of `boss`, fights it, comes back. */
 async function replay(boss: string, index: number): Promise<{ cleared: boolean; tokens: number }> {
   const cookie = await signIn(BASE, `${values.accounts}r`, index);
   const res = await fetch(`${BASE}${ENTER_PATH}`, {
     method: "POST",
     headers: { cookie, "content-type": "application/json" },
-    body: JSON.stringify({ map: "p1-agora" }),
+    body: JSON.stringify({ map: "jeungmyeong" }),
   });
   if (!res.ok) fail(`enter answered ${res.status}`);
   const { seat } = (await res.json()) as Seating;
   const client = new Client(WS, { headers: { cookie } });
   let room: Room<unknown, MapState> = await client.consumeSeatReservation(seat, MapState);
+  // 복습 is asked for at the personal story log: the 증명관's screen. Walk there from the door.
+  const walker = new Bot(room, false);
+  walker.route = [...SCREEN_ROUTE];
+  let steps = 0;
+  const walking = setInterval(() => walker.tick(++steps), TICK_MS);
+  for (let i = 0; i < 200 && walker.route.length > 0; i++) await sleep(100);
+  clearInterval(walking);
+  if (walker.route.length > 0) fail("the 복습 student did not reach the story log's screen");
   const me = await db.pool.query(
     "select c.id from characters c join accounts a on a.id = c.account_id where a.login_id = $1",
     [`${values.accounts}r${String(index).padStart(4, "0")}`],

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DAY_MS, HOUR_MS } from "./live.ts";
 import {
-  bossShareOf,
+  bossDaily,
   calibrateHp,
   countsObjective,
   type DamageWindow,
@@ -18,7 +18,7 @@ import {
   tierOf,
 } from "./raid.ts";
 
-/** `days` of the server dealing `daily` a day, a boss standing all of it and drawing `share`. */
+/** `days` of the server dealing `daily` a day, a boss standing all of it and taking `share`. */
 function window(daily: number, days: number, share: number): DamageWindow {
   const total = daily * days;
   return {
@@ -30,16 +30,29 @@ function window(daily: number, days: number, share: number): DamageWindow {
   };
 }
 
+/** `days` of field hunting at `daily` a day with no boss up. */
+function fields(daily: number, days: number): DamageWindow {
+  return { ...NO_DAMAGE, total: daily * days, measuredMs: days * DAY_MS };
+}
+
 describe("phase HP calibration", () => {
-  it("sizes a phase to about 4.5 days of the damage a standing boss draws", () => {
+  it("sizes a phase to 4.5 days of the pace a standing boss was taken down at", () => {
     const hp = calibrateHp("era", 100, window(5e9, 14, 0.4));
     expect(hp).toBe(Math.round(5e9 * 0.4 * 4.5));
   });
 
-  it("empties in the target days at the measured rate, era or mid", () => {
-    const w = window(3e9, 14, 0.5);
-    expect(calibrateHp("era", 100, w) / (3e9 * 0.5)).toBeCloseTo(RAID.targetDays.era, 6);
-    expect(calibrateHp("mid", 50, w) / (3e9 * 0.5)).toBeCloseTo(RAID.targetDays.mid, 6);
+  it("reads the boss's pace from the hours it stood, not the field days around them", () => {
+    // Ten field days and four days of a boss taking 2e9 a day, in one window.
+    const w: DamageWindow = {
+      total: 10 * 8e9 + 4 * 3e9,
+      boss: 4 * 2e9,
+      measuredMs: 14 * DAY_MS,
+      standingMs: 4 * DAY_MS,
+      totalStanding: 4 * 3e9,
+    };
+    expect(bossDaily(w)).toBeCloseTo(2e9, 0);
+    expect(calibrateHp("era", 100, w) / 2e9).toBeCloseTo(RAID.targetDays.era, 6);
+    expect(calibrateHp("mid", 50, w) / 2e9).toBeCloseTo(RAID.targetDays.mid, 6);
   });
 
   it("follows a server that grows or shrinks", () => {
@@ -48,22 +61,16 @@ describe("phase HP calibration", () => {
     expect(busy / quiet).toBeCloseTo(4, 6);
   });
 
-  it("reads a shorter history as a rate, so a week-old server is sized the same", () => {
-    expect(calibrateHp("era", 100, window(5e9, 7, 0.4))).toBe(
-      calibrateHp("era", 100, window(5e9, 14, 0.4)),
-    );
+  it("assumes the share a standing boss draws until one has stood six hours of the window", () => {
+    const early = { ...window(5e9, 14, 0.9), standingMs: 5 * 3_600_000 };
+    expect(bossDaily(early)).toBeCloseTo(5e9 * RAID.bossShare, 0);
+    expect(bossDaily(fields(5e9, 7))).toBeCloseTo(bossDaily(fields(5e9, 14)), 0);
+    expect(calibrateHp("era", 100, fields(5e9, 14))).toBe(Math.round(5e9 * RAID.bossShare * 4.5));
   });
 
   it("never looks back further than 14 days", () => {
-    const w = { ...window(5e9, 14, 0.4), total: 5e9 * 28, measuredMs: 28 * DAY_MS };
-    expect(calibrateHp("era", 100, w)).toBe(Math.round(((5e9 * 28) / 14) * 0.4 * 4.5));
-  });
-
-  it("assumes the default share until a boss has stood for six hours of the window", () => {
-    const none = { ...window(5e9, 14, 0.9), standingMs: 5 * HOUR_MS };
-    expect(bossShareOf(none)).toBe(RAID.bossShare);
-    expect(bossShareOf(window(5e9, 14, 0.9))).toBeCloseTo(0.9, 9);
-    expect(bossShareOf(window(5e9, 14, 0))).toBe(RAID.minShare);
+    const w = { ...fields(5e9, 14), total: 5e9 * 28, measuredMs: 28 * DAY_MS };
+    expect(calibrateHp("era", 100, w)).toBe(Math.round(((5e9 * 28) / 14) * RAID.bossShare * 4.5));
   });
 
   it("stretches a few minutes of history to six hours instead of trusting it", () => {
