@@ -249,16 +249,18 @@ async function phases(raid: string, rate: number): Promise<string[]> {
       measuredMs: number;
       standingMs: number;
       totalStanding: number;
+      ended?: { hp: number; ms: number; pace: number };
+      nextPace?: number;
     };
-    const share =
-      c.standingMs >= 6 * 3_600_000 && c.totalStanding > 0 ? c.boss / c.totalStanding : null;
+    const basis = c.ended
+      ? `from 논제 ${p.phase - 1}'s pace, ${Math.round((c.ended.hp / c.ended.ms) * DAY_MS).toLocaleString()} a Page day, × ${((c.nextPace ?? 1) / c.ended.pace).toFixed(2)} for this 논제`
+      : c.standingMs >= 6 * 3_600_000
+        ? `from bosses' pace over ${(c.standingMs / DAY_MS).toFixed(2)} standing days`
+        : `from ${Math.round(c.total).toLocaleString()} damage over ${(c.measuredMs / DAY_MS).toFixed(2)} days × the assumed share ${RAID.bossShare}`;
     out.push(
       [
         `  논제 ${p.phase}: calibrated HP ${Math.round(Number(p.max_hp)).toLocaleString()}`,
-        `from ${Math.round(c.total).toLocaleString()} damage over ${(c.measuredMs / DAY_MS).toFixed(2)} days`,
-        share === null
-          ? `(share assumed ${RAID.bossShare})`
-          : `(the boss's own pace over ${(c.standingMs / DAY_MS).toFixed(2)} standing days)`,
+        basis,
         `· lasted ${(ms / DAY_MS).toFixed(2)} Page days (${(ms / rate / 1000).toFixed(0)} s real)`,
         `· tiers ${tiers.rows.map((t) => `${RAID_TIER_NAMES[Number(t.tier)] || "none"} ${t.n}`).join(", ")}`,
         `· paid ${tiers.rows.reduce((a, t) => a + Number(t.paid), 0)} characters, ${Number(tokens.rows[0]?.tokens ?? 0).toLocaleString()} 탐구 토큰 to ${tokens.rows[0]?.ops ?? 0} characters, ${loot.rows[0]?.n ?? 0} loot ledger rows`,

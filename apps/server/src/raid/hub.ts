@@ -23,6 +23,7 @@ import {
   type DamageWindow,
   HOUR_MS,
   isDebateHour,
+  nextPhaseHp,
   RAID,
   RAID_BOARDS,
   RAID_TIER_NAMES,
@@ -603,7 +604,12 @@ export class RaidHub {
     const last = ended >= r.def.phases;
     const now = this.o.clock.now();
     const window = last ? null : await this.window(now);
-    const nextMax = window ? calibrateHp(r.def.rank, r.def.level, window, this.o.clock.rate) : 0;
+    // The next bar from the pace this 논제 went down at, scaled to the next one's (PLAN §10).
+    const pace = (n: number) => r.def.pace[n - 1] ?? 1;
+    const endedRun = { hp: r.max, ms: Math.max(0, now - r.phaseStartedAt), pace: pace(ended) };
+    const nextMax = window
+      ? nextPhaseHp(r.def.rank, r.def.level, endedRun, pace(ended + 1), window, this.o.clock.rate)
+      : 0;
     const nextShield = r.def.rank === "era" ? 1 : 0;
     const taken = r.take(ended);
     const at = new Date(now).toISOString();
@@ -631,7 +637,8 @@ export class RaidHub {
         if (!last) {
           await tx.execute(sql`
             insert into raid_phases (raid_id, phase, max_hp, calibration, started_at)
-            values (${r.id}, ${ended + 1}, ${nextMax}, ${JSON.stringify(window)}::jsonb,
+            values (${r.id}, ${ended + 1}, ${nextMax},
+              ${JSON.stringify({ ...window, ended: endedRun, nextPace: pace(ended + 1) })}::jsonb,
               ${at}::timestamptz)
             on conflict do nothing`);
         }

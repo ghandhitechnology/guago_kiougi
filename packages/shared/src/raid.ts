@@ -22,7 +22,7 @@ export const RAID = {
    * Share of the server's damage a standing boss draws, for a phase whose window holds less
    * than six hours of a boss standing (a Page's first boss phase after field weeks).
    */
-  bossShare: 0.3,
+  bossShare: 0.21,
   /**
    * The smallest bar: what a small community deals in the target days, so a new or tiny server
    * never gets a phase that one visit empties. Four same-level players, two hours a day, each
@@ -93,6 +93,26 @@ export const NO_DAMAGE: DamageWindow = {
 export function calibrateHp(rank: RaidRank, level: number, window: DamageWindow, rate = 1): number {
   const sized = bossDaily(window) * RAID.targetDays[rank];
   return Math.round(Math.max(phaseFloor(rank, level, rate), sized));
+}
+
+/**
+ * The next 논제's HP once one has ended (PLAN §10): the pace the class took the last one down at,
+ * scaled by how much faster or slower the next 논제's mechanics go (`pace`, relative per 논제,
+ * from content), times the target days, never below the floor. A 논제 that ended in under six
+ * Page hours says too little about the pace: the window decides (`calibrateHp`).
+ */
+export function nextPhaseHp(
+  rank: RaidRank,
+  level: number,
+  ended: { readonly hp: number; readonly ms: number; readonly pace: number },
+  nextPace: number,
+  window: DamageWindow,
+  rate = 1,
+): number {
+  if (ended.ms < RAID.minMeasuredMs || !(ended.pace > 0) || !(nextPace > 0))
+    return calibrateHp(rank, level, window, rate);
+  const daily = (ended.hp / ended.ms) * DAY_MS * (nextPace / ended.pace);
+  return Math.round(Math.max(phaseFloor(rank, level, rate), daily * RAID.targetDays[rank]));
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   isDebateHour,
   NO_DAMAGE,
   nextDebate,
+  nextPhaseHp,
   phaseFloor,
   RAID,
   RaidTier,
@@ -85,6 +86,20 @@ describe("phase HP calibration", () => {
     expect(calibrateHp("era", 100, window(1, 14, 1))).toBe(Math.round(phaseFloor("era", 100)));
     expect(phaseFloor("era", 100)).toBeGreaterThan(phaseFloor("mid", 100));
     expect(phaseFloor("era", 200) / phaseFloor("era", 100)).toBeCloseTo(10, 6);
+  });
+
+  it("sizes the next 논제 from the pace of the one that ended, scaled by how fast each goes", () => {
+    const ended = { hp: 9e9, ms: 3 * DAY_MS, pace: 1 };
+    // The class took 3e9 a day off the last one; the next goes twice as fast.
+    expect(nextPhaseHp("era", 100, ended, 2, NO_DAMAGE)).toBe(Math.round(3e9 * 2 * 4.5));
+    expect(nextPhaseHp("era", 100, { ...ended, pace: 2 }, 1, NO_DAMAGE)).toBe(
+      Math.round(1.5e9 * 4.5),
+    );
+    // A 논제 over in an hour says little: the window decides.
+    const quick = { ...ended, ms: HOUR_MS };
+    expect(nextPhaseHp("era", 100, quick, 2, window(5e9, 14, 0.4))).toBe(
+      calibrateHp("era", 100, window(5e9, 14, 0.4)),
+    );
   });
 
   it("shrinks the floor with the Page clock, so a compressed server's floor is the same fighting", () => {
