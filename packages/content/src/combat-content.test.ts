@@ -22,6 +22,7 @@ import {
   regionCount,
   regionLevels,
   spawnLevel,
+  surgeOpening,
   wavePhase,
 } from "./fields.ts";
 import { zenoDamage } from "./monsters.ts";
@@ -151,9 +152,13 @@ describe("제논의 거북이", () => {
 });
 
 describe("field pacing", () => {
-  it("holds population between 60 and 150", () => {
-    expect(fieldPopulation(0)).toBe(60);
-    expect(fieldPopulation(1)).toBe(60);
+  it("thins the horde for one player and runs two or more in full, 60 to 150", () => {
+    const { alone } = FIELD_PACING;
+    expect(fieldPopulation(1)).toBe(alone.population);
+    expect(surgeOpening(1)).toBe(alone.surgeOpening);
+    expect(refillCap(1, "surge")).toBe(alone.refill);
+    expect(fieldPopulation(2)).toBe(75);
+    expect(surgeOpening(2)).toBe(FIELD_PACING.surgeOpening);
     expect(fieldPopulation(4)).toBe(105);
     expect(fieldPopulation(40)).toBe(150);
   });
@@ -162,12 +167,13 @@ describe("field pacing", () => {
     expect(wavePhase(10)).toBe("surge");
     expect(wavePhase(55)).toBe("lull");
     expect(wavePhase(62)).toBe("surge");
-    const cap = FIELD_PACING.refillBase + FIELD_PACING.refillPerPlayer;
-    expect(refillCap(1, "surge")).toBe(cap);
+    const n = 2;
+    const cap = FIELD_PACING.refillBase + FIELD_PACING.refillPerPlayer * n;
+    expect(refillCap(n, "surge")).toBe(cap);
     expect(refillCap(3, "lull")).toBe(0);
-    expect(refill(1, "surge", 1)).toBe(1);
-    expect(refill(1, "surge", 100)).toBe(cap);
-    expect(refill(1, "lull", 1)).toBe(0);
+    expect(refill(n, "surge", 1)).toBe(1);
+    expect(refill(n, "surge", 100)).toBe(cap);
+    expect(refill(n, "lull", 1)).toBe(0);
   });
 
   it("cuts a field into regions of levels, deeper is higher", () => {

@@ -312,14 +312,16 @@ export function stepDirector(w: FightWorld): void {
   let alive = aliveCount(w);
   d.alive = alive;
   const cap = pacing.refillCap(players, surge);
-  d.tokens = Math.min(cap, d.tokens + cap / 20);
+  // The bucket holds at least one spawn, so a cap under one a second still refills.
+  d.tokens = Math.min(Math.max(1, cap), d.tokens + cap / 20);
 
   if (surge && !d.openingDone) {
     d.openingDone = true;
     // A ring dropped around each player at the start of a surge.
+    const opening = pacing.surgeOpening(players);
     for (const p of w.players) {
       if (!p.joined || w.inSafe(p.x, p.y) || alive >= population) continue;
-      for (let i = 0; i < pacing.surgeOpening && alive < population; i += 1) {
+      for (let i = 0; i < opening && alive < population; i += 1) {
         alive += spawnOne(w, field, p);
       }
     }

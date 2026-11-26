@@ -58,6 +58,7 @@ import {
   regionCount,
   regionLevels,
   spawnLevel,
+  surgeOpening,
 } from "./fields.ts";
 import { AUTO_PLAY, MODES } from "./modes.ts";
 import {
@@ -585,7 +586,7 @@ function reactionRules(): { list: ReactionRule[]; table: Int8Array } {
 const pacing: Pacing = {
   surge: tickCount(FIELD_PACING.surgeSeconds),
   lull: tickCount(FIELD_PACING.lullSeconds),
-  surgeOpening: FIELD_PACING.surgeOpening,
+  surgeOpening,
   respawnDelay: tickCount(FIELD_PACING.respawnDelay),
   spawnMinDistance: FIELD_PACING.spawnMinDistance,
   spawnMaxDistance: FIELD_PACING.spawnMaxDistance,
