@@ -7,8 +7,17 @@
  * loses unsaved seconds, never a phase; the boss is freed once with its final hit and boards; a
  * 복습's first clear pays once. Every test ends with the economy's invariants.
  */
-import { raidBoss } from "@guago/content";
-import { MINUTE_MS, RAID, RaidTier, WEEK_MS } from "@guago/shared";
+import { compileKit, fightMapOf, raidBoss, STARTER_BOOKS, simRules } from "@guago/content";
+import {
+  createFight,
+  type FightWorld,
+  MINUTE_MS,
+  NO_STATS,
+  RAID,
+  RaidTier,
+  stepFight,
+  WEEK_MS,
+} from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
@@ -17,6 +26,9 @@ import { LiveClock } from "../live/clock.ts";
 import { createLive, type Live } from "../live/index.ts";
 import { PageClock } from "../live/page.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
+import { builtMap } from "../world-maps.ts";
+import { raidArena } from "./arena.ts";
+import { provideRaids } from "./current.ts";
 import { type Raid, RaidHub } from "./hub.ts";
 
 /** Wednesday 2026-11-25 12:00 KST. */
@@ -304,6 +316,61 @@ describe("participation", () => {
 });
 
 describe("closing a phase", () => {
+  it("lets a process that died between closing a phase and paying it be paid by the next", async () => {
+    const w = await world();
+    await eraOpen(w);
+    // This process closes the phase, then hangs forever where it would pay: it died there.
+    const dying = hub(w, { execute: () => new Promise(() => {}) } as never);
+    await dying.poll();
+    const r = dying.raidFor("aristotle") as Raid;
+    const a = await character(w);
+    r.credit(a.id, a.name, 100, 10 * MINUTE_MS, 0, 0);
+    await dying.save();
+    r.hit(r.hp, 0, a);
+    for (let i = 0; i < 100 && r.phase === 1; i++) await new Promise((x) => setTimeout(x, 20));
+    expect(r.phase).toBe(2);
+    expect((await participant(r.id, 1, a.id)).paid).toBe(false);
+    const next = hub(w, rivalEconomy(w).executor);
+    await next.start();
+    await next.settle();
+    expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+    expect((await participant(r.id, 1, a.id)).paid).toBe(true);
+  });
+
+  it("is retried by the next poll when its transaction fails", async () => {
+    const w = await world();
+    await eraOpen(w);
+    let failNext = false;
+    const flaky = new Proxy(db, {
+      get(target, key) {
+        if (key === "transaction" && failNext) {
+          failNext = false;
+          return async () => {
+            throw new Error("connection reset");
+          };
+        }
+        const v = Reflect.get(target, key);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    }) as Db;
+    const h = hub(w, w.economy.executor, flaky);
+    await h.poll();
+    const r = h.raidFor("aristotle") as Raid;
+    const a = await character(w);
+    r.credit(a.id, a.name, 100, 10 * MINUTE_MS, 0, 0);
+    await h.save();
+    failNext = true;
+    r.hit(r.hp, 0, a);
+    await h.settle();
+    expect(r.phase).toBe(1);
+    expect(r.emptied).toBe(true);
+    await h.poll();
+    await h.settle();
+    expect(r.phase).toBe(2);
+    expect((await participant(r.id, 1, a.id)).tier).toBe(RaidTier.Present);
+    expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+  });
+
   it("never overwrites a phase a rival process closed first: the stale one adopts the row", async () => {
     const w = await world();
     await eraOpen(w);
@@ -335,6 +402,114 @@ describe("closing a phase", () => {
     );
     expect(phases.rows.map((p) => Number(p.phase))).toEqual([1, 2]);
     expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+  });
+});
+
+describe("two channels of an arena", () => {
+  /** One channel's fight on the 리케이온, with an arena run by a host that stands in for its room. */
+  function channel(names: Map<string, { id: string; name: string }>, seed: number) {
+    const def = builtMap("p1-lyceum");
+    if (!def) throw new Error("no lyceum");
+    const world: FightWorld = createFight(fightMapOf(def), simRules(), null, seed);
+    const arena = raidArena.create({
+      world,
+      def,
+      options: { map: def.id, channel: seed, seats: 60, grace: 30 },
+      characterOf: (p) => names.get(p.id)?.id,
+      nameOf: (p) => names.get(p.id)?.name,
+      relocate: () => false,
+      // The players steer every tick.
+      inputAt: () => world.tick,
+    });
+    return { world, arena, def };
+  }
+
+  it("share one pool and one phase: both report each tick, one character moves between them", async () => {
+    const w = await world();
+    await eraOpen(w);
+    const h = hub(w, w.economy.executor);
+    provideRaids(h);
+    try {
+      await h.poll();
+      const r = h.raidFor("aristotle") as Raid;
+      const a = await character(w);
+      const b = await character(w);
+      const names = new Map([
+        ["a", a],
+        ["b", b],
+      ]);
+      const one = channel(names, 1);
+      const two = channel(names, 2);
+      const kit = compileKit({
+        major: "earth",
+        minor: null,
+        level: 100,
+        stats: NO_STATS,
+        books: STARTER_BOOKS.earth.map((def) => ({
+          def,
+          level: 100,
+          grade: 0,
+          pilgi: 0,
+          evolved: false,
+        })),
+        tools: [],
+      });
+      // The bodies go up on the first report.
+      one.arena.afterStep();
+      two.arena.afterStep();
+      const near = (c: typeof one) => {
+        const boss = c.def.marks.lectern ?? c.def.marks.boss;
+        return { x: (boss?.x ?? 0) - 50, y: (boss?.y ?? 0) + 50 };
+      };
+      const at1 = near(one);
+      const at2 = near(two);
+      one.world.addPlayer("a", 0, at1.x, at1.y, kit, 100);
+      two.world.addPlayer("b", 0, at2.x, at2.y, kit, 100);
+      const dealt = { a: 0, b: 0 };
+      const tick = (c: typeof one) => {
+        stepFight(c.world);
+        const boss = c.world.boss as unknown as { dealtBy: Float64Array };
+        for (const p of c.world.players) {
+          if (!p.joined) continue;
+          dealt[p.id as "a" | "b"] += boss.dealtBy[p.index] as number;
+        }
+        c.arena.afterStep();
+      };
+      for (let t = 0; t < 400; t++) {
+        // a moves from channel 1 to channel 2 half-way, as a door or a re-entry would.
+        if (t === 200) {
+          one.arena.leaving?.(one.world.playerById("a") as never, a.id);
+          one.world.removePlayer("a");
+          two.world.addPlayer("a", 1, at2.x, at2.y, kit, 100);
+        }
+        tick(one);
+        tick(two);
+      }
+      expect(dealt.a).toBeGreaterThan(0);
+      expect(dealt.b).toBeGreaterThan(0);
+      // Both channels empty the pool in the same tick: one phase closes, once.
+      r.hp = 1;
+      tick(one);
+      tick(two);
+      await h.settle();
+      expect(r.phase).toBe(2);
+      const rows = await db.pool.query(
+        "select character_id, damage from raid_participants where raid_id = $1 and phase = 1",
+        [r.id],
+      );
+      const by = new Map(rows.rows.map((x) => [x.character_id as string, Number(x.damage)]));
+      expect(rows.rows).toHaveLength(2);
+      expect(by.get(a.id)).toBeCloseTo(dealt.a, 3);
+      expect(by.get(b.id)).toBeCloseTo(dealt.b, 3);
+      const phases = await db.pool.query(
+        "select phase, ended_at from raid_phases where raid_id = $1 order by phase",
+        [r.id],
+      );
+      expect(phases.rows.map((p) => Number(p.phase))).toEqual([1, 2]);
+      expect(phases.rows[0].ended_at).not.toBeNull();
+    } finally {
+      provideRaids(undefined);
+    }
   });
 });
 
