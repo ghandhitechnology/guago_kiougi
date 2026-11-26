@@ -139,16 +139,22 @@ describe("participation tiers", () => {
 });
 
 describe("active fighting", () => {
-  const at = { away: false, serverMoves: false, inputAt: 0, movedAt: 0, hitAt: 0 };
+  const at = { away: false, serverMoves: false, inputAt: 0, movedAt: 0, hitAt: 0, helpAt: 0 };
   const w = RAID.activeWindowTicks;
 
-  it("is the player's own input within the window", () => {
-    expect(isActive({ ...at, inputAt: 100 }, 100 + w - 1)).toBe(true);
-    expect(isActive({ ...at, inputAt: 100 }, 100 + w)).toBe(false);
+  it("is the player steering while its own hit or help lands, within the window", () => {
+    expect(isActive({ ...at, inputAt: 100, hitAt: 100 }, 100 + w - 1)).toBe(true);
+    expect(isActive({ ...at, inputAt: 100, hitAt: 100 }, 100 + w)).toBe(false);
+    expect(isActive({ ...at, inputAt: 100, helpAt: 90 }, 101)).toBe(true);
+  });
+
+  it("is never a body that only sends inputs: a script parked in a corner with one old hit", () => {
+    expect(isActive({ ...at, inputAt: 1000 }, 1001)).toBe(false);
+    expect(isActive({ ...at, inputAt: 1000, hitAt: 10 }, 1001)).toBe(false);
   });
 
   it("is never a dropped client's body, whatever it does", () => {
-    const busy = { serverMoves: true, inputAt: 100, movedAt: 100, hitAt: 100 };
+    const busy = { serverMoves: true, inputAt: 100, movedAt: 100, hitAt: 100, helpAt: 100 };
     expect(isActive({ ...busy, away: true }, 101)).toBe(false);
   });
 

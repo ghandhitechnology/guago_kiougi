@@ -274,7 +274,7 @@ interface Pawn {
   /** Where the body stood before this tick's step, to tell a push against a shut door. */
   fromX: number;
   fromY: number;
-  /** The tick the player's own last input arrived (a step, a dodge, a cast, an aim), for raids. */
+  /** The tick the player's own last input arrived (a step, a dodge, a cast), for raids. */
   inputAt: number;
 }
 
@@ -586,7 +586,6 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       if (e.t === "mode" && pawn.player.team > 0) continue;
       const before = pawn.player.mode;
       applyBetween(this.world, e);
-      if (e.t === "aim") pawn.inputAt = this.world.tick + 1;
       if (e.t === "mode" && pawn.player.mode !== before) {
         this.tellMode(pawn);
         background("mode save", modes.write(pawn.character.id, pawn.player.mode));

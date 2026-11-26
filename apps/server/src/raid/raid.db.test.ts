@@ -258,10 +258,11 @@ describe("participation", () => {
     const alt = await character(w);
     const late = await character(w);
     const regular = await character(w);
-    // A level-1 alt walks from lit zone to lit zone in a quiet channel for two Page minutes: an
-    // objective every 6 s and the active ticks of walking, no damage.
+    const holder = await character(w);
+    // A level-1 alt walks from lit zone to lit zone in a quiet channel: an objective every 6 s
+    // for two Page minutes, with more than 참석's five minutes of fighting, and no damage.
     for (let t = 0; t < 20; t++) {
-      r.credit(alt.id, alt.name, 0, 6000, 1, 0);
+      r.credit(alt.id, alt.name, 0, 16_000, 1, 0);
       w.clock.step(6000);
     }
     // One hit landed as the pool empties, with no time spent.
@@ -271,15 +272,24 @@ describe("participation", () => {
       r.credit(regular.id, regular.name, 500, 10 * MINUTE_MS, 1, 0);
       w.clock.step(RAID.objectiveGapMs);
     }
+    // A weak student who never landed a hit but held three zones well apart, on the floor.
+    for (let k = 0; k < 3; k++) {
+      r.credit(holder.id, holder.name, 0, 2 * MINUTE_MS, 1, 0);
+      w.clock.step(RAID.objectiveGapMs);
+    }
     await h.save();
     await finish(h, r, regular);
 
+    // Only the gap stands between the alt and 핵심: one of its twenty objectives counted.
     const pa = await participant(r.id, 1, alt.id);
     expect(pa.objectives).toBe(1);
-    expect(pa.tier).toBe(RaidTier.None);
+    expect(pa.tier).toBe(RaidTier.Present);
+    // Objectives spread over the phase are a tier for a character that cannot hit.
+    expect((await participant(r.id, 1, holder.id)).tier).toBe(RaidTier.Contributor);
     expect((await participant(r.id, 1, late.id)).tier).toBe(RaidTier.None);
     expect((await participant(r.id, 1, regular.id)).tier).toBe(RaidTier.Contributor);
-    expect(await tokens(alt.id)).toBe(0);
+    expect(await tokens(alt.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+    expect(await tokens(holder.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
     expect(await tokens(late.id)).toBe(0);
     expect(await tokens(regular.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
   });

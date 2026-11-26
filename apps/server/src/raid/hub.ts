@@ -95,7 +95,10 @@ export class Raid {
   finalHit: { id: string; name: string } | null = null;
   /** Participation of the current phase not yet written, by character. */
   pending = new Map<string, Tally>();
-  /** Page ms each character's last objective counted at, this phase. */
+  /**
+   * Page ms each character's last objective counted at. Kept across phase changes, so a phase
+   * closing never hands anyone an extra objective; in memory only (see DECISIONS.md).
+   */
   readonly objectiveAt = new Map<string, number>();
   /** Damage into the pool since the last write. */
   dirty = false;
@@ -624,7 +627,6 @@ export class RaidHub {
       r.hp = 0;
     } else {
       r.phase = ended + 1;
-      r.objectiveAt.clear();
       r.max = nextMax;
       r.hp = nextMax;
       r.shield = nextShield;

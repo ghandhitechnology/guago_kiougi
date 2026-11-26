@@ -34,6 +34,8 @@ class Arena implements Encounter {
   /** Per player index: the last tick its own hit landed on the boss, and the last it moved. */
   private readonly hitAt = new Int32Array(BOSS_PLAYERS);
   private readonly movedAt = new Int32Array(BOSS_PLAYERS);
+  /** Per player index: the last tick it helped (an objective, a revive, an add put down). */
+  private readonly helpAt = new Int32Array(BOSS_PLAYERS);
   private readonly objectives = new Int32Array(BOSS_PLAYERS);
   private readonly support = new Int32Array(BOSS_PLAYERS);
 
@@ -114,6 +116,8 @@ class Arena implements Encounter {
         }
       }
       if (p.movedX !== 0 || p.movedY !== 0) this.movedAt[i] = tick;
+      if ((this.objectives[i] as number) > 0 || (this.support[i] as number) > 0)
+        this.helpAt[i] = tick;
       const active = isActive(
         {
           away: p.away,
@@ -121,6 +125,7 @@ class Arena implements Encounter {
           inputAt: this.host.inputAt(p),
           movedAt: this.movedAt[i] as number,
           hitAt: this.hitAt[i] as number,
+          helpAt: this.helpAt[i] as number,
         },
         tick,
       );
@@ -143,6 +148,7 @@ class Arena implements Encounter {
     if (p.index >= BOSS_PLAYERS) return;
     this.hitAt[p.index] = 0;
     this.movedAt[p.index] = 0;
+    this.helpAt[p.index] = 0;
   }
 
   dispose(): void {

@@ -175,24 +175,28 @@ export interface Activity {
   readonly away: boolean;
   /** The server moves the body (완전 자동, 스킬 수동). */
   readonly serverMoves: boolean;
-  /** The last tick the player's own input arrived: a step, a dodge, a cast, an aim. */
+  /** The last tick the player's own input arrived: a step, a dodge, a cast (never an aim). */
   readonly inputAt: number;
-  /** The last tick the body moved, and the last its own hit landed on the boss. */
+  /** The last tick the body moved. */
   readonly movedAt: number;
+  /** The last tick its own hit landed on the boss, and the last it helped: an objective, a
+   * revive, one of the boss's adds put down. */
   readonly hitAt: number;
+  readonly helpAt: number;
 }
 
 /**
  * Whether a tick counts as active fighting: never while the client is away; otherwise the
- * player's own input within the window, or, for a body the server moves for a connected client
- * (완전 자동 with the tab open), a hit of its own while it moves. A body standing still with
- * its books firing is not fighting.
+ * character's own hit or help within the window, while the player steers it (its own input in
+ * the window) or, for a body the server moves for a connected client (완전 자동 with the tab
+ * open), while it moves. A body parked with its books firing, or a script that only keeps
+ * sending inputs, is not fighting.
  */
 export function isActive(a: Activity, tick: number): boolean {
   if (a.away) return false;
   const recent = (at: number) => at > 0 && tick - at < RAID.activeWindowTicks;
-  if (recent(a.inputAt)) return true;
-  return a.serverMoves && recent(a.hitAt) && recent(a.movedAt);
+  if (!recent(a.hitAt) && !recent(a.helpAt)) return false;
+  return recent(a.inputAt) || (a.serverMoves && recent(a.movedAt));
 }
 
 /** Whether an objective at `nowMs` counts toward the tier after the last one that did. */
