@@ -171,6 +171,7 @@ function play(id: string, start: string, carry: { level: number; exp: number }):
     characterOf: (q) => (q === p ? CHARACTER : undefined),
     nameOf: () => undefined,
     relocate: () => false,
+    inputAt: () => 0,
   });
   enc.joined?.(p, CHARACTER);
   scene = b.untils;

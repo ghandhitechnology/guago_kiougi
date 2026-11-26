@@ -152,6 +152,8 @@ export type ItemOrigin =
   | "craft"
   | "drop"
   | "era-drop"
+  /** A raid's personal loot roll (PLAN §10), mid boss or era boss. */
+  | "raid"
   | "quest"
   | "council-shop"
   | "research-shop"
@@ -161,6 +163,7 @@ export type ItemOrigin =
 const BOUND_ORIGINS: ReadonlySet<ItemOrigin> = new Set([
   "kit",
   "era-drop",
+  "raid",
   "quest",
   "council-shop",
   "research-shop",

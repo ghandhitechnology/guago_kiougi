@@ -3,7 +3,9 @@ import { DAY_MS, HOUR_MS } from "./live.ts";
 import {
   bossShareOf,
   calibrateHp,
+  countsObjective,
   type DamageWindow,
+  isActive,
   isDebateHour,
   NO_DAMAGE,
   nextDebate,
@@ -102,18 +104,62 @@ describe("토론 시간", () => {
 
 describe("participation tiers", () => {
   const none = { damage: 0, activeMs: 0, objectives: 0, support: 0 };
-  it("counts a single hit as 참석", () => {
+  const floor = RAID.tiers.present.activeMs;
+
+  it("gives 참석 to a hit landed with five minutes of fighting, not to a last-second hit", () => {
     expect(tierOf(none)).toBe(RaidTier.None);
-    expect(tierOf({ ...none, damage: 1 })).toBe(RaidTier.Present);
+    expect(tierOf({ ...none, damage: 1e12 })).toBe(RaidTier.None);
+    expect(tierOf({ ...none, damage: 1, activeMs: floor })).toBe(RaidTier.Present);
     expect(tierOf({ ...none, support: 50, activeMs: 3 * HOUR_MS })).toBe(RaidTier.None);
   });
 
-  it("gives 기여 for 30 minutes or 3 objectives, 핵심 for 2 hours or 10", () => {
+  it("gives 기여 for 30 minutes or 3 objectives, 핵심 for 2 hours or 10, all on the floor", () => {
     expect(tierOf({ ...none, damage: 1, activeMs: 30 * 60_000 })).toBe(RaidTier.Contributor);
-    expect(tierOf({ ...none, objectives: 3 })).toBe(RaidTier.Contributor);
+    expect(tierOf({ ...none, objectives: 3, activeMs: floor })).toBe(RaidTier.Contributor);
     expect(tierOf({ ...none, damage: 1, activeMs: 2 * HOUR_MS })).toBe(RaidTier.Core);
-    expect(tierOf({ ...none, objectives: 10 })).toBe(RaidTier.Core);
+    expect(tierOf({ ...none, objectives: 10, activeMs: floor })).toBe(RaidTier.Core);
+    expect(tierOf({ ...none, objectives: 10, activeMs: floor - 1 })).toBe(RaidTier.None);
     expect(tierOf({ ...none, damage: 1e12, activeMs: 29 * 60_000 })).toBe(RaidTier.Present);
+  });
+
+  it("counts an objective toward a tier at most once every six Page minutes", () => {
+    let last: number | undefined;
+    let counted = 0;
+    // An alt walking zone to zone, an objective every 6 s for two minutes.
+    for (let t = 0; t <= 120_000; t += 6000) {
+      if (countsObjective(last, t)) {
+        counted++;
+        last = t;
+      }
+    }
+    expect(counted).toBe(1);
+    expect(countsObjective(0, RAID.objectiveGapMs)).toBe(true);
+    expect(countsObjective(0, RAID.objectiveGapMs - 1)).toBe(false);
+  });
+});
+
+describe("active fighting", () => {
+  const at = { away: false, serverMoves: false, inputAt: 0, movedAt: 0, hitAt: 0 };
+  const w = RAID.activeWindowTicks;
+
+  it("is the player's own input within the window", () => {
+    expect(isActive({ ...at, inputAt: 100 }, 100 + w - 1)).toBe(true);
+    expect(isActive({ ...at, inputAt: 100 }, 100 + w)).toBe(false);
+  });
+
+  it("is never a dropped client's body, whatever it does", () => {
+    const busy = { serverMoves: true, inputAt: 100, movedAt: 100, hitAt: 100 };
+    expect(isActive({ ...busy, away: true }, 101)).toBe(false);
+  });
+
+  it("is never a body standing still with its books firing", () => {
+    expect(isActive({ ...at, hitAt: 100 }, 101)).toBe(false);
+    expect(isActive({ ...at, serverMoves: true, hitAt: 100 }, 101)).toBe(false);
+  });
+
+  it("is 완전 자동 with the tab open while it moves and hits, as anyone else", () => {
+    expect(isActive({ ...at, serverMoves: true, hitAt: 100, movedAt: 99 }, 101)).toBe(true);
+    expect(isActive({ ...at, serverMoves: false, hitAt: 100, movedAt: 99 }, 101)).toBe(false);
   });
 });
 

@@ -43,13 +43,22 @@ export const RAID = {
    * clock keeps the live balance against objectives), and objectives matter all phase long.
    */
   shieldRegrowPerHour: 0.1,
-  /** 기여: 30 minutes of active fighting or 3 objectives; 핵심: 2 hours or 10. */
+  /**
+   * 참석: a hit landed (or an objective) and 5 minutes of active fighting; 기여: 30 minutes or 3
+   * objectives; 핵심: 2 hours or 10. Every tier stands on 참석's floor of presence.
+   */
   tiers: {
+    present: { activeMs: 5 * 60_000 },
     contribute: { activeMs: 30 * 60_000, objectives: 3 },
     core: { activeMs: 2 * HOUR_MS, objectives: 10 },
   },
-  /** A real second counts as active fighting when the character hit, helped or did an objective. */
-  activeWindowTicks: 20,
+  /**
+   * Objectives count toward a tier at most one per this much Page time per character: an
+   * objective is an event of the fight, not a faucet, so 핵심 by objectives takes an hour there.
+   */
+  objectiveGapMs: 6 * 60_000,
+  /** How recent, in ticks, an input or a moving hit keeps a tick of fighting active (3 s). */
+  activeWindowTicks: 60,
   /** Support board points: a revive, and an add of the boss's put down. */
   support: { revive: 5, add: 1 },
 } as const;
@@ -147,15 +156,48 @@ export interface Participation {
   readonly support: number;
 }
 
-/** 참석 landed a hit (or did an objective); 기여 and 핵심 by active time or objectives. */
+/**
+ * A phase's tier (PLAN §10): 참석 landed a hit (or did an objective) and stood its floor of
+ * active fighting; 기여 and 핵심 by active time or by objectives counted (`countsObjective`).
+ */
 export function tierOf(p: Participation): RaidTier {
-  const { contribute, core } = RAID.tiers;
-  const present = p.damage > 0 || p.objectives > 0;
-  if (!present) return RaidTier.None;
+  const { present, contribute, core } = RAID.tiers;
+  if (!(p.damage > 0 || p.objectives > 0) || p.activeMs < present.activeMs) return RaidTier.None;
   if (p.activeMs >= core.activeMs || p.objectives >= core.objectives) return RaidTier.Core;
   if (p.activeMs >= contribute.activeMs || p.objectives >= contribute.objectives)
     return RaidTier.Contributor;
   return RaidTier.Present;
+}
+
+/** What a tick of a character's fight shows of the player behind it, as ticks (0 for never). */
+export interface Activity {
+  /** The client dropped: the server plays the body until it comes back. */
+  readonly away: boolean;
+  /** The server moves the body (완전 자동, 스킬 수동). */
+  readonly serverMoves: boolean;
+  /** The last tick the player's own input arrived: a step, a dodge, a cast, an aim. */
+  readonly inputAt: number;
+  /** The last tick the body moved, and the last its own hit landed on the boss. */
+  readonly movedAt: number;
+  readonly hitAt: number;
+}
+
+/**
+ * Whether a tick counts as active fighting: never while the client is away; otherwise the
+ * player's own input within the window, or, for a body the server moves for a connected client
+ * (완전 자동 with the tab open), a hit of its own while it moves. A body standing still with
+ * its books firing is not fighting.
+ */
+export function isActive(a: Activity, tick: number): boolean {
+  if (a.away) return false;
+  const recent = (at: number) => at > 0 && tick - at < RAID.activeWindowTicks;
+  if (recent(a.inputAt)) return true;
+  return a.serverMoves && recent(a.hitAt) && recent(a.movedAt);
+}
+
+/** Whether an objective at `nowMs` counts toward the tier after the last one that did. */
+export function countsObjective(lastCountedMs: number | undefined, nowMs: number): boolean {
+  return lastCountedMs === undefined || nowMs - lastCountedMs >= RAID.objectiveGapMs;
 }
 
 /** Damage a boss takes after its shield and 토론 시간. */

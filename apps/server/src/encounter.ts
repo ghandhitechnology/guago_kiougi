@@ -19,6 +19,8 @@ export interface EncounterHost {
   nameOf(p: Player): string | undefined;
   /** Sends a character standing here to another map (`MapRoom.relocate`). */
   relocate(characterId: string, to: string, spawn: string, via: string): boolean;
+  /** The tick a seated body's player last sent an input of its own (0 for never). */
+  inputAt(p: Player): number;
 }
 
 /** One room's running encounter. */

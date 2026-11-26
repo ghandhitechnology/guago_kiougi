@@ -1,34 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { Client, type Room } from "@colyseus/sdk";
-import { mapById, snapshotReaderForMap } from "@guago/content";
-import {
-  AIM_MESSAGE,
-  type Collidable,
-  type Doorway,
-  ENTER_PATH,
-  encodeInput,
-  type Facing,
-  INPUT_MESSAGE,
-  MapState,
-  MODE_MESSAGE,
-  MOVE_MAX,
-  moveBody,
-  NULL_SINK,
-  POS_SCALE,
-  Predictor,
-  portalAt,
-  Q,
-  type Seating,
-  SNAPSHOT_MESSAGE,
-  type SnapshotReader,
-  shutDoors,
-  TICK_MS,
-  TILE_SIZE,
-  type WireBoss,
-  WirePlayer,
-  type WireSelf,
-} from "@guago/shared";
+import { Client } from "@colyseus/sdk";
+import { ENTER_PATH, MapState, type Seating, TICK_MS } from "@guago/shared";
 import { Abuser } from "./abuse.ts";
 import { signIn } from "./account.ts";
 import { Bot } from "./bot.ts";

@@ -6,7 +6,7 @@
  * hit and boards; a 복습's first clear pays once. Every test ends with the economy's invariants.
  */
 import { raidBoss } from "@guago/content";
-import { MINUTE_MS, RaidTier, WEEK_MS } from "@guago/shared";
+import { MINUTE_MS, RAID, RaidTier, WEEK_MS } from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
@@ -170,7 +170,7 @@ describe("a phase's rewards", () => {
     // a fights in two channels of the arena this phase, b in one.
     r.credit(a.id, a.name, 4000, 20 * MINUTE_MS, 1, 0);
     r.credit(a.id, a.name, 3000, 15 * MINUTE_MS, 0, 5);
-    r.credit(b.id, b.name, 10, 1000, 0, 0);
+    r.credit(b.id, b.name, 10, 6 * MINUTE_MS, 0, 0);
     await h.save();
     await finish(h, r, a);
 
@@ -198,7 +198,7 @@ describe("a phase's rewards", () => {
     expect(await tokens(b.id)).toBe(tb);
 
     // Phase 2 closes while the executor is down: its rewards wait in the rows.
-    r.credit(a.id, a.name, 50, 0, 10, 0);
+    r.credit(a.id, a.name, 50, 2 * 60 * MINUTE_MS, 0, 0);
     await h.save();
     down = true;
     await finish(h, r, a);
@@ -248,6 +248,43 @@ describe("a phase's rewards", () => {
   });
 });
 
+describe("participation", () => {
+  it("costs real presence: an alt walking zone to zone, a last-second hit and a crowd's objectives", async () => {
+    const w = await world();
+    await eraOpen(w);
+    const h = hub(w, w.economy.executor);
+    await h.poll();
+    const r = h.raidFor("aristotle") as Raid;
+    const alt = await character(w);
+    const late = await character(w);
+    const regular = await character(w);
+    // A level-1 alt walks from lit zone to lit zone in a quiet channel for two Page minutes: an
+    // objective every 6 s and the active ticks of walking, no damage.
+    for (let t = 0; t < 20; t++) {
+      r.credit(alt.id, alt.name, 0, 6000, 1, 0);
+      w.clock.step(6000);
+    }
+    // One hit landed as the pool empties, with no time spent.
+    r.credit(late.id, late.name, 1e6, 0, 0, 0);
+    // A student who fought half an hour and held three zones well apart.
+    for (let k = 0; k < 3; k++) {
+      r.credit(regular.id, regular.name, 500, 10 * MINUTE_MS, 1, 0);
+      w.clock.step(RAID.objectiveGapMs);
+    }
+    await h.save();
+    await finish(h, r, regular);
+
+    const pa = await participant(r.id, 1, alt.id);
+    expect(pa.objectives).toBe(1);
+    expect(pa.tier).toBe(RaidTier.None);
+    expect((await participant(r.id, 1, late.id)).tier).toBe(RaidTier.None);
+    expect((await participant(r.id, 1, regular.id)).tier).toBe(RaidTier.Contributor);
+    expect(await tokens(alt.id)).toBe(0);
+    expect(await tokens(late.id)).toBe(0);
+    expect(await tokens(regular.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
+  });
+});
+
 describe("the pool", () => {
   it("loses at most what was not yet written in a crash, never a phase", async () => {
     const w = await world();
@@ -294,7 +331,12 @@ describe("freeing the boss", () => {
     const b = await character(w);
     for (let phase = 1; phase <= DEF.phases; phase++) {
       r.credit(a.id, a.name, 9000, 3 * 60 * MINUTE_MS, 1, 0);
-      r.credit(b.id, b.name, 10, 60 * MINUTE_MS, 4, 25);
+      r.credit(b.id, b.name, 10, 60 * MINUTE_MS, 0, 25);
+      // b holds four zones a phase, far enough apart in Page time for each to count.
+      for (let k = 0; k < 4; k++) {
+        r.credit(b.id, b.name, 0, 0, 1, 0);
+        w.clock.step(RAID.objectiveGapMs);
+      }
       await h.save();
       await finish(h, r, b);
     }

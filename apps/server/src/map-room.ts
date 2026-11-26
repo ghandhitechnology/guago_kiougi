@@ -274,6 +274,8 @@ interface Pawn {
   /** Where the body stood before this tick's step, to tell a push against a shut door. */
   fromX: number;
   fromY: number;
+  /** The tick the player's own last input arrived (a step, a dodge, a cast, an aim), for raids. */
+  inputAt: number;
 }
 
 /** A cast member standing here, with what the room remembers about them. */
@@ -584,6 +586,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       if (e.t === "mode" && pawn.player.team > 0) continue;
       const before = pawn.player.mode;
       applyBetween(this.world, e);
+      if (e.t === "aim") pawn.inputAt = this.world.tick + 1;
       if (e.t === "mode" && pawn.player.mode !== before) {
         this.tellMode(pawn);
         background("mode save", modes.write(pawn.character.id, pawn.player.mode));
@@ -949,6 +952,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       eating: false,
       fromX: player.x,
       fromY: player.y,
+      inputAt: 0,
     };
     player.rebuild = (lv) => this.kitOf(pawn, lv);
     this.pawns.set(id, pawn);
@@ -986,6 +990,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       characterOf: (p) => pawnOf(p)?.character.id,
       nameOf: (p) => pawnOf(p)?.character.name,
       relocate: (characterId, to, spawn, via) => this.relocate(characterId, to, spawn, via),
+      inputAt: (p) => pawnOf(p)?.inputAt ?? 0,
     };
   }
 
@@ -1124,7 +1129,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     for (let i = 0; i < run; i++) {
       const inputs = new Map<string, FightInput[]>();
       for (const [id, pawn] of this.pawns) {
-        inputs.set(id, pawn.queue.take() as FightInput[]);
+        const taken = pawn.queue.take() as FightInput[];
+        inputs.set(id, taken);
+        if (taken.some((f) => f.mx !== 0 || f.my !== 0 || (f.flags ?? 0) !== 0))
+          pawn.inputAt = this.world.tick + 1;
         pawn.fromX = pawn.player.x;
         pawn.fromY = pawn.player.y;
       }

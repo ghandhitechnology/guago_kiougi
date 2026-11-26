@@ -18,6 +18,7 @@ import { lifecycleOf, type RaidBossDef, raidBoss } from "@guago/content";
 import {
   type ChangeNotice,
   calibrateHp,
+  countsObjective,
   DAY_MS,
   type DamageWindow,
   HOUR_MS,
@@ -94,6 +95,8 @@ export class Raid {
   finalHit: { id: string; name: string } | null = null;
   /** Participation of the current phase not yet written, by character. */
   pending = new Map<string, Tally>();
+  /** Page ms each character's last objective counted at, this phase. */
+  readonly objectiveAt = new Map<string, number>();
   /** Damage into the pool since the last write. */
   dirty = false;
   /** The phase-end transaction runs, or ran and failed: the poll retries it. */
@@ -175,6 +178,16 @@ export class Raid {
     support: number,
   ): void {
     if (this.freed) return;
+    // An objective counts toward the tier at most once per gap, across every channel.
+    let counted = 0;
+    if (objectives > 0) {
+      const now = this.clock.now();
+      if (countsObjective(this.objectiveAt.get(characterId), now)) {
+        counted = 1;
+        this.objectiveAt.set(characterId, now);
+      }
+    }
+    objectives = counted;
     let t = this.pending.get(characterId);
     if (!t) {
       t = tally(name);
@@ -611,6 +624,7 @@ export class RaidHub {
       r.hp = 0;
     } else {
       r.phase = ended + 1;
+      r.objectiveAt.clear();
       r.max = nextMax;
       r.hp = nextMax;
       r.shield = nextShield;

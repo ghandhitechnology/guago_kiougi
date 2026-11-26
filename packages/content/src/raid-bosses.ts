@@ -133,13 +133,14 @@ export function raidBossOn(mapId: string): RaidBossDef | undefined {
 export const BOSS_BODY_RANK = Rank.FieldBoss;
 
 /**
- * One personal loot roll from a boss (PLAN §10 rewards by tier): a boss-rank drop of the boss's
- * Page at its level. An era boss's drops are bound (PLAN §13); the major sets the spotlight
- * subject the 낱장 lean to.
+ * One personal loot roll from a boss (PLAN §10 rewards by tier): the tool of a boss-rank drop of
+ * the boss's Page at its level, which the raid's reward binds (origin `raid`). The roll's 솔방울,
+ * 낱장, 잉크 and 제본 재료 are left out: stacks cannot be bound, and PLAN §13 binds what a boss
+ * drops. The major sets the spotlight subject the tool's book leans to.
  */
 export function bossLoot(random: Random, def: RaidBossDef, major: string): Drop[] {
   const books = bossLootBooks(def);
-  return rollDrops(random, {
+  const drops = rollDrops(random, {
     source: {
       kind: "monster",
       fieldId: def.map,
@@ -156,6 +157,7 @@ export function bossLoot(random: Random, def: RaidBossDef, major: string): Drop[
     tools: TOOLS.filter((t) => books.some((b) => b.tool === t.id)),
     spotlight: (MAJORS as readonly string[]).includes(major) ? (major as ClassId) : "math",
   });
+  return drops.filter((d) => d.item.kind === "tool");
 }
 
 /** The books a boss's 낱장 can land on: its Page's. */
