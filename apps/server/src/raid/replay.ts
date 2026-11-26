@@ -3,7 +3,12 @@
  * player's own level in a private copy of its arena, its 논제 one after another on the fight's
  * own pool. The first clear pays the boss's first-clear 탐구 토큰 once (`raid.firstClear`, kept by
  * its `boss_clears` row) and counts for the story (`bossCleared`); a moment later the player is
- * walked back to where they asked for it.
+ * walked back to the spot they asked from. It is asked for at the personal story log's replay
+ * object (`replay` interactables), and its adds earn no EXP or drops.
+ *
+ * A reconnect inside a 복습 lands in the shared arena until the story director's private-copy
+ * rules take a seat there (`feat/story-scenes`: `mayJoin` and `whereBelongs`); `replayOf` is
+ * what they read to send the character back into its copy.
  */
 import { LIFECYCLES, lifecycleOf, type RaidBossDef, raidBoss } from "@guago/content";
 import { type Boss, type Player, startBoss, TICK_RATE_HZ } from "@guago/shared";
@@ -14,8 +19,21 @@ import { raids } from "./current.ts";
 /** Seconds between the boss falling and the walk back. */
 const BACK_AFTER_S = 6;
 
-/** Where each character asked for its 복습, to be walked back there after. */
-const origins = new Map<string, string>();
+/** Where a character stood when it asked for its 복습. */
+export interface ReplayOrigin {
+  readonly map: string;
+  readonly x: number;
+  readonly y: number;
+  readonly facing: number;
+}
+
+/** Each character's 복습 under way: the boss, and where to walk it back to after. */
+const replays = new Map<string, { boss: string; from: ReplayOrigin }>();
+
+/** The 복습 a character is in, if any: the boss and the spot it left from. */
+export function replayOf(characterId: string): { boss: string; from: ReplayOrigin } | undefined {
+  return replays.get(characterId);
+}
 
 /** Whether `boss` may be fought again: freed on the live Page, or on one before it. */
 export function mayReplay(def: RaidBossDef): boolean {
@@ -25,10 +43,10 @@ export function mayReplay(def: RaidBossDef): boolean {
   return page < l.page.live() || l.page.freedBosses()[def.id] !== undefined;
 }
 
-/** The map a character left for its 복습. */
-export function noteReplay(characterId: string, from: string): void {
-  origins.set(characterId, from);
-  if (origins.size > 10_000) origins.delete(origins.keys().next().value as string);
+/** A character leaves `from` for a 복습 of `boss`. */
+export function noteReplay(characterId: string, boss: string, from: ReplayOrigin): void {
+  replays.set(characterId, { boss, from });
+  if (replays.size > 10_000) replays.delete(replays.keys().next().value as string);
 }
 
 class Replay implements Encounter {
@@ -50,6 +68,7 @@ class Replay implements Encounter {
   joined(p: Player, characterId: string): void {
     if (characterId !== this.owner || (this.boss && !this.boss.freed)) return;
     this.boss = startBoss(this.host.world, this.def.id, p.level);
+    this.boss.addsPay = false;
     this.back = -1;
   }
 
@@ -62,9 +81,11 @@ class Replay implements Encounter {
       return;
     }
     if (this.back > 0 && --this.back === 0) {
-      const to = origins.get(this.owner) ?? lifecycleOf(1)?.town ?? this.host.def.id;
-      origins.delete(this.owner);
-      this.host.relocate(this.owner, to, "main", "replay");
+      const from = replays.get(this.owner)?.from;
+      replays.delete(this.owner);
+      if (from) this.host.sendTo(this.owner, from, "replay");
+      else
+        this.host.relocate(this.owner, lifecycleOf(1)?.town ?? this.host.def.id, "main", "replay");
     }
   }
 

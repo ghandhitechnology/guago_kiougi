@@ -19,6 +19,12 @@ export interface EncounterHost {
   nameOf(p: Player): string | undefined;
   /** Sends a character standing here to another map (`MapRoom.relocate`). */
   relocate(characterId: string, to: string, spawn: string, via: string): boolean;
+  /** Sends a character standing here to an exact spot on another map (after a 복습). */
+  sendTo(
+    characterId: string,
+    to: { map: string; x: number; y: number; facing: number },
+    via: string,
+  ): boolean;
   /** The tick a seated body's player last sent an input of its own (0 for never). */
   inputAt(p: Player): number;
 }

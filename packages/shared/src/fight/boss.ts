@@ -137,6 +137,8 @@ export class Boss implements BossHooks {
   shield = 0;
   /** 토론 시간: +50% damage taken and the full mechanic set. Set by the room from the Page clock. */
   debate = false;
+  /** Whether the boss's adds earn EXP and drops when put down (off in a 복습). */
+  addsPay = true;
   /** The pool is shared outside this world: phases change only through `sync`. */
   external = false;
   /** The pool emptied; waiting for the next phase (external) or freed. */
@@ -405,6 +407,14 @@ export class Boss implements BossHooks {
     v.max = this.max;
     v.shield = this.shield;
     return v;
+  }
+
+  /**
+   * Whether killing `m` earns EXP and drops. Its adds (and 제논's tortoise) earn nothing when
+   * `addsPay` is off: a 복습 alone pays its first clear, not a private add farm.
+   */
+  pays(m: Monster): boolean {
+    return this.addsPay || m.owner !== this.core.index;
   }
 
   pushable(part: Monster): boolean {

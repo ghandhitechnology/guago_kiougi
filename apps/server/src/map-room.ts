@@ -470,8 +470,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const now = Date.now();
       if (!pawn || pawn.leaving || this.owner || !def || !target || !mayReplay(def)) return;
       if (now - pawn.lastInteract < INTERACT_COOLDOWN_MS) return;
+      // Asked at the personal story log (PLAN §10): a replay object within reach.
+      const p = pawn.player;
+      const near = nearestUsable(this.usable, p.x, p.y);
+      if (!near || !("thing" in near.what) || near.what.thing.kind !== "replay") return;
       pawn.lastInteract = now;
-      noteReplay(pawn.character.id, this.def.id);
+      noteReplay(pawn.character.id, def.id, { map: this.def.id, x: p.x, y: p.y, facing: p.facing });
       const arrive = spawnPlace(target, def.entrance);
       background(
         "replay",
@@ -993,6 +997,13 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       characterOf: (p) => pawnOf(p)?.character.id,
       nameOf: (p) => pawnOf(p)?.character.name,
       relocate: (characterId, to, spawn, via) => this.relocate(characterId, to, spawn, via),
+      sendTo: (characterId, to, via) => {
+        const pawn = [...this.pawns.values()].find((p) => p.character.id === characterId);
+        if (!pawn || pawn.leaving || !builtMap(to.map)) return false;
+        const arrive = { x: to.x, y: to.y, facing: (to.facing % 4) as Facing };
+        background("send back", this.carry(pawn, via, to.map, arrive));
+        return true;
+      },
       inputAt: (p) => pawnOf(p)?.inputAt ?? 0,
     };
   }

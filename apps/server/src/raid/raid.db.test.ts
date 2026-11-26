@@ -418,6 +418,7 @@ describe("two channels of an arena", () => {
       characterOf: (p) => names.get(p.id)?.id,
       nameOf: (p) => names.get(p.id)?.name,
       relocate: () => false,
+      sendTo: () => false,
       // The players steer every tick.
       inputAt: () => world.tick,
     });
