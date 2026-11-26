@@ -1,9 +1,11 @@
 /**
  * The raid's rewards and its persistent pool against a real Postgres (PLAN §26 economic
  * operations, §10 raid rules): a phase's reward goes out once per character under retries, a
- * rival process, a crash before paying and a restart, and for a character who fought in two
- * channels; a crash loses unsaved seconds, never a phase; the boss is freed once with its final
- * hit and boards; a 복습's first clear pays once. Every test ends with the economy's invariants.
+ * rival process, an executor that was down, a process that died between closing a phase and
+ * paying it, and a restart; two arenas reporting in one tick, a character who moved channels
+ * among them; a phase close that failed is retried, one a rival closed first is adopted; a crash
+ * loses unsaved seconds, never a phase; the boss is freed once with its final hit and boards; a
+ * 복습's first clear pays once. Every test ends with the economy's invariants.
  */
 import { raidBoss } from "@guago/content";
 import { MINUTE_MS, RAID, RaidTier, WEEK_MS } from "@guago/shared";
@@ -78,9 +80,10 @@ function rivalEconomy(w: World): Economy {
 function hub(
   w: World,
   executor: Economy["executor"] | { execute: Economy["executor"]["execute"] },
+  on: Db = db,
 ) {
   const h = new RaidHub({
-    db,
+    db: on,
     clock: w.clock,
     page: w.page,
     executor,
@@ -151,7 +154,7 @@ async function finish(h: RaidHub, r: Raid, by: { id: string; name: string }): Pr
 }
 
 describe("a phase's rewards", () => {
-  it("go out once per character under retries, a rival process, a crash before paying and a restart", async () => {
+  it("go out once per character under retries, a rival process, a down executor and a restart", async () => {
     const w = await world();
     await eraOpen(w);
     let down = false;
@@ -297,6 +300,41 @@ describe("participation", () => {
     expect(await tokens(holder.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
     expect(await tokens(late.id)).toBe(0);
     expect(await tokens(regular.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
+  });
+});
+
+describe("closing a phase", () => {
+  it("never overwrites a phase a rival process closed first: the stale one adopts the row", async () => {
+    const w = await world();
+    await eraOpen(w);
+    const first = hub(w, w.economy.executor);
+    await first.poll();
+    const rival = hub(w, rivalEconomy(w).executor);
+    await rival.start();
+    const ra = first.raidFor("aristotle") as Raid;
+    const rb = rival.raidFor("aristotle") as Raid;
+    const a = await character(w);
+    ra.credit(a.id, a.name, 100, 10 * MINUTE_MS, 0, 0);
+    await first.save();
+    await finish(first, ra, a);
+    // Phase 2 takes a third of its bar in the first process, written.
+    ra.hit(ra.max / 3, 0, null);
+    await first.save();
+    const left = ra.hp;
+    // The rival still holds phase 1 and empties it.
+    rb.hit(rb.hp, 0, a);
+    await rival.settle();
+    expect(rb.phase).toBe(2);
+    expect(rb.hp).toBeCloseTo(left, 3);
+    const row = (await db.pool.query("select phase, hp from raids where id = $1", [ra.id])).rows[0];
+    expect(Number(row.phase)).toBe(2);
+    expect(Number(row.hp)).toBeCloseTo(left, 3);
+    const phases = await db.pool.query(
+      "select phase from raid_phases where raid_id = $1 order by phase",
+      [ra.id],
+    );
+    expect(phases.rows.map((p) => Number(p.phase))).toEqual([1, 2]);
+    expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
   });
 });
 

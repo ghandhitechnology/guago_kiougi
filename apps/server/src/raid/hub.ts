@@ -99,8 +99,8 @@ export class Raid {
   phaseStartedAt: number;
   /** Who landed the hit that emptied the last 논제. */
   finalHit: { id: string; name: string } | null = null;
-  /** Participation of the current phase not yet written, by character. */
-  pending = new Map<string, Tally>();
+  /** Participation not yet written, by the phase it was earned in, then by character. */
+  pending = new Map<number, Map<string, Tally>>();
   /**
    * Page ms each character's last objective counted at. Kept across phase changes, so a phase
    * closing never hands anyone an extra objective; in memory only (see DECISIONS.md).
@@ -186,7 +186,8 @@ export class Raid {
     objectives: number,
     support: number,
   ): void {
-    if (this.freed) return;
+    // Nothing is earned while a phase closes: the pool is empty and the next bar is not up.
+    if (this.freed || this.emptied) return;
     // An objective counts toward the tier at most once per gap, across every channel.
     let counted = 0;
     if (objectives > 0) {
@@ -197,10 +198,15 @@ export class Raid {
       }
     }
     objectives = counted;
-    let t = this.pending.get(characterId);
+    let phase = this.pending.get(this.phase);
+    if (!phase) {
+      phase = new Map();
+      this.pending.set(this.phase, phase);
+    }
+    let t = phase.get(characterId);
     if (!t) {
       t = tally(name);
-      this.pending.set(characterId, t);
+      phase.set(characterId, t);
     }
     t.damage += damage;
     t.activeMs += activeMs;
@@ -208,17 +214,22 @@ export class Raid {
     t.support += support;
   }
 
-  /** Takes the participation not yet written; `restore` puts it back if the write failed. */
-  take(): Map<string, Tally> {
-    const out = this.pending;
-    this.pending = new Map();
+  /** Takes one phase's participation not yet written; `restore` puts it back if the write failed. */
+  take(phase: number): Map<string, Tally> {
+    const out = this.pending.get(phase) ?? new Map<string, Tally>();
+    this.pending.delete(phase);
     return out;
   }
 
-  restore(taken: Map<string, Tally>): void {
+  restore(phase: number, taken: Map<string, Tally>): void {
+    let into = this.pending.get(phase);
+    if (!into) {
+      into = new Map();
+      this.pending.set(phase, into);
+    }
     for (const [id, t] of taken) {
-      const now = this.pending.get(id);
-      if (!now) this.pending.set(id, t);
+      const now = into.get(id);
+      if (!now) into.set(id, t);
       else {
         now.damage += t.damage;
         now.activeMs += t.activeMs;
@@ -226,6 +237,13 @@ export class Raid {
         now.support += t.support;
       }
     }
+  }
+}
+
+/** The raid's row was moved on by another process before this one could close its phase. */
+class StaleRaid extends Error {
+  constructor(id: string, phase: number) {
+    super(`raid ${id} phase ${phase} was already closed`);
   }
 }
 
@@ -519,7 +537,7 @@ export class RaidHub {
       const phase = r.phase;
       await this.serial(r, async () => {
         if (r.ending || r.phase !== phase) return;
-        const taken = r.take();
+        const taken = r.take(phase);
         const hp = r.hp;
         const shield = r.shield;
         try {
@@ -533,7 +551,7 @@ export class RaidHub {
           });
           r.dirty = false;
         } catch (error) {
-          r.restore(taken);
+          r.restore(phase, taken);
           throw error;
         }
       });
@@ -587,27 +605,30 @@ export class RaidHub {
     const window = last ? null : await this.window(now);
     const nextMax = window ? calibrateHp(r.def.rank, r.def.level, window, this.o.clock.rate) : 0;
     const nextShield = r.def.rank === "era" ? 1 : 0;
-    const taken = r.take();
+    const taken = r.take(ended);
     const at = new Date(now).toISOString();
     let tiers: Record<string, number> = {};
     try {
       await this.o.db.transaction(async (tx) => {
+        // Only the process that holds the phase as written closes it: another process, or this
+        // one after a commit it never heard back from, finds the row moved on and adopts it.
+        const moved = last
+          ? await tx.execute(sql`
+              update raids set hp = 0, freed_at = ${at}::timestamptz,
+                final_hit_by = ${r.finalHit?.id ?? null},
+                final_hit_name = ${r.finalHit?.name ?? null}, updated_at = now()
+              where id = ${r.id} and phase = ${ended} and freed_at is null`)
+          : await tx.execute(sql`
+              update raids set phase = ${ended + 1}, hp = ${nextMax}, max_hp = ${nextMax},
+                shield = ${nextShield}, phase_started_at = ${at}::timestamptz, updated_at = now()
+              where id = ${r.id} and phase = ${ended} and freed_at is null`);
+        if (!moved.rowCount) throw new StaleRaid(r.id, ended);
         await upsertTallies(tx, r.id, ended, taken);
         tiers = await settleTiers(tx, r.id, ended);
         await tx.execute(sql`
           update raid_phases set ended_at = ${at}::timestamptz
           where raid_id = ${r.id} and phase = ${ended}`);
-        if (last) {
-          await tx.execute(sql`
-            update raids set hp = 0, freed_at = ${at}::timestamptz,
-              final_hit_by = ${r.finalHit?.id ?? null}, final_hit_name = ${r.finalHit?.name ?? null},
-              updated_at = now()
-            where id = ${r.id}`);
-        } else {
-          await tx.execute(sql`
-            update raids set phase = ${ended + 1}, hp = ${nextMax}, max_hp = ${nextMax},
-              shield = ${nextShield}, phase_started_at = ${at}::timestamptz, updated_at = now()
-            where id = ${r.id}`);
+        if (!last) {
           await tx.execute(sql`
             insert into raid_phases (raid_id, phase, max_hp, calibration, started_at)
             values (${r.id}, ${ended + 1}, ${nextMax}, ${JSON.stringify(window)}::jsonb,
@@ -616,7 +637,13 @@ export class RaidHub {
         }
       });
     } catch (error) {
-      r.restore(taken);
+      if (error instanceof StaleRaid) {
+        // The phase this process held was already closed: what it earned here is the closing
+        // process's to have written, and the raid goes on from the row.
+        await this.adopt(r);
+        return;
+      }
+      r.restore(ended, taken);
       throw error;
     }
     const e: PhaseEnded = {
@@ -648,6 +675,26 @@ export class RaidHub {
     if (last) {
       this.unannounced.add(r.id);
       if (!this.announcing.has(r.id)) this.track("raid freed", this.announce(r));
+    }
+  }
+
+  /** Takes the raid's state from its row: another process moved it on. */
+  private async adopt(r: Raid): Promise<void> {
+    const row = await this.readRaid(r.id);
+    r.ending = false;
+    if (!row) return;
+    this.log(JSON.stringify({ raid: { adopted: r.id, from: r.phase, to: row.phase } }));
+    r.phase = row.phase;
+    r.hp = row.hp;
+    r.max = row.max;
+    r.shield = row.shield;
+    r.phaseStartedAt = row.phaseStartedAt;
+    r.emptied = row.hp <= 0 && row.freedAt === null;
+    r.dirty = false;
+    r.pending.clear();
+    if (row.freedAt !== null) {
+      r.freed = true;
+      if (this.o.page.freedBosses()[r.def.id] === undefined) this.unannounced.add(r.id);
     }
   }
 
