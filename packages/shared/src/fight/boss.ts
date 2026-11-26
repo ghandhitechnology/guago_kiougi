@@ -119,6 +119,11 @@ export interface BossBrain {
   pushable?(b: Boss, part: Monster): boolean;
   /** An objective entity died. */
   objective?(b: Boss, w: FightWorld, m: Monster, by: Player | null): void;
+  /**
+   * Where the arena sends out the `n`th add of a wave, and of which kind (a monster kind index;
+   * -1 for the boss's own add). Null: around the body.
+   */
+  addAt?(b: Boss, w: FightWorld, n: number): { x: number; y: number; kind: number } | null;
 }
 
 /** Players a boss keeps per-player numbers for (body slots stay under this). */
@@ -137,6 +142,8 @@ export class Boss implements BossHooks {
   shield = 0;
   /** 토론 시간: +50% damage taken and the full mechanic set. Set by the room from the Page clock. */
   debate = false;
+  /** Whether the boss's adds earn EXP and drops when put down (off in a 복습). */
+  addsPay = true;
   /** The pool is shared outside this world: phases change only through `sync`. */
   external = false;
   /** The pool emptied; waiting for the next phase (external) or freed. */
@@ -286,12 +293,32 @@ export class Boss implements BossHooks {
 
   /** An objective done: the shield loses a fixed share, the same whoever did it. */
   complete(w: FightWorld, kind: number, by: Player | null, entity = 0): void {
+    this.credit(w, kind, by, entity);
+    this.strips++;
+    if (!this.external) this.shield = Math.max(0, this.shield - RAID.shieldPerObjective);
+  }
+
+  /**
+   * A held objective done (a zone held, a circle filled): one completion, one strip, and a credit
+   * to every player standing in it, so a crowd strips no more than one player would.
+   */
+  completeHeld(w: FightWorld, kind: number, inside: (p: Player) => boolean): void {
+    let first = true;
+    for (const p of w.players) {
+      if (!p.joined || p.down || !inside(p)) continue;
+      if (first) this.complete(w, kind, p);
+      else this.credit(w, kind, p);
+      first = false;
+    }
+    if (first) this.complete(w, kind, null);
+  }
+
+  /** A player took part in an objective already completed: the credit, no strip. */
+  credit(w: FightWorld, kind: number, by: Player | null, entity = 0): void {
     const ev = w.event(Ev.Objective);
     ev.a = by ? by.index : -1;
     ev.c = entity;
     ev.d = kind;
-    this.strips++;
-    if (!this.external) this.shield = Math.max(0, this.shield - RAID.shieldPerObjective);
   }
 
   // The step's hooks --------------------------------------------------------------------------
@@ -387,6 +414,14 @@ export class Boss implements BossHooks {
     return v;
   }
 
+  /**
+   * Whether killing `m` earns EXP and drops. Its adds (and 제논's tortoise) earn nothing when
+   * `addsPay` is off: a 복습 alone pays its first clear, not a private add farm.
+   */
+  pays(m: Monster): boolean {
+    return this.addsPay || m.owner !== this.core.index;
+  }
+
   pushable(part: Monster): boolean {
     return this.brain.pushable?.(this, part) ?? false;
   }
@@ -464,17 +499,26 @@ export class Boss implements BossHooks {
     if (r.add < 0 || r.addEvery <= 0) return;
     const every = this.debate ? Math.max(1, Math.floor(r.addEvery / 2)) : r.addEvery;
     if (w.tick % every !== 0) return;
-    const kind = w.rules.monsters[r.add];
-    if (!kind) return;
     let mine = 0;
     for (const o of w.monsters) if (o.alive && o.owner === this.core.index) mine++;
     const count = Math.min(r.addCount, r.addCap - mine);
     for (let i = 0; i < count; i++) {
-      const a = w.random.next() * Math.PI * 2;
-      const d = this.core.radius + 24 + w.random.next() * 40;
-      const x = this.core.x + Math.cos(a) * d;
-      const y = this.core.y + Math.sin(a) * d;
-      if (w.tileAt(x, y) !== 0) continue;
+      // The arena sends them out where the brain says (a corner, the floor's edge), else round
+      // the body.
+      const from = this.brain.addAt?.(this, w, i) ?? null;
+      let x: number;
+      let y: number;
+      if (from) {
+        x = from.x + (w.random.next() - 0.5) * 24;
+        y = from.y + (w.random.next() - 0.5) * 24;
+      } else {
+        const a = w.random.next() * Math.PI * 2;
+        const d = this.core.radius + 24 + w.random.next() * 40;
+        x = this.core.x + Math.cos(a) * d;
+        y = this.core.y + Math.sin(a) * d;
+      }
+      const kind = w.rules.monsters[from && from.kind >= 0 ? from.kind : r.add];
+      if (!kind || w.tileAt(x, y) !== 0) continue;
       const s = spawnMonster(w, kind, this.level, false, x, y);
       if (s) s.owner = this.core.index;
     }

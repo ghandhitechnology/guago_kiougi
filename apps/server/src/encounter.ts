@@ -5,7 +5,7 @@
  * fixed points, so `map-room.ts` knows nothing of bosses or tutorials.
  */
 import type { BuiltMap } from "@guago/content";
-import type { FightMap, FightWorld, Player } from "@guago/shared";
+import type { Between, FightMap, FightWorld, Player } from "@guago/shared";
 import type { MapRoomOptions } from "./channels.ts";
 
 /** What an encounter may ask of its room. */
@@ -19,6 +19,16 @@ export interface EncounterHost {
   nameOf(p: Player): string | undefined;
   /** Sends a character standing here to another map (`MapRoom.relocate`). */
   relocate(characterId: string, to: string, spawn: string, via: string): boolean;
+  /** Sends a character standing here to an exact spot on another map (after a 복습). */
+  sendTo(
+    characterId: string,
+    to: { map: string; x: number; y: number; facing: number },
+    via: string,
+  ): boolean;
+  /** The tick a seated body's player last sent an input of its own (0 for never). */
+  inputAt(p: Player): number;
+  /** Queues a record the room applies at the next tick's start, where a replay finds it. */
+  between(e: Between): void;
 }
 
 /** One room's running encounter. */

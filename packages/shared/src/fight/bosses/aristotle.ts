@@ -90,6 +90,10 @@ const HOME_Y = 19;
 const NEXT_PUSH_CUE = 20;
 const BLOCK_PUSHER = 21;
 const BLOCK_OFF = 22;
+/** The corner the next wave of element spirits comes from, outside 논제 2. */
+const ADD_ZONE = 23;
+/** Each corner's spirit, in `ZONES` order. */
+const SPIRITS = ["element-earth", "element-water", "element-air", "element-fire"] as const;
 
 /** Mode bits in the boss record: the lit zone + 1 (0–4), moving, stunned. */
 export const AristotleMode = { Zone: 7, Moving: 8, Stunned: 16 } as const;
@@ -104,6 +108,20 @@ export const aristotle: BossBrain = {
     b.n[PUSHER] = -1;
     b.n[BLOCK_PUSHER] = -1;
     b.n[NEXT_SLAM] = w.tick + 80;
+  },
+
+  /**
+   * Each element's spirit comes out of its own corner: the lit one in 논제 2, every corner in
+   * turn otherwise.
+   */
+  addAt(b, w, n) {
+    const lit = b.n[LIT] as number;
+    const z = lit >= 0 ? lit : ((b.n[ADD_ZONE] as number) + n) % ZONES.length;
+    if (lit < 0 && n === 0) b.n[ADD_ZONE] = ((b.n[ADD_ZONE] as number) + 1) % ZONES.length;
+    const zone = ZONES[z] as (typeof ZONES)[number];
+    const at = b.mark(w, zone.mark, b.core.x, b.core.y);
+    const id = SPIRITS[z];
+    return { x: at.x, y: at.y, kind: w.rules.monsters.findIndex((k) => k.id === id) };
   },
 
   phase(b, w) {
@@ -264,9 +282,7 @@ function zones(b: Boss, w: FightWorld): void {
   const need = Math.min(6, Math.max(1, Math.ceil(joined * 0.1)));
   b.n[HELD] = inside >= need ? (b.n[HELD] as number) + 1 : Math.max(0, (b.n[HELD] as number) - 2);
   if ((b.n[HELD] as number) < HOLD_TICKS) return;
-  for (const p of w.players) {
-    if (p.joined && !p.down && inZone(p, c.x, c.y)) b.complete(w, ObjectiveKind.Hold, p);
-  }
+  b.completeHeld(w, ObjectiveKind.Hold, (p) => inZone(p, c.x, c.y));
   b.n[NEXT_ZONE] = tick;
 }
 

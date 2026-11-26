@@ -1,7 +1,9 @@
 import {
+  AristotleMode,
   applyBetween,
   applyStatus,
   type Between,
+  type Boss,
   ByteReader,
   cast,
   castFlag,
@@ -24,6 +26,7 @@ import {
   overlapsSolid,
   type Player,
   Q,
+  RAID,
   rebuildHash,
   SnapshotReader,
   settleKills,
@@ -1001,5 +1004,101 @@ describe("the wire", () => {
     expect(seen?.kind).toBe(m.kind.index);
     expect(Math.abs((seen?.qx ?? 0) / Q - m.x)).toBeLessThanOrEqual(0.25);
     expect(new ByteReader(bytes).u8() & 1).toBe(1);
+  });
+});
+
+describe("a boss's objectives", () => {
+  const ZONE_MARKS = ["zone-earth", "zone-water", "zone-air", "zone-fire"] as const;
+
+  it("strip the shield once per completion however many players stand in a held zone", () => {
+    const map = fightMapOf(mapById("p1-lyceum") as never);
+    const w = createFight(map, rules, null, 99);
+    const players: Player[] = [];
+    for (let i = 0; i < 6; i++) {
+      const p = w.addPlayer(`h${i}`, i, map.spawn.x, map.spawn.y, kitFor("math", [], 100), 100);
+      p.mode = Mode.Semi;
+      players.push(p);
+    }
+    const b = startBoss(w, "aristotle", 100);
+    b.setPhase(w, 2, b.max, 1);
+    const before = b.shield;
+    let credited = 0;
+    let strips = 0;
+    for (let t = 0; t < 600 && credited === 0; t++) {
+      const lit = (b.mode & AristotleMode.Zone) - 1;
+      const zone = map.marks?.[ZONE_MARKS[lit] ?? ""];
+      // Everyone stands in the lit zone whatever drags them.
+      for (const p of players) {
+        if (!zone) continue;
+        p.x = zone.x;
+        p.y = zone.y;
+      }
+      stepFight(w);
+      for (let i = 0; i < w.eventCount; i++) if (w.events[i]?.type === Ev.Objective) credited++;
+      strips += b.strips;
+      b.drain();
+    }
+    expect(credited).toBe(6);
+    expect(strips).toBe(1);
+    expect(before - b.shield).toBeCloseTo(RAID.shieldPerObjective, 9);
+  });
+});
+
+describe("an arena fight", () => {
+  /** A channel of the 리케이온 whose pool is fed back from its own hits, as the raid would. */
+  function arena(seed: number): string[] {
+    const map = fightMapOf(mapById("p1-lyceum") as never);
+    const w = createFight(map, rules, null, seed);
+    const at = map.marks?.lectern ?? map.spawn;
+    const majors = Object.keys(STARTER_BOOKS);
+    for (let i = 0; i < 6; i++) {
+      const major = majors[i % majors.length] as string;
+      const books = STARTER_BOOKS[major as keyof typeof STARTER_BOOKS];
+      const p = w.addPlayer(
+        `a${i}`,
+        i,
+        at.x - 60 + i * 20,
+        at.y + 70,
+        kitFor(major, books, 100),
+        100,
+      );
+      p.mode = MODES[i % 4] as Mode;
+    }
+    const max = 5e6;
+    let hp = max;
+    let phase = 1;
+    const digests: string[] = [];
+    for (let t = 0; t < 600; t++) {
+      if (t === 300) {
+        phase = 2;
+        hp = max;
+      }
+      // The record the room would apply at this tick's start.
+      applyBetween(w, {
+        t: "boss",
+        id: "aristotle",
+        level: 100,
+        phase,
+        hp,
+        max,
+        shield: 0.5,
+        emptied: false,
+        debate: t >= 100 && t < 200,
+        freed: false,
+      });
+      stepFight(w);
+      const b = w.boss as Boss;
+      hp = Math.max(0, hp - b.dealt);
+      b.drain();
+      if (t % 100 === 99) digests.push(`${digest(w)},${b.phase},${b.hp},${b.mode}`);
+    }
+    return digests;
+  }
+
+  it("replays from the seed and the boss records a room applies between ticks", () => {
+    const first = arena(31);
+    expect(arena(31)).toEqual(first);
+    expect(arena(32).at(-1)).not.toEqual(first.at(-1));
+    expect(first.at(-1)?.split(",").at(-3)).toBe("2");
   });
 });

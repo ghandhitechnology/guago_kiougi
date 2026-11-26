@@ -19,12 +19,10 @@ export const RAID = {
   /** Days a phase should take: an era 논제 about 4 to 5, a mid boss about 2. */
   targetDays: { era: 4.5, mid: 2 },
   /**
-   * Share of the server's damage a standing boss draws, until the window holds enough hours
-   * with a boss up to measure it.
+   * Share of the server's damage a standing boss draws, for a phase whose window holds less
+   * than six hours of a boss standing (a Page's first boss phase after field weeks).
    */
-  bossShare: 0.3,
-  /** A measured share is never taken below this: a boss nobody fought says little. */
-  minShare: 0.02,
+  bossShare: 0.21,
   /**
    * The smallest bar: what a small community deals in the target days, so a new or tiny server
    * never gets a phase that one visit empties. Four same-level players, two hours a day, each
@@ -43,13 +41,22 @@ export const RAID = {
    * clock keeps the live balance against objectives), and objectives matter all phase long.
    */
   shieldRegrowPerHour: 0.1,
-  /** 기여: 30 minutes of active fighting or 3 objectives; 핵심: 2 hours or 10. */
+  /**
+   * 참석: a hit landed (or an objective) and 5 minutes of active fighting; 기여: 30 minutes or 3
+   * objectives; 핵심: 2 hours or 10. Every tier stands on 참석's floor of presence.
+   */
   tiers: {
+    present: { activeMs: 5 * 60_000 },
     contribute: { activeMs: 30 * 60_000, objectives: 3 },
     core: { activeMs: 2 * HOUR_MS, objectives: 10 },
   },
-  /** A real second counts as active fighting when the character hit, helped or did an objective. */
-  activeWindowTicks: 20,
+  /**
+   * Objectives count toward a tier at most one per this much Page time per character: an
+   * objective is an event of the fight, not a faucet, so 핵심 by objectives takes an hour there.
+   */
+  objectiveGapMs: 6 * 60_000,
+  /** How recent, in ticks, an input or a moving hit keeps a tick of fighting active (3 s). */
+  activeWindowTicks: 60,
   /** Support board points: a revive, and an add of the boss's put down. */
   support: { revive: 5, add: 1 },
 } as const;
@@ -78,25 +85,49 @@ export const NO_DAMAGE: DamageWindow = {
 };
 
 /**
- * A phase's HP (PLAN §10 HP calibration): the server's daily damage over the last 14 days, times
- * the share a standing boss draws from it, times the days the phase should take, never below the
- * floor. A server that grows or shrinks gets a bar sized to it; a new or tiny one stands on the
- * floor. `rate` is the Page clock's rate: the floor is fighting time, so it shrinks with the clock.
+ * A phase's HP (PLAN §10 HP calibration): the damage a standing boss takes in a Page day, from
+ * the server's last 14 days, times the days the phase should take, never below the floor. A
+ * server that grows or shrinks gets a bar sized to it; a new or tiny one stands on the floor.
+ * `rate` is the Page clock's rate: the floor is fighting time, so it shrinks with the clock.
  */
 export function calibrateHp(rank: RaidRank, level: number, window: DamageWindow, rate = 1): number {
+  const sized = bossDaily(window) * RAID.targetDays[rank];
+  return Math.round(Math.max(phaseFloor(rank, level, rate), sized));
+}
+
+/**
+ * The next 논제's HP once one has ended (PLAN §10): the pace the class took the last one down at,
+ * scaled by how much faster or slower the next 논제's mechanics go (`pace`, relative per 논제,
+ * from content), times the target days, never below the floor. A 논제 that ended in under six
+ * Page hours says too little about the pace: the window decides (`calibrateHp`).
+ */
+export function nextPhaseHp(
+  rank: RaidRank,
+  level: number,
+  ended: { readonly hp: number; readonly ms: number; readonly pace: number },
+  nextPace: number,
+  window: DamageWindow,
+  rate = 1,
+): number {
+  if (ended.ms < RAID.minMeasuredMs || !(ended.pace > 0) || !(nextPace > 0))
+    return calibrateHp(rank, level, window, rate);
+  const daily = (ended.hp / ended.ms) * DAY_MS * (nextPace / ended.pace);
+  return Math.round(Math.max(phaseFloor(rank, level, rate), daily * RAID.targetDays[rank]));
+}
+
+/**
+ * The damage a standing boss takes in a Page day: what bosses took over the hours one stood,
+ * once the window holds six of them; before that, the server's daily damage (a few minutes of
+ * history stretched to six hours) times the share a standing boss is assumed to draw.
+ */
+export function bossDaily(window: DamageWindow): number {
+  if (window.standingMs >= RAID.minMeasuredMs)
+    return (Math.max(0, window.boss) / window.standingMs) * DAY_MS;
   const measured = Math.min(
     RAID.windowDays * DAY_MS,
     Math.max(RAID.minMeasuredMs, window.measuredMs),
   );
-  const daily = (Math.max(0, window.total) / measured) * DAY_MS;
-  const sized = daily * bossShareOf(window) * RAID.targetDays[rank];
-  return Math.round(Math.max(phaseFloor(rank, level, rate), sized));
-}
-
-/** The share of the server's damage a standing boss draws: measured when it can be. */
-export function bossShareOf(window: DamageWindow): number {
-  if (window.standingMs < RAID.minMeasuredMs || !(window.totalStanding > 0)) return RAID.bossShare;
-  return Math.min(1, Math.max(RAID.minShare, window.boss / window.totalStanding));
+  return (Math.max(0, window.total) / measured) * DAY_MS * RAID.bossShare;
 }
 
 /** The smallest a phase can be: the small community's damage over the target days (`RAID.floor`). */
@@ -147,15 +178,52 @@ export interface Participation {
   readonly support: number;
 }
 
-/** 참석 landed a hit (or did an objective); 기여 and 핵심 by active time or objectives. */
+/**
+ * A phase's tier (PLAN §10): 참석 landed a hit (or did an objective) and stood its floor of
+ * active fighting; 기여 and 핵심 by active time or by objectives counted (`countsObjective`).
+ */
 export function tierOf(p: Participation): RaidTier {
-  const { contribute, core } = RAID.tiers;
-  const present = p.damage > 0 || p.objectives > 0;
-  if (!present) return RaidTier.None;
+  const { present, contribute, core } = RAID.tiers;
+  if (!(p.damage > 0 || p.objectives > 0) || p.activeMs < present.activeMs) return RaidTier.None;
   if (p.activeMs >= core.activeMs || p.objectives >= core.objectives) return RaidTier.Core;
   if (p.activeMs >= contribute.activeMs || p.objectives >= contribute.objectives)
     return RaidTier.Contributor;
   return RaidTier.Present;
+}
+
+/** What a tick of a character's fight shows of the player behind it, as ticks (0 for never). */
+export interface Activity {
+  /** The client dropped: the server plays the body until it comes back. */
+  readonly away: boolean;
+  /** The server moves the body (완전 자동, 스킬 수동). */
+  readonly serverMoves: boolean;
+  /** The last tick the player's own input arrived: a step, a dodge, a cast (never an aim). */
+  readonly inputAt: number;
+  /** The last tick the body moved. */
+  readonly movedAt: number;
+  /** The last tick its own hit landed on the boss, and the last it helped: an objective, a
+   * revive, one of the boss's adds put down. */
+  readonly hitAt: number;
+  readonly helpAt: number;
+}
+
+/**
+ * Whether a tick counts as active fighting: never while the client is away; otherwise the
+ * character's own hit or help within the window, while the player steers it (its own input in
+ * the window) or, for a body the server moves for a connected client (완전 자동 with the tab
+ * open), while it moves. A body parked with its books firing, or a script that only keeps
+ * sending inputs, is not fighting.
+ */
+export function isActive(a: Activity, tick: number): boolean {
+  if (a.away) return false;
+  const recent = (at: number) => at > 0 && tick - at < RAID.activeWindowTicks;
+  if (!recent(a.hitAt) && !recent(a.helpAt)) return false;
+  return recent(a.inputAt) || (a.serverMoves && recent(a.movedAt));
+}
+
+/** Whether an objective at `nowMs` counts toward the tier after the last one that did. */
+export function countsObjective(lastCountedMs: number | undefined, nowMs: number): boolean {
+  return lastCountedMs === undefined || nowMs - lastCountedMs >= RAID.objectiveGapMs;
 }
 
 /** Damage a boss takes after its shield and 토론 시간. */

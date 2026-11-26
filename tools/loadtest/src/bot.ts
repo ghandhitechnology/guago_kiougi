@@ -71,6 +71,8 @@ export class Bot {
   private readonly plays: number;
   private boss: WireBoss | null = null;
   private aimed = "";
+  /** Spots to walk to in order, as a player crossing a building would; empty: fight as usual. */
+  route: { x: number; y: number }[] = [];
 
   constructor(room: Room<unknown, MapState>, auto: boolean, plays = -1) {
     this.room = room;
@@ -189,6 +191,18 @@ export class Bot {
     if (!p) return;
     const px = p.body.x;
     const py = p.body.y;
+    const to = this.route[0];
+    if (to) {
+      const dx = to.x - px;
+      const dy = to.y - py;
+      const d = Math.hypot(dx, dy);
+      if (d <= 3) {
+        this.route.shift();
+        this.dir = [0, 0];
+      } else this.dir = [Math.round((dx / d) * MOVE_MAX), Math.round((dy / d) * MOVE_MAX)];
+      this.until = 0;
+      return;
+    }
     if (this.playMechanic(px, py)) return;
     let best = Number.POSITIVE_INFINITY;
     let mx = 0;
@@ -262,7 +276,7 @@ export class Bot {
 
   tick(n: number): void {
     if (this.auto || !this.predictor || this.down) return;
-    if (n % 4 === 0 || this.plays >= 0) this.think(n);
+    if (n % 4 === 0 || this.plays >= 0 || this.route.length > 0) this.think(n);
     // A door would take the bot to another map: turn back instead.
     const map = this.map;
     const next = map && moveBody(map, this.predictor.body, this.dir[0], this.dir[1], this.speed);

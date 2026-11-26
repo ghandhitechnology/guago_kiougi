@@ -18,10 +18,12 @@ import { lifecycleOf, type RaidBossDef, raidBoss } from "@guago/content";
 import {
   type ChangeNotice,
   calibrateHp,
+  countsObjective,
   DAY_MS,
   type DamageWindow,
   HOUR_MS,
   isDebateHour,
+  nextPhaseHp,
   RAID,
   RAID_BOARDS,
   RAID_TIER_NAMES,
@@ -59,7 +61,13 @@ export interface RaidHubOptions {
   /** A reward landed: the change notice for the player's client. */
   notify?(characterId: string, change: ChangeNotice): void;
   log?(line: string): void;
+  /** Real ms before the first retry of rewards left unpaid; it doubles while they fail. */
+  retryMs?: number;
 }
+
+/** Retries of unpaid rewards back off to at most this, in real ms. */
+const RETRY_MAX_MS = 10 * 60_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Tally {
   name: string;
@@ -92,8 +100,13 @@ export class Raid {
   phaseStartedAt: number;
   /** Who landed the hit that emptied the last 논제. */
   finalHit: { id: string; name: string } | null = null;
-  /** Participation of the current phase not yet written, by character. */
-  pending = new Map<string, Tally>();
+  /** Participation not yet written, by the phase it was earned in, then by character. */
+  pending = new Map<number, Map<string, Tally>>();
+  /**
+   * Page ms each character's last objective counted at. Kept across phase changes, so a phase
+   * closing never hands anyone an extra objective; in memory only (see DECISIONS.md).
+   */
+  readonly objectiveAt = new Map<string, number>();
   /** Damage into the pool since the last write. */
   dirty = false;
   /** The phase-end transaction runs, or ran and failed: the poll retries it. */
@@ -174,11 +187,27 @@ export class Raid {
     objectives: number,
     support: number,
   ): void {
-    if (this.freed) return;
-    let t = this.pending.get(characterId);
+    // Nothing is earned while a phase closes: the pool is empty and the next bar is not up.
+    if (this.freed || this.emptied) return;
+    // An objective counts toward the tier at most once per gap, across every channel.
+    let counted = 0;
+    if (objectives > 0) {
+      const now = this.clock.now();
+      if (countsObjective(this.objectiveAt.get(characterId), now)) {
+        counted = 1;
+        this.objectiveAt.set(characterId, now);
+      }
+    }
+    objectives = counted;
+    let phase = this.pending.get(this.phase);
+    if (!phase) {
+      phase = new Map();
+      this.pending.set(this.phase, phase);
+    }
+    let t = phase.get(characterId);
     if (!t) {
       t = tally(name);
-      this.pending.set(characterId, t);
+      phase.set(characterId, t);
     }
     t.damage += damage;
     t.activeMs += activeMs;
@@ -186,17 +215,22 @@ export class Raid {
     t.support += support;
   }
 
-  /** Takes the participation not yet written; `restore` puts it back if the write failed. */
-  take(): Map<string, Tally> {
-    const out = this.pending;
-    this.pending = new Map();
+  /** Takes one phase's participation not yet written; `restore` puts it back if the write failed. */
+  take(phase: number): Map<string, Tally> {
+    const out = this.pending.get(phase) ?? new Map<string, Tally>();
+    this.pending.delete(phase);
     return out;
   }
 
-  restore(taken: Map<string, Tally>): void {
+  restore(phase: number, taken: Map<string, Tally>): void {
+    let into = this.pending.get(phase);
+    if (!into) {
+      into = new Map();
+      this.pending.set(phase, into);
+    }
     for (const [id, t] of taken) {
-      const now = this.pending.get(id);
-      if (!now) this.pending.set(id, t);
+      const now = into.get(id);
+      if (!now) into.set(id, t);
       else {
         now.damage += t.damage;
         now.activeMs += t.activeMs;
@@ -204,6 +238,13 @@ export class Raid {
         now.support += t.support;
       }
     }
+  }
+}
+
+/** The raid's row was moved on by another process before this one could close its phase. */
+class StaleRaid extends Error {
+  constructor(id: string, phase: number) {
+    super(`raid ${id} phase ${phase} was already closed`);
   }
 }
 
@@ -354,6 +395,7 @@ export class RaidHub {
       const r = this.raids.get(id);
       if (r && !this.announcing.has(id)) this.track("raid freed", this.announce(r));
     }
+    this.retryDue();
   }
 
   /** The boss's raid row for this run of the Page, made with its first phase calibrated. */
@@ -496,21 +538,26 @@ export class RaidHub {
       const phase = r.phase;
       await this.serial(r, async () => {
         if (r.ending || r.phase !== phase) return;
-        const taken = r.take();
+        const taken = r.take(phase);
         const hp = r.hp;
         const shield = r.shield;
         try {
           await this.o.db.transaction(async (tx) => {
+            // Written only while the row still holds this phase: once another process closed it,
+            // this one's tallies would land after its tiers, so it adopts the row instead.
+            const held = await tx.execute(sql`
+              update raids set hp = ${hp}, shield = ${shield}, updated_at = now()
+              where id = ${r.id} and phase = ${phase} and freed_at is null`);
+            if (!held.rowCount) throw new StaleRaid(r.id, phase);
             await upsertTallies(tx, r.id, phase, taken);
-            if (r.dirty) {
-              await tx.execute(sql`
-                update raids set hp = ${hp}, shield = ${shield}, updated_at = now()
-                where id = ${r.id} and phase = ${phase} and freed_at is null`);
-            }
           });
           r.dirty = false;
         } catch (error) {
-          r.restore(taken);
+          if (error instanceof StaleRaid) {
+            await this.adopt(r);
+            return;
+          }
+          r.restore(phase, taken);
           throw error;
         }
       });
@@ -562,38 +609,53 @@ export class RaidHub {
     const last = ended >= r.def.phases;
     const now = this.o.clock.now();
     const window = last ? null : await this.window(now);
-    const nextMax = window ? calibrateHp(r.def.rank, r.def.level, window, this.o.clock.rate) : 0;
+    // The next bar from the pace this 논제 went down at, scaled to the next one's (PLAN §10).
+    const pace = (n: number) => r.def.pace[n - 1] ?? 1;
+    const endedRun = { hp: r.max, ms: Math.max(0, now - r.phaseStartedAt), pace: pace(ended) };
+    const nextMax = window
+      ? nextPhaseHp(r.def.rank, r.def.level, endedRun, pace(ended + 1), window, this.o.clock.rate)
+      : 0;
     const nextShield = r.def.rank === "era" ? 1 : 0;
-    const taken = r.take();
+    const taken = r.take(ended);
     const at = new Date(now).toISOString();
     let tiers: Record<string, number> = {};
     try {
       await this.o.db.transaction(async (tx) => {
+        // Only the process that holds the phase as written closes it: another process, or this
+        // one after a commit it never heard back from, finds the row moved on and adopts it.
+        const moved = last
+          ? await tx.execute(sql`
+              update raids set hp = 0, freed_at = ${at}::timestamptz,
+                final_hit_by = ${r.finalHit?.id ?? null},
+                final_hit_name = ${r.finalHit?.name ?? null}, updated_at = now()
+              where id = ${r.id} and phase = ${ended} and freed_at is null`)
+          : await tx.execute(sql`
+              update raids set phase = ${ended + 1}, hp = ${nextMax}, max_hp = ${nextMax},
+                shield = ${nextShield}, phase_started_at = ${at}::timestamptz, updated_at = now()
+              where id = ${r.id} and phase = ${ended} and freed_at is null`);
+        if (!moved.rowCount) throw new StaleRaid(r.id, ended);
         await upsertTallies(tx, r.id, ended, taken);
         tiers = await settleTiers(tx, r.id, ended);
         await tx.execute(sql`
           update raid_phases set ended_at = ${at}::timestamptz
           where raid_id = ${r.id} and phase = ${ended}`);
-        if (last) {
-          await tx.execute(sql`
-            update raids set hp = 0, freed_at = ${at}::timestamptz,
-              final_hit_by = ${r.finalHit?.id ?? null}, final_hit_name = ${r.finalHit?.name ?? null},
-              updated_at = now()
-            where id = ${r.id}`);
-        } else {
-          await tx.execute(sql`
-            update raids set phase = ${ended + 1}, hp = ${nextMax}, max_hp = ${nextMax},
-              shield = ${nextShield}, phase_started_at = ${at}::timestamptz, updated_at = now()
-            where id = ${r.id}`);
+        if (!last) {
           await tx.execute(sql`
             insert into raid_phases (raid_id, phase, max_hp, calibration, started_at)
-            values (${r.id}, ${ended + 1}, ${nextMax}, ${JSON.stringify(window)}::jsonb,
+            values (${r.id}, ${ended + 1}, ${nextMax},
+              ${JSON.stringify({ ...window, ended: endedRun, nextPace: pace(ended + 1) })}::jsonb,
               ${at}::timestamptz)
             on conflict do nothing`);
         }
       });
     } catch (error) {
-      r.restore(taken);
+      if (error instanceof StaleRaid) {
+        // The phase this process held was already closed: what it earned here is the closing
+        // process's to have written, and the raid goes on from the row.
+        await this.adopt(r);
+        return;
+      }
+      r.restore(ended, taken);
       throw error;
     }
     const e: PhaseEnded = {
@@ -625,6 +687,26 @@ export class RaidHub {
     if (last) {
       this.unannounced.add(r.id);
       if (!this.announcing.has(r.id)) this.track("raid freed", this.announce(r));
+    }
+  }
+
+  /** Takes the raid's state from its row: another process moved it on. */
+  private async adopt(r: Raid): Promise<void> {
+    const row = await this.readRaid(r.id);
+    r.ending = false;
+    if (!row) return;
+    this.log(JSON.stringify({ raid: { adopted: r.id, from: r.phase, to: row.phase } }));
+    r.phase = row.phase;
+    r.hp = row.hp;
+    r.max = row.max;
+    r.shield = row.shield;
+    r.phaseStartedAt = row.phaseStartedAt;
+    r.emptied = row.hp <= 0 && row.freedAt === null;
+    r.dirty = false;
+    r.pending.clear();
+    if (row.freedAt !== null) {
+      r.freed = true;
+      if (this.o.page.freedBosses()[r.def.id] === undefined) this.unannounced.add(r.id);
     }
   }
 
@@ -668,25 +750,105 @@ export class RaidHub {
    * once, so running this again, from another process or after a restart, pays nobody twice.
    */
   async payPhase(raidId: string, phase: number, def: RaidBossDef): Promise<number> {
-    const { rows } = await this.o.db.execute(sql`
-      select character_id, tier from raid_participants
-      where raid_id = ${raidId} and phase = ${phase} and tier > 0 and not paid
-      order by character_id`);
-    let paid = 0;
-    for (const row of rows) {
-      const id = row.character_id as string;
-      const r = await this.run(id, `raid:${raidId}:${phase}`, {
-        raid: raidId,
-        phase,
-        boss: def.id,
-      });
-      if (r?.ok && r.outcome.paid) {
-        paid++;
-        this.o.notify?.(id, r.change);
+    return (await this.payPhaseOnce(raidId, phase, def)).paid;
+  }
+
+  /** Phases being paid now: a second pass over the same rows would notify twice. */
+  private readonly paying = new Set<string>();
+  /** Rewards the executor refused (not a failure to reach it): not tried again. */
+  private readonly refused = new Set<string>();
+
+  private async payPhaseOnce(raidId: string, phase: number, def: RaidBossDef) {
+    const key = `${raidId}:${phase}`;
+    if (this.paying.has(key)) return { paid: 0, failed: 0 };
+    this.paying.add(key);
+    try {
+      const { rows } = await this.o.db.execute(sql`
+        select character_id, tier from raid_participants
+        where raid_id = ${raidId} and phase = ${phase} and tier > 0 and not paid
+        order by character_id`);
+      let paid = 0;
+      let failed = 0;
+      for (const row of rows) {
+        const id = row.character_id as string;
+        if (this.refused.has(`${key}:${id}`)) continue;
+        const r = await this.run(id, `raid:${raidId}:${phase}`, {
+          raid: raidId,
+          phase,
+          boss: def.id,
+        });
+        if (!r) failed++;
+        else if (!r.ok) {
+          // The rules said no: retrying the same request would be told the same.
+          this.refused.add(`${key}:${id}`);
+          this.log(`raid reward ${key} for ${id} refused: ${r.error}`);
+        } else if (r.outcome.paid) {
+          paid++;
+          this.o.notify?.(id, r.change);
+        }
       }
+      this.log(
+        JSON.stringify({ raid: { paid: { raid: raidId, phase, characters: paid, failed } } }),
+      );
+      return { paid, failed };
+    } finally {
+      this.paying.delete(key);
     }
-    this.log(JSON.stringify({ raid: { paid: { raid: raidId, phase, characters: paid } } }));
-    return paid;
+  }
+
+  // Retries -------------------------------------------------------------------------------------
+
+  /** First clears that could not be paid yet, by character and boss. */
+  private readonly owedClears = new Map<string, { characterId: string; bossId: string }>();
+  private retryDelay = 0;
+  private nextRetryAt = 0;
+  private retrying = false;
+
+  /**
+   * From the poll: every phase reward left unpaid (a database blip as a phase closed, an executor
+   * that refused for a moment) and every owed first clear, again. It waits `retryMs` after a
+   * pass that left something unpaid, doubling up to ten minutes, and a pass with nothing owed
+   * costs one indexed query.
+   */
+  private retryDue(): void {
+    if (this.retrying || Date.now() < this.nextRetryAt) return;
+    this.retrying = true;
+    this.track(
+      "raid reward retry",
+      this.retryOwed().finally(() => {
+        this.retrying = false;
+      }),
+    );
+  }
+
+  private async retryOwed(): Promise<void> {
+    const base = this.o.retryMs ?? 15_000;
+    let failed = 0;
+    try {
+      const { rows } = await this.o.db.execute(sql`
+        select distinct p.raid_id, p.phase, r.boss_id from raid_participants p
+        join raids r on r.id = p.raid_id
+        where p.tier > 0 and not p.paid`);
+      for (const u of rows) {
+        const def = raidBoss(u.boss_id as string);
+        if (def)
+          failed += (await this.payPhaseOnce(u.raid_id as string, Number(u.phase), def)).failed;
+      }
+      for (const [key, c] of this.owedClears) {
+        try {
+          await this.payFirstClear(c.characterId, c.bossId);
+          this.owedClears.delete(key);
+        } catch {
+          failed++;
+        }
+      }
+    } catch (error) {
+      failed++;
+      this.log(`raid reward retry failed: ${describeError(error)}`);
+    }
+    this.retryDelay =
+      failed > 0 ? Math.min(RETRY_MAX_MS, Math.max(base, this.retryDelay * 2)) : base;
+    this.nextRetryAt = Date.now() + this.retryDelay;
   }
 
   private async run(
@@ -699,9 +861,11 @@ export class RaidHub {
         return await this.o.executor.execute(characterId, opId, "raid.reward", request);
       } catch (error) {
         if (!isTransient(error) || attempt >= 2) {
+          // Left unpaid in its row: the next retry pass tries again.
           this.log(`raid reward ${opId} for ${characterId} failed: ${describeError(error)}`);
           return undefined;
         }
+        await sleep(100 * 4 ** attempt);
       }
     }
   }
@@ -765,11 +929,33 @@ export class RaidHub {
    */
   firstClear(characterId: string, bossId: string): void {
     this.o.live()?.bossCleared(characterId, bossId);
-    this.track("first clear", this.payFirstClear(characterId, bossId));
+    const key = `${characterId}:${bossId}`;
+    this.track(
+      "first clear",
+      this.payFirstClear(characterId, bossId).catch((error: unknown) => {
+        // Owed until a retry pass pays it (or the boss_clears row says it already was).
+        this.owedClears.set(key, { characterId, bossId });
+        throw error;
+      }),
+    );
   }
+
+  /** First clears being paid now, so a retry pass and the clear never both notify. */
+  private readonly clearing = new Set<string>();
 
   /** The first-clear reward, once per character and boss by its `boss_clears` row. */
   async payFirstClear(characterId: string, bossId: string): Promise<void> {
+    const key = `${characterId}:${bossId}`;
+    if (this.clearing.has(key)) return;
+    this.clearing.add(key);
+    try {
+      await this.payFirstClearOnce(characterId, bossId);
+    } finally {
+      this.clearing.delete(key);
+    }
+  }
+
+  private async payFirstClearOnce(characterId: string, bossId: string): Promise<void> {
     for (let attempt = 0; ; attempt++) {
       try {
         const r = await this.o.executor.execute(
@@ -787,6 +973,7 @@ export class RaidHub {
         return;
       } catch (error) {
         if (!isTransient(error) || attempt >= 2) throw error;
+        await sleep(100 * 4 ** attempt);
       }
     }
   }

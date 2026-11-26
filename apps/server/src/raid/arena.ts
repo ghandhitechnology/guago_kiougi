@@ -8,12 +8,14 @@
 import { raidBossOn } from "@guago/content";
 import {
   BOSS_PLAYERS,
-  type Boss,
+  Boss,
+  type BossRecord,
   Ev,
   type FightWorld,
+  isActive,
+  MODE_AUTO,
   type Player,
   RAID,
-  startBoss,
   TICK_MS,
 } from "@guago/shared";
 import type { Encounter, EncounterHost, EncounterKind } from "../encounter.ts";
@@ -25,12 +27,14 @@ class Arena implements Encounter {
   private readonly host: EncounterHost;
   private readonly bossId: string;
   private readonly level: number;
-  private boss: Boss | null = null;
   private raid: Raid | null = null;
   /** Kind indices whose kills count as support: the boss's adds. */
   private readonly addKind: number;
-  /** Per player index: the last tick it hit, helped or did an objective (0: never). */
-  private readonly lastActive = new Int32Array(BOSS_PLAYERS);
+  /** Per player index: the last tick its own hit landed on the boss, and the last it moved. */
+  private readonly hitAt = new Int32Array(BOSS_PLAYERS);
+  private readonly movedAt = new Int32Array(BOSS_PLAYERS);
+  /** Per player index: the last tick it helped (an objective, a revive, an add put down). */
+  private readonly helpAt = new Int32Array(BOSS_PLAYERS);
   private readonly objectives = new Int32Array(BOSS_PLAYERS);
   private readonly support = new Int32Array(BOSS_PLAYERS);
 
@@ -44,33 +48,36 @@ class Arena implements Encounter {
     this.addKind = rule?.add ?? -1;
   }
 
+  /**
+   * After a tick: what this channel's players did goes to the shared raid, and the raid's numbers
+   * come back as a record the room applies at the next tick's start (`BossRecord`), so the world
+   * only changes at tick boundaries and a recorded arena fight replays.
+   */
   afterStep(): void {
     const w = this.host.world;
     const raid = raids()?.raidFor(this.bossId) ?? null;
+    const b =
+      w.boss instanceof Boss && w.boss.rule.id === this.bossId && !w.boss.freed ? w.boss : null;
+    if (b && this.raid && raid === this.raid) this.report(w, b, this.raid);
     // The raid this body belonged to is over (freed), or another run of the Page put up a new one.
-    if (this.boss && raid !== this.raid) {
-      if (!this.boss.freed) this.boss.free(w);
-      this.boss = null;
-    }
+    if (b && this.raid && raid !== this.raid) this.host.between(this.record(this.raid, true));
     this.raid = raid;
-    if (!raid) return;
-    if (!this.boss) {
-      const b = startBoss(w, this.bossId, this.level, { hp: raid.max, external: true });
-      if (raid.phase > 1) b.setPhase(w, raid.phase, raid.max, raid.shield);
-      b.sync(raid.hp, raid.max, raid.shield, raid.emptied);
-      b.debate = raid.debate;
-      this.boss = b;
-      return;
-    }
-    const b = this.boss;
-    this.report(w, b, raid);
-    if (raid.freed) {
-      b.free(w);
-      return;
-    }
-    if (raid.phase !== b.phase) b.setPhase(w, raid.phase, raid.max, raid.shield);
-    b.sync(raid.hp, raid.max, raid.shield, raid.emptied);
-    b.debate = raid.debate;
+    if (raid) this.host.between(this.record(raid, raid.freed));
+  }
+
+  private record(raid: Raid, freed: boolean): BossRecord {
+    return {
+      t: "boss",
+      id: this.bossId,
+      level: this.level,
+      phase: raid.phase,
+      hp: raid.hp,
+      max: raid.max,
+      shield: raid.shield,
+      emptied: raid.emptied,
+      debate: raid.debate,
+      freed,
+    };
   }
 
   /** This tick's damage, objectives, help and active time, to the shared raid. */
@@ -83,22 +90,16 @@ class Arena implements Encounter {
       if (!e) continue;
       switch (e.type) {
         case Ev.Objective:
-          if (e.a >= 0 && e.a < BOSS_PLAYERS) {
+          if (e.a >= 0 && e.a < BOSS_PLAYERS)
             this.objectives[e.a] = (this.objectives[e.a] as number) + 1;
-            this.lastActive[e.a] = tick;
-          }
           break;
         case Ev.Revive:
-          if (e.b >= 0 && e.b < BOSS_PLAYERS) {
+          if (e.b >= 0 && e.b < BOSS_PLAYERS)
             this.support[e.b] = (this.support[e.b] as number) + RAID.support.revive;
-            this.lastActive[e.b] = tick;
-          }
           break;
         case Ev.Credit:
-          if (e.d === this.addKind && e.a >= 0 && e.a < BOSS_PLAYERS) {
+          if (e.d === this.addKind && e.a >= 0 && e.a < BOSS_PLAYERS)
             this.support[e.a] = (this.support[e.a] as number) + RAID.support.add;
-            this.lastActive[e.a] = tick;
-          }
           break;
       }
     }
@@ -110,16 +111,29 @@ class Arena implements Encounter {
       const i = p.index;
       const dealt = b.dealtBy[i] as number;
       if (dealt > 0) {
-        this.lastActive[i] = tick;
+        this.hitAt[i] = tick;
         if (dealt > topDealt) {
           topDealt = dealt;
           top = p;
         }
       }
-      const last = this.lastActive[i] as number;
-      const active = last > 0 && tick - last < RAID.activeWindowTicks;
-      const objectives = this.objectives[i] as number;
-      const support = this.support[i] as number;
+      if (p.movedX !== 0 || p.movedY !== 0) this.movedAt[i] = tick;
+      if ((this.objectives[i] as number) > 0 || (this.support[i] as number) > 0)
+        this.helpAt[i] = tick;
+      const active = isActive(
+        {
+          away: p.away,
+          serverMoves: MODE_AUTO[p.mode].move,
+          inputAt: this.host.inputAt(p),
+          movedAt: this.movedAt[i] as number,
+          hitAt: this.hitAt[i] as number,
+          helpAt: this.helpAt[i] as number,
+        },
+        tick,
+      );
+      // A dropped client's body earns no objectives or help for its character.
+      const objectives = p.away ? 0 : (this.objectives[i] as number);
+      const support = p.away ? 0 : (this.support[i] as number);
       if (!active && dealt <= 0 && objectives === 0 && support === 0) continue;
       const id = this.host.characterOf(p);
       if (!id) continue;
@@ -133,11 +147,13 @@ class Arena implements Encounter {
   }
 
   leaving(p: Player): void {
-    if (p.index < BOSS_PLAYERS) this.lastActive[p.index] = 0;
+    if (p.index >= BOSS_PLAYERS) return;
+    this.hitAt[p.index] = 0;
+    this.movedAt[p.index] = 0;
+    this.helpAt[p.index] = 0;
   }
 
   dispose(): void {
-    this.boss = null;
     this.raid = null;
   }
 }

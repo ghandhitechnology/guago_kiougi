@@ -738,7 +738,10 @@ export function settleKills(w: FightWorld, onKill: (m: Monster) => void): void {
           bystanders.push({ playerId: String(q.index), partyId: q.party });
       }
     }
-    const credits = contributions.length > 0 ? killCredits(m.maxHp, contributions, bystanders) : [];
+    // A 복습's adds die as usual but earn nobody EXP or drops (`BossHooks.pays`).
+    const pays = !w.boss || w.boss.pays(m);
+    const credits =
+      pays && contributions.length > 0 ? killCredits(m.maxHp, contributions, bystanders) : [];
     const exp = monsterEXP(m.level, m.rank) * m.kind.exp;
     for (const c of credits) {
       const p = w.players[Number(c.playerId)];

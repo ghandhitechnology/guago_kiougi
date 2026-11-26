@@ -55,6 +55,8 @@ export interface BossHooks {
   view(viewer: Player): BossView;
   /** A body left between ticks: its per-player numbers are cleared for the next one. */
   leave(index: number): void;
+  /** Whether killing `m` earns EXP and drops: a 복습's adds earn nothing. */
+  pays(m: Monster): boolean;
 }
 
 /** One boss record: the bar, the phase, the shield, and what the gimmick shows this viewer. */

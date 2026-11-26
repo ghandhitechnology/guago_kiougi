@@ -274,6 +274,8 @@ interface Pawn {
   /** Where the body stood before this tick's step, to tell a push against a shut door. */
   fromX: number;
   fromY: number;
+  /** The tick the player's own last input arrived (a step, a dodge, a cast), for raids. */
+  inputAt: number;
 }
 
 /** A cast member standing here, with what the room remembers about them. */
@@ -468,8 +470,12 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const now = Date.now();
       if (!pawn || pawn.leaving || this.owner || !def || !target || !mayReplay(def)) return;
       if (now - pawn.lastInteract < INTERACT_COOLDOWN_MS) return;
+      // Asked at the personal story log (PLAN §10): a replay object within reach.
+      const p = pawn.player;
+      const near = nearestUsable(this.usable, p.x, p.y);
+      if (!near || !("thing" in near.what) || near.what.thing.kind !== "replay") return;
       pawn.lastInteract = now;
-      noteReplay(pawn.character.id, this.def.id);
+      noteReplay(pawn.character.id, def.id, { map: this.def.id, x: p.x, y: p.y, facing: p.facing });
       const arrive = spawnPlace(target, def.entrance);
       background(
         "replay",
@@ -578,6 +584,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
   private applyQueued(): void {
     if (this.between.length === 0) return;
     for (const e of this.between) {
+      if (e.t === "boss") {
+        applyBetween(this.world, e);
+        continue;
+      }
       const pawn = this.pawns.get(e.player);
       if (!pawn || pawn.leaving) continue;
       // A fighter's mode is set for the match (duel/floor.ts).
@@ -631,10 +641,14 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const e = w.events[i];
       if (!e) continue;
       switch (e.type) {
-        case Ev.Hit:
-          // The server's damage, which raid phases are sized from (PLAN §10 HP calibration).
-          if (e.a >= 0) dealt += e.d;
+        case Ev.Hit: {
+          // The server's damage, which raid phases are sized from (PLAN §10 HP calibration):
+          // players' hits on monsters and bosses in a shared map. A duel's hit names a player,
+          // a private copy is one player's, and a body the server runs has no pawn.
+          const target = w.monsters[e.b];
+          if (!this.owner && target?.entity === e.c && of(e.a)) dealt += e.d;
           break;
+        }
         case Ev.Credit: {
           const pawn = of(e.a);
           const kind = w.rules.monsters[e.d];
@@ -949,6 +963,7 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       eating: false,
       fromX: player.x,
       fromY: player.y,
+      inputAt: 0,
     };
     player.rebuild = (lv) => this.kitOf(pawn, lv);
     this.pawns.set(id, pawn);
@@ -986,6 +1001,15 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       characterOf: (p) => pawnOf(p)?.character.id,
       nameOf: (p) => pawnOf(p)?.character.name,
       relocate: (characterId, to, spawn, via) => this.relocate(characterId, to, spawn, via),
+      sendTo: (characterId, to, via) => {
+        const pawn = [...this.pawns.values()].find((p) => p.character.id === characterId);
+        if (!pawn || pawn.leaving || !builtMap(to.map)) return false;
+        const arrive = { x: to.x, y: to.y, facing: (to.facing % 4) as Facing };
+        background("send back", this.carry(pawn, via, to.map, arrive));
+        return true;
+      },
+      inputAt: (p) => pawnOf(p)?.inputAt ?? 0,
+      between: (e) => this.between.push(e),
     };
   }
 
@@ -1124,7 +1148,10 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
     for (let i = 0; i < run; i++) {
       const inputs = new Map<string, FightInput[]>();
       for (const [id, pawn] of this.pawns) {
-        inputs.set(id, pawn.queue.take() as FightInput[]);
+        const taken = pawn.queue.take() as FightInput[];
+        inputs.set(id, taken);
+        if (taken.some((f) => f.mx !== 0 || f.my !== 0 || (f.flags ?? 0) !== 0))
+          pawn.inputAt = this.world.tick + 1;
         pawn.fromX = pawn.player.x;
         pawn.fromY = pawn.player.y;
       }

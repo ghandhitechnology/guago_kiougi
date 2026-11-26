@@ -38,6 +38,11 @@ export interface RaidBossDef {
   readonly level: number;
   /** 논제: the era boss has four, a mid boss one. */
   readonly phases: number;
+  /**
+   * How fast each 논제 goes down against the first at the same class, its mechanics as played
+   * (gates, objectives, the shield): the next 논제's bar is the last one's pace times this ratio.
+   */
+  readonly pace: readonly number[];
   /** The spawn knocked-out players wake at: the arena's entrance, with no 벌점 (PLAN §10). */
   readonly entrance: string;
   readonly body: RaidBossBody;
@@ -72,6 +77,7 @@ export const RAID_BOSSES: readonly RaidBossDef[] = [
     rank: "mid",
     level: 50,
     phases: 1,
+    pace: [1],
     entrance: "main",
     body: { sprite: "boss-pythagoreans", radius: 30, mass: 1e9, armor: 0.2, damage: 0.4, speed: 0 },
     objects: [],
@@ -88,6 +94,7 @@ export const RAID_BOSSES: readonly RaidBossDef[] = [
     rank: "mid",
     level: 80,
     phases: 1,
+    pace: [1],
     entrance: "main",
     body: { sprite: "boss-zeno", radius: 16, mass: 1e9, armor: 0.1, damage: 0.3, speed: 0 },
     part: { sprite: "boss-zeno-ghost", radius: 14, mass: 1e9, armor: 0.1, damage: 0, speed: 0 },
@@ -105,6 +112,9 @@ export const RAID_BOSSES: readonly RaidBossDef[] = [
     rank: "era",
     level: 100,
     phases: 4,
+    // Measured with 40 bots on a compressed run (fix/raid-review): 논제 3's push gate stays open
+    // and its pushes strip the shield fast; 논제 4 opens only while the block has stunned him.
+    pace: [1, 2, 3.75, 2],
     entrance: "respawn",
     body: { sprite: "boss-aristotle", radius: 40, mass: 10, armor: 0.3, damage: 0.5, speed: 0 },
     objects: [
@@ -133,13 +143,14 @@ export function raidBossOn(mapId: string): RaidBossDef | undefined {
 export const BOSS_BODY_RANK = Rank.FieldBoss;
 
 /**
- * One personal loot roll from a boss (PLAN §10 rewards by tier): a boss-rank drop of the boss's
- * Page at its level. An era boss's drops are bound (PLAN §13); the major sets the spotlight
- * subject the 낱장 lean to.
+ * One personal loot roll from a boss (PLAN §10 rewards by tier): the tool of a boss-rank drop of
+ * the boss's Page at its level, which the raid's reward binds (origin `raid`). The roll's 솔방울,
+ * 낱장, 잉크 and 제본 재료 are left out: stacks cannot be bound, and PLAN §13 binds what a boss
+ * drops. The major sets the spotlight subject the tool's book leans to.
  */
 export function bossLoot(random: Random, def: RaidBossDef, major: string): Drop[] {
   const books = bossLootBooks(def);
-  return rollDrops(random, {
+  const drops = rollDrops(random, {
     source: {
       kind: "monster",
       fieldId: def.map,
@@ -156,6 +167,7 @@ export function bossLoot(random: Random, def: RaidBossDef, major: string): Drop[
     tools: TOOLS.filter((t) => books.some((b) => b.tool === t.id)),
     spotlight: (MAJORS as readonly string[]).includes(major) ? (major as ClassId) : "math",
   });
+  return drops.filter((d) => d.item.kind === "tool");
 }
 
 /** The books a boss's 낱장 can land on: its Page's. */

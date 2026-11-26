@@ -1,12 +1,25 @@
 /**
  * The raid's rewards and its persistent pool against a real Postgres (PLAN §26 economic
  * operations, §10 raid rules): a phase's reward goes out once per character under retries, a
- * rival process, a crash before paying and a restart, and for a character who fought in two
- * channels; a crash loses unsaved seconds, never a phase; the boss is freed once with its final
- * hit and boards; a 복습's first clear pays once. Every test ends with the economy's invariants.
+ * rival process, an executor that was down, a process that died between closing a phase and
+ * paying it, and a restart; two arenas reporting in one tick, a character who moved channels
+ * among them; a phase close that failed is retried, one a rival closed first is adopted; a crash
+ * loses unsaved seconds, never a phase; the boss is freed once with its final hit and boards; a
+ * 복습's first clear pays once. Every test ends with the economy's invariants.
  */
-import { raidBoss } from "@guago/content";
-import { MINUTE_MS, RaidTier, WEEK_MS } from "@guago/shared";
+import { compileKit, fightMapOf, raidBoss, STARTER_BOOKS, simRules } from "@guago/content";
+import {
+  applyBetween,
+  type Between,
+  createFight,
+  type FightWorld,
+  MINUTE_MS,
+  NO_STATS,
+  RAID,
+  RaidTier,
+  stepFight,
+  WEEK_MS,
+} from "@guago/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.ts";
 import { checkInvariants } from "../economy/audit.ts";
@@ -15,6 +28,9 @@ import { LiveClock } from "../live/clock.ts";
 import { createLive, type Live } from "../live/index.ts";
 import { PageClock } from "../live/page.ts";
 import { TEST_DATABASE_URL } from "../test/db-setup.ts";
+import { builtMap } from "../world-maps.ts";
+import { raidArena } from "./arena.ts";
+import { provideRaids } from "./current.ts";
 import { type Raid, RaidHub } from "./hub.ts";
 
 /** Wednesday 2026-11-25 12:00 KST. */
@@ -78,14 +94,16 @@ function rivalEconomy(w: World): Economy {
 function hub(
   w: World,
   executor: Economy["executor"] | { execute: Economy["executor"]["execute"] },
+  on: Db = db,
 ) {
   const h = new RaidHub({
-    db,
+    db: on,
     clock: w.clock,
     page: w.page,
     executor,
     live: () => w.live.events,
     log: () => {},
+    retryMs: 0,
   });
   hubs.push(h);
   return h;
@@ -150,7 +168,7 @@ async function finish(h: RaidHub, r: Raid, by: { id: string; name: string }): Pr
 }
 
 describe("a phase's rewards", () => {
-  it("go out once per character under retries, a rival process, a crash before paying and a restart", async () => {
+  it("go out once per character under retries, a rival process, a down executor and a restart", async () => {
     const w = await world();
     await eraOpen(w);
     let down = false;
@@ -170,7 +188,7 @@ describe("a phase's rewards", () => {
     // a fights in two channels of the arena this phase, b in one.
     r.credit(a.id, a.name, 4000, 20 * MINUTE_MS, 1, 0);
     r.credit(a.id, a.name, 3000, 15 * MINUTE_MS, 0, 5);
-    r.credit(b.id, b.name, 10, 1000, 0, 0);
+    r.credit(b.id, b.name, 10, 6 * MINUTE_MS, 0, 0);
     await h.save();
     await finish(h, r, a);
 
@@ -198,7 +216,7 @@ describe("a phase's rewards", () => {
     expect(await tokens(b.id)).toBe(tb);
 
     // Phase 2 closes while the executor is down: its rewards wait in the rows.
-    r.credit(a.id, a.name, 50, 0, 10, 0);
+    r.credit(a.id, a.name, 50, 2 * 60 * MINUTE_MS, 0, 0);
     await h.save();
     down = true;
     await finish(h, r, a);
@@ -208,13 +226,17 @@ describe("a phase's rewards", () => {
     expect(unpaid.paid).toBe(false);
     expect(await tokens(a.id)).toBe(ta);
 
-    // A restart finds them and pays once; a second restart finds nothing.
+    // The executor comes back: the same process pays them on its next poll, with no restart.
     down = false;
-    const restarted = hub(w, real);
-    await restarted.start();
-    await restarted.settle();
+    await h.poll();
+    await h.settle();
     expect(await tokens(a.id)).toBe(ta + (DEF.rewards.tokens[RaidTier.Core] ?? 0));
     expect((await participant(r.id, 2, a.id)).paid).toBe(true);
+    // A restart and another poll find nothing left to pay.
+    const restarted = hub(w, real);
+    await restarted.start();
+    await restarted.poll();
+    await restarted.settle();
     const twice = hub(w, real);
     await twice.start();
     await twice.settle();
@@ -245,6 +267,309 @@ describe("a phase's rewards", () => {
       [a.id],
     );
     expect(ledger.rows[0].n).toBeGreaterThan(0);
+  });
+});
+
+describe("participation", () => {
+  it("costs real presence: an alt walking zone to zone, a last-second hit and a crowd's objectives", async () => {
+    const w = await world();
+    await eraOpen(w);
+    const h = hub(w, w.economy.executor);
+    await h.poll();
+    const r = h.raidFor("aristotle") as Raid;
+    const alt = await character(w);
+    const late = await character(w);
+    const regular = await character(w);
+    const holder = await character(w);
+    // A level-1 alt walks from lit zone to lit zone in a quiet channel: an objective every 6 s
+    // for two Page minutes, with more than 참석's five minutes of fighting, and no damage.
+    for (let t = 0; t < 20; t++) {
+      r.credit(alt.id, alt.name, 0, 16_000, 1, 0);
+      w.clock.step(6000);
+    }
+    // One hit landed as the pool empties, with no time spent.
+    r.credit(late.id, late.name, 1e6, 0, 0, 0);
+    // A student who fought half an hour and held three zones well apart.
+    for (let k = 0; k < 3; k++) {
+      r.credit(regular.id, regular.name, 500, 10 * MINUTE_MS, 1, 0);
+      w.clock.step(RAID.objectiveGapMs);
+    }
+    // A weak student who never landed a hit but held three zones well apart, on the floor.
+    for (let k = 0; k < 3; k++) {
+      r.credit(holder.id, holder.name, 0, 2 * MINUTE_MS, 1, 0);
+      w.clock.step(RAID.objectiveGapMs);
+    }
+    await h.save();
+    await finish(h, r, regular);
+
+    // Only the gap stands between the alt and 핵심: one of its twenty objectives counted.
+    const pa = await participant(r.id, 1, alt.id);
+    expect(pa.objectives).toBe(1);
+    expect(pa.tier).toBe(RaidTier.Present);
+    // Objectives spread over the phase are a tier for a character that cannot hit.
+    expect((await participant(r.id, 1, holder.id)).tier).toBe(RaidTier.Contributor);
+    expect((await participant(r.id, 1, late.id)).tier).toBe(RaidTier.None);
+    expect((await participant(r.id, 1, regular.id)).tier).toBe(RaidTier.Contributor);
+    expect(await tokens(alt.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+    expect(await tokens(holder.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
+    expect(await tokens(late.id)).toBe(0);
+    expect(await tokens(regular.id)).toBe(DEF.rewards.tokens[RaidTier.Contributor]);
+  });
+});
+
+describe("closing a phase", () => {
+  it("lets a process that died between closing a phase and paying it be paid by the next", async () => {
+    const w = await world();
+    await eraOpen(w);
+    // This process closes the phase, then hangs forever where it would pay: it died there.
+    const dying = hub(w, { execute: () => new Promise(() => {}) } as never);
+    await dying.poll();
+    const r = dying.raidFor("aristotle") as Raid;
+    const a = await character(w);
+    r.credit(a.id, a.name, 100, 10 * MINUTE_MS, 0, 0);
+    await dying.save();
+    r.hit(r.hp, 0, a);
+    for (let i = 0; i < 100 && r.phase === 1; i++) await new Promise((x) => setTimeout(x, 20));
+    expect(r.phase).toBe(2);
+    expect((await participant(r.id, 1, a.id)).paid).toBe(false);
+    const next = hub(w, rivalEconomy(w).executor);
+    await next.start();
+    await next.settle();
+    expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+    expect((await participant(r.id, 1, a.id)).paid).toBe(true);
+  });
+
+  it("is retried by the next poll when its transaction fails", async () => {
+    const w = await world();
+    await eraOpen(w);
+    let failNext = false;
+    const flaky = new Proxy(db, {
+      get(target, key) {
+        if (key === "transaction" && failNext) {
+          failNext = false;
+          return async () => {
+            throw new Error("connection reset");
+          };
+        }
+        const v = Reflect.get(target, key);
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    }) as Db;
+    const h = hub(w, w.economy.executor, flaky);
+    await h.poll();
+    const r = h.raidFor("aristotle") as Raid;
+    const a = await character(w);
+    r.credit(a.id, a.name, 100, 10 * MINUTE_MS, 0, 0);
+    await h.save();
+    failNext = true;
+    r.hit(r.hp, 0, a);
+    await h.settle();
+    expect(r.phase).toBe(1);
+    expect(r.emptied).toBe(true);
+    await h.poll();
+    await h.settle();
+    expect(r.phase).toBe(2);
+    expect((await participant(r.id, 1, a.id)).tier).toBe(RaidTier.Present);
+    expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+  });
+
+  it("never overwrites a phase a rival process closed first: the stale one adopts the row", async () => {
+    const w = await world();
+    await eraOpen(w);
+    const first = hub(w, w.economy.executor);
+    await first.poll();
+    const rival = hub(w, rivalEconomy(w).executor);
+    await rival.start();
+    const ra = first.raidFor("aristotle") as Raid;
+    const rb = rival.raidFor("aristotle") as Raid;
+    const a = await character(w);
+    ra.credit(a.id, a.name, 100, 10 * MINUTE_MS, 0, 0);
+    await first.save();
+    await finish(first, ra, a);
+    // Phase 2 takes a third of its bar in the first process, written.
+    ra.hit(ra.max / 3, 0, null);
+    await first.save();
+    const left = ra.hp;
+    // The rival still holds phase 1 and empties it.
+    rb.hit(rb.hp, 0, a);
+    await rival.settle();
+    expect(rb.phase).toBe(2);
+    expect(rb.hp).toBeCloseTo(left, 3);
+    const row = (await db.pool.query("select phase, hp from raids where id = $1", [ra.id])).rows[0];
+    expect(Number(row.phase)).toBe(2);
+    expect(Number(row.hp)).toBeCloseTo(left, 3);
+    const phases = await db.pool.query(
+      "select phase from raid_phases where raid_id = $1 order by phase",
+      [ra.id],
+    );
+    expect(phases.rows.map((p) => Number(p.phase))).toEqual([1, 2]);
+    expect(await tokens(a.id)).toBe(DEF.rewards.tokens[RaidTier.Present]);
+  });
+});
+
+describe("two channels of an arena", () => {
+  /** One channel's fight on the 리케이온, with an arena run by a host that stands in for its room. */
+  function channel(names: Map<string, { id: string; name: string }>, seed: number) {
+    const def = builtMap("p1-lyceum");
+    if (!def) throw new Error("no lyceum");
+    const world: FightWorld = createFight(fightMapOf(def), simRules(), null, seed);
+    // Records the arena queues, applied at the next tick's start as the room does.
+    const queued: Between[] = [];
+    const arena = raidArena.create({
+      world,
+      def,
+      options: { map: def.id, channel: seed, seats: 60, grace: 30 },
+      characterOf: (p) => names.get(p.id)?.id,
+      nameOf: (p) => names.get(p.id)?.name,
+      relocate: () => false,
+      sendTo: () => false,
+      // The players steer every tick.
+      inputAt: () => world.tick,
+      between: (e) => queued.push(e),
+    });
+    return { world, arena, def, queued };
+  }
+
+  it("share one pool and one phase: both report each tick, one character moves between them", async () => {
+    const w = await world();
+    await eraOpen(w);
+    const h = hub(w, w.economy.executor);
+    provideRaids(h);
+    try {
+      await h.poll();
+      const r = h.raidFor("aristotle") as Raid;
+      const a = await character(w);
+      const b = await character(w);
+      const c = await character(w);
+      const names = new Map([
+        ["a", a],
+        ["b", b],
+        ["c", c],
+      ]);
+      const one = channel(names, 1);
+      const two = channel(names, 2);
+      const kit = compileKit({
+        major: "earth",
+        minor: null,
+        level: 100,
+        stats: NO_STATS,
+        books: STARTER_BOOKS.earth.map((def) => ({
+          def,
+          level: 100,
+          grade: 0,
+          pilgi: 0,
+          evolved: false,
+        })),
+        tools: [],
+      });
+      // The bodies go up on the first report.
+      one.arena.afterStep();
+      two.arena.afterStep();
+      const near = (c: typeof one) => {
+        const boss = c.def.marks.lectern ?? c.def.marks.boss;
+        return { x: (boss?.x ?? 0) - 50, y: (boss?.y ?? 0) + 50 };
+      };
+      const at1 = near(one);
+      const at2 = near(two);
+      one.world.addPlayer("a", 0, at1.x, at1.y, kit, 100);
+      two.world.addPlayer("b", 0, at2.x, at2.y, kit, 100);
+      // The students stand and hit: one knocked out is stood back up before the next tick.
+      const standUp = (world: FightWorld) => {
+        for (const p of world.players) {
+          if (!p.joined || !p.down) continue;
+          p.downAt = -1;
+          p.hp = p.kit.maxHp;
+        }
+      };
+      const dealt = { a: 0, b: 0, c: 0 };
+      /** One tick of a channel; what its players put into the pool in it. */
+      const tick = (ch: typeof one): number => {
+        for (const e of ch.queued.splice(0)) applyBetween(ch.world, e);
+        standUp(ch.world);
+        stepFight(ch.world);
+        const boss = ch.world.boss as unknown as { dealtBy: Float64Array };
+        let now = 0;
+        for (const p of ch.world.players) {
+          if (!p.joined) continue;
+          const d = boss.dealtBy[p.index] as number;
+          dealt[p.id as "a" | "b" | "c"] += d;
+          now += d;
+        }
+        ch.arena.afterStep();
+        return now;
+      };
+      for (let t = 0; t < 400; t++) {
+        // a moves from channel 1 to channel 2 half-way, as a door or a re-entry would.
+        if (t === 200) {
+          one.arena.leaving?.(one.world.playerById("a") as never, a.id);
+          one.world.removePlayer("a");
+          two.world.addPlayer("a", 1, at2.x, at2.y, kit, 100);
+          // Channel one keeps a student of its own.
+          one.world.addPlayer("c", 1, at1.x, at1.y, kit, 100);
+        }
+        tick(one);
+        tick(two);
+      }
+      expect(dealt.a).toBeGreaterThan(0);
+      expect(dealt.b).toBeGreaterThan(0);
+      // Both channels empty the pool in the same tick: one phase closes, once. Both worlds step;
+      // on the first tick both put damage in, the pool is left at 1 before either reports.
+      let both = false;
+      // Channel two reports after channel one empties the pool: its damage of that tick never
+      // reached the pool, so it is nobody's credit.
+      const late: Record<string, number> = {};
+      for (let t = 0; t < 200 && !both; t++) {
+        let first = 0;
+        let second = 0;
+        const twoNow: Record<string, number> = {};
+        for (const [ch, k] of [
+          [one, 0],
+          [two, 1],
+        ] as const) {
+          for (const e of ch.queued.splice(0)) applyBetween(ch.world, e);
+          standUp(ch.world);
+          stepFight(ch.world);
+          const boss = ch.world.boss as unknown as { dealtBy: Float64Array };
+          let now = 0;
+          for (const p of ch.world.players) {
+            if (!p.joined) continue;
+            const d = boss.dealtBy[p.index] as number;
+            dealt[p.id as "a" | "b" | "c"] += d;
+            if (k === 1) twoNow[p.id] = d;
+            now += d;
+          }
+          if (k === 0) first = now;
+          else second = now;
+        }
+        both = first > 0 && second > 0;
+        if (both) {
+          r.hp = 1;
+          Object.assign(late, twoNow);
+        }
+        one.arena.afterStep();
+        two.arena.afterStep();
+      }
+      expect(both).toBe(true);
+      await h.settle();
+      expect(r.phase).toBe(2);
+      const rows = await db.pool.query(
+        "select character_id, damage from raid_participants where raid_id = $1 and phase = 1",
+        [r.id],
+      );
+      const by = new Map(rows.rows.map((x) => [x.character_id as string, Number(x.damage)]));
+      expect(rows.rows).toHaveLength(3);
+      expect(by.get(a.id)).toBeCloseTo(dealt.a - (late.a ?? 0), 3);
+      expect(by.get(b.id)).toBeCloseTo(dealt.b - (late.b ?? 0), 3);
+      expect(by.get(c.id)).toBeCloseTo(dealt.c, 3);
+      const phases = await db.pool.query(
+        "select phase, ended_at from raid_phases where raid_id = $1 order by phase",
+        [r.id],
+      );
+      expect(phases.rows.map((p) => Number(p.phase))).toEqual([1, 2]);
+      expect(phases.rows[0].ended_at).not.toBeNull();
+    } finally {
+      provideRaids(undefined);
+    }
   });
 });
 
@@ -294,7 +619,12 @@ describe("freeing the boss", () => {
     const b = await character(w);
     for (let phase = 1; phase <= DEF.phases; phase++) {
       r.credit(a.id, a.name, 9000, 3 * 60 * MINUTE_MS, 1, 0);
-      r.credit(b.id, b.name, 10, 60 * MINUTE_MS, 4, 25);
+      r.credit(b.id, b.name, 10, 60 * MINUTE_MS, 0, 25);
+      // b holds four zones a phase, far enough apart in Page time for each to count.
+      for (let k = 0; k < 4; k++) {
+        r.credit(b.id, b.name, 0, 0, 1, 0);
+        w.clock.step(RAID.objectiveGapMs);
+      }
       await h.save();
       await finish(h, r, b);
     }
@@ -353,5 +683,27 @@ describe("a 복습's first clear", () => {
       a.id,
     ]);
     expect(rows.rows.map((x) => x.boss_id).sort()).toEqual(["pythagoreans", "zeno"]);
+  });
+
+  it("is owed when it cannot be paid at the clear, and paid once by the next poll", async () => {
+    const w = await world();
+    let down = true;
+    const real = w.economy.executor;
+    const h = hub(w, {
+      execute: ((...args: Parameters<typeof real.execute>) =>
+        down
+          ? Promise.reject(new Error("executor down"))
+          : real.execute(...args)) as typeof real.execute,
+    });
+    const a = await character(w);
+    h.firstClear(a.id, "zeno");
+    await h.settle();
+    expect(await tokens(a.id)).toBe(0);
+    down = false;
+    await h.poll();
+    await h.settle();
+    await h.poll();
+    await h.settle();
+    expect(await tokens(a.id)).toBe(raidBoss("zeno")?.firstClear.tokens);
   });
 });

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { DAY_MS, HOUR_MS } from "./live.ts";
 import {
-  bossShareOf,
+  bossDaily,
   calibrateHp,
+  countsObjective,
   type DamageWindow,
+  isActive,
   isDebateHour,
   NO_DAMAGE,
   nextDebate,
+  nextPhaseHp,
   phaseFloor,
   RAID,
   RaidTier,
@@ -16,7 +19,7 @@ import {
   tierOf,
 } from "./raid.ts";
 
-/** `days` of the server dealing `daily` a day, a boss standing all of it and drawing `share`. */
+/** `days` of the server dealing `daily` a day, a boss standing all of it and taking `share`. */
 function window(daily: number, days: number, share: number): DamageWindow {
   const total = daily * days;
   return {
@@ -28,16 +31,29 @@ function window(daily: number, days: number, share: number): DamageWindow {
   };
 }
 
+/** `days` of field hunting at `daily` a day with no boss up. */
+function fields(daily: number, days: number): DamageWindow {
+  return { ...NO_DAMAGE, total: daily * days, measuredMs: days * DAY_MS };
+}
+
 describe("phase HP calibration", () => {
-  it("sizes a phase to about 4.5 days of the damage a standing boss draws", () => {
+  it("sizes a phase to 4.5 days of the pace a standing boss was taken down at", () => {
     const hp = calibrateHp("era", 100, window(5e9, 14, 0.4));
     expect(hp).toBe(Math.round(5e9 * 0.4 * 4.5));
   });
 
-  it("empties in the target days at the measured rate, era or mid", () => {
-    const w = window(3e9, 14, 0.5);
-    expect(calibrateHp("era", 100, w) / (3e9 * 0.5)).toBeCloseTo(RAID.targetDays.era, 6);
-    expect(calibrateHp("mid", 50, w) / (3e9 * 0.5)).toBeCloseTo(RAID.targetDays.mid, 6);
+  it("reads the boss's pace from the hours it stood, not the field days around them", () => {
+    // Ten field days and four days of a boss taking 2e9 a day, in one window.
+    const w: DamageWindow = {
+      total: 10 * 8e9 + 4 * 3e9,
+      boss: 4 * 2e9,
+      measuredMs: 14 * DAY_MS,
+      standingMs: 4 * DAY_MS,
+      totalStanding: 4 * 3e9,
+    };
+    expect(bossDaily(w)).toBeCloseTo(2e9, 0);
+    expect(calibrateHp("era", 100, w) / 2e9).toBeCloseTo(RAID.targetDays.era, 6);
+    expect(calibrateHp("mid", 50, w) / 2e9).toBeCloseTo(RAID.targetDays.mid, 6);
   });
 
   it("follows a server that grows or shrinks", () => {
@@ -46,22 +62,16 @@ describe("phase HP calibration", () => {
     expect(busy / quiet).toBeCloseTo(4, 6);
   });
 
-  it("reads a shorter history as a rate, so a week-old server is sized the same", () => {
-    expect(calibrateHp("era", 100, window(5e9, 7, 0.4))).toBe(
-      calibrateHp("era", 100, window(5e9, 14, 0.4)),
-    );
+  it("assumes the share a standing boss draws until one has stood six hours of the window", () => {
+    const early = { ...window(5e9, 14, 0.9), standingMs: 5 * 3_600_000 };
+    expect(bossDaily(early)).toBeCloseTo(5e9 * RAID.bossShare, 0);
+    expect(bossDaily(fields(5e9, 7))).toBeCloseTo(bossDaily(fields(5e9, 14)), 0);
+    expect(calibrateHp("era", 100, fields(5e9, 14))).toBe(Math.round(5e9 * RAID.bossShare * 4.5));
   });
 
   it("never looks back further than 14 days", () => {
-    const w = { ...window(5e9, 14, 0.4), total: 5e9 * 28, measuredMs: 28 * DAY_MS };
-    expect(calibrateHp("era", 100, w)).toBe(Math.round(((5e9 * 28) / 14) * 0.4 * 4.5));
-  });
-
-  it("assumes the default share until a boss has stood for six hours of the window", () => {
-    const none = { ...window(5e9, 14, 0.9), standingMs: 5 * HOUR_MS };
-    expect(bossShareOf(none)).toBe(RAID.bossShare);
-    expect(bossShareOf(window(5e9, 14, 0.9))).toBeCloseTo(0.9, 9);
-    expect(bossShareOf(window(5e9, 14, 0))).toBe(RAID.minShare);
+    const w = { ...fields(5e9, 14), total: 5e9 * 28, measuredMs: 28 * DAY_MS };
+    expect(calibrateHp("era", 100, w)).toBe(Math.round(((5e9 * 28) / 14) * RAID.bossShare * 4.5));
   });
 
   it("stretches a few minutes of history to six hours instead of trusting it", () => {
@@ -76,6 +86,20 @@ describe("phase HP calibration", () => {
     expect(calibrateHp("era", 100, window(1, 14, 1))).toBe(Math.round(phaseFloor("era", 100)));
     expect(phaseFloor("era", 100)).toBeGreaterThan(phaseFloor("mid", 100));
     expect(phaseFloor("era", 200) / phaseFloor("era", 100)).toBeCloseTo(10, 6);
+  });
+
+  it("sizes the next 논제 from the pace of the one that ended, scaled by how fast each goes", () => {
+    const ended = { hp: 9e9, ms: 3 * DAY_MS, pace: 1 };
+    // The class took 3e9 a day off the last one; the next goes twice as fast.
+    expect(nextPhaseHp("era", 100, ended, 2, NO_DAMAGE)).toBe(Math.round(3e9 * 2 * 4.5));
+    expect(nextPhaseHp("era", 100, { ...ended, pace: 2 }, 1, NO_DAMAGE)).toBe(
+      Math.round(1.5e9 * 4.5),
+    );
+    // A 논제 over in an hour says little: the window decides.
+    const quick = { ...ended, ms: HOUR_MS };
+    expect(nextPhaseHp("era", 100, quick, 2, window(5e9, 14, 0.4))).toBe(
+      calibrateHp("era", 100, window(5e9, 14, 0.4)),
+    );
   });
 
   it("shrinks the floor with the Page clock, so a compressed server's floor is the same fighting", () => {
@@ -102,18 +126,68 @@ describe("토론 시간", () => {
 
 describe("participation tiers", () => {
   const none = { damage: 0, activeMs: 0, objectives: 0, support: 0 };
-  it("counts a single hit as 참석", () => {
+  const floor = RAID.tiers.present.activeMs;
+
+  it("gives 참석 to a hit landed with five minutes of fighting, not to a last-second hit", () => {
     expect(tierOf(none)).toBe(RaidTier.None);
-    expect(tierOf({ ...none, damage: 1 })).toBe(RaidTier.Present);
+    expect(tierOf({ ...none, damage: 1e12 })).toBe(RaidTier.None);
+    expect(tierOf({ ...none, damage: 1, activeMs: floor })).toBe(RaidTier.Present);
     expect(tierOf({ ...none, support: 50, activeMs: 3 * HOUR_MS })).toBe(RaidTier.None);
   });
 
-  it("gives 기여 for 30 minutes or 3 objectives, 핵심 for 2 hours or 10", () => {
+  it("gives 기여 for 30 minutes or 3 objectives, 핵심 for 2 hours or 10, all on the floor", () => {
     expect(tierOf({ ...none, damage: 1, activeMs: 30 * 60_000 })).toBe(RaidTier.Contributor);
-    expect(tierOf({ ...none, objectives: 3 })).toBe(RaidTier.Contributor);
+    expect(tierOf({ ...none, objectives: 3, activeMs: floor })).toBe(RaidTier.Contributor);
     expect(tierOf({ ...none, damage: 1, activeMs: 2 * HOUR_MS })).toBe(RaidTier.Core);
-    expect(tierOf({ ...none, objectives: 10 })).toBe(RaidTier.Core);
+    expect(tierOf({ ...none, objectives: 10, activeMs: floor })).toBe(RaidTier.Core);
+    expect(tierOf({ ...none, objectives: 10, activeMs: floor - 1 })).toBe(RaidTier.None);
     expect(tierOf({ ...none, damage: 1e12, activeMs: 29 * 60_000 })).toBe(RaidTier.Present);
+  });
+
+  it("counts an objective toward a tier at most once every six Page minutes", () => {
+    let last: number | undefined;
+    let counted = 0;
+    // An alt walking zone to zone, an objective every 6 s for two minutes.
+    for (let t = 0; t <= 120_000; t += 6000) {
+      if (countsObjective(last, t)) {
+        counted++;
+        last = t;
+      }
+    }
+    expect(counted).toBe(1);
+    expect(countsObjective(0, RAID.objectiveGapMs)).toBe(true);
+    expect(countsObjective(0, RAID.objectiveGapMs - 1)).toBe(false);
+  });
+});
+
+describe("active fighting", () => {
+  const at = { away: false, serverMoves: false, inputAt: 0, movedAt: 0, hitAt: 0, helpAt: 0 };
+  const w = RAID.activeWindowTicks;
+
+  it("is the player steering while its own hit or help lands, within the window", () => {
+    expect(isActive({ ...at, inputAt: 100, hitAt: 100 }, 100 + w - 1)).toBe(true);
+    expect(isActive({ ...at, inputAt: 100, hitAt: 100 }, 100 + w)).toBe(false);
+    expect(isActive({ ...at, inputAt: 100, helpAt: 90 }, 101)).toBe(true);
+  });
+
+  it("is never a body that only sends inputs: a script parked in a corner with one old hit", () => {
+    expect(isActive({ ...at, inputAt: 1000 }, 1001)).toBe(false);
+    expect(isActive({ ...at, inputAt: 1000, hitAt: 10 }, 1001)).toBe(false);
+  });
+
+  it("is never a dropped client's body, whatever it does", () => {
+    const busy = { serverMoves: true, inputAt: 100, movedAt: 100, hitAt: 100, helpAt: 100 };
+    expect(isActive({ ...busy, away: true }, 101)).toBe(false);
+  });
+
+  it("is never a body standing still with its books firing", () => {
+    expect(isActive({ ...at, hitAt: 100 }, 101)).toBe(false);
+    expect(isActive({ ...at, serverMoves: true, hitAt: 100 }, 101)).toBe(false);
+  });
+
+  it("is 완전 자동 with the tab open while it moves and hits, as anyone else", () => {
+    expect(isActive({ ...at, serverMoves: true, hitAt: 100, movedAt: 99 }, 101)).toBe(true);
+    expect(isActive({ ...at, serverMoves: false, hitAt: 100, movedAt: 99 }, 101)).toBe(false);
   });
 });
 
