@@ -440,9 +440,11 @@ describe("two channels of an arena", () => {
       const r = h.raidFor("aristotle") as Raid;
       const a = await character(w);
       const b = await character(w);
+      const c = await character(w);
       const names = new Map([
         ["a", a],
         ["b", b],
+        ["c", c],
       ]);
       const one = channel(names, 1);
       const two = channel(names, 2);
@@ -471,16 +473,30 @@ describe("two channels of an arena", () => {
       const at2 = near(two);
       one.world.addPlayer("a", 0, at1.x, at1.y, kit, 100);
       two.world.addPlayer("b", 0, at2.x, at2.y, kit, 100);
-      const dealt = { a: 0, b: 0 };
-      const tick = (c: typeof one) => {
-        for (const e of c.queued.splice(0)) applyBetween(c.world, e);
-        stepFight(c.world);
-        const boss = c.world.boss as unknown as { dealtBy: Float64Array };
-        for (const p of c.world.players) {
-          if (!p.joined) continue;
-          dealt[p.id as "a" | "b"] += boss.dealtBy[p.index] as number;
+      // The students stand and hit: one knocked out is stood back up before the next tick.
+      const standUp = (world: FightWorld) => {
+        for (const p of world.players) {
+          if (!p.joined || !p.down) continue;
+          p.downAt = -1;
+          p.hp = p.kit.maxHp;
         }
-        c.arena.afterStep();
+      };
+      const dealt = { a: 0, b: 0, c: 0 };
+      /** One tick of a channel; what its players put into the pool in it. */
+      const tick = (ch: typeof one): number => {
+        for (const e of ch.queued.splice(0)) applyBetween(ch.world, e);
+        standUp(ch.world);
+        stepFight(ch.world);
+        const boss = ch.world.boss as unknown as { dealtBy: Float64Array };
+        let now = 0;
+        for (const p of ch.world.players) {
+          if (!p.joined) continue;
+          const d = boss.dealtBy[p.index] as number;
+          dealt[p.id as "a" | "b" | "c"] += d;
+          now += d;
+        }
+        ch.arena.afterStep();
+        return now;
       };
       for (let t = 0; t < 400; t++) {
         // a moves from channel 1 to channel 2 half-way, as a door or a re-entry would.
@@ -488,16 +504,52 @@ describe("two channels of an arena", () => {
           one.arena.leaving?.(one.world.playerById("a") as never, a.id);
           one.world.removePlayer("a");
           two.world.addPlayer("a", 1, at2.x, at2.y, kit, 100);
+          // Channel one keeps a student of its own.
+          one.world.addPlayer("c", 1, at1.x, at1.y, kit, 100);
         }
         tick(one);
         tick(two);
       }
       expect(dealt.a).toBeGreaterThan(0);
       expect(dealt.b).toBeGreaterThan(0);
-      // Both channels empty the pool in the same tick: one phase closes, once.
-      r.hp = 1;
-      tick(one);
-      tick(two);
+      // Both channels empty the pool in the same tick: one phase closes, once. Both worlds step;
+      // on the first tick both put damage in, the pool is left at 1 before either reports.
+      let both = false;
+      // Channel two reports after channel one empties the pool: its damage of that tick never
+      // reached the pool, so it is nobody's credit.
+      const late: Record<string, number> = {};
+      for (let t = 0; t < 200 && !both; t++) {
+        let first = 0;
+        let second = 0;
+        const twoNow: Record<string, number> = {};
+        for (const [ch, k] of [
+          [one, 0],
+          [two, 1],
+        ] as const) {
+          for (const e of ch.queued.splice(0)) applyBetween(ch.world, e);
+          standUp(ch.world);
+          stepFight(ch.world);
+          const boss = ch.world.boss as unknown as { dealtBy: Float64Array };
+          let now = 0;
+          for (const p of ch.world.players) {
+            if (!p.joined) continue;
+            const d = boss.dealtBy[p.index] as number;
+            dealt[p.id as "a" | "b" | "c"] += d;
+            if (k === 1) twoNow[p.id] = d;
+            now += d;
+          }
+          if (k === 0) first = now;
+          else second = now;
+        }
+        both = first > 0 && second > 0;
+        if (both) {
+          r.hp = 1;
+          Object.assign(late, twoNow);
+        }
+        one.arena.afterStep();
+        two.arena.afterStep();
+      }
+      expect(both).toBe(true);
       await h.settle();
       expect(r.phase).toBe(2);
       const rows = await db.pool.query(
@@ -505,9 +557,10 @@ describe("two channels of an arena", () => {
         [r.id],
       );
       const by = new Map(rows.rows.map((x) => [x.character_id as string, Number(x.damage)]));
-      expect(rows.rows).toHaveLength(2);
-      expect(by.get(a.id)).toBeCloseTo(dealt.a, 3);
-      expect(by.get(b.id)).toBeCloseTo(dealt.b, 3);
+      expect(rows.rows).toHaveLength(3);
+      expect(by.get(a.id)).toBeCloseTo(dealt.a - (late.a ?? 0), 3);
+      expect(by.get(b.id)).toBeCloseTo(dealt.b - (late.b ?? 0), 3);
+      expect(by.get(c.id)).toBeCloseTo(dealt.c, 3);
       const phases = await db.pool.query(
         "select phase, ended_at from raid_phases where raid_id = $1 order by phase",
         [r.id],

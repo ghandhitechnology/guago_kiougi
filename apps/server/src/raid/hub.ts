@@ -543,15 +543,20 @@ export class RaidHub {
         const shield = r.shield;
         try {
           await this.o.db.transaction(async (tx) => {
+            // Written only while the row still holds this phase: once another process closed it,
+            // this one's tallies would land after its tiers, so it adopts the row instead.
+            const held = await tx.execute(sql`
+              update raids set hp = ${hp}, shield = ${shield}, updated_at = now()
+              where id = ${r.id} and phase = ${phase} and freed_at is null`);
+            if (!held.rowCount) throw new StaleRaid(r.id, phase);
             await upsertTallies(tx, r.id, phase, taken);
-            if (r.dirty) {
-              await tx.execute(sql`
-                update raids set hp = ${hp}, shield = ${shield}, updated_at = now()
-                where id = ${r.id} and phase = ${phase} and freed_at is null`);
-            }
           });
           r.dirty = false;
         } catch (error) {
+          if (error instanceof StaleRaid) {
+            await this.adopt(r);
+            return;
+          }
           r.restore(phase, taken);
           throw error;
         }
@@ -748,28 +753,47 @@ export class RaidHub {
     return (await this.payPhaseOnce(raidId, phase, def)).paid;
   }
 
+  /** Phases being paid now: a second pass over the same rows would notify twice. */
+  private readonly paying = new Set<string>();
+  /** Rewards the executor refused (not a failure to reach it): not tried again. */
+  private readonly refused = new Set<string>();
+
   private async payPhaseOnce(raidId: string, phase: number, def: RaidBossDef) {
-    const { rows } = await this.o.db.execute(sql`
-      select character_id, tier from raid_participants
-      where raid_id = ${raidId} and phase = ${phase} and tier > 0 and not paid
-      order by character_id`);
-    let paid = 0;
-    let failed = 0;
-    for (const row of rows) {
-      const id = row.character_id as string;
-      const r = await this.run(id, `raid:${raidId}:${phase}`, {
-        raid: raidId,
-        phase,
-        boss: def.id,
-      });
-      if (!r) failed++;
-      else if (r.ok && r.outcome.paid) {
-        paid++;
-        this.o.notify?.(id, r.change);
+    const key = `${raidId}:${phase}`;
+    if (this.paying.has(key)) return { paid: 0, failed: 0 };
+    this.paying.add(key);
+    try {
+      const { rows } = await this.o.db.execute(sql`
+        select character_id, tier from raid_participants
+        where raid_id = ${raidId} and phase = ${phase} and tier > 0 and not paid
+        order by character_id`);
+      let paid = 0;
+      let failed = 0;
+      for (const row of rows) {
+        const id = row.character_id as string;
+        if (this.refused.has(`${key}:${id}`)) continue;
+        const r = await this.run(id, `raid:${raidId}:${phase}`, {
+          raid: raidId,
+          phase,
+          boss: def.id,
+        });
+        if (!r) failed++;
+        else if (!r.ok) {
+          // The rules said no: retrying the same request would be told the same.
+          this.refused.add(`${key}:${id}`);
+          this.log(`raid reward ${key} for ${id} refused: ${r.error}`);
+        } else if (r.outcome.paid) {
+          paid++;
+          this.o.notify?.(id, r.change);
+        }
       }
+      this.log(
+        JSON.stringify({ raid: { paid: { raid: raidId, phase, characters: paid, failed } } }),
+      );
+      return { paid, failed };
+    } finally {
+      this.paying.delete(key);
     }
-    this.log(JSON.stringify({ raid: { paid: { raid: raidId, phase, characters: paid, failed } } }));
-    return { paid, failed };
   }
 
   // Retries -------------------------------------------------------------------------------------
@@ -916,8 +940,22 @@ export class RaidHub {
     );
   }
 
+  /** First clears being paid now, so a retry pass and the clear never both notify. */
+  private readonly clearing = new Set<string>();
+
   /** The first-clear reward, once per character and boss by its `boss_clears` row. */
   async payFirstClear(characterId: string, bossId: string): Promise<void> {
+    const key = `${characterId}:${bossId}`;
+    if (this.clearing.has(key)) return;
+    this.clearing.add(key);
+    try {
+      await this.payFirstClearOnce(characterId, bossId);
+    } finally {
+      this.clearing.delete(key);
+    }
+  }
+
+  private async payFirstClearOnce(characterId: string, bossId: string): Promise<void> {
     for (let attempt = 0; ; attempt++) {
       try {
         const r = await this.o.executor.execute(
