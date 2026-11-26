@@ -85,6 +85,14 @@ export const pythagoreans: BossBrain = {
 
   phase() {},
 
+  /** The brothers form up on the counting floor's edge and march in along its rows. */
+  addAt(_b, w) {
+    const side = w.random.int(4);
+    const c = side < 2 ? w.random.int(G.cols) : side === 2 ? 0 : G.cols - 1;
+    const r = side === 0 ? 0 : side === 1 ? G.rows - 1 : w.random.int(G.rows);
+    return { x: centerX(c), y: centerY(r), kind: -1 };
+  },
+
   step(b, w) {
     const tick = w.tick;
     watchSteps(b, w);
