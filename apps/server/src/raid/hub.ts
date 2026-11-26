@@ -60,7 +60,13 @@ export interface RaidHubOptions {
   /** A reward landed: the change notice for the player's client. */
   notify?(characterId: string, change: ChangeNotice): void;
   log?(line: string): void;
+  /** Real ms before the first retry of rewards left unpaid; it doubles while they fail. */
+  retryMs?: number;
 }
+
+/** Retries of unpaid rewards back off to at most this, in real ms. */
+const RETRY_MAX_MS = 10 * 60_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Tally {
   name: string;
@@ -370,6 +376,7 @@ export class RaidHub {
       const r = this.raids.get(id);
       if (r && !this.announcing.has(id)) this.track("raid freed", this.announce(r));
     }
+    this.retryDue();
   }
 
   /** The boss's raid row for this run of the Page, made with its first phase calibrated. */
@@ -684,11 +691,16 @@ export class RaidHub {
    * once, so running this again, from another process or after a restart, pays nobody twice.
    */
   async payPhase(raidId: string, phase: number, def: RaidBossDef): Promise<number> {
+    return (await this.payPhaseOnce(raidId, phase, def)).paid;
+  }
+
+  private async payPhaseOnce(raidId: string, phase: number, def: RaidBossDef) {
     const { rows } = await this.o.db.execute(sql`
       select character_id, tier from raid_participants
       where raid_id = ${raidId} and phase = ${phase} and tier > 0 and not paid
       order by character_id`);
     let paid = 0;
+    let failed = 0;
     for (const row of rows) {
       const id = row.character_id as string;
       const r = await this.run(id, `raid:${raidId}:${phase}`, {
@@ -696,13 +708,69 @@ export class RaidHub {
         phase,
         boss: def.id,
       });
-      if (r?.ok && r.outcome.paid) {
+      if (!r) failed++;
+      else if (r.ok && r.outcome.paid) {
         paid++;
         this.o.notify?.(id, r.change);
       }
     }
-    this.log(JSON.stringify({ raid: { paid: { raid: raidId, phase, characters: paid } } }));
-    return paid;
+    this.log(JSON.stringify({ raid: { paid: { raid: raidId, phase, characters: paid, failed } } }));
+    return { paid, failed };
+  }
+
+  // Retries -------------------------------------------------------------------------------------
+
+  /** First clears that could not be paid yet, by character and boss. */
+  private readonly owedClears = new Map<string, { characterId: string; bossId: string }>();
+  private retryDelay = 0;
+  private nextRetryAt = 0;
+  private retrying = false;
+
+  /**
+   * From the poll: every phase reward left unpaid (a database blip as a phase closed, an executor
+   * that refused for a moment) and every owed first clear, again. It waits `retryMs` after a
+   * pass that left something unpaid, doubling up to ten minutes, and a pass with nothing owed
+   * costs one indexed query.
+   */
+  private retryDue(): void {
+    if (this.retrying || Date.now() < this.nextRetryAt) return;
+    this.retrying = true;
+    this.track(
+      "raid reward retry",
+      this.retryOwed().finally(() => {
+        this.retrying = false;
+      }),
+    );
+  }
+
+  private async retryOwed(): Promise<void> {
+    const base = this.o.retryMs ?? 15_000;
+    let failed = 0;
+    try {
+      const { rows } = await this.o.db.execute(sql`
+        select distinct p.raid_id, p.phase, r.boss_id from raid_participants p
+        join raids r on r.id = p.raid_id
+        where p.tier > 0 and not p.paid`);
+      for (const u of rows) {
+        const def = raidBoss(u.boss_id as string);
+        if (def)
+          failed += (await this.payPhaseOnce(u.raid_id as string, Number(u.phase), def)).failed;
+      }
+      for (const [key, c] of this.owedClears) {
+        try {
+          await this.payFirstClear(c.characterId, c.bossId);
+          this.owedClears.delete(key);
+        } catch {
+          failed++;
+        }
+      }
+    } catch (error) {
+      failed++;
+      this.log(`raid reward retry failed: ${describeError(error)}`);
+    }
+    this.retryDelay =
+      failed > 0 ? Math.min(RETRY_MAX_MS, Math.max(base, this.retryDelay * 2)) : base;
+    this.nextRetryAt = Date.now() + this.retryDelay;
   }
 
   private async run(
@@ -715,9 +783,11 @@ export class RaidHub {
         return await this.o.executor.execute(characterId, opId, "raid.reward", request);
       } catch (error) {
         if (!isTransient(error) || attempt >= 2) {
+          // Left unpaid in its row: the next retry pass tries again.
           this.log(`raid reward ${opId} for ${characterId} failed: ${describeError(error)}`);
           return undefined;
         }
+        await sleep(100 * 4 ** attempt);
       }
     }
   }
@@ -781,7 +851,15 @@ export class RaidHub {
    */
   firstClear(characterId: string, bossId: string): void {
     this.o.live()?.bossCleared(characterId, bossId);
-    this.track("first clear", this.payFirstClear(characterId, bossId));
+    const key = `${characterId}:${bossId}`;
+    this.track(
+      "first clear",
+      this.payFirstClear(characterId, bossId).catch((error: unknown) => {
+        // Owed until a retry pass pays it (or the boss_clears row says it already was).
+        this.owedClears.set(key, { characterId, bossId });
+        throw error;
+      }),
+    );
   }
 
   /** The first-clear reward, once per character and boss by its `boss_clears` row. */
@@ -803,6 +881,7 @@ export class RaidHub {
         return;
       } catch (error) {
         if (!isTransient(error) || attempt >= 2) throw error;
+        await sleep(100 * 4 ** attempt);
       }
     }
   }

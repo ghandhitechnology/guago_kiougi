@@ -86,6 +86,7 @@ function hub(
     executor,
     live: () => w.live.events,
     log: () => {},
+    retryMs: 0,
   });
   hubs.push(h);
   return h;
@@ -208,13 +209,17 @@ describe("a phase's rewards", () => {
     expect(unpaid.paid).toBe(false);
     expect(await tokens(a.id)).toBe(ta);
 
-    // A restart finds them and pays once; a second restart finds nothing.
+    // The executor comes back: the same process pays them on its next poll, with no restart.
     down = false;
-    const restarted = hub(w, real);
-    await restarted.start();
-    await restarted.settle();
+    await h.poll();
+    await h.settle();
     expect(await tokens(a.id)).toBe(ta + (DEF.rewards.tokens[RaidTier.Core] ?? 0));
     expect((await participant(r.id, 2, a.id)).paid).toBe(true);
+    // A restart and another poll find nothing left to pay.
+    const restarted = hub(w, real);
+    await restarted.start();
+    await restarted.poll();
+    await restarted.settle();
     const twice = hub(w, real);
     await twice.start();
     await twice.settle();
@@ -405,5 +410,27 @@ describe("a 복습's first clear", () => {
       a.id,
     ]);
     expect(rows.rows.map((x) => x.boss_id).sort()).toEqual(["pythagoreans", "zeno"]);
+  });
+
+  it("is owed when it cannot be paid at the clear, and paid once by the next poll", async () => {
+    const w = await world();
+    let down = true;
+    const real = w.economy.executor;
+    const h = hub(w, {
+      execute: ((...args: Parameters<typeof real.execute>) =>
+        down
+          ? Promise.reject(new Error("executor down"))
+          : real.execute(...args)) as typeof real.execute,
+    });
+    const a = await character(w);
+    h.firstClear(a.id, "zeno");
+    await h.settle();
+    expect(await tokens(a.id)).toBe(0);
+    down = false;
+    await h.poll();
+    await h.settle();
+    await h.poll();
+    await h.settle();
+    expect(await tokens(a.id)).toBe(raidBoss("zeno")?.firstClear.tokens);
   });
 });
