@@ -633,10 +633,14 @@ export class MapRoom extends Room<{ state: MapState }> implements ChannelRoom {
       const e = w.events[i];
       if (!e) continue;
       switch (e.type) {
-        case Ev.Hit:
-          // The server's damage, which raid phases are sized from (PLAN §10 HP calibration).
-          if (e.a >= 0) dealt += e.d;
+        case Ev.Hit: {
+          // The server's damage, which raid phases are sized from (PLAN §10 HP calibration):
+          // players' hits on monsters and bosses in a shared map. A duel's hit names a player,
+          // a private copy is one player's, and a body the server runs has no pawn.
+          const target = w.monsters[e.b];
+          if (!this.owner && target?.entity === e.c && of(e.a)) dealt += e.d;
           break;
+        }
         case Ev.Credit: {
           const pawn = of(e.a);
           const kind = w.rules.monsters[e.d];
